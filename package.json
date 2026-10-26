@@ -1,0 +1,21 @@
+{
+  "name": "means-of-compute",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "gates": "bun run scripts/gates.ts",
+    "fmt": "prettier --write .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "^1.4.4",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.72.0"
+  }
+}

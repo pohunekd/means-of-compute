@@ -13,7 +13,7 @@ README.
 ## Flow
 
 1. The **loop runner** picks the next ready issue and drives the loop: place,
-   run, audit, merge by rule, stall/retry, follow-ups. A goal reaches the
+   run, audit, merge by rule, stall/retry, follow-ups, daily digest (#17). A goal reaches the
    **coordinator** (Muse Code on Muse Spark), which calls the
    **MCP server**: `submit_work` with a DAG of `WorkItem`s.
 2. **Placement** reads each host's `HostCapacity` from its **host probe** and returns a

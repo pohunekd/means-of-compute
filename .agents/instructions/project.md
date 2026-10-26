@@ -15,19 +15,19 @@ cost on rented cloud capacity.
 
 ## Components
 
-| Component                  | Responsibility                                                                                                                   |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Contracts (`contracts-v1`) | JSON Schema and TypeScript types: `WorkItem`, `HostCapacity`, `PlacementDecision`, `UsageRecord`, `FactorySpec`                  |
-| MCP server                 | the coordinator's interface: `submit_work`, `fleet_status`, `list_work`, `approve`, `audit_results`, `pause_fleet`               |
-| Coordinator                | Muse Code on Muse Spark; turns a goal into a DAG of work items through the MCP server                                            |
-| Loop runner                | picks next ready issue, places work, runs sessions, audits results, merges by rule, applies stall/retry policy, files follow-ups |
-| Host probe                 | reports a host's idle state, power, CPU, memory, GPU, local models, and policy window                                            |
-| Placement                  | scores hosts against capacity and policy; returns a `PlacementDecision` with its reason                                          |
-| Dispatcher                 | starts, watches, and reschedules sessions through `DispatcherPort`                                                               |
-| Auditor                    | read-only check of a branch against its issue's DoD; verdict bound to a commit SHA                                               |
-| Ledger                     | one `UsageRecord` per task: tokens per provider, session time per host                                                           |
-| Budget guard               | refuses new model sessions at the daily or total spend cap                                                                       |
-| Dashboard                  | fleet, running work, usage, and savings, served from the ledger                                                                  |
+| Component                  | Responsibility                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contracts (`contracts-v1`) | JSON Schema and TypeScript types: `WorkItem`, `HostCapacity`, `PlacementDecision`, `UsageRecord`, `FactorySpec`                                               |
+| MCP server                 | the coordinator's interface: `submit_work`, `fleet_status`, `list_work`, `approve`, `audit_results`, `pause_fleet`                                            |
+| Coordinator                | Muse Code on Muse Spark; turns a goal into a DAG of work items through the MCP server                                                                         |
+| Loop runner                | picks next ready issue, places work, runs sessions, audits results, merges by rule, applies stall/retry policy, files follow-ups, produces daily digest (#17) |
+| Host probe                 | reports a host's idle state, power, CPU, memory, GPU, local models, and policy window                                                                         |
+| Placement                  | scores hosts against capacity and policy; returns a `PlacementDecision` with its reason                                                                       |
+| Dispatcher                 | starts, watches, and reschedules sessions through `DispatcherPort`                                                                                            |
+| Auditor                    | read-only check of a branch against its issue's DoD; verdict bound to a commit SHA                                                                            |
+| Ledger                     | one `UsageRecord` per task: tokens per provider, session time per host                                                                                        |
+| Budget guard               | refuses new model sessions at the daily or total spend cap                                                                                                    |
+| Dashboard                  | fleet, running work, usage, and savings, served from the ledger                                                                                               |
 
 ## Boundaries
 

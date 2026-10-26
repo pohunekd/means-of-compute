@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "v1",
+  "hostAlias": "laptop-b",
+  "timestamp": "2026-10-26T21:40:00.000Z",
+  "idle": false,
+  "idleReason": "battery at 34 percent, below the 50 percent floor",
+  "secondsSinceInput": 1500,
+  "acPower": false,
+  "batteryPercent": 34,
+  "cpu": { "cores": 8, "load1m": 0.4 },
+  "memory": { "totalMb": 16384, "freeMb": 9000 },
+  "gpu": { "present": false, "name": null, "freeMb": null },
+  "localModels": { "reachable": false, "models": [] },
+  "policy": {
+    "allowedWindow": { "start": "08:00", "end": "20:00" },
+    "insideWindow": false,
+    "maxConcurrentAgents": 1
+  }
+}

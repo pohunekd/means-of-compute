@@ -4,11 +4,16 @@
   "type": "module",
   "packageManager": "bun@1.4.2",
   "scripts": {
+    "contracts:check": "bun run scripts/contracts-check.ts",
     "gates": "bun run scripts/gates.ts",
     "fmt": "prettier --write .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

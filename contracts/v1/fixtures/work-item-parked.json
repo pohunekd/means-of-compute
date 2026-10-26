@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "v1",
+  "id": "w2-parked-example",
+  "repo": "pohunekd/means-of-compute",
+  "title": "Park a stalled task with its reason",
+  "goal": "Loop runner parks tasks with one escalation",
+  "issue": 17,
+  "dod": [
+    { "id": "D2", "text": "Park after 3 stagnant rounds with one escalation", "done": false }
+  ],
+  "dependencies": ["w1-contracts"],
+  "status": "parked",
+  "statusReason": "no newly met DoD item for 3 rounds",
+  "assignedHostAlias": null,
+  "branch": "17-loop-stall",
+  "pullNumber": null,
+  "modelRouting": {
+    "preferredModel": "muse-glimmer-1.3",
+    "attempts": 2,
+    "fallbackUsed": false
+  },
+  "retryCount": 1,
+  "stallRounds": 3
+}

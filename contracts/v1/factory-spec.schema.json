@@ -1,0 +1,14 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/factory-spec.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FactorySpec",
+  "description": "Per-repo factory configuration owned by the operator under config/, read by the loop runner.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repo", "mergeMode"],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "mergeMode": { "enum": ["by-rule", "human-approval"] }
+  }
+}

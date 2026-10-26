@@ -1,0 +1,92 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/host-capacity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HostCapacity",
+  "description": "One host probe report: idle state, power, capacity, GPU, local models, and policy window.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "hostAlias",
+    "timestamp",
+    "idle",
+    "idleReason",
+    "secondsSinceInput",
+    "acPower",
+    "batteryPercent",
+    "cpu",
+    "memory",
+    "gpu",
+    "localModels",
+    "policy"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "idle": { "type": "boolean" },
+    "idleReason": { "type": "string", "minLength": 1 },
+    "secondsSinceInput": { "type": "integer", "minimum": 0 },
+    "acPower": { "type": "boolean" },
+    "batteryPercent": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "cpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cores", "load1m"],
+      "properties": {
+        "cores": { "type": "integer", "minimum": 1 },
+        "load1m": { "type": "number", "minimum": 0 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalMb", "freeMb"],
+      "properties": {
+        "totalMb": { "type": "integer", "minimum": 1 },
+        "freeMb": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "name", "freeMb"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "name": { "type": ["string", "null"], "minLength": 1 },
+        "freeMb": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "localModels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reachable", "models"],
+      "properties": {
+        "reachable": { "type": "boolean" },
+        "models": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedWindow", "insideWindow", "maxConcurrentAgents"],
+      "properties": {
+        "allowedWindow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+            "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+          }
+        },
+        "insideWindow": { "type": "boolean" },
+        "maxConcurrentAgents": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

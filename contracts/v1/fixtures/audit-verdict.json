@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "v1",
+  "repo": "pohunekd/means-of-compute",
+  "workItemId": "w1-contracts",
+  "pullNumber": 7,
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "authorModels": ["muse-glimmer-1.3"],
+  "auditorModel": "muse-spark-1.3-contributor",
+  "counts": { "high": 0, "medium": 0, "low": 1 },
+  "findings": [
+    {
+      "severity": "low",
+      "location": "contracts/README.md:12",
+      "defect": "Example alias list misses laptop-mac",
+      "scenario": "A reader copies the alias list and placement rejects the missing alias",
+      "fixDirection": "Add the missing alias to the example"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "v1",
+  "id": "w1-contracts",
+  "repo": "pohunekd/means-of-compute",
+  "title": "Draft contracts-v1 schemas and fixtures",
+  "goal": "Fleet contracts other components can build against in parallel",
+  "issue": 5,
+  "dod": [
+    { "id": "D1", "text": "Six schema files exist and parse as JSON Schema", "done": true },
+    { "id": "D2", "text": "TypeScript types mirror every schema", "done": false },
+    { "id": "D3", "text": "Every fixture validates via contracts:check", "done": false }
+  ],
+  "dependencies": [],
+  "status": "running",
+  "statusReason": null,
+  "assignedHostAlias": "desktop",
+  "branch": "5-contracts-v1",
+  "pullNumber": null,
+  "modelRouting": {
+    "preferredModel": "muse-glimmer-1.3",
+    "attempts": 1,
+    "fallbackUsed": false
+  },
+  "retryCount": 0,
+  "stallRounds": 0
+}

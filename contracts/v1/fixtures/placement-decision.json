@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "v1",
+  "workItemId": "w1-contracts",
+  "chosenHostAlias": "desktop",
+  "reason": "desktop is idle on AC power with CPU and memory headroom inside its policy window",
+  "candidates": [
+    {
+      "hostAlias": "desktop",
+      "score": 0.85,
+      "reason": "idle, on AC power, free CPU and memory",
+      "excluded": false
+    },
+    {
+      "hostAlias": "laptop-a",
+      "score": 0,
+      "reason": "excluded: active user session",
+      "excluded": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "nvidia-build",
+  "name": "NVIDIA Build",
+  "baseUrl": "https://integrate.api.nvidia.com/v1",
+  "model": "meta/muse-glimmer-30b",
+  "apiKeyEnv": "NVIDIA_API_KEY",
+  "pricing": {
+    "inputPer1M": 0,
+    "outputPer1M": 0
+  },
+  "rateLimit": {
+    "rpm": 40
+  }
+}

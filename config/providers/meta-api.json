@@ -1,0 +1,12 @@
+{
+  "id": "meta-api",
+  "name": "Meta Model API",
+  "baseUrl": "https://api.meta.ai/v1",
+  "model": "muse-spark-1.3-contributor",
+  "apiKeyEnv": "META_API_KEY",
+  "pricing": {
+    "inputPer1M": 0.1,
+    "cachedInputPer1M": 0.002,
+    "outputPer1M": 0.2
+  }
+}

@@ -15,7 +15,7 @@
   "branch": "17-loop-stall",
   "pullNumber": null,
   "modelRouting": {
-    "preferredModel": "muse-glimmer-1.3",
+    "preferredModel": "meta/muse-glimmer-30b",
     "attempts": 2,
     "fallbackUsed": false
   },

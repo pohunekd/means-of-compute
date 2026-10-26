@@ -5,11 +5,7 @@ the guides that own the details.
 
 ## About
 
-Means of Compute turns machines a company already owns into a managed fleet for
-coding-agent work. A coordinator running on Meta models talks to the Means of Compute MCP
-server, work is placed on idle hosts, sessions run through Pohunek (an external
-dependency), every change passes an audit gate, and a ledger feeds a savings
-dashboard. See [docs/architecture.md](docs/architecture.md).
+Means of Compute is an autonomous software factory that runs coding-agent work on company-owned machines. A coordinator running on Meta models talks to the Means of Compute MCP server, work is placed on idle hosts, sessions run through Pohunek (an external dependency), every change passes an audit gate, and a ledger feeds a savings dashboard. Built by itself: see README. Models: Muse Glimmer 30B is the main coder; Muse Spark is fallback, planner and auditor. Every Muse Spark call uses `muse-spark-1.3-contributor`; Muse Code runs with `--model muse-spark-1.3-contributor --contributor-mode on`. See [docs/architecture.md](docs/architecture.md).
 
 ## Hard rules (every task, including read-only work)
 

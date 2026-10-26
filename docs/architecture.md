@@ -4,9 +4,17 @@ Means of Compute is a client of a session daemon that already runs on every host
 adds the fleet layer: what to run, where, under which budget, and whether the result
 is accepted.
 
+Models: Muse Glimmer 30B (open weights, NVIDIA Build) is the main coder; Muse
+Spark is fallback, planner and auditor. Every Muse Spark call uses
+`muse-spark-1.3-contributor`; Muse Code runs with
+`--model muse-spark-1.3-contributor --contributor-mode on`. Built by itself: see
+README.
+
 ## Flow
 
-1. A goal reaches the **coordinator** (Muse Code on Muse Spark), which calls the
+1. The **loop runner** picks the next ready issue and drives the loop: place,
+   run, audit, merge by rule, stall/retry, follow-ups, daily digest (#17). A goal reaches the
+   **coordinator** (Muse Code on Muse Spark), which calls the
    **MCP server**: `submit_work` with a DAG of `WorkItem`s.
 2. **Placement** reads each host's `HostCapacity` from its **host probe** and returns a
    `PlacementDecision` with the reason.
@@ -14,7 +22,7 @@ is accepted.
    watches it, and reschedules the item when the host leaves or the session is lost.
 4. The **auditor** checks the resulting branch against the item's DoD and posts a
    verdict bound to the commit SHA.
-5. The **ledger** stores a `UsageRecord` per item; the **budget guard** reads it before
+5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
 
 ## Boundaries

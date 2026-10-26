@@ -3,3 +3,5 @@ logs/*
 !logs/.gitkeep
 .env*
 !.env.example
+
+config/hosts.json

@@ -22,7 +22,7 @@
   ],
   "properties": {
     "schemaVersion": { "const": "v1" },
-    "hostAlias": { "type": "string", "minLength": 1 },
+    "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
     "timestamp": { "type": "string", "format": "date-time" },
     "idle": { "type": "boolean" },
     "idleReason": { "type": "string", "minLength": 1 },
@@ -73,17 +73,18 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowedWindow", "maxConcurrentAgents"],
+      "required": ["allowedWindow", "insideWindow", "maxConcurrentAgents"],
       "properties": {
         "allowedWindow": {
           "type": "object",
           "additionalProperties": false,
           "required": ["start", "end"],
           "properties": {
-            "start": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
-            "end": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" }
+            "start": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+            "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
           }
         },
+        "insideWindow": { "type": "boolean" },
         "maxConcurrentAgents": { "type": "integer", "minimum": 1 }
       }
     }

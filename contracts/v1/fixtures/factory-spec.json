@@ -1,6 +1,5 @@
 {
   "schemaVersion": "v1",
   "repo": "pohunekd/means-of-compute",
-  "capsRef": "config/caps/default.json",
   "mergeMode": "by-rule"
 }

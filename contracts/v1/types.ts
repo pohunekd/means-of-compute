@@ -3,7 +3,7 @@
 
 export const CONTRACTS_VERSION = "v1" as const;
 
-export type WorkItemStatus = "queued" | "running" | "done" | "failed" | "parked" | "blocked";
+export type WorkItemStatus = "queued" | "running" | "review" | "parked" | "blocked" | "done";
 
 export interface WorkItemDod {
   readonly id: string;
@@ -20,14 +20,17 @@ export interface ModelRouting {
 export interface WorkItem {
   readonly schemaVersion: "v1";
   readonly id: string;
+  readonly repo: string;
   readonly title: string;
   readonly goal: string;
   readonly issue: number | null;
   readonly dod: readonly WorkItemDod[];
   readonly dependencies: readonly string[];
   readonly status: WorkItemStatus;
+  readonly statusReason: string | null;
   readonly assignedHostAlias: string | null;
   readonly branch: string | null;
+  readonly pullNumber: number | null;
   readonly modelRouting: ModelRouting;
   readonly retryCount: number;
   readonly stallRounds: number;
@@ -61,6 +64,7 @@ export interface PolicyWindow {
 
 export interface HostPolicy {
   readonly allowedWindow: PolicyWindow;
+  readonly insideWindow: boolean;
   readonly maxConcurrentAgents: number;
 }
 
@@ -98,22 +102,34 @@ export interface PlacementDecision {
 export interface TokenUsage {
   readonly provider: string;
   readonly model: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly requests: number;
+  readonly source: string;
 }
 
 export interface SessionTime {
   readonly hostAlias: string;
   readonly seconds: number;
+  readonly source: string;
 }
 
-export type UsageResult = "success" | "failure" | "blocked";
+export type AttemptResult = "success" | "failure" | "stalled" | "lost";
+
+export interface ModelAttempt {
+  readonly model: string;
+  readonly result: AttemptResult;
+}
+
+export type UsageResult = "success" | "blocked";
 
 export interface UsageRecord {
   readonly schemaVersion: "v1";
   readonly workItemId: string;
+  readonly finishedAt: string;
   readonly tokens: readonly TokenUsage[];
   readonly sessionSeconds: readonly SessionTime[];
+  readonly attempts: readonly ModelAttempt[];
   readonly retries: number;
   readonly humanInterventions: number;
   readonly result: UsageResult;
@@ -138,9 +154,10 @@ export interface AuditCounts {
 export interface AuditVerdict {
   readonly schemaVersion: "v1";
   readonly repo: string;
-  readonly pullNumber: number;
+  readonly workItemId: string;
+  readonly pullNumber: number | null;
   readonly headSha: string;
-  readonly authorModel: string;
+  readonly authorModels: readonly string[];
   readonly auditorModel: string;
   readonly counts: AuditCounts;
   readonly findings: readonly AuditFinding[];
@@ -151,6 +168,5 @@ export type MergeMode = "by-rule" | "human-approval";
 export interface FactorySpec {
   readonly schemaVersion: "v1";
   readonly repo: string;
-  readonly capsRef: string;
   readonly mergeMode: MergeMode;
 }

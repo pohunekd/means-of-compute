@@ -2,27 +2,31 @@
   "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/work-item.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "WorkItem",
-  "description": "One unit of agent work: goal reference, DoD, DAG dependencies, placement and routing state.",
+  "description": "One unit of agent work: repo, goal reference, DoD, DAG dependencies, placement and routing state.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion",
     "id",
+    "repo",
     "title",
     "goal",
     "issue",
     "dod",
     "dependencies",
     "status",
+    "statusReason",
     "assignedHostAlias",
     "branch",
+    "pullNumber",
     "modelRouting",
     "retryCount",
     "stallRounds"
   ],
   "properties": {
     "schemaVersion": { "const": "v1" },
-    "id": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
     "title": { "type": "string", "minLength": 1 },
     "goal": { "type": "string", "minLength": 1 },
     "issue": { "type": ["integer", "null"], "minimum": 1 },
@@ -43,11 +47,17 @@
     "dependencies": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1 }
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" }
     },
-    "status": { "enum": ["queued", "running", "done", "failed", "parked", "blocked"] },
-    "assignedHostAlias": { "type": ["string", "null"], "minLength": 1 },
+    "status": { "enum": ["queued", "running", "review", "parked", "blocked", "done"] },
+    "statusReason": { "type": ["string", "null"], "minLength": 1 },
+    "assignedHostAlias": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
     "branch": { "type": ["string", "null"], "minLength": 1 },
+    "pullNumber": { "type": ["integer", "null"], "minimum": 1 },
     "modelRouting": {
       "type": "object",
       "additionalProperties": false,

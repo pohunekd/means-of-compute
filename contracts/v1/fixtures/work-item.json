@@ -1,6 +1,7 @@
 {
   "schemaVersion": "v1",
   "id": "w1-contracts",
+  "repo": "pohunekd/means-of-compute",
   "title": "Draft contracts-v1 schemas and fixtures",
   "goal": "Fleet contracts other components can build against in parallel",
   "issue": 5,
@@ -11,8 +12,10 @@
   ],
   "dependencies": [],
   "status": "running",
+  "statusReason": null,
   "assignedHostAlias": "desktop",
   "branch": "5-contracts-v1",
+  "pullNumber": null,
   "modelRouting": {
     "preferredModel": "muse-glimmer-1.3",
     "attempts": 1,

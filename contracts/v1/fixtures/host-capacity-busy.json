@@ -6,13 +6,14 @@
   "idleReason": "user input 40 seconds ago",
   "secondsSinceInput": 40,
   "acPower": true,
-  "batteryPercent": null,
+  "batteryPercent": 87,
   "cpu": { "cores": 12, "load1m": 1.2 },
   "memory": { "totalMb": 65536, "freeMb": 48000 },
   "gpu": { "present": true, "name": "synthetic-gpu-a", "freeMb": 8192 },
   "localModels": { "reachable": true, "models": ["synthetic-local-8b"] },
   "policy": {
     "allowedWindow": { "start": "00:00", "end": "23:59" },
+    "insideWindow": true,
     "maxConcurrentAgents": 1
   }
 }

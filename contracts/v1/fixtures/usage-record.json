@@ -23,9 +23,10 @@
   "sessionSeconds": [{ "hostAlias": "desktop", "seconds": 540, "source": "dispatcher-clock" }],
   "attempts": [
     { "model": "muse-glimmer-1.3", "result": "failure" },
+    { "model": "muse-glimmer-1.3", "result": "failure" },
     { "model": "muse-spark-1.3-contributor", "result": "success" }
   ],
-  "retries": 1,
+  "retries": 2,
   "humanInterventions": 0,
   "result": "success"
 }

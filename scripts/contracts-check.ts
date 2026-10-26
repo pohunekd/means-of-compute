@@ -2,15 +2,18 @@
 // Usage: bun run contracts:check
 //        bun run contracts:check <schema-name> -   (reads one JSON document from stdin)
 import {
+  contractErrors,
   isAuditVerdict,
   isFactorySpec,
   isHostCapacity,
   isPlacementDecision,
+  isSchemaName,
   isUsageRecord,
   isWorkItem,
+  type SchemaName,
 } from "../contracts/v1/validate.js";
 
-const checks: readonly (readonly [name: string, paths: readonly string[]])[] = [
+const checks: readonly (readonly [name: SchemaName, paths: readonly string[]])[] = [
   [
     "work-item",
     ["contracts/v1/fixtures/work-item.json", "contracts/v1/fixtures/work-item-parked.json"],
@@ -29,7 +32,7 @@ const checks: readonly (readonly [name: string, paths: readonly string[]])[] = [
   ["factory-spec", ["contracts/v1/fixtures/factory-spec.json"]],
 ];
 
-const guards: Readonly<Record<string, (value: unknown) => boolean>> = {
+const guards: Record<SchemaName, (value: unknown) => boolean> = {
   "work-item": isWorkItem,
   "host-capacity": isHostCapacity,
   "placement-decision": isPlacementDecision,
@@ -38,35 +41,35 @@ const guards: Readonly<Record<string, (value: unknown) => boolean>> = {
   "factory-spec": isFactorySpec,
 };
 
-function check(name: string, label: string, value: unknown): boolean {
-  const guard = guards[name];
-  if (guard === undefined) {
-    console.error(`Unknown schema: ${name}`);
-    return false;
-  }
-  if (guard(value)) {
+function check(name: SchemaName, label: string, value: unknown): boolean {
+  if (guards[name](value)) {
     console.log(`ok ${name} <- ${label}`);
     return true;
   }
   console.error(`FAIL ${name} <- ${label}`);
+  console.error(JSON.stringify(contractErrors(name, value), null, 2));
   return false;
 }
 
-const [schemaName, stdinMarker] = Bun.argv.slice(2);
+const [schemaArg, stdinMarker] = Bun.argv.slice(2);
 let failed = 0;
-if (schemaName !== undefined && stdinMarker === "-") {
+if (schemaArg !== undefined && stdinMarker === "-") {
+  if (!isSchemaName(schemaArg)) {
+    console.error(`Unknown schema: ${schemaArg}`);
+    process.exit(1);
+  }
   const text = await new Response(Bun.stdin.stream()).text();
   let value: unknown;
   try {
     value = JSON.parse(text) as unknown;
   } catch {
-    console.error(`FAIL ${schemaName} <- stdin (not JSON)`);
+    console.error(`FAIL ${schemaArg} <- stdin (not JSON)`);
     process.exit(1);
   }
-  if (!check(schemaName, "stdin", value)) {
+  if (!check(schemaArg, "stdin", value)) {
     failed += 1;
   }
-} else if (schemaName === undefined) {
+} else if (schemaArg === undefined) {
   for (const [name, paths] of checks) {
     for (const path of paths) {
       const value: unknown = await Bun.file(path).json();

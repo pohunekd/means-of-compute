@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "v1",
+  "id": "w3-parked-no-reason",
+  "repo": "pohunekd/means-of-compute",
+  "title": "Invalid: parked without a reason",
+  "goal": "Negative case for contracts:check (must be rejected)",
+  "issue": 5,
+  "dod": [{ "id": "D1", "text": "Rejected when parked with null statusReason", "done": true }],
+  "dependencies": [],
+  "status": "parked",
+  "statusReason": null,
+  "assignedHostAlias": null,
+  "branch": "5-contracts-v1",
+  "pullNumber": null,
+  "modelRouting": {
+    "preferredModel": "muse-glimmer-1.3",
+    "attempts": 1,
+    "fallbackUsed": false
+  },
+  "retryCount": 1,
+  "stallRounds": 3
+}

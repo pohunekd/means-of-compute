@@ -27,6 +27,7 @@ export interface WorkItem {
   readonly dod: readonly WorkItemDod[];
   readonly dependencies: readonly string[];
   readonly status: WorkItemStatus;
+  // Non-null for parked and blocked (schema if/then); TS cannot express it cleanly.
   readonly statusReason: string | null;
   readonly assignedHostAlias: string | null;
   readonly branch: string | null;

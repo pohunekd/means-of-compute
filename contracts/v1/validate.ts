@@ -22,12 +22,32 @@ import workItemSchema from "./work-item.schema.json" with { type: "json" };
 const ajv = new Ajv({ strict: true });
 addFormats(ajv);
 
-const validateWorkItem = ajv.compile(workItemSchema);
-const validateHostCapacity = ajv.compile(hostCapacitySchema);
-const validatePlacementDecision = ajv.compile(placementDecisionSchema);
-const validateUsageRecord = ajv.compile(usageRecordSchema);
-const validateAuditVerdict = ajv.compile(auditVerdictSchema);
-const validateFactorySpec = ajv.compile(factorySpecSchema);
+const validators = {
+  "work-item": ajv.compile(workItemSchema),
+  "host-capacity": ajv.compile(hostCapacitySchema),
+  "placement-decision": ajv.compile(placementDecisionSchema),
+  "usage-record": ajv.compile(usageRecordSchema),
+  "audit-verdict": ajv.compile(auditVerdictSchema),
+  "factory-spec": ajv.compile(factorySpecSchema),
+} as const;
+
+export type SchemaName = keyof typeof validators;
+
+export function isSchemaName(value: string): value is SchemaName {
+  return value in validators;
+}
+
+const validateWorkItem = validators["work-item"];
+const validateHostCapacity = validators["host-capacity"];
+const validatePlacementDecision = validators["placement-decision"];
+const validateUsageRecord = validators["usage-record"];
+const validateAuditVerdict = validators["audit-verdict"];
+const validateFactorySpec = validators["factory-spec"];
+
+export function contractErrors(schemaName: SchemaName, value: unknown): unknown {
+  validators[schemaName](value);
+  return validators[schemaName].errors;
+}
 
 export function isWorkItem(value: unknown): value is WorkItem {
   return validateWorkItem(value);

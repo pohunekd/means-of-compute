@@ -23,7 +23,7 @@
   "properties": {
     "schemaVersion": { "const": "v1" },
     "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
-    "timestamp": { "type": "string", "format": "date-time" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "idle": { "type": "boolean" },
     "idleReason": { "type": "string", "minLength": 1 },
     "secondsSinceInput": { "type": "integer", "minimum": 0 },

@@ -19,6 +19,6 @@
     "attempts": 2,
     "fallbackUsed": false
   },
-  "retryCount": 2,
+  "retryCount": 1,
   "stallRounds": 3
 }

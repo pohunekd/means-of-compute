@@ -27,18 +27,27 @@ later version can coexist under a new path.
 return to `queued` (a failed attempt increments `retryCount`), or move to
 `parked` (stalled with no newly met DoD item for 3 rounds, or the host left, or
 the user returned; work is kept on `branch`) or `blocked` (out of retries: at
-most 2 retries, then blocked). Dependents start only when every dependency is
-`done`. A failed attempt never produces a `failed` status; there is no producer
-for it. `statusReason` is required and is non-null for `parked` and `blocked`.
+most 2 retries, then blocked). From `review`, red CI or audit findings return
+the item to `queued` with the findings kept; `review -> done` happens only
+through the merge rule or a human approval. From `parked`, the item returns to
+`queued` when it is re-placed or retried, or moves to `blocked` when no retry is
+left. Dependents start only when every dependency is `done`. A failed attempt
+never produces a `failed` status; there is no producer for it. `statusReason` is
+required and is non-null for `parked` and `blocked` (enforced by the schema).
 `pullNumber` is null until a pull request exists.
 
 `modelRouting.attempts` counts attempts on `preferredModel` and drives the
 two-failure move to Spark; `retryCount` counts stall-policy retries (max 2) and
 differs from it. `UsageRecord.attempts` also counts host-loss resumes, so it can
-exceed both. Placement counts running items (`status: "running"` with
-`assignedHostAlias` equal to the host) against `HostCapacity.policy`
-`maxConcurrentAgents`; `HostCapacity` stays a pure host fact the probe reports
-without seeing factory sessions.
+exceed both. A 429 failover inside one attempt is the router's per-request
+fallback, not a new attempt. Placement counts running items
+(`status: "running"` with `assignedHostAlias` equal to the host) against
+`HostCapacity.policy` `maxConcurrentAgents`; `HostCapacity` stays a pure host
+fact the probe reports without seeing factory sessions.
+
+One `UsageRecord` is written when the item reaches `done` (result `success`) or
+`blocked` (result `blocked`). A later completion of the same item updates that
+record instead of adding a row.
 
 Item ids are unique across the factory, not only within one DAG, so ledger
 idempotency and branch names keyed on the id stay unambiguous.

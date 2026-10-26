@@ -34,7 +34,7 @@ const validators = {
 export type SchemaName = keyof typeof validators;
 
 export function isSchemaName(value: string): value is SchemaName {
-  return value in validators;
+  return Object.hasOwn(validators, value);
 }
 
 const validateWorkItem = validators["work-item"];
@@ -45,6 +45,9 @@ const validateAuditVerdict = validators["audit-verdict"];
 const validateFactorySpec = validators["factory-spec"];
 
 export function contractErrors(schemaName: SchemaName, value: unknown): unknown {
+  if (!Object.hasOwn(validators, schemaName)) {
+    throw new Error(`Unknown schema: ${schemaName}`);
+  }
   validators[schemaName](value);
   return validators[schemaName].errors;
 }

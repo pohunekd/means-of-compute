@@ -9,6 +9,7 @@ const gates: readonly Gate[] = [
   { name: "format", cmd: ["bunx", "prettier", "--check", "--log-level", "warn", "."] },
   { name: "lint", cmd: ["bunx", "eslint", "--max-warnings", "0", "."] },
   { name: "typecheck", cmd: ["bunx", "tsc", "--noEmit"] },
+  { name: "contracts", cmd: ["bun", "run", "contracts:check"] },
   {
     name: "test",
     cmd: [

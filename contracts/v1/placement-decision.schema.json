@@ -1,0 +1,29 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/placement-decision.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PlacementDecision",
+  "description": "Placement outcome for one work item: chosen host alias or none, with reason and candidate scores.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workItemId", "chosenHostAlias", "reason", "candidates"],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "workItemId": { "type": "string", "minLength": 1 },
+    "chosenHostAlias": { "type": ["string", "null"], "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hostAlias", "score", "reason", "excluded"],
+        "properties": {
+          "hostAlias": { "type": "string", "minLength": 1 },
+          "score": { "type": "number" },
+          "reason": { "type": "string", "minLength": 1 },
+          "excluded": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/audit-verdict.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuditVerdict",
+  "description": "Auditor verdict for one pull request head: SHA binding, author and auditor models, counted findings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "repo",
+    "pullNumber",
+    "headSha",
+    "authorModel",
+    "auditorModel",
+    "counts",
+    "findings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "repo": { "type": "string", "minLength": 1 },
+    "pullNumber": { "type": "integer", "minimum": 1 },
+    "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "authorModel": { "type": "string", "minLength": 1 },
+    "auditorModel": { "type": "string", "minLength": 1 },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["high", "medium", "low"],
+      "properties": {
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "location", "defect", "scenario", "fixDirection"],
+        "properties": {
+          "severity": { "enum": ["high", "medium", "low"] },
+          "location": { "type": "string", "pattern": "^.+:[0-9]+$" },
+          "defect": { "type": "string", "minLength": 1 },
+          "scenario": { "type": "string", "minLength": 1 },
+          "fixDirection": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

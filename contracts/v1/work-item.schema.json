@@ -1,0 +1,64 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/work-item.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkItem",
+  "description": "One unit of agent work: goal reference, DoD, DAG dependencies, placement and routing state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "goal",
+    "issue",
+    "dod",
+    "dependencies",
+    "status",
+    "assignedHostAlias",
+    "branch",
+    "modelRouting",
+    "retryCount",
+    "stallRounds"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "issue": { "type": ["integer", "null"], "minimum": 1 },
+    "dod": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "done"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "text": { "type": "string", "minLength": 1 },
+          "done": { "type": "boolean" }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "status": { "enum": ["queued", "running", "done", "failed", "parked", "blocked"] },
+    "assignedHostAlias": { "type": ["string", "null"], "minLength": 1 },
+    "branch": { "type": ["string", "null"], "minLength": 1 },
+    "modelRouting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferredModel", "attempts", "fallbackUsed"],
+      "properties": {
+        "preferredModel": { "type": "string", "minLength": 1 },
+        "attempts": { "type": "integer", "minimum": 0 },
+        "fallbackUsed": { "type": "boolean" }
+      }
+    },
+    "retryCount": { "type": "integer", "minimum": 0 },
+    "stallRounds": { "type": "integer", "minimum": 0 }
+  }
+}

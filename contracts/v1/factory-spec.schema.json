@@ -1,0 +1,15 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/contracts/v1/factory-spec.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FactorySpec",
+  "description": "Factory configuration a coordinator submits with a goal: repo, caps reference, merge mode per repo.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repo", "capsRef", "mergeMode"],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "repo": { "type": "string", "minLength": 1 },
+    "capsRef": { "type": "string", "minLength": 1 },
+    "mergeMode": { "enum": ["by-rule", "human-approval"] }
+  }
+}

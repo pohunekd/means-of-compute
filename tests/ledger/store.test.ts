@@ -140,6 +140,65 @@ test("append after finalize writes the record line before the pending line", asy
   }
 });
 
+test("append of a folded entry refuses and leaves the file unchanged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    await appendPending(ledgerPath, sessionEntry());
+    await finalizeUsage(ledgerPath, {
+      workItemId: "w1-demo",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+    });
+    const before = await Bun.file(ledgerPath).text();
+    let error: unknown;
+    try {
+      await appendPending(ledgerPath, sessionEntry({ entryId: "e2-folded" }));
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LedgerRefusal);
+    expect((error as LedgerRefusal).reason).toContain(
+      "pending entry e2-folded is not newer than the record of w1-demo",
+    );
+    expect(await Bun.file(ledgerPath).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("append of an entry with the same finishedAt as the record refuses", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    await appendPending(ledgerPath, sessionEntry());
+    await finalizeUsage(ledgerPath, {
+      workItemId: "w1-demo",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+    });
+    const before = await Bun.file(ledgerPath).text();
+    let error: unknown;
+    try {
+      await appendPending(
+        ledgerPath,
+        sessionEntry({ entryId: "e2-same-time", finishedAt: "2026-10-26T10:40:00.000Z" }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LedgerRefusal);
+    expect((error as LedgerRefusal).reason).toContain(
+      "pending entry e2-same-time is not newer than the record of w1-demo",
+    );
+    expect(await Bun.file(ledgerPath).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("finalize with no pending and no record refuses and writes nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
   const ledgerPath = join(dir, "ledger.jsonl");

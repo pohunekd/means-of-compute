@@ -8,6 +8,8 @@
     "providers:check": "bun run scripts/providers-check.ts",
     "gates": "bun run scripts/gates.ts",
     "budget:check": "bun run src/budget/check.ts",
+    "ledger:record": "bun run src/ledger/cli.ts record",
+    "ledger:query": "bun run src/ledger/cli.ts query",
     "place": "bun run src/placement/cli.ts",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",

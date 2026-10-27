@@ -62,51 +62,46 @@ function baseFacts(extra: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+async function expectFactsError(result: RunResult, key: string): Promise<void> {
+  expect(result.exitCode).toBe(1);
+  expect(result.stdout).toBe("");
+  const lines = result.stderr.split("\n");
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toBe("");
+  expect(lines[0]?.startsWith("facts ")).toBe(true);
+  expect(lines[0]).toContain(`: ${key}:`);
+}
+
 describe.skipIf(process.platform !== "linux")("facts validation", () => {
   test("string noLocalUserSession exits 1 naming the key (mutation: drop the schema check)", async () => {
     for (const bad of ["true", "yes", 1]) {
       await withFacts(baseFacts({ noLocalUserSession: bad }), async (p) => {
-        const r = await runProbe(p);
-        expect(r.exitCode).toBe(1);
-        expect(r.stdout).toBe("");
-        expect(r.stderr).toContain(": noLocalUserSession:");
+        await expectFactsError(await runProbe(p), "noLocalUserSession");
       });
     }
   });
 
   test("unknown key exits 1 naming it (mutation: additionalProperties: true)", async () => {
     await withFacts(baseFacts({ idleOverride: true }), async (p) => {
-      const r = await runProbe(p);
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toBe("");
-      expect(r.stderr).toContain(": idleOverride:");
+      await expectFactsError(await runProbe(p), "idleOverride");
     });
   });
 
   test("batteryPercent 101 exits 1 (mutation: drop maximum)", async () => {
     await withFacts(baseFacts({ batteryPercent: 101 }), async (p) => {
-      const r = await runProbe(p);
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toBe("");
-      expect(r.stderr).toContain(": batteryPercent:");
+      await expectFactsError(await runProbe(p), "batteryPercent");
     });
   });
 
   test("secondsSinceInput -1 exits 1 (mutation: drop minimum)", async () => {
     await withFacts(baseFacts({ secondsSinceInput: -1 }), async (p) => {
-      const r = await runProbe(p);
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toBe("");
-      expect(r.stderr).toContain(": secondsSinceInput:");
+      await expectFactsError(await runProbe(p), "secondsSinceInput");
     });
   });
 
   test("impossible timestamp exits 1 (mutation: drop the code date check)", async () => {
     await withFacts(baseFacts({ timestamp: "2026-13-01T00:00:00.000Z" }), async (p) => {
-      const r = await runProbe(p);
-      expect(r.exitCode).toBe(1);
-      expect(r.stdout).toBe("");
-      expect(r.stderr).toContain(": timestamp:");
+      await expectFactsError(await runProbe(p), "timestamp");
     });
   });
 });

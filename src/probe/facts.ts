@@ -6,6 +6,8 @@ import Ajv from "ajv/dist/2020";
 import factsSchema from "./facts.schema.json" with { type: "json" };
 import { assertSysfsRoot, readJson } from "./config.js";
 
+export class FactsError extends Error {}
+
 export type Facts = Partial<{
   secondsSinceInput: number;
   // Simulates a failed user-activity reader: the probe reports activity as
@@ -70,20 +72,20 @@ export function validateFactsValue(
 ): asserts value is Facts {
   const path = rawPath ?? "facts";
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`facts ${path}: facts: not an object`);
+    throw new FactsError(`facts ${path}: facts: not an object`);
   }
   const record = value as Record<string, unknown>;
   if (!validateFacts(record)) {
     const key = firstFailureKey(record);
     if (key === "noLocalUserSession") {
-      throw new Error(`facts ${path}: noLocalUserSession: must be true or absent`);
+      throw new FactsError(`facts ${path}: noLocalUserSession: must be true or absent`);
     }
-    throw new Error(`facts ${path}: ${key}: ${failureReason()}`);
+    throw new FactsError(`facts ${path}: ${key}: ${failureReason()}`);
   }
   const timestamp = record["timestamp"];
   if (typeof timestamp === "string") {
     if (Number.isNaN(Date.parse(timestamp)) || new Date(timestamp).toISOString() !== timestamp) {
-      throw new Error(`facts ${path}: timestamp: not a real calendar date`);
+      throw new FactsError(`facts ${path}: timestamp: not a real calendar date`);
     }
   }
   // The config root is asserted in loadConfig on Linux; a facts override
@@ -94,7 +96,7 @@ export function validateFactsValue(
       assertSysfsRoot(record["sysfsRoot"], label);
     } catch (e) {
       const detail = e instanceof Error ? e.message.split(": ").slice(-1)[0] : String(e);
-      throw new Error(`facts ${path}: sysfsRoot: ${detail ?? "invalid"}`, { cause: e });
+      throw new FactsError(`facts ${path}: sysfsRoot: ${detail ?? "invalid"}`, { cause: e });
     }
   }
 }

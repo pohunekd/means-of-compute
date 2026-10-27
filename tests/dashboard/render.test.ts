@@ -77,4 +77,146 @@ describe("dashboard escaping (mutation: string interpolation without escapeHtml)
     expect(page).toContain("muse-spark-1.3-contributor");
     expect(page).not.toContain("<muse");
   });
+
+  test("a baseline label escapes and the page has no <script (mutation: skip escapeHtml)", async () => {
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const inputs = await gatherInputs(
+      {
+        ledgerPath: "tests/fixtures/dashboard/ledger.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: null,
+        registryPath: "",
+      },
+      {
+        budget,
+        route,
+        baselines: {
+          frontierTokens: {
+            label: `<script>x</script>&"'`,
+            inputNanoPer1M: 3_000_000_000n,
+            outputNanoPer1M: 15_000_000_000n,
+            source: "synthetic test value, not a price",
+            asOf: "2026-10-01",
+          },
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      new Date("2026-10-27T12:00:00.000Z"),
+      () => {},
+    );
+    const page = renderDashboard(buildDashboard(inputs));
+    expect(page).toContain("&lt;script&gt;x&lt;/script&gt;&amp;&quot;&#39;");
+    expect(page).not.toContain("<script");
+  });
+
+  test("a bad alias throws without the value (mutation: skip the alias guard)", async () => {
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const inputs = await gatherInputs(
+      {
+        ledgerPath: "tests/fixtures/dashboard/ledger.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: null,
+        registryPath: "",
+      },
+      {
+        budget,
+        route,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      new Date("2026-10-27T12:00:00.000Z"),
+      () => {},
+    );
+    const model = buildDashboard(inputs);
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const bad = {
+      ...model,
+      panels: [
+        {
+          ...fleet,
+          tables: [
+            {
+              ...fleet.tables[0],
+              rows: [[{ kind: "aliases", aliases: ["Bad Alias"] }]],
+            },
+          ],
+        },
+        ...model.panels.slice(1),
+      ],
+    };
+    let message = "";
+    try {
+      renderDashboard(bad as never);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).not.toContain("Bad Alias");
+    expect(message.length).toBeGreaterThan(0);
+  });
+});
+
+describe("dashboard CSP and fixed texts (mutation: inline style without the hash; raw cause in a cell)", () => {
+  test("the style text hashes to CSS_HASH and no page holds a sentinel text", async () => {
+    const { createHash } = await import("node:crypto");
+    const { DASHBOARD_CSS, CSS_HASH } = await import("../../src/dashboard/render.js");
+    const digest = `sha256-${createHash("sha256").update(DASHBOARD_CSS, "utf8").digest("base64")}`;
+    expect(CSS_HASH).toBe(digest);
+    const { startDashboard } = await import("../../src/dashboard/server.js");
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const logged: { event: string }[] = [];
+    const server = await startDashboard({
+      config: {
+        listenEnv: "MOC_DASHBOARD_LISTEN",
+        listenAlias: "dashboard",
+        logPath: "logs/dashboard.jsonl",
+        maxRequestBytes: 1024,
+        idleTimeoutSec: 10,
+        workRowLimit: 50,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+      },
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: {
+        budget,
+        route,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      sources: {
+        ledgerPath: "tests/fixtures/dashboard/ledger.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: null,
+        registryPath: "",
+      },
+      now: () => new Date("2026-10-27T12:00:00.000Z"),
+      log: (event) => {
+        logged.push(event);
+      },
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${String(server.port)}/`, {
+        headers: { host: `127.0.0.1:${String(server.port)}` },
+      });
+      expect(response.headers.get("content-security-policy") ?? "").toBe(
+        `default-src 'none'; style-src '${CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      );
+      expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(response.headers.get("x-frame-options")).toBe("DENY");
+      expect(logged.length).toBeGreaterThan(0);
+    } finally {
+      await server.stop();
+    }
+    const page = await renderFixture();
+    expect(page.toLowerCase()).not.toContain("host-");
+    for (const needle of ["sentinel", "192.168.", "198.51.100.", ".internal"]) {
+      expect(page).not.toContain(needle);
+    }
+  });
 });

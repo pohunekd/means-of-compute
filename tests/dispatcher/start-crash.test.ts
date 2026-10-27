@@ -250,12 +250,19 @@ test("K2: a crash after port.start keeps one session", async () => {
 
 test("K4: an unreachable host at start ends lost after the threshold", async () => {
   await withHarness(async ({ control, ledgerPath, registryPath, config }) => {
+    // The clock advances 30 s per read, so any clock read written into
+    // the entry shows up as non-zero seconds on the lost terminal.
+    const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
     const plain = createDispatcher({
       port: control.port,
       budget: gateUnused(),
       config,
       ledgerPath,
-      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      now: () => {
+        const current = ticks.now;
+        ticks.now = new Date(current.getTime() + 30_000);
+        return current;
+      },
       sleep: () => Promise.resolve(),
       log: () => undefined,
     });
@@ -284,10 +291,12 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.terminal?.state).toBe("lost");
     expect(entries[0]?.terminal?.ledgerAppended).toBe(true);
+    expect(entries[0]?.terminal?.seconds).toBe(0);
     const contents = await readLedger("Test ledger", ledgerPath);
     expect(contents.pending).toHaveLength(1);
     expect(contents.pending[0]?.entryId).toBe("item-a:item-a:0");
     expect(contents.pending[0]?.session?.result).toBe("lost");
+    expect(contents.pending[0]?.session?.seconds).toBe(0);
     // A later attempt on another host gets the next request id.
     control.setUnreachable("laptop-a", false);
     const last = plain.start(

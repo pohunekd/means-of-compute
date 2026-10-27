@@ -690,6 +690,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         if (!admission.admit) {
           return { kind: "refused", reason: admission.reason };
         }
+        const t = deps.now().toISOString();
         const provisional: RegistryEntry = {
           requestId: request.requestId,
           workItemId: request.workItemId,
@@ -703,11 +704,11 @@ export function createDispatcher(deps: DispatcherDeps): {
           sessionId: null,
           worktree: null,
           baseCommit: null,
-          startedAt: deps.now().toISOString(),
+          startedAt: t,
           cursor: null,
           unreachableCount: 0,
           lastSeenState: "starting",
-          lastSeenAt: deps.now().toISOString(),
+          lastSeenAt: t,
           cancelReason: null,
           terminal: null,
           revision: 0,
@@ -722,10 +723,11 @@ export function createDispatcher(deps: DispatcherDeps): {
         if (error instanceof PortUnreachableError) {
           const count = provisional.unreachableCount + 1;
           if (count < deps.config.lostAfterUnreachable) {
+            // A start miss is not a successful observation, so only the
+            // count and the revision change; lastSeenAt stays unchanged.
             const persisted: RegistryEntry = {
               ...provisional,
               unreachableCount: count,
-              lastSeenAt: deps.now().toISOString(),
               revision: provisional.revision + 1,
             };
             await replaceRegistryEntry(deps.config.registryPath, persisted);

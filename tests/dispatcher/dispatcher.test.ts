@@ -11,6 +11,7 @@ import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { ModelSelection } from "../../src/dispatcher/port.js";
+import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readLedger } from "../../src/ledger/read.js";
 
 const CONFIG: DispatcherConfig = {
@@ -156,6 +157,239 @@ test("precondition 2.1.5: a missing provider descriptor throws", async () => {
     error = err;
   }
   expect((error as Error).message).toContain("model-provider");
+});
+
+test("2.1 order: a blank brief and a bad provider report model-provider", async () => {
+  const dispatcher = testDispatcher(join(tmpdir(), "unused-ledger.jsonl"));
+  let error: unknown;
+  try {
+    await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      { providerId: "no-such-provider", model: "x" },
+      "   ",
+    );
+  } catch (err) {
+    error = err;
+  }
+  expect((error as Error).message).toContain("model-provider");
+});
+
+test("cancel of a terminal entry never calls the port", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-cancel-terminal-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    const watched = await dispatcher.watch(started.request.requestId);
+    expect(watched.result.state).toBe("finished");
+    const failing = {
+      ...control.port,
+      cancel(): Promise<never> {
+        return Promise.reject(new PortUnreachableError("host unreachable"));
+      },
+    };
+    const terminalOnly = createDispatcher({
+      port: failing,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const outcome = await terminalOnly.cancel(started.request.requestId, "host-left");
+    expect(outcome.result.state).toBe("finished");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid port usage is stored as null and stays readable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-invalid-usage-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: {
+        tokens: [
+          {
+            provider: "nvidia-build",
+            model: "meta/muse-glimmer-30b",
+            inputTokens: 10,
+            outputTokens: 20,
+            requests: -1,
+            source: "metering-proxy",
+          },
+        ],
+      },
+      detail: "exited 0",
+    });
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("finished");
+    // The registry stays readable: an invalid reported usage is stored
+    // as null with usageValid false, never as the reported value.
+    const { readRegistry } = await import("../../src/dispatcher/registry.js");
+    const entries = await readRegistry(registryPath);
+    const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
+    expect(entry?.terminal?.usageValid).toBe(false);
+    expect(entry?.terminal?.usage).toBeNull();
+    // A later start of another item still works on the same registry.
+    const other = await dispatcher.start(
+      queuedItem({ id: "other-item" }) as never,
+      decision({ workItemId: "other-item" }) as never,
+      MODEL,
+      "Do the work.",
+    );
+    expect(other.kind).toBe("started");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an empty detail keeps the registry readable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-empty-detail-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "failed",
+      usage: null,
+      detail: "",
+    });
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("failed");
+    const { readRegistry } = await import("../../src/dispatcher/registry.js");
+    const entries = await readRegistry(registryPath);
+    expect(entries).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stored worktree and base commit survive a replayed start", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-replay-handle-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    control.pushCommit("moc/demo-item", "sha1");
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const first = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (first.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    const replayed = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (replayed.kind !== "started") {
+      throw new Error("expected a replayed session");
+    }
+    expect(replayed.handle.worktree).toBe(first.handle.worktree);
+    expect(replayed.handle.baseCommit).toBe(first.handle.baseCommit);
+    expect(replayed.handle.worktree.length).toBeGreaterThan(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an empty registry file throws RegistryDataError", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-empty-registry-"));
+  try {
+    const registryPath = join(dir, "registry.json");
+    const { readRegistry, RegistryDataError } = await import(
+      "../../src/dispatcher/registry.js"
+    );
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(registryPath, "", "utf8");
+    let error: unknown;
+    try {
+      await readRegistry(registryPath);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(RegistryDataError);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("unknown usage becomes an unknown-requests pending token, never zero", async () => {

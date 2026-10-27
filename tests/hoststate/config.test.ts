@@ -49,27 +49,33 @@ describe("host-state package config", () => {
 
   test("missing package section throws", () => {
     expect(() => loadHostStateConfig(writeDoc({}))).toThrow(
-      "config host-state.json: invalid package",
+      /^config host-state\.json: invalid package$/,
     );
   });
 
   test("extra top-level key throws", () => {
     const path = writeDoc({ package: validPackage, collector: {} });
-    expect(() => loadHostStateConfig(path)).toThrow("config host-state.json: invalid package");
+    expect(() => loadHostStateConfig(path)).toThrow(
+      /^config host-state\.json: invalid package$/,
+    );
   });
 
   test("extra package key throws", () => {
     const path = mutatePackage((pkg) => {
       pkg["extra"] = true;
     });
-    expect(() => loadHostStateConfig(path)).toThrow("config host-state.json: invalid package");
+    expect(() => loadHostStateConfig(path)).toThrow(
+      /^config host-state\.json: invalid package$/,
+    );
   });
 
   test("missing package id throws", () => {
     const path = mutatePackage((pkg) => {
       delete pkg["id"];
     });
-    expect(() => loadHostStateConfig(path)).toThrow("config host-state.json: invalid package");
+    expect(() => loadHostStateConfig(path)).toThrow(
+      /^config host-state\.json: invalid package$/,
+    );
   });
 
   test("bad id throws", () => {

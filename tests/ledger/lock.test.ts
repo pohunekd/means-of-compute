@@ -98,9 +98,12 @@ test("lock is released when the holder crashes", async () => {
     stderr: "ignore",
     env: { ...process.env, LEDGER_LOCK_TEST_PATH: ledgerPath },
   });
-  await waitForLine(child, "holder ready");
-  child.kill(9);
-  await child.exited;
+  try {
+    await waitForLine(child, "holder ready");
+  } finally {
+    child.kill(9);
+    await child.exited;
+  }
   try {
     expect(await appendPending(ledgerPath, sessionEntry("e-crash", "w-crash") as never)).toBe(
       "appended",

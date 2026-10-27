@@ -404,14 +404,14 @@ test("determinism: settle twice, restart, settle again", async () => {
   const events: MeterLogEvent[] = [];
   try {
     const base = await loadMeterConfig();
-  const config: MeterConfig = { ...base, usageLogPath: logPath };
-  const envOf = (): Promise<Awaited<ReturnType<typeof resolveMeterEnv>>> =>
-    resolveMeterEnv(config, {
-      MOC_METER_LISTEN: "127.0.0.1:0",
-      MOC_METER_SECRET: secret,
-      MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
-    });
-  const providers = await getProviders();
+    const config: MeterConfig = { ...base, usageLogPath: logPath };
+    const envOf = (): Promise<Awaited<ReturnType<typeof resolveMeterEnv>>> =>
+      resolveMeterEnv(config, {
+        MOC_METER_LISTEN: "127.0.0.1:0",
+        MOC_METER_SECRET: secret,
+        MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
+      });
+    const providers = await getProviders();
     const startArgs = {
       config,
       providers,

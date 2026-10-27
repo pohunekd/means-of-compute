@@ -1,1 +1,7 @@
-[{ "status": 200, "body": { "choices": [{ "message": { "content": "late" } }] }, "holdBeforeHeaders": true }]
+[
+  {
+    "status": 200,
+    "body": { "choices": [{ "message": { "content": "late" } }] },
+    "holdBeforeHeaders": true
+  }
+]

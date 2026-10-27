@@ -103,17 +103,35 @@ describe("dashboard config keys", () => {
   test("missing key throws naming the key (mutation: default a missing key)", async () => {
     const raw = validConfig();
     delete raw["workRowLimit"];
-    await expect(loadTemp(raw)).rejects.toThrow("workRowLimit");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("workRowLimit");
   });
 
   test("extra key throws (mutation: allow extra keys)", async () => {
     const raw = { ...validConfig(), extra: 1 };
-    await expect(loadTemp(raw)).rejects.toThrow("extra");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("extra");
   });
 
   test("out-of-range integer throws naming the key", async () => {
     const raw = { ...validConfig(), maxRequestBytes: 65537 };
-    await expect(loadTemp(raw)).rejects.toThrow("maxRequestBytes");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("maxRequestBytes");
   });
 
   test("baseline without source throws (mutation: skip the source check)", async () => {
@@ -124,7 +142,13 @@ describe("dashboard config keys", () => {
       outputPer1M: 15,
       asOf: "2026-10-01",
     };
-    await expect(loadTemp(raw)).rejects.toThrow("source");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("source");
   });
 
   test("impossible asOf date 2026-02-30 throws", async () => {
@@ -136,7 +160,13 @@ describe("dashboard config keys", () => {
       source: "synthetic test value, not a price",
       asOf: "2026-02-30",
     };
-    await expect(loadTemp(raw)).rejects.toThrow("asOf");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("asOf");
   });
 
   test("inputPer1M with more than 9 decimals throws", async () => {
@@ -148,7 +178,13 @@ describe("dashboard config keys", () => {
       source: "synthetic test value, not a price",
       asOf: "2026-10-01",
     };
-    await expect(loadTemp(raw)).rejects.toThrow("inputPer1M");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("inputPer1M");
   });
 
   test("extra key inside a baseline throws", async () => {
@@ -160,7 +196,13 @@ describe("dashboard config keys", () => {
       asOf: "2026-10-01",
       extra: true,
     };
-    await expect(loadTemp(raw)).rejects.toThrow("extra");
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("extra");
   });
 
   test("valid baselines parse to nano-USD BigInt", async () => {

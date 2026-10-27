@@ -67,6 +67,7 @@ const LISTEN_ENV_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
 const LISTEN_ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS_PATTERN = /[\u0000-\u001F\u007F]/;
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -334,8 +335,8 @@ export function resolveDashboardListen(
       `environment variable ${variable} must be host:port (listen ${alias})`,
     );
   }
-  const host = (match[1] ?? match[2] ?? "") as string;
-  const port = Number(match[3] as string);
+  const host = match[1] ?? match[2] ?? "";
+  const port = Number(match[3]);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new DashboardConfigError(
       `environment variable ${variable} must use a port in 0..65535 (listen ${alias})`,

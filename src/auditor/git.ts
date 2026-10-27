@@ -97,10 +97,11 @@ function parseShaOutput(stdout: string, ref: string, rc: number): string {
 
 export function createReadOnlyGit(repoDir: string): ReadOnlyGit {
   async function resolveCommit(ref: string): Promise<string> {
-    if (HEX40_PATTERN.test(ref)) {
-      return ref;
-    }
-    if (!REF_PATTERN.test(ref) || ref.includes("..")) {
+    // Every ref, including a literal 40-hex sha, goes through rev-parse
+    // --verify ...^{commit}: a nonexistent sha or a non-commit object
+    // fails here with the rev-parse message instead of later in
+    // merge-base.
+    if (!HEX40_PATTERN.test(ref) && (!REF_PATTERN.test(ref) || ref.includes(".."))) {
       throw new GitReadError(`invalid ref "${ref}"`, 128);
     }
     const { stdout, rc } = await execGit(repoDir, "rev-parse", [

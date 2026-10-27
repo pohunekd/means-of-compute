@@ -447,7 +447,7 @@ test("closed connection exits 4 with no ledger entry", async () => {
   }
 });
 
-test("work item without DoD refuses 3 with no verdict (no DoD, no audit)", async () => {
+test("work item without DoD exits 2: the library and the CLI share isWorkItem", async () => {
   const repo = await makeTempRepo();
   const workdir = mkdtempSync(join(tmpdir(), "auditor-nodod-"));
   const verdictDir = join(workdir, "verdicts");
@@ -464,29 +464,34 @@ test("work item without DoD refuses 3 with no verdict (no DoD, no audit)", async
       ...(demoItem("demo-good") as unknown as AuditInput["item"]),
       dod: [],
     };
-    const outcome = await runAudit(
-      {
-        item,
-        repoDir: repo.dir,
-        ref: "demo-good",
-        baseRef: "main",
-        pullNumber: 99,
-        authorModels: ["meta/muse-glimmer-30b"],
-      },
-      {
-        config: { ...config, verdictDir },
-        git: createReadOnlyGit(repo.dir),
-        budget: createCliBudgetGate({
-          command: ["bun", "src/budget/check.ts"],
-          timeoutMs: 30000,
-          cwd: process.cwd(),
-        }),
-        call: callProviderOnce,
-        ledgerPath,
-        now: () => new Date("2026-10-27T10:00:00.000Z"),
-      },
-    );
-    expect(outcome.kind).toBe("refused");
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item,
+          repoDir: repo.dir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir },
+          git: createReadOnlyGit(repo.dir),
+          budget: createCliBudgetGate({
+            command: ["bun", "src/budget/check.ts"],
+            timeoutMs: 30000,
+            cwd: process.cwd(),
+          }),
+          call: callProviderOnce,
+          ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(2);
     const files = await Array.fromAsync(new Bun.Glob("**/*.json").scan({ cwd: verdictDir }));
     expect(files).toHaveLength(0);
   } finally {

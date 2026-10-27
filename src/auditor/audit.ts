@@ -108,13 +108,6 @@ async function recordAuditUsage(
 }
 
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
-  // No DoD, no audit: an item without acceptance criteria is a domain
-  // refusal, checked before contract validation so it never reaches a
-  // model call.
-  const rawDod: unknown = (input.item as unknown as { dod?: unknown }).dod;
-  if (Array.isArray(rawDod) && rawDod.length === 0) {
-    return refused("no definition of done: nothing to audit");
-  }
   if (!isWorkItem(input.item)) {
     throw new Error(
       `audit: invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`,

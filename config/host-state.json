@@ -2,7 +2,7 @@
   "package": {
     "id": "moc.host-state",
     "version": "0.1.0",
-    "sourceDigest": "sha256:b14a224661618a211c906e1207a54036e96d3fa9c60f26613ceda16b923d89c8",
+    "sourceDigest": "sha256:4d3dc9d464931bbfdade184f45569631aaf44ab49fdbdaeae17d555c1fa203ca",
     "targets": ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"]
   }
 }

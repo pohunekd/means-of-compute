@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
+
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 

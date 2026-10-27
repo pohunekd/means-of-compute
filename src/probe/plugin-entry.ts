@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { runProbe } from "./probe.js";
 import { loadHostFile } from "./config.js";
-import { FactsError } from "./facts.js";
 
 const configDir = join(dirname(process.execPath), "..", "config");
 

@@ -101,7 +101,8 @@ const gitCommit = gitCommitOut.trim();
 const bunVersion = Bun.version;
 
 for (const t of targets) {
-  const dirName = t === "native" ? `moc-host-state-${version}-native` : `moc-host-state-${version}-${t}`;
+  const dirName =
+    t === "native" ? `moc-host-state-${version}-native` : `moc-host-state-${version}-${t}`;
   const dir = join(outDir, dirName);
   const binDir = join(dir, "bin");
   mkdirSync(binDir, { recursive: true });

@@ -327,6 +327,32 @@ async function linuxSecondsSinceInput(): Promise<number> {
   return minSecs;
 }
 
+async function linuxManagerIdleSecs(): Promise<number | null> {
+  const proc = Bun.spawn(["loginctl", "show", "-p", "IdleHint", "-p", "IdleSinceHint"], {
+    stdout: "pipe",
+  });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) throw new Error("loginctl show manager failed");
+  const props = new Map<string, string>();
+  for (const line of out.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq > 0) props.set(line.slice(0, eq), line.slice(eq + 1));
+  }
+  const sinceRaw = props.get("IdleSinceHint");
+  const sinceUs = sinceRaw === undefined || sinceRaw === "" ? NaN : Number(sinceRaw);
+  if (Number.isFinite(sinceUs) && sinceUs > 0) {
+    return Math.max(0, Math.floor((Date.now() - sinceUs / 1000) / 1000));
+  }
+  return null;
+}
+
+function linuxUptimeSecs(): number | null {
+  const first = readFileIfExists("/proc/uptime")?.split(/\s+/)[0];
+  const upSecs = first ? Math.floor(Number(first)) : NaN;
+  return Number.isFinite(upSecs) ? upSecs : null;
+}
+
 async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number | null }> {
   const proc = Bun.spawn(["pmset", "-g", "batt"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
@@ -553,9 +579,12 @@ async function main(): Promise<void> {
         const secs = await linuxSecondsSinceInput();
         if (Number.isNaN(secs)) {
           loggedOut = true;
-          const uptime = readFileIfExists("/proc/uptime")?.split(/\s+/)[0];
-          const upSecs = uptime ? Math.floor(Number(uptime)) : NaN;
-          loggedOutSecs = Number.isFinite(upSecs) ? upSecs : null;
+          const managerIdle = await linuxManagerIdleSecs();
+          if (managerIdle !== null) {
+            loggedOutSecs = managerIdle;
+          } else {
+            loggedOutSecs = linuxUptimeSecs();
+          }
         } else {
           secondsSinceInput = secs;
         }
@@ -567,7 +596,12 @@ async function main(): Promise<void> {
           secondsSinceInput = await macosSecondsSinceInput();
         }
       }
-      if (loggedOut) secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
+      if (loggedOut) {
+        if (platform === "linux" && loggedOutSecs === null) {
+          throw new Error("logged out but neither IdleSinceHint nor uptime readable");
+        }
+        secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
+      }
     } catch (e) {
       userActivityUnknown = true;
       userActivityCause = String(e);

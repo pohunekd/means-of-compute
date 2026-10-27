@@ -12,6 +12,7 @@ const KEYS = [
   "LOCAL_MODEL_BASE_URL",
   "PROVIDER_META_API_BASE_URL",
   "PROVIDER_NVIDIA_BUILD_BASE_URL",
+  "PROVIDER_META_API_TIMEOUT_MS",
 ] as const;
 
 export function applyTestEnv(): () => void {

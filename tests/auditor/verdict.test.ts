@@ -375,7 +375,6 @@ test("a timed-out call exits 4 with one billed entry (mutation: 504, true become
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   const cleanup = (): void => {
     void server.stop();
-    delete process.env.PROVIDER_META_API_TIMEOUT_MS;
     restoreEnv();
     setup.cleanupFiles();
   };

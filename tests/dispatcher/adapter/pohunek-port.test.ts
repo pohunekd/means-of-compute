@@ -663,3 +663,230 @@ test("wait rejects a progress mismatch (W2)", async () => {
     await teardown(fake, port);
   }
 });
+
+test("cancel on a live session returns cancelled session stopped", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    const result = await port.cancel(ref, "operator");
+    expect(result).toMatchObject({
+      state: "cancelled",
+      sessionId: handle.sessionId,
+      detail: "session stopped",
+    });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("cancel on a finished session returns finished (P4)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setSession("laptop-a", handle.sessionId, { state: "done", exit_code: 0 });
+    const result = await port.cancel(ref, "operator");
+    expect(result).toMatchObject({ state: "finished", detail: "exited 0" });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("cancel with stop outcome unknown gives PortUnreachableError", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.failNext("laptop-a", "session.stop", {
+      error: fakeErrors.stopOutcomeUnknown("laptop-a"),
+      apply: false,
+    });
+    await expect(
+      port.cancel({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, "stall"),
+    ).rejects.toBeInstanceOf(PortUnreachableError);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("cancel on a missing session gives lost session missing (X1)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.failNext("laptop-a", "session.stop", { errCode: "session_not_found", apply: false });
+    const result = await port.cancel(ref, "stall");
+    expect(result).toMatchObject({ state: "lost", detail: "session missing" });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a racing wait and cancel return one terminal (J1)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
+    const waiting = port.wait(ref, 1000, null);
+    const cancelling = port.cancel(ref, "operator");
+    const [waited, cancelled] = await Promise.all([waiting, cancelling]);
+    expect(waited).toEqual(cancelled);
+    expect(waited).toMatchObject({ sessionId: handle.sessionId });
+    expect(["cancelled", "finished"]).toContain(waited.state);
+    const stops = fake.calls("laptop-a").filter((call) => call.method === "session.stop");
+    expect(stops.length).toBeGreaterThanOrEqual(1);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("two waits on one turn agree (J2)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
+    const [first, second] = await Promise.all([
+      port.wait(ref, 1000, null),
+      port.wait(ref, 1000, null),
+    ]);
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ state: "finished", detail: "turn completed" });
+    const stops = fake.calls("laptop-a").filter((call) => call.method === "session.stop");
+    expect(stops.length).toBeLessThanOrEqual(2);
+    expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.outcome]).toBe("finished");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("two cancels agree (J3)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    const [first, second] = await Promise.all([
+      port.cancel(ref, "operator"),
+      port.cancel(ref, "operator"),
+    ]);
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ state: "cancelled", detail: "session stopped" });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("cancel after a terminal wait calls nothing (J4, P4)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const waited = await port.wait(ref, 1000, null);
+    const stopsBefore = fake
+      .calls("laptop-a")
+      .filter((call) => call.method === "session.stop").length;
+    const cancelled = await port.cancel(ref, "operator");
+    expect(cancelled).toEqual(waited);
+    const stopsAfter = fake
+      .calls("laptop-a")
+      .filter((call) => call.method === "session.stop").length;
+    expect(stopsAfter).toBe(stopsBefore);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a hostUnreachable route gives alias plus code and drops the connection", async () => {
+  const { fake, port } = setup();
+  let dropped = 0;
+  const dropping = {
+    ...fake.connector,
+    drop: async (alias: string): Promise<void> => {
+      dropped += 1;
+      await fake.connector.drop(alias);
+    },
+  };
+  const droppingLog: AdapterLogEvent[] = [];
+  const droppingPort = createPohunekPort(CONFIG, {
+    connector: dropping,
+    log: (event) => {
+      droppingLog.push(event);
+    },
+  });
+  try {
+    fake.setUnreachable("laptop-a", true);
+    const error = await droppingPort.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortUnreachableError);
+    expect((error as PortUnreachableError).message).toBe("laptop-a: host_unreachable");
+    expect((error as Error).message).not.toContain("peer.example-route");
+    expect(dropped).toBe(1);
+    expect(droppingLog.map((entry) => entry.event)).toContain("adapter-connection-dropped");
+  } finally {
+    await droppingPort.close();
+    await teardown(fake, port);
+  }
+});
+
+test("diff maps the daemon reply (3.8)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.setDiff("laptop-a", handle.sessionId, {
+      diff: "diff --git a\n",
+      base: "origin/main",
+      truncated: true,
+    });
+    const result = await port.diff(
+      { sessionId: handle.sessionId, hostAlias: "laptop-a" },
+      "origin/main",
+    );
+    expect(result).toEqual({
+      sessionId: handle.sessionId,
+      base: "origin/main",
+      unifiedDiff: "diff --git a\n",
+      truncated: true,
+    });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("diff on a missing session gives session-not-found (3.8)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.failNext("laptop-a", "session.diff", { errCode: "session_not_found", apply: false });
+    await expect(port.diff(ref, "origin/main")).rejects.toMatchObject({
+      code: "session-not-found",
+    });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("after close, start throws closed and a second close returns at once", async () => {
+  const { fake, port } = setup();
+  try {
+    await port.close();
+    await port.close();
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PohunekAdapterError);
+    expect((error as PohunekAdapterError).code).toBe("closed");
+    await expect(
+      port.wait({ sessionId: "fake-1", hostAlias: "laptop-a" }, 1000, null),
+    ).rejects.toMatchObject({ code: "closed" });
+    await expect(
+      port.diff({ sessionId: "fake-1", hostAlias: "laptop-a" }, "origin/main"),
+    ).rejects.toMatchObject({ code: "closed" });
+    await expect(
+      port.cancel({ sessionId: "fake-1", hostAlias: "laptop-a" }, "operator"),
+    ).rejects.toMatchObject({ code: "closed" });
+  } finally {
+    await fake.connector.close();
+  }
+});

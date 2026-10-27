@@ -65,10 +65,13 @@ test("router does not fail over on 401", async () => {
 
 test("router fails over on timeout", async () => {
   const { primaryServer, fallbackServer } = await withProviders(
-    "tests/providers/recordings/primary-delay.json",
+    "tests/providers/recordings/primary-hold.json",
     "tests/providers/recordings/fallback-200.json",
     { PROVIDER_NVIDIA_BUILD_TIMEOUT_MS: "10" },
   );
+  // The primary holds its headers forever, so the 10 ms router timeout
+  // fires and the fallback answers. The gate models stalled upstream
+  // bytes: no wall-clock sleep is involved on the loopback side.
   const { callWithFallback } = await import("../../src/providers/router.js");
   const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
   void primaryServer.stop();

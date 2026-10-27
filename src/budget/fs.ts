@@ -49,6 +49,24 @@ export async function statInputPath(label: string, path: string): Promise<InputP
   return "file";
 }
 
+// Directory inputs (the providers directory, log and state parent dirs)
+// must exist. A missing or unreadable input exits 2; only the ledger and
+// the state may be absent.
+export async function requireInputDir(label: string, path: string): Promise<void> {
+  let isDirectory: boolean;
+  try {
+    isDirectory = (await stat(path)).isDirectory();
+  } catch (error: unknown) {
+    throw new InputPathError(
+      `${label} ${path}: cannot stat path (${String((error as NodeJS.ErrnoException).code)})`,
+      { cause: error },
+    );
+  }
+  if (!isDirectory) {
+    throw new InputPathError(`${label} ${path}: not a directory`);
+  }
+}
+
 export async function readInputText(label: string, path: string): Promise<string> {
   try {
     return await readFile(path, "utf8");

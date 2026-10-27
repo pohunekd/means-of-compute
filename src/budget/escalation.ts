@@ -7,10 +7,10 @@
 // set grows by at most a few keys a day. Each escalation appends one JSON
 // line to the escalation log and prints one line on stderr for the
 // coordinator's daily digest channel.
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
-import { readInputText, statInputPath } from "./fs.js";
+import { readInputText, requireInputDir, statInputPath } from "./fs.js";
 import type { BudgetDecision } from "./decision.js";
 
 export type CapKind = "day" | "total" | "nvidia-daily" | "spend-unknown";
@@ -79,7 +79,9 @@ async function readState(statePath: string): Promise<EscalationState> {
 }
 
 async function writeState(statePath: string, state: EscalationState): Promise<void> {
-  await mkdir(dirname(statePath), { recursive: true });
+  const label = "Budget escalation state";
+  await requireInputDir(label, dirname(statePath));
+  await statInputPath(label, statePath);
   await Bun.write(statePath, `${JSON.stringify(state)}\n`);
 }
 
@@ -112,7 +114,7 @@ export async function maybeEscalate(
     nvidiaRequestsToday: decision.nvidiaRequestsToday,
     at: options.now.toISOString(),
   };
-  await mkdir(dirname(options.escalationLogPath), { recursive: true });
+  await requireInputDir("Budget escalation log", dirname(options.escalationLogPath));
   await appendFile(options.escalationLogPath, `${JSON.stringify(entry)}\n`);
   await writeState(options.statePath, { escalated: [...state.escalated, key] });
   if (options.stderr !== undefined) {

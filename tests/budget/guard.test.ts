@@ -726,3 +726,22 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }
 });
+
+test("CLI: missing config file and missing providers dir exit 2", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const configPath = join(sandbox.dir, "config", "budget.json");
+    const backup = await Bun.file(configPath).text();
+    rmSync(configPath);
+    const missing = await sandbox.run([]);
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toContain("Budget config");
+    await Bun.write(configPath, backup);
+    rmSync(join(sandbox.dir, "config", "providers"), { recursive: true, force: true });
+    const noProviders = await sandbox.run([]);
+    expect(noProviders.code).toBe(2);
+    expect(noProviders.stderr).toContain("Budget pricing");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,7 @@
 // Typed loader for config/budget.json. Every field is required: the guard must
 // fail at startup with a clear error instead of silently using a default cap.
+// A missing or unreadable file exits 2; the config may never be absent.
+import { readInputText, statInputPath } from "./fs.js";
 export interface BudgetConfig {
   readonly ledgerPath: string;
   readonly statePath: string;
@@ -29,12 +31,11 @@ function requiredNumber(record: Record<string, unknown>, field: string, path: st
 }
 
 export async function loadBudgetConfig(path: string = DEFAULT_CONFIG_PATH): Promise<BudgetConfig> {
-  let text: string;
-  try {
-    text = await Bun.file(path).text();
-  } catch {
-    throw new Error(`Budget config ${path}: cannot read file`);
+  const label = "Budget config";
+  if ((await statInputPath(label, path)) === "absent") {
+    throw new Error(`${label} ${path}: file is missing`);
   }
+  const text = await readInputText(label, path);
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;

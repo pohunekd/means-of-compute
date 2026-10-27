@@ -3,6 +3,7 @@
 // A descriptor without a pricing block is an error: "free" must be stated
 // with explicit zero prices.
 import type { ProviderPricing } from "../providers/types.js";
+import { readInputText, requireInputDir, statInputPath } from "./fs.js";
 
 const DEFAULT_PRICING_DIR = "config/providers";
 
@@ -51,6 +52,7 @@ export async function loadPricing(
 ): Promise<ReadonlyMap<string, ProviderPricing>> {
   const pricing = new Map<string, ProviderPricing>();
   const owners = new Map<string, string>();
+  await requireInputDir("Budget pricing", dir);
   const glob = new Bun.Glob(`${dir}/*.json`);
   const files: string[] = [];
   for await (const file of glob.scan({ cwd: "." })) {
@@ -64,11 +66,15 @@ export async function loadPricing(
     if (file.endsWith("schema.json") || file.endsWith("route.json")) {
       continue;
     }
+    if ((await statInputPath("Budget pricing", file)) === "absent") {
+      throw new Error(`Budget pricing ${file}: file is missing`);
+    }
+    const text = await readInputText("Budget pricing", file);
     let parsed: unknown;
     try {
-      parsed = (await Bun.file(file).json()) as unknown;
-    } catch {
-      throw new Error(`Budget pricing ${file}: not valid JSON`);
+      parsed = JSON.parse(text) as unknown;
+    } catch (error: unknown) {
+      throw new Error(`Budget pricing ${file}: not valid JSON`, { cause: error });
     }
     if (typeof parsed !== "object" || parsed === null) {
       throw new Error(`Budget pricing ${file}: missing provider id`);

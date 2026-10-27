@@ -8,6 +8,7 @@
 // function; the override never writes escalation state or the escalation
 // log, it only prints `would escalate: <event key>` on stderr.
 import { loadBudgetConfig } from "./config.js";
+import { readInputText, statInputPath } from "./fs.js";
 import { readUsageLedger } from "./ledger.js";
 import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
@@ -22,11 +23,16 @@ interface CliArgs {
 }
 
 async function loadRoute(routePath = "config/providers/route.json"): Promise<string[]> {
+  const label = "Budget route";
+  if ((await statInputPath(label, routePath)) === "absent") {
+    throw new Error(`${label} ${routePath}: file is missing`);
+  }
+  const text = await readInputText(label, routePath);
   let raw: unknown;
   try {
-    raw = (await Bun.file(routePath).json()) as unknown;
-  } catch {
-    throw new Error(`Budget route ${routePath}: cannot read file or not valid JSON`);
+    raw = JSON.parse(text) as unknown;
+  } catch (error: unknown) {
+    throw new Error(`${label} ${routePath}: not valid JSON`, { cause: error });
   }
   if (
     typeof raw !== "object" ||

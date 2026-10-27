@@ -9,13 +9,16 @@ coordinator's daily digest channel.
 
 - Spend source: `UsageRecord` documents (contracts-v1) as JSON lines in the
   ledger file at `config/budget.json` `ledgerPath`. The guard only reads it;
-  the ledger writer lives in #12. A missing file means zero spend. A present
-  line that fails `contracts/v1/validate.ts` is an error naming the line
-  number and is never skipped.
+  the ledger writer lives in #12. A missing file with an existing parent
+  directory means zero spend; a missing or dangling parent, or a parent
+  that is not a directory, exits 2 naming the path and the error code.
+  A present line that fails `contracts/v1/validate.ts` is an error naming the
+  line number and is never skipped.
 - Prices: provider descriptors under `config/providers/` (see
-  `config/providers/schema.json`). A descriptor without a `pricing` block is
-  a load error naming the file; "free" must be stated with explicit zero
-  prices. The guard prices all input tokens at `inputPer1M` and output tokens
+  `config/providers/schema.json`). The directory must exist; the file list is
+  sorted and a duplicate provider id exits 2 naming both files. A descriptor
+  without a `pricing` block is a load error naming the file; "free" must be
+  stated with explicit zero prices. The guard prices all input tokens at `inputPer1M` and output tokens
   at `outputPer1M` per 1M tokens. Cached pricing is not applied because
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
   bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
@@ -23,7 +26,9 @@ coordinator's daily digest channel.
   literals in code.
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
   `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
-  missing one is a startup error.
+  missing or unreadable file exits 2. The route comes from
+  `config/providers/route.json`, which must exist and hold a string array
+  `providers`.
 
 ## Rules
 

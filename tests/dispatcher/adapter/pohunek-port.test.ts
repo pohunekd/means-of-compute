@@ -3,13 +3,19 @@
 // named in 5.3; P1 replay and conflict rows hold. The fake daemon stands in
 // for the host; real Clients run over the Transport seam.
 import { expect, test } from "bun:test";
-import type { SessionNewParams, SessionWaitTurnResult } from "@pohunek/sdk";
 import { createFakeDaemon, fakeErrors } from "../../../src/dispatcher/adapter/fake-daemon.js";
 import {
   MOC_METADATA,
   requestDigestOf,
   sessionNewParams,
+  type acceptanceFailure,
+  type sessionNewParams as sessionNewParamsFn,
+  type waitDecision,
 } from "../../../src/dispatcher/adapter/map.js";
+
+type SessionNewParams = ReturnType<typeof sessionNewParamsFn>;
+type SessionNewResult = Parameters<typeof acceptanceFailure>[1];
+type SessionWaitTurnResult = Parameters<typeof waitDecision>[1];
 import {
   createPohunekPort,
   type AdapterLogEvent,
@@ -118,8 +124,16 @@ test("host-unsupported makes no session call", async () => {
   const { fake, log, port } = setup();
   try {
     fake.setCapabilities("laptop-a", { git_available: false });
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortRejectedError);
-    await expect(port.start(request())).rejects.toMatchObject({ code: "host-unsupported" });
+    const caught_1: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_1).toBeInstanceOf(PortRejectedError);
+    const matched_1: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_1).toMatchObject({ code: "host-unsupported" });
     expect(methodNames(fake, "laptop-a")).not.toContain("session.list");
     expect(eventsOf(log)).toContain("adapter-host-unsupported");
     expect(log.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
@@ -137,7 +151,7 @@ test("unknown-host-alias makes no connection", async () => {
       .start(request({ hostAlias: "unknown-host" }))
       .catch((error: unknown) => error);
     expect(portError).toBeInstanceOf(PortRejectedError);
-    expect((portError as PortRejectedError).code).toBe("unknown-host-alias");
+    expect(portError).toMatchObject({ code: "unknown-host-alias" });
     expect(methodNames(fake, "laptop-a")).toHaveLength(0);
   } finally {
     await teardown(fake, port);
@@ -148,7 +162,11 @@ test("an unreachable host before session.new creates nothing (A1)", async () => 
   const { fake, port } = setup();
   try {
     fake.setUnreachable("laptop-a", true);
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortUnreachableError);
+    const caught_2: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_2).toBeInstanceOf(PortUnreachableError);
     expect(fake.sessions("laptop-a")).toHaveLength(0);
     fake.setUnreachable("laptop-a", false);
     const handle = await port.start(request());
@@ -165,8 +183,16 @@ test("a lost session.new reply is voided on replay (A2)", async () => {
       error: fakeErrors.requestTimeout("laptop-a"),
       apply: true,
     });
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortUnreachableError);
-    await expect(port.start(request())).rejects.toMatchObject({ code: "start-unconfirmed" });
+    const caught_3: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_3).toBeInstanceOf(PortUnreachableError);
+    const matched_2: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_2).toMatchObject({ code: "start-unconfirmed" });
     const handle = await port.start(request());
     expect(handle.sessionId).toBe("fake-2");
     const sessions = fake.sessions("laptop-a");
@@ -188,8 +214,16 @@ test("an unreachable accept write is voided on replay (A4)", async () => {
       error: fakeErrors.requestTimeout("laptop-a"),
       apply: false,
     });
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortUnreachableError);
-    await expect(port.start(request())).rejects.toMatchObject({ code: "start-unconfirmed" });
+    const caught_4: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_4).toBeInstanceOf(PortUnreachableError);
+    const matched_3: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_3).toMatchObject({ code: "start-unconfirmed" });
     const handle = await port.start(request());
     expect(handle.sessionId).toBe("fake-2");
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
@@ -221,7 +255,11 @@ test("a changed brief gives request-conflict (P1)", async () => {
   const { fake, port } = setup();
   try {
     await port.start(request());
-    await expect(port.start(request({ brief: "a different task" }))).rejects.toMatchObject({
+    const matched_4: unknown = await port.start(request({ brief: "a different task" })).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_4).toMatchObject({
       code: "request-conflict",
     });
     expect(fake.sessions("laptop-a")).toHaveLength(1);
@@ -250,7 +288,11 @@ test("two bound sessions give request-duplicated (P1)", async () => {
         [MOC_METADATA.start]: "pending",
       },
     } satisfies SessionNewParams);
-    await expect(port.start(request())).rejects.toMatchObject({
+    const matched_5: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_5).toMatchObject({
       code: "request-duplicated",
     });
   } finally {
@@ -261,15 +303,16 @@ test("two bound sessions give request-duplicated (P1)", async () => {
 test("a failed stop keeps the binding (A6)", async () => {
   const { fake, port } = setup();
   try {
-    fake.onNew(
-      "laptop-a",
-      () => ({ prompt_delivered: false }) as Partial<import("@pohunek/sdk").SessionNewResult>,
-    );
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
     fake.failNext("laptop-a", "session.stop", {
       error: fakeErrors.requestTimeout("laptop-a"),
       apply: false,
     });
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortUnreachableError);
+    const caught_5: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_5).toBeInstanceOf(PortUnreachableError);
     const newsBefore = methodNames(fake, "laptop-a").filter(
       (method) => method === "session.new",
     ).length;
@@ -278,7 +321,11 @@ test("a failed stop keeps the binding (A6)", async () => {
     expect(bound).toHaveLength(1);
     expect(bound[0]?.metadata?.[MOC_METADATA.requestId]).toBe("req-1");
     fake.onNew("laptop-a", () => ({}));
-    await expect(port.start(request())).rejects.toMatchObject({ code: "start-unconfirmed" });
+    const matched_6: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_6).toMatchObject({ code: "start-unconfirmed" });
     const newsDuringReplay = methodNames(fake, "laptop-a").filter(
       (method) => method === "session.new",
     ).length;
@@ -293,20 +340,25 @@ test("a failed stop keeps the binding (A6)", async () => {
 test("an unreachable unbind is retried on replay (A7)", async () => {
   const { fake, port } = setup();
   try {
-    fake.onNew(
-      "laptop-a",
-      () => ({ prompt_delivered: false }) as Partial<import("@pohunek/sdk").SessionNewResult>,
-    );
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
     fake.failNext("laptop-a", "session.set_metadata", {
       error: fakeErrors.requestTimeout("laptop-a"),
       apply: false,
     });
-    await expect(port.start(request())).rejects.toBeInstanceOf(PortUnreachableError);
+    const caught_6: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_6).toBeInstanceOf(PortUnreachableError);
     const bound = fake.sessions("laptop-a");
     expect(bound).toHaveLength(1);
     expect(bound[0]?.metadata?.[MOC_METADATA.requestId]).toBe("req-1");
     fake.onNew("laptop-a", () => ({}));
-    await expect(port.start(request())).rejects.toMatchObject({ code: "start-unconfirmed" });
+    const matched_7: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(matched_7).toMatchObject({ code: "start-unconfirmed" });
     const handle = await port.start(request());
     expect(handle.sessionId).toBe("fake-2");
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
@@ -318,14 +370,11 @@ test("an unreachable unbind is retried on replay (A7)", async () => {
 test("a refused unbind keeps the provisional path (A8)", async () => {
   const { fake, port } = setup();
   try {
-    fake.onNew(
-      "laptop-a",
-      () => ({ prompt_delivered: false }) as Partial<import("@pohunek/sdk").SessionNewResult>,
-    );
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
     fake.failNext("laptop-a", "session.stop", { errCode: "bad_request", apply: false });
     const error = await port.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PohunekAdapterError);
-    expect((error as PohunekAdapterError).code).toBe("void-incomplete");
+    expect(error).toMatchObject({ code: "void-incomplete" });
     expect(fake.sessions("laptop-a")).toHaveLength(1);
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.requestId]).toBe("req-1");
   } finally {
@@ -339,7 +388,7 @@ test("a refused session.new leaves no binding (A9)", async () => {
     fake.failNext("laptop-a", "session.new", { errCode: "bad_request", apply: true });
     const error = await port.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PortRejectedError);
-    expect((error as PortRejectedError).code).toBe("bad-request");
+    expect(error).toMatchObject({ code: "bad-request" });
     const bound = fake.sessions("laptop-a");
     expect(bound).toHaveLength(1);
     expect(bound[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
@@ -355,7 +404,7 @@ test("branch-diverged from session.new has no cleanup (A9, P2)", async () => {
     fake.failNext("laptop-a", "session.new", { errCode: "branch_diverged", apply: true });
     const error = await port.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PortRejectedError);
-    expect((error as PortRejectedError).code).toBe("branch-diverged");
+    expect(error).toMatchObject({ code: "branch-diverged" });
     expect(fake.sessions("laptop-a")).toHaveLength(1);
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.start]).toBe("pending");
   } finally {
@@ -366,46 +415,44 @@ test("branch-diverged from session.new has no cleanup (A9, P2)", async () => {
 test("each S5 failure leaves the session stopped and unbound, and a replay creates a new session", async () => {
   const overrides: ReadonlyArray<{
     readonly name: string;
-    readonly reply: (params: SessionNewParams) => Partial<import("@pohunek/sdk").SessionNewResult>;
+    readonly reply: (params: SessionNewParams) => Partial<SessionNewResult>;
     readonly code: string;
   }> = [
     {
       name: "branch-mismatch",
-      reply: () => ({ branch: "moc/other" }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({ branch: "moc/other" }),
       code: "branch-mismatch",
     },
     {
       name: "no-worktree",
-      reply: () => ({ worktree_path: "" }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({ worktree_path: "" }),
       code: "no-worktree",
     },
     {
       name: "prompt-not-acknowledged",
-      reply: () => ({ applied_input: false }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({ applied_input: false }),
       code: "prompt-not-acknowledged",
     },
     {
       name: "base-branch-fallback",
-      reply: (params) =>
-        ({
-          ...(params.branch_source === "remote"
-            ? { worktree_source: { ref: `origin/${String(params.branch)}`, commit: "abc" } }
-            : {}),
-          warnings: [{ kind: "base_branch_fallback", message: "fell back", detail: "" }],
-        }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: (params) => ({
+        ...(params.branch_source === "remote"
+          ? { worktree_source: { ref: `origin/${String(params.branch)}`, commit: "abc" } }
+          : {}),
+        warnings: [{ kind: "base_branch_fallback", message: "fell back", detail: "" }],
+      }),
       code: "base-branch-fallback",
     },
     {
       name: "fetch-failed",
-      reply: () =>
-        ({
-          warnings: [{ kind: "fetch", message: "fetch failed", detail: "" }],
-        }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({
+        warnings: [{ kind: "fetch", message: "fetch failed", detail: "" }],
+      }),
       code: "fetch-failed",
     },
     {
       name: "start-unconfirmed replay",
-      reply: () => ({}) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({}),
       code: "start-unconfirmed",
     },
   ];
@@ -420,7 +467,7 @@ test("each S5 failure leaves the session stopped and unbound, and a replay creat
         .start(request({ resume: name === "fetch-failed" ? false : request().resume }))
         .catch((cause: unknown) => cause);
       expect(error, name).toBeInstanceOf(PortRejectedError);
-      expect((error as PortRejectedError).code, name).toBe(code);
+      expect(error, name).toMatchObject({ code: code });
       const sessions = fake.sessions("laptop-a");
       expect(sessions, name).toHaveLength(1);
       expect(sessions[0]?.state, name).toBe("stopped");
@@ -439,22 +486,20 @@ test("each S5 failure leaves the session stopped and unbound, and a replay creat
 test("resume-only S5 failures void and a replay creates a new session", async () => {
   const cases: ReadonlyArray<{
     readonly name: string;
-    readonly reply: (params: SessionNewParams) => Partial<import("@pohunek/sdk").SessionNewResult>;
+    readonly reply: (params: SessionNewParams) => Partial<SessionNewResult>;
     readonly code: string;
   }> = [
     {
       name: "branch-source-ignored",
-      reply: () =>
-        ({ worktree_source: undefined }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: () => ({ worktree_source: undefined }),
       code: "branch-source-ignored",
     },
     {
       name: "branch-ahead-of-remote",
-      reply: (params) =>
-        ({
-          worktree_source: { ref: `origin/${String(params.branch)}`, commit: "abc" },
-          warnings: [{ kind: "branch_ahead_of_remote", message: "ahead", detail: "" }],
-        }) as Partial<import("@pohunek/sdk").SessionNewResult>,
+      reply: (params) => ({
+        worktree_source: { ref: `origin/${String(params.branch)}`, commit: "abc" },
+        warnings: [{ kind: "branch_ahead_of_remote", message: "ahead", detail: "" }],
+      }),
       code: "branch-ahead-of-remote",
     },
   ];
@@ -464,7 +509,7 @@ test("resume-only S5 failures void and a replay creates a new session", async ()
       fake.onNew("laptop-a", reply);
       const error = await port.start(request({ resume: true })).catch((cause: unknown) => cause);
       expect(error, name).toBeInstanceOf(PortRejectedError);
-      expect((error as PortRejectedError).code, name).toBe(code);
+      expect(error, name).toMatchObject({ code: code });
       expect(fake.sessions("laptop-a")[0]?.state, name).toBe("stopped");
       fake.onNew("laptop-a", () => ({}));
       const handle: SessionHandle = await port.start(request({ resume: true }));
@@ -557,7 +602,7 @@ test("a restart after stop keeps finished (WC3)", async () => {
         "cursor-1",
       );
       expect(result).toMatchObject({ state: "finished", detail: "turn completed" });
-      void secondLog;
+      expect(secondLog).toHaveLength(0);
     } finally {
       await second.close();
     }
@@ -640,7 +685,11 @@ test("wait rejects a bad timeout with RangeError (W0)", async () => {
   try {
     const handle = await port.start(request());
     const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
-    await expect(port.wait(ref, 0, null)).rejects.toBeInstanceOf(RangeError);
+    const caught_7: unknown = await port.wait(ref, 0, null).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught_7).toBeInstanceOf(RangeError);
   } finally {
     await teardown(fake, port);
   }
@@ -656,9 +705,13 @@ test("wait rejects a progress mismatch (W2)", async () => {
       cursor: "cursor-1",
       progress: [{ session_id: handle.sessionId, state: "running", output_advanced: true }],
     });
-    await expect(
-      port.wait({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, 1000, null),
-    ).rejects.toMatchObject({ code: "progress-mismatch" });
+    const matched_8: unknown = await port
+      .wait({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, 1000, null)
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(matched_8).toMatchObject({ code: "progress-mismatch" });
   } finally {
     await teardown(fake, port);
   }
@@ -701,9 +754,13 @@ test("cancel with stop outcome unknown gives PortUnreachableError", async () => 
       error: fakeErrors.stopOutcomeUnknown("laptop-a"),
       apply: false,
     });
-    await expect(
-      port.cancel({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, "stall"),
-    ).rejects.toBeInstanceOf(PortUnreachableError);
+    const caught_8: unknown = await port
+      .cancel({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, "stall")
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(caught_8).toBeInstanceOf(PortUnreachableError);
   } finally {
     await teardown(fake, port);
   }
@@ -861,7 +918,11 @@ test("diff on a missing session gives session-not-found (3.8)", async () => {
     const handle = await port.start(request());
     const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
     fake.failNext("laptop-a", "session.diff", { errCode: "session_not_found", apply: false });
-    await expect(port.diff(ref, "origin/main")).rejects.toMatchObject({
+    const diffError: unknown = await port.diff(ref, "origin/main").then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(diffError).toMatchObject({
       code: "session-not-found",
     });
   } finally {
@@ -876,16 +937,28 @@ test("after close, start throws closed and a second close returns at once", asyn
     await port.close();
     const error = await port.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PohunekAdapterError);
-    expect((error as PohunekAdapterError).code).toBe("closed");
-    await expect(
-      port.wait({ sessionId: "fake-1", hostAlias: "laptop-a" }, 1000, null),
-    ).rejects.toMatchObject({ code: "closed" });
-    await expect(
-      port.diff({ sessionId: "fake-1", hostAlias: "laptop-a" }, "origin/main"),
-    ).rejects.toMatchObject({ code: "closed" });
-    await expect(
-      port.cancel({ sessionId: "fake-1", hostAlias: "laptop-a" }, "operator"),
-    ).rejects.toMatchObject({ code: "closed" });
+    expect(error).toMatchObject({ code: "closed" });
+    const matched_10: unknown = await port
+      .wait({ sessionId: "fake-1", hostAlias: "laptop-a" }, 1000, null)
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(matched_10).toMatchObject({ code: "closed" });
+    const matched_11: unknown = await port
+      .diff({ sessionId: "fake-1", hostAlias: "laptop-a" }, "origin/main")
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(matched_11).toMatchObject({ code: "closed" });
+    const matched_12: unknown = await port
+      .cancel({ sessionId: "fake-1", hostAlias: "laptop-a" }, "operator")
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(matched_12).toMatchObject({ code: "closed" });
   } finally {
     await fake.connector.close();
   }

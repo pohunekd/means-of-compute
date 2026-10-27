@@ -118,16 +118,19 @@ async function mappedError(
   port: PortInternals,
   alias: string,
   error: unknown,
-): Promise<PortUnreachableError | PortRejectedError | unknown> {
+): Promise<PortUnreachableError | PortRejectedError> {
   const mapped = portErrorOf(error, alias);
   if (mapped instanceof PortUnreachableError) {
     await dropConnection(port, alias);
-    throw mapped;
+    return mapped;
   }
   if (mapped instanceof PortRejectedError) {
-    throw mapped;
+    return mapped;
   }
-  throw error;
+  if (error instanceof Error) {
+    throw error;
+  }
+  throw new PortRejectedError("daemon-error");
 }
 
 // One inspected client per alias (S1): host.inspect runs once per Client
@@ -144,7 +147,7 @@ async function clientFor(port: PortInternals, alias: string): Promise<Client> {
   }
   let capabilities: HostCapabilities;
   try {
-    capabilities = (await client.call("host.inspect", null)) as HostCapabilities;
+    capabilities = await client.call("host.inspect", null);
   } catch (error) {
     throw await mappedError(port, alias, error);
   }
@@ -231,9 +234,9 @@ async function voidError(
   const mapped = portErrorOf(error, alias);
   if (mapped instanceof PortUnreachableError) {
     await dropConnection(port, alias);
-    throw mapped;
+    return mapped;
   }
-  throw new PohunekAdapterError("void-incomplete");
+  return new PohunekAdapterError("void-incomplete");
 }
 
 async function listBound(
@@ -243,9 +246,9 @@ async function listBound(
   requestId: string,
 ): Promise<SessionInfo[]> {
   try {
-    return (await client.call("session.list", {
+    return await client.call("session.list", {
       filters: [{ key: "metadata_eq", value: { key: MOC_METADATA.requestId, value: requestId } }],
-    })) as SessionInfo[];
+    });
   } catch (error) {
     throw await mappedError(port, alias, error);
   }
@@ -263,9 +266,10 @@ async function cleanupOrphans(
 ): Promise<never> {
   const bound = await listBound(port, client, alias, req.requestId);
   for (const match of bound) {
+    const startMeta: Record<string, string> | undefined = match.metadata;
     if (
-      match.metadata?.[MOC_METADATA.requestDigest] === digest &&
-      match.metadata?.[MOC_METADATA.start] === "pending"
+      startMeta?.[MOC_METADATA.requestDigest] === digest &&
+      startMeta[MOC_METADATA.start] === "pending"
     ) {
       await voidSession(port, client, alias, match, req, code);
     }
@@ -325,10 +329,7 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   }
   let created: SessionNewResult;
   try {
-    created = (await client.call(
-      "session.new",
-      sessionNewParams(req, port.config, digest),
-    )) as SessionNewResult;
+    created = await client.call("session.new", sessionNewParams(req, port.config, digest));
   } catch (error) {
     const mapped = portErrorOf(error, alias);
     if (mapped instanceof PortUnreachableError) {
@@ -486,12 +487,15 @@ async function waitSession(
     throw await mappedError(port, alias, error);
   }
   const progress = turn.progress.find((entry) => entry.session_id === id) ?? null;
-  if (progress === null || (turn.reason === "event" && turn.event?.session_id !== id)) {
+  if (progress === null) {
+    throw new PortRejectedError("progress-mismatch");
+  }
+  if (turn.reason === "event" && turn.event !== undefined && turn.event.session_id !== id) {
     throw new PortRejectedError("progress-mismatch");
   }
   let info: SessionInfo;
   try {
-    info = (await client.call("session.inspect", id)) as SessionInfo;
+    info = await client.call("session.inspect", id);
   } catch (error) {
     if (isSessionNotFound(error)) {
       return lostTerminal(port, alias, id, turn.cursor);
@@ -560,10 +564,10 @@ async function diffSession(
   }
   const client = await clientFor(port, ref.hostAlias);
   try {
-    const result = (await client.call("session.diff", {
+    const result = await client.call("session.diff", {
       session_id: ref.sessionId,
       base,
-    })) as { base: string; diff: string; truncated: boolean };
+    });
     return {
       sessionId: ref.sessionId,
       base: result.base,

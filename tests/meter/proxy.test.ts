@@ -392,28 +392,28 @@ test("only config timeouts apply, never the descriptor timeout", async () => {
 test("idle timeout aborts a slow stream", async () => {
   await withMeter(
     "tests/meter/recordings/stream-hold-after-first.json",
-    async ({ meter, tokenFor, logPath, loopback, timers }) => {
+    async ({ meter, tokenFor, logPath, loopback, timers, waitForEvent }) => {
       const { requestId } = await openBoundGrant(meter);
-      const pending = post(meter, tokenFor(requestId), chatBody());
-      const resp = await pending.then(async (r) => {
-        // The first chunk proves the tap saw the content frame; the rest
-        // of the body holds at the loopback. The reader stays locked so
-        // the pump keeps ownership of the caller side.
-        const reader = r.body?.getReader();
-        if (reader === undefined) {
-          throw new Error("no body");
-        }
-        const first = await reader.read();
-        expect(first.done).toBe(false);
-        await loopback.waitHeld(1);
-        // The idle timer re-armed on the first chunk; the 4001ms timer
-        // must be pending before advancing, or the advance skips it.
-        await timers.waitForTimer(4001);
-        timers.advance(4001);
-        return r;
-      });
+      const resp = await post(meter, tokenFor(requestId), chatBody());
+      // The caller side is read only through the reader: the first
+      // chunk proves the tap saw the content frame, and the rest of
+      // the body holds at the loopback.
+      const reader = resp.body?.getReader();
+      if (reader === undefined) {
+        throw new Error("no body");
+      }
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      await loopback.waitHeld(1);
+      // The idle timer re-armed on the first chunk; the 4001ms timer
+      // must be pending before advancing, or the advance skips it.
+      await timers.waitForTimer(4001);
+      timers.advance(4001);
+      await reader.read().catch(() => ({ done: true, value: undefined }));
       expect(resp.status).toBe(200);
-      await resp.text().catch(() => "");
+      // M2a: the record is read only after call-finished, never from a
+      // half-written log.
+      await waitForEvent((e) => e.event === "call-finished");
       const end = readEnd(await readLogLines(logPath));
       expect(end["outcome"]).toBe("idle-timeout");
       expect(end["billed"]).toBe(true);
@@ -429,7 +429,7 @@ test("idle timeout aborts a slow stream", async () => {
 test("total timeout runs from t0, not from the headers", async () => {
   await withMeter(
     "tests/meter/recordings/stream-hold-headers-then-first.json",
-    async ({ meter, tokenFor, logPath, loopback, timers }) => {
+    async ({ meter, tokenFor, logPath, loopback, timers, waitForEvent }) => {
       const { requestId } = await openBoundGrant(meter);
       const pending = post(meter, tokenFor(requestId), chatBody());
       // 3000 ms pass before the headers arrive.
@@ -437,21 +437,19 @@ test("total timeout runs from t0, not from the headers", async () => {
       timers.advance(3000);
       loopback.release();
       // The first chunk arrives; the body then holds again.
-      const resp = await pending.then(async (r) => {
-        const reader = r.body?.getReader();
-        if (reader === undefined) {
-          throw new Error("no body");
-        }
-        const first = await reader.read();
-        expect(first.done).toBe(false);
-        reader.releaseLock();
-        return r;
-      });
+      const resp = await pending;
+      const reader = resp.body?.getReader();
+      if (reader === undefined) {
+        throw new Error("no body");
+      }
+      const first = await reader.read();
+      expect(first.done).toBe(false);
       await loopback.waitHeld(2);
       // 2001 ms more: 5001 since t0, but the idle timer (60001) never
       // fires. Only a t0-based total timer kills this call.
       timers.advance(2001);
-      await resp.text().catch(() => "");
+      await reader.read().catch(() => ({ done: true, value: undefined }));
+      await waitForEvent((e) => e.event === "call-finished");
       const end = readEnd(await readLogLines(logPath));
       expect(end["outcome"]).toBe("total-timeout");
       expect(end["billed"]).toBe(true);
@@ -687,8 +685,10 @@ test("caller disconnect still records usage with clientGone", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(resp.status).toBe(200);
-      // F9: read the first chunk (which proves the tap saw the content
-      // frame), cancel the reader, release, then await call-finished.
+      // M2b: hold the loopback before the usage frame, cancel the
+      // caller's reader, await caller-gone, then release. The log event
+      // proves the pump observed the disconnect, so no counted yields
+      // remain.
       const reader = resp.body?.getReader();
       if (reader === undefined) {
         throw new Error("no body");
@@ -697,15 +697,7 @@ test("caller disconnect still records usage with clientGone", async () => {
       expect(first.done).toBe(false);
       await loopback.waitHeld(1);
       await reader.cancel();
-      // Let the transport deliver the cancellation to the pump's strand
-      // before the release: these are event-loop yields, not timers, so
-      // the no-wall-clock rule still holds. Without them the usage frame
-      // can win the race and clientGone stays false.
-      for (let i = 0; i < 5; i += 1) {
-        await new Promise<void>((resolve) => {
-          setImmediate(resolve);
-        });
-      }
+      await waitForEvent((e) => e.event === "caller-gone");
       // The usage frame arrives only after the hold releases; the caller
       // already left, so clientGone is set but the outcome still bills.
       loopback.release();

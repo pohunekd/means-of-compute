@@ -69,7 +69,8 @@ nothing goes upstream:
 
 A caller that disconnects does not cancel the upstream read: the pump reads
 upstream to its end under the same timers and discards the bytes, because
-the provider has already billed the call. The `call-end` record then
+the provider has already billed the call. The disconnect itself is logged
+as `caller-gone`. The `call-end` record then
 carries `clientGone: true` with the observed usage. The pump order is
 fixed: tap end, then `finishEnd` (the `call-end` append), then the live
 registry release, then the caller stream close or error. The caller

@@ -704,6 +704,7 @@ async function forwardCall(
       // its end and discards the bytes to recover usage. The caller is
       // gone: mark it now; the pump keeps reading but enqueues nothing.
       clientGone = true;
+      state.log({ level: "info", event: "caller-gone", requestId });
     },
   });
   const headers = new Headers();

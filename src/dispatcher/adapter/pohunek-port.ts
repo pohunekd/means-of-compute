@@ -4,11 +4,15 @@ import type { Client, HostCapabilities, SessionInfo, SessionNewResult } from "@p
 import {
   PortRejectedError,
   PortUnreachableError,
+  type DiffResult,
   type SessionHandle,
+  type SessionRef,
   type StartRequest,
   type TerminalState,
   type WaitResult,
 } from "../port.js";
+import { createHostConnector } from "./connection.js";
+import { loadHostRoutes } from "./routes.js";
 import type { HostConnector } from "./connection.js";
 import type { PohunekAdapterConfig } from "./config.js";
 import {
@@ -53,6 +57,7 @@ interface PortInternals {
   readonly connector: HostConnector;
   readonly log: (event: AdapterLogEvent) => void;
   closed: boolean;
+  closeDone: boolean;
   readonly inspected: Map<string, Client>;
   readonly terminals: Map<string, TerminalResult>;
 }
@@ -371,4 +376,81 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
     worktree: created.worktree_path ?? "",
     baseCommit: created.worktree_source?.commit ?? null,
   };
+}
+
+// 3.8: session.diff mapped onto DiffResult. session_not_found gives
+// PortRejectedError("session-not-found").
+async function diffSession(
+  port: PortInternals,
+  ref: SessionRef,
+  base: string,
+): Promise<DiffResult> {
+  if (port.closed) {
+    throw new PohunekAdapterError("closed");
+  }
+  const client = await clientFor(port, ref.hostAlias);
+  try {
+    const result = (await client.call("session.diff", {
+      session_id: ref.sessionId,
+      base,
+    })) as { base: string; diff: string; truncated: boolean };
+    return {
+      sessionId: ref.sessionId,
+      base: result.base,
+      unifiedDiff: result.diff,
+      truncated: result.truncated,
+    };
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      throw new PortRejectedError("session-not-found");
+    }
+    throw await mappedError(port, ref.hostAlias, error);
+  }
+}
+
+// 3.9: close the connector once; a second close returns at once. Later
+// start/wait/diff/cancel throw PohunekAdapterError("closed").
+async function closePort(port: PortInternals): Promise<void> {
+  if (port.closeDone) {
+    return;
+  }
+  port.closeDone = true;
+  port.closed = true;
+  await port.connector.close();
+}
+
+export function createPohunekPort(
+  config: PohunekAdapterConfig,
+  deps: PohunekPortDeps,
+): import("../port.js").DispatcherPort {
+  const port: PortInternals = {
+    config,
+    connector: deps.connector,
+    log: deps.log,
+    closed: false,
+    closeDone: false,
+    inspected: new Map(),
+    terminals: new Map(),
+  };
+  return {
+    start: (req: StartRequest) => startSession(port, req),
+    wait: () => {
+      throw new PohunekAdapterError("closed");
+    },
+    diff: (ref: SessionRef, base: string) => diffSession(port, ref, base),
+    cancel: () => {
+      throw new PohunekAdapterError("closed");
+    },
+    close: () => closePort(port),
+  };
+}
+
+export async function openPohunekPort(
+  config: PohunekAdapterConfig,
+  log: (event: AdapterLogEvent) => void,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<import("../port.js").DispatcherPort> {
+  const routes = await loadHostRoutes(config.hostRoutesFileEnv, env);
+  const connector = createHostConnector(routes, { connectTimeoutMs: config.connectTimeoutMs }, env);
+  return createPohunekPort(config, { connector, log });
 }

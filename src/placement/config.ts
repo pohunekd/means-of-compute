@@ -1,14 +1,16 @@
 // Typed loader for config/placement.json. The three scoring weights are
 // validated at load: each is a finite number from 0 to 1, the weights sum to
 // 1 within 1e-9, and no other weights keys are allowed. batteryFloorPercent
-// is an integer from 0 to 100. Only the top-level keys "weights" and
-// "batteryFloorPercent" are allowed. A missing or unreadable file,
+// is an integer from 0 to 100, minInputIdleSeconds an integer of at least 0.
+// Only the top-level keys "weights", "batteryFloorPercent" and
+// "minInputIdleSeconds" are allowed. A missing or unreadable file,
 // invalid JSON, or a failed validation is a startup error (exit 2 at the CLI).
 import { readInputText, statInputPath } from "../fs/input.js";
 
 export interface PlacementConfig {
   readonly weights: PlacementWeights;
   readonly batteryFloorPercent: number;
+  readonly minInputIdleSeconds: number;
 }
 
 export interface PlacementWeights {
@@ -18,7 +20,7 @@ export interface PlacementWeights {
 }
 
 const DEFAULT_CONFIG_PATH = "config/placement.json";
-const ALLOWED_TOP_LEVEL_KEYS = new Set(["weights", "batteryFloorPercent"]);
+const ALLOWED_TOP_LEVEL_KEYS = new Set(["weights", "batteryFloorPercent", "minInputIdleSeconds"]);
 const ALLOWED_KEYS = new Set(["cpu", "memory", "gpu"]);
 
 export async function loadPlacementConfig(
@@ -74,7 +76,17 @@ export async function loadPlacementConfig(
       `Placement config ${path}: missing or invalid required field "batteryFloorPercent"`,
     );
   }
-  return { weights, batteryFloorPercent: floorRaw };
+  const idleSecondsRaw = record["minInputIdleSeconds"];
+  if (
+    typeof idleSecondsRaw !== "number" ||
+    !Number.isInteger(idleSecondsRaw) ||
+    idleSecondsRaw < 0
+  ) {
+    throw new Error(
+      `Placement config ${path}: missing or invalid required field "minInputIdleSeconds"`,
+    );
+  }
+  return { weights, batteryFloorPercent: floorRaw, minInputIdleSeconds: idleSecondsRaw };
 }
 
 function requiredWeight(record: Record<string, unknown>, field: string, path: string): number {

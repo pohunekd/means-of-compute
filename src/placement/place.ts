@@ -1,6 +1,7 @@
 // Pure placement: score hosts against capacity and policy and return one
-// PlacementDecision. No clock, no I/O; battery, AC, and window exclusions
-// repeat the probe rule on purpose, so placement never trusts idle alone.
+// PlacementDecision. No clock, no I/O; battery, AC, input-recency, and window
+// exclusions repeat the probe rule on purpose, so placement never trusts idle
+// alone.
 import { isPlacementDecision } from "../../contracts/v1/validate.js";
 import type {
   HostCapacity,
@@ -107,6 +108,17 @@ function buildCandidate(
         hostAlias: host.hostAlias,
         score: 0,
         reason: `excluded: battery at ${String(host.batteryPercent)} percent, at or below the ${String(config.batteryFloorPercent)} percent floor`,
+        excluded: true,
+      },
+    };
+  }
+  if (host.secondsSinceInput < config.minInputIdleSeconds) {
+    return {
+      loadRatio,
+      candidate: {
+        hostAlias: host.hostAlias,
+        score: 0,
+        reason: `excluded: user input ${String(host.secondsSinceInput)} seconds ago`,
         excluded: true,
       },
     };

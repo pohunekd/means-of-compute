@@ -10,6 +10,7 @@ import { place } from "../../src/placement/place.js";
 const CONFIG: PlacementConfig = {
   weights: { cpu: 0.4, memory: 0.4, gpu: 0.2 },
   batteryFloorPercent: 50,
+  minInputIdleSeconds: 900,
 };
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {
@@ -42,6 +43,7 @@ interface HostOverrides {
   readonly hostAlias?: string;
   readonly idle?: boolean;
   readonly idleReason?: string;
+  readonly secondsSinceInputOverride?: number;
   readonly acPower?: boolean;
   readonly batteryPercent?: number | null;
   readonly cores?: number;
@@ -60,7 +62,7 @@ function host(overrides: HostOverrides = {}): HostCapacity {
     timestamp: "2026-10-26T10:00:00.000Z",
     idle: overrides.idle ?? true,
     idleReason: overrides.idleReason ?? "no user input for 42 minutes, on AC power",
-    secondsSinceInput: 2520,
+    secondsSinceInput: overrides.secondsSinceInputOverride ?? 2520,
     acPower: overrides.acPower ?? true,
     batteryPercent: overrides.batteryPercent ?? null,
     cpu: { cores: overrides.cores ?? 8, load1m: overrides.load1m ?? 0.7 },
@@ -141,6 +143,28 @@ test("an idle host on AC at the battery floor is never chosen (mutation: drop ex
   expect(candidate?.reason).toBe(
     "excluded: battery at 50 percent, at or below the 50 percent floor",
   );
+});
+
+test("an idle host with recent input and the most capacity is never chosen (mutation: drop exclusion 4)", () => {
+  const hosts = [
+    host({ hostAlias: "desktop" }),
+    host({
+      hostAlias: "laptop-a",
+      idle: true,
+      secondsSinceInputOverride: 40,
+      cores: 32,
+      load1m: 0.1,
+      totalMb: 131072,
+      freeMb: 120000,
+      gpuPresent: true,
+    }),
+  ];
+  const decision = place(item(), hosts, [], CONFIG);
+  expect(isPlacementDecision(decision)).toBe(true);
+  expect(decision.chosenHostAlias).toBe("desktop");
+  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
+  expect(candidate?.excluded).toBe(true);
+  expect(candidate?.reason).toBe("excluded: user input 40 seconds ago");
 });
 
 test("an idle host above the battery floor is scored (mutation: use < instead of <=)", () => {

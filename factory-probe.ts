@@ -575,10 +575,11 @@ async function main(): Promise<void> {
   let powerUnknown = false;
   let powerCause = "";
 
-  // Facts override the live readers field by field: a field left undefined
-  // falls back to the live reader. An explicit fact (including an explicit
-  // false or empty list) always wins over the reader. A live value needed on
-  // an unsupported platform fails fast.
+  // Facts override the live readers member by member: a member left
+  // undefined falls back to the live reader, including inside the grouped
+  // gpu and localModels objects. An explicitly set member (even false or an
+  // empty list) always wins over the reader. A live value needed on an
+  // unsupported platform fails fast.
   function platformOrThrow(): "linux" | "darwin" {
     if (platform === "linux" || platform === "darwin") return platform;
     throw new Error("unsupported platform");
@@ -649,20 +650,20 @@ async function main(): Promise<void> {
   }
 
   if (
-    facts.gpuPresent === undefined &&
-    facts.gpuName === undefined &&
+    facts.gpuPresent === undefined ||
+    facts.gpuName === undefined ||
     facts.gpuFreeMb === undefined
   ) {
     const gpu = platformOrThrow() === "linux" ? await linuxGpu() : await macosGpu();
-    gpuPresent = gpu.present;
-    gpuName = gpu.name;
-    gpuFreeMb = gpu.freeMb;
+    if (facts.gpuPresent === undefined) gpuPresent = gpu.present;
+    if (facts.gpuName === undefined) gpuName = gpu.name;
+    if (facts.gpuFreeMb === undefined) gpuFreeMb = gpu.freeMb;
   }
 
-  if (facts.localModelsReachable === undefined && facts.localModels === undefined) {
+  if (facts.localModelsReachable === undefined || facts.localModels === undefined) {
     const lm = await queryLocalModels(cfg.localModelsBaseUrl, cfg.localModelsTimeoutMs);
-    localModelsReachable = lm.reachable;
-    localModelsList = lm.models;
+    if (facts.localModelsReachable === undefined) localModelsReachable = lm.reachable;
+    if (facts.localModels === undefined) localModelsList = lm.models;
   }
 
   const { idle, reason } = deriveIdle(

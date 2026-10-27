@@ -37,7 +37,13 @@ for (const rel of inputs) {
 const computed = `sha256:${sha256Hex(Buffer.from(text, "utf-8"))}`;
 console.log(computed);
 
-const expected = loadHostStateConfig(join(root, "config", "host-state.json")).package.sourceDigest;
+let expected: string;
+try {
+  expected = loadHostStateConfig(join(root, "config", "host-state.json")).package.sourceDigest;
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
+  process.exit(2);
+}
 if (computed !== expected) {
   console.error(`plugin:digest: expected ${expected}, computed ${computed}`);
   process.exit(2);

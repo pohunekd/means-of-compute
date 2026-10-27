@@ -1,7 +1,15 @@
 // Builds the host-state plugin package directory per target.
 // Usage: bun run plugin:build --target <native|all|bun-...> --out <dir>
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { hostStateTargets, loadHostStateConfig } from "../src/hoststate/config.js";
 
@@ -76,7 +84,13 @@ if (target === "all") {
 }
 
 if (existsSync(outDir)) {
-  if (readdirSync(outDir).length > 0) {
+  let isDirectory = false;
+  try {
+    isDirectory = statSync(outDir).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  if (!isDirectory || readdirSync(outDir).length > 0) {
     usageError(`output directory ${out} is not empty`);
   }
 } else {

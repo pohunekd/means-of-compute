@@ -106,7 +106,10 @@ test("listen wildcard refused", async () => {
     try {
       let message = "";
       try {
-        await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_LISTEN: listen, MOC_METER_HOST_ADDRESSES_FILE: file }));
+        await resolveMeterEnv(
+          baseConfig(),
+          envWith({ MOC_METER_LISTEN: listen, MOC_METER_HOST_ADDRESSES_FILE: file }),
+        );
       } catch (error: unknown) {
         message = (error as Error).message;
       }

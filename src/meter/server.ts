@@ -12,7 +12,7 @@ export interface MeterServer {
 export function serveMeter(
   config: MeterConfig,
   listen: { readonly host: string; readonly port: number },
-  buildState: (index: import("./usage-log.js").UsageIndex) => ProxyState,
+  buildState: () => ProxyState,
   index: import("./usage-log.js").UsageIndex,
   log: (event: MeterLogEvent) => void,
 ): MeterServer {
@@ -23,14 +23,14 @@ export function serveMeter(
     idleTimeout: config.clientIdleTimeoutSec,
     fetch(req, srv) {
       const address = srv.requestIP(req)?.address ?? null;
-      return handleMeterRequest(buildState(index), req, srv, address, index);
+      return handleMeterRequest(buildState(), req, srv, address, index);
     },
   });
   log({ level: "info", event: "listening", hostAlias: config.listenAlias });
   return {
     port: server.port ?? 0,
-    stop(closeActive: boolean) {
-      server.stop(closeActive);
+    stop(closeActive: boolean): void {
+      void server.stop(closeActive);
     },
   };
 }

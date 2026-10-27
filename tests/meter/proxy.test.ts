@@ -42,7 +42,7 @@ test("auth order: no token gives 401 and the loopback sees nothing", async () =>
       body: JSON.stringify(chatBody()),
     });
     expect(resp.status).toBe(401);
-    expect((await resp.json() as { error: { code: string } }).error.code).toBe("unauthorized");
+    expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("unauthorized");
   });
 });
 
@@ -50,7 +50,7 @@ test("auth order: a token for an unknown grant gives 403", async () => {
   await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, tokenFor }) => {
     const resp = await post(meter, tokenFor("w9-unknown:0"), chatBody());
     expect(resp.status).toBe(403);
-    expect((await resp.json() as { error: { code: string } }).error.code).toBe("no-grant");
+    expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("no-grant");
   });
 });
 
@@ -95,7 +95,7 @@ test("wrong host gives 403", async () => {
       await meter.bindGrant("w1-demo:0", "sess-1");
       const resp = await post(meter, meter.tokenFor("w1-demo:0"), chatBody());
       expect(resp.status).toBe(403);
-      expect((await resp.json() as { error: { code: string } }).error.code).toBe("wrong-host");
+      expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("wrong-host");
       expect(loopback.requests().length).toBe(0);
     } finally {
       await meter.close();
@@ -149,7 +149,9 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
       now = new Date(openedAt.getTime() + 2000);
       const denied = await post(meter, meter.tokenFor("w1-demo:0"), chatBody());
       expect(denied.status).toBe(403);
-      expect((await denied.json() as { error: { code: string } }).error.code).toBe("grant-unbound");
+      expect(((await denied.json()) as { error: { code: string } }).error.code).toBe(
+        "grant-unbound",
+      );
       await meter.bindGrant("w1-demo:0", "sess-1");
       const allowed = await post(meter, meter.tokenFor("w1-demo:0"), chatBody());
       expect(allowed.status).toBe(200);
@@ -172,9 +174,13 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
 test("caller model is rejected and the grant model is forwarded", async () => {
   await withMeter("tests/meter/recordings/json-ok.json", async ({ meter, tokenFor }) => {
     const { requestId } = await openBoundGrant(meter);
-    const bad = await post(meter, tokenFor(requestId), chatBody({ model: "meta/muse-glimmer-30b" }));
+    const bad = await post(
+      meter,
+      tokenFor(requestId),
+      chatBody({ model: "meta/muse-glimmer-30b" }),
+    );
     expect(bad.status).toBe(400);
-    expect((await bad.json() as { error: { code: string } }).error.code).toBe("model-mismatch");
+    expect(((await bad.json()) as { error: { code: string } }).error.code).toBe("model-mismatch");
   });
 });
 
@@ -262,14 +268,16 @@ test("include_usage is forced on streamed calls", async () => {
     });
     const { getProviders } = await import("../../src/providers/config.js");
     const providers = await getProviders();
-    const meter = await startMeter({ config, env, providers, now: () => new Date(), log: () => {} });
+    const meter = await startMeter({
+      config,
+      env,
+      providers,
+      now: () => new Date(),
+      log: () => {},
+    });
     try {
       const { token } = await openBoundGrant(meter);
-      const resp = await post(
-        meter,
-        token,
-        chatBody({ stream_options: { include_usage: false } }),
-      );
+      const resp = await post(meter, token, chatBody({ stream_options: { include_usage: false } }));
       expect(resp.status).toBe(200);
       await resp.text();
       const sent = JSON.parse(loopback.requests()[0]?.body ?? "{}") as Record<string, unknown>;
@@ -295,18 +303,22 @@ test("no failover and no budget import: 429 passes through unbilled", async () =
   expect(proxySource.includes("callWithFallback")).toBe(false);
   expect(proxySource.includes("src/budget")).toBe(false);
   expect(proxySource.includes("@/budget")).toBe(false);
-  await withMeter("tests/meter/recordings/upstream-429.json", async ({ meter, tokenFor, logPath }) => {
-    const { requestId } = await openBoundGrant(meter, { providerId: "meta-api" });
-    const resp = await post(meter, tokenFor(requestId), chatBody());
-    expect(resp.status).toBe(429);
-    await resp.text();
-    const lines = await readLogLines(logPath);
-    const end = JSON.parse(
-      lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
-    ) as Record<string, unknown>;
-    expect(end["outcome"]).toBe("upstream-status");
-    expect(end["billed"]).toBe(false);
-  });
+  await withMeter(
+    "tests/meter/recordings/upstream-429.json",
+    async ({ meter, tokenFor, logPath }) => {
+      const { requestId } = await openBoundGrant(meter, { providerId: "meta-api" });
+      const resp = await post(meter, tokenFor(requestId), chatBody());
+      expect(resp.status).toBe(429);
+      await resp.text();
+      const lines = await readLogLines(logPath);
+      const end = JSON.parse(lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(end["outcome"]).toBe("upstream-status");
+      expect(end["billed"]).toBe(false);
+    },
+  );
 });
 
 test("first-byte timeout is billed with null counts", async () => {
@@ -316,11 +328,14 @@ test("first-byte timeout is billed with null counts", async () => {
       const { requestId } = await openBoundGrant(meter);
       const resp = await post(meter, tokenFor(requestId), chatBody());
       expect(resp.status).toBe(504);
-      expect((await resp.json() as { error: { code: string } }).error.code).toBe("upstream-timeout");
+      expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
+        "upstream-timeout",
+      );
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
-      ) as Record<string, unknown>;
+      const end = JSON.parse(lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}") as Record<
+        string,
+        unknown
+      >;
       expect(end["outcome"]).toBe("first-byte-timeout");
       expect(end["billed"]).toBe(true);
       expect(end["inputTokens"]).toBeNull();
@@ -338,9 +353,10 @@ test("idle timeout aborts a slow stream", async () => {
       expect(resp.status).toBe(200);
       await resp.text().catch(() => "");
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
-      ) as Record<string, unknown>;
+      const end = JSON.parse(lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}") as Record<
+        string,
+        unknown
+      >;
       expect(end["outcome"]).toBe("idle-timeout");
       expect(end["billed"]).toBe(true);
     },
@@ -370,15 +386,22 @@ test("connection failure gives 502 and is not billed", async () => {
     });
     const { getProviders } = await import("../../src/providers/config.js");
     const providers = await getProviders();
-    const meter = await startMeter({ config, env, providers, now: () => new Date(), log: () => {} });
+    const meter = await startMeter({
+      config,
+      env,
+      providers,
+      now: () => new Date(),
+      log: () => {},
+    });
     try {
       const { token } = await openBoundGrant(meter);
       const resp = await post(meter, token, chatBody());
       expect(resp.status).toBe(502);
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
-      ) as Record<string, unknown>;
+      const end = JSON.parse(lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}") as Record<
+        string,
+        unknown
+      >;
       expect(end["outcome"]).toBe("upstream-unreachable");
       expect(end["billed"]).toBe(false);
     } finally {
@@ -405,9 +428,9 @@ test("concurrency limit rejects without a call-start", async () => {
       const slowBody = slow.text();
       const second = await post(meter, token, chatBody());
       expect(second.status).toBe(429);
-      expect(
-        ((await second.json()) as { error: { code: string } }).error.code,
-      ).toBe("session-concurrency");
+      expect(((await second.json()) as { error: { code: string } }).error.code).toBe(
+        "session-concurrency",
+      );
       await slowBody;
       const lines = await readLogLines(logPath);
       expect(lines.filter((l) => l.includes('"kind":"call-start"')).length).toBe(1);
@@ -431,9 +454,10 @@ test("caller disconnect still records usage with clientGone", async () => {
     await reader.cancel();
     await new Promise((resolve) => setTimeout(resolve, 300));
     const lines = await readLogLines(logPath);
-    const end = JSON.parse(
-      lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
-    ) as Record<string, unknown>;
+    const end = JSON.parse(lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}") as Record<
+      string,
+      unknown
+    >;
     expect(end["clientGone"]).toBe(true);
     expect(end["outcome"]).toBe("ok");
     expect(end["inputTokens"]).toBe(1200);

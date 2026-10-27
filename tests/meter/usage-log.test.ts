@@ -12,7 +12,9 @@ function at(no: number): string {
   return new Date(Date.UTC(2026, 9, 27, 10, 0, no)).toISOString();
 }
 
-function openGrant(overrides: Partial<Extract<UsageLogRecord, { kind: "grant-open" }>> = {}): UsageLogRecord {
+function openGrant(
+  overrides: Partial<Extract<UsageLogRecord, { kind: "grant-open" }>> = {},
+): UsageLogRecord {
   return {
     kind: "grant-open",
     at: at(1),
@@ -25,15 +27,33 @@ function openGrant(overrides: Partial<Extract<UsageLogRecord, { kind: "grant-ope
   };
 }
 
-function bind(overrides: Partial<Extract<UsageLogRecord, { kind: "grant-bind" }>> = {}): UsageLogRecord {
-  return { kind: "grant-bind", at: at(2), requestId: "w1-demo:0", sessionId: "sess-1", ...overrides };
+function bind(
+  overrides: Partial<Extract<UsageLogRecord, { kind: "grant-bind" }>> = {},
+): UsageLogRecord {
+  return {
+    kind: "grant-bind",
+    at: at(2),
+    requestId: "w1-demo:0",
+    sessionId: "sess-1",
+    ...overrides,
+  };
 }
 
-function closeGrant(overrides: Partial<Extract<UsageLogRecord, { kind: "grant-close" }>> = {}): UsageLogRecord {
-  return { kind: "grant-close", at: at(3), requestId: "w1-demo:0", state: "finished", ...overrides };
+function closeGrant(
+  overrides: Partial<Extract<UsageLogRecord, { kind: "grant-close" }>> = {},
+): UsageLogRecord {
+  return {
+    kind: "grant-close",
+    at: at(3),
+    requestId: "w1-demo:0",
+    state: "finished",
+    ...overrides,
+  };
 }
 
-function start(overrides: Partial<Extract<UsageLogRecord, { kind: "call-start" }>> = {}): UsageLogRecord {
+function start(
+  overrides: Partial<Extract<UsageLogRecord, { kind: "call-start" }>> = {},
+): UsageLogRecord {
   return {
     kind: "call-start",
     at: at(4),
@@ -46,7 +66,9 @@ function start(overrides: Partial<Extract<UsageLogRecord, { kind: "call-start" }
   };
 }
 
-function end(overrides: Partial<Extract<UsageLogRecord, { kind: "call-end" }>> = {}): UsageLogRecord {
+function end(
+  overrides: Partial<Extract<UsageLogRecord, { kind: "call-end" }>> = {},
+): UsageLogRecord {
   return {
     kind: "call-end",
     at: at(5),
@@ -65,7 +87,11 @@ function end(overrides: Partial<Extract<UsageLogRecord, { kind: "call-end" }>> =
   };
 }
 
-async function writeLog(path: string, records: readonly UsageLogRecord[], tail = ""): Promise<void> {
+async function writeLog(
+  path: string,
+  records: readonly UsageLogRecord[],
+  tail = "",
+): Promise<void> {
   const text = records.map((r) => JSON.stringify(r)).join("\n");
   await Bun.write(path, text === "" ? tail : `${text}\n${tail}`);
 }
@@ -128,7 +154,11 @@ test(
   "call-end billed flag must match its outcome",
   withDir(async (dir) => {
     const path = join(dir, "usage.jsonl");
-    await writeLog(path, [openGrant(), start(), end({ outcome: "upstream-unreachable", billed: true })]);
+    await writeLog(path, [
+      openGrant(),
+      start(),
+      end({ outcome: "upstream-unreachable", billed: true }),
+    ]);
     let message = "";
     try {
       await replayUsageLog(path, "read-only", () => {});

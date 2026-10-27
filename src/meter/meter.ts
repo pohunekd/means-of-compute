@@ -8,12 +8,7 @@ import { joinUsage } from "./join.js";
 import { handleMeterRequest, type ProxyState } from "./proxy.js";
 import { serveMeter, type MeterServer } from "./server.js";
 import { tokenFor } from "./token.js";
-import {
-  openUsageAppender,
-  replayUsageLog,
-  type UsageAppender,
-  type UsageIndex,
-} from "./usage-log.js";
+import { openUsageAppender, replayUsageLog, type UsageAppender } from "./usage-log.js";
 
 export interface GrantSpec {
   readonly requestId: string;
@@ -104,7 +99,7 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   const drainControllers = new Map<string, AbortController>();
   const settleMemos = new Map<string, Promise<PortUsage | null>>();
 
-  const buildState = (live: UsageIndex): ProxyState => ({
+  const buildState = (): ProxyState => ({
     config,
     secret: env.secret,
     hostAddresses: env.hostAddresses,
@@ -150,7 +145,10 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       !WORK_ITEM_ID_PATTERN.test(spec.workItemId) ||
       spec.requestId.split(":")[0] !== spec.workItemId
     ) {
-      throw new MeterGrantError("request-conflict", `meter: request conflict for "${spec.workItemId}"`);
+      throw new MeterGrantError(
+        "request-conflict",
+        `meter: request conflict for "${spec.workItemId}"`,
+      );
     }
     if (!(spec.providerId in providers)) {
       throw new MeterGrantError(
@@ -259,12 +257,12 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       });
       checkFailed(appender);
     }
-    const deadline = Date.now() + config.drainTimeoutMs;
+    const deadline = now().getTime() + config.drainTimeoutMs;
     for (;;) {
       if ((inFlight.get(requestId) ?? 0) === 0) {
         break;
       }
-      if (Date.now() >= deadline) {
+      if (now().getTime() >= deadline) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -274,8 +272,12 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       const controller = drainControllers.get(requestId);
       controller?.abort();
       log({ level: "info", event: "drain-abort", requestId, count: remaining });
+      const abortDeadline = now().getTime() + config.drainTimeoutMs;
       for (;;) {
         if ((inFlight.get(requestId) ?? 0) === 0) {
+          break;
+        }
+        if (now().getTime() >= abortDeadline) {
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 5));

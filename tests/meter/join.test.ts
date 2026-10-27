@@ -11,7 +11,12 @@ function at(no: number): string {
   return new Date(Date.UTC(2026, 9, 27, 10, 0, no)).toISOString();
 }
 
-function grant(requestId: string, workItemId: string, providerId: string, model: string): UsageLogRecord {
+function grant(
+  requestId: string,
+  workItemId: string,
+  providerId: string,
+  model: string,
+): UsageLogRecord {
   return {
     kind: "grant-open",
     at: at(1),
@@ -23,7 +28,13 @@ function grant(requestId: string, workItemId: string, providerId: string, model:
   };
 }
 
-function start(callId: string, requestId: string, providerId: string, model: string, no: number): UsageLogRecord {
+function start(
+  callId: string,
+  requestId: string,
+  providerId: string,
+  model: string,
+  no: number,
+): UsageLogRecord {
   return { kind: "call-start", at: at(no), callId, requestId, providerId, model, stream: false };
 }
 
@@ -50,7 +61,10 @@ function end(
   };
 }
 
-async function joinOf(records: readonly UsageLogRecord[], requestId: string): Promise<ReturnType<typeof joinUsage>> {
+async function joinOf(
+  records: readonly UsageLogRecord[],
+  requestId: string,
+): Promise<ReturnType<typeof joinUsage>> {
   const dir = mkdtempSync(join(tmpdir(), "meter-join-"));
   const path = join(dir, "usage.jsonl");
   try {

@@ -3,7 +3,11 @@
 import type { CallOutcome } from "./usage-log.js";
 
 export type UsageSeen =
-  | { readonly seen: true; readonly inputTokens: number | null; readonly outputTokens: number | null }
+  | {
+      readonly seen: true;
+      readonly inputTokens: number | null;
+      readonly outputTokens: number | null;
+    }
   | { readonly seen: false };
 
 export interface UsageTap {

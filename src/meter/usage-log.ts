@@ -72,11 +72,7 @@ export interface CallEndRecord {
 }
 
 export type UsageLogRecord =
-  | GrantOpenRecord
-  | GrantBindRecord
-  | GrantCloseRecord
-  | CallStartRecord
-  | CallEndRecord;
+  GrantOpenRecord | GrantBindRecord | GrantCloseRecord | CallStartRecord | CallEndRecord;
 
 export interface GrantState {
   readonly open: GrantOpenRecord;
@@ -161,7 +157,12 @@ function checkAt(path: string, line: number, at: string): void {
   }
 }
 
-function applyRecord(mutable: MutableIndex, record: UsageLogRecord, path: string, line: number): void {
+function applyRecord(
+  mutable: MutableIndex,
+  record: UsageLogRecord,
+  path: string,
+  line: number,
+): void {
   checkAt(path, line, record.at);
   switch (record.kind) {
     case "grant-open": {

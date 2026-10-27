@@ -40,17 +40,20 @@ export async function withMeter(
   const events: MeterLogEvent[] = [];
   const base = await loadMeterConfig();
   const config: MeterConfig = { ...base, usageLogPath: logPath, ...meterOverrides };
-  const env = await resolveMeterEnv(
-    config,
-    {
-      MOC_METER_LISTEN: "127.0.0.1:0",
-      MOC_METER_SECRET: secret,
-      MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
-    },
-  );
+  const env = await resolveMeterEnv(config, {
+    MOC_METER_LISTEN: "127.0.0.1:0",
+    MOC_METER_SECRET: secret,
+    MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
+  });
   const { getProviders } = await import("../../src/providers/config.js");
   const providers = await getProviders();
-  const meter = await startMeter({ config, env, providers, now: () => new Date(), log: (e) => events.push(e) });
+  const meter = await startMeter({
+    config,
+    env,
+    providers,
+    now: () => new Date(),
+    log: (e) => events.push(e),
+  });
   try {
     await run({
       meter,

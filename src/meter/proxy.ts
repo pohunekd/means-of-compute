@@ -1,7 +1,6 @@
 // Metering proxy request handler: route, call authorization, forwarding,
 // response pump, timers and usage extraction of design sections 3.1 to 3.7.
 import { randomUUID } from "node:crypto";
-import { isIP } from "node:net";
 import type { TerminalState } from "../dispatcher/port.js";
 import type { ProviderDescriptor } from "../providers/types.js";
 import type { MeterConfig } from "./config.js";
@@ -119,7 +118,7 @@ function authorize(
 }
 
 function isTerminalState(value: unknown): value is TerminalState {
-  return typeof value === "string" && (TERMINAL_STATES as readonly string[]).includes(value);
+  return typeof value === "string" && TERMINAL_STATES.some((state) => state === value);
 }
 
 export async function handleMeterRequest(
@@ -270,7 +269,16 @@ export async function handleMeterRequest(
   // a streamed call stays counted until its end record is durable.
   const release = state.trackCall(grantId);
   try {
-    return await forwardCall(state, descriptor, auth.requestId, callId, bodyText, fields, stream, release);
+    return await forwardCall(
+      state,
+      descriptor,
+      auth.requestId,
+      callId,
+      bodyText,
+      fields,
+      stream,
+      release,
+    );
   } catch (error: unknown) {
     release();
     throw error;
@@ -321,9 +329,9 @@ async function forwardCall(
   }
   const url = `${descriptor.baseUrl.replace(/\/$/, "")}/chat/completions`;
   const controller = new AbortController();
-  let abortReason: string | null = null;
-  const abortWith = (reason: string): void => {
-    abortReason = reason;
+  const abortState: { reason: CallOutcome | null } = { reason: null };
+  const abortWith = (reason: CallOutcome): void => {
+    abortState.reason = reason;
     controller.abort();
   };
   const t0 = Date.now();
@@ -347,12 +355,12 @@ async function forwardCall(
   }
   timers.push(
     setTimeout(() => {
-      if (abortReason === null) {
+      if (abortState.reason === null) {
         abortWith("first-byte-timeout");
       }
     }, timings.firstByteMs),
     setTimeout(() => {
-      if (abortReason === null) {
+      if (abortState.reason === null) {
         abortWith("total-timeout");
       }
     }, timings.totalMs),
@@ -420,13 +428,13 @@ async function forwardCall(
     });
   } catch (error: unknown) {
     clearTimers();
-    if (onDrain !== null && drain !== null) {
-      drain.removeEventListener("abort", onDrain);
+    if (onDrain !== null) {
+      drain?.removeEventListener("abort", onDrain);
     }
     const ms = Date.now() - t0;
     try {
-      if (abortReason !== null) {
-        const out = abortReason as CallOutcome;
+      if (abortState.reason !== null) {
+        const out: CallOutcome = abortState.reason;
         await finishEnd({
           outcome: out,
           billed: true,
@@ -438,7 +446,10 @@ async function forwardCall(
           bytesOut: 0,
         });
         state.log({ level: "error", event: "error", outcome: (error as Error).name });
-        return errorResponse(abortReason === "closed-abort" ? "upstream-error" : "upstream-timeout", 504);
+        return errorResponse(
+          abortState.reason === "closed-abort" ? "upstream-error" : "upstream-timeout",
+          504,
+        );
       }
       if (error instanceof TypeError) {
         await finishEnd({
@@ -472,8 +483,8 @@ async function forwardCall(
   status = upstream.status;
   clearTimers();
   if (status < 200 || status > 299) {
-    if (onDrain !== null && drain !== null) {
-      drain.removeEventListener("abort", onDrain);
+    if (onDrain !== null) {
+      drain?.removeEventListener("abort", onDrain);
     }
     const body = await upstream.text().catch(() => "");
     bytesOut = new TextEncoder().encode(body).length;
@@ -506,14 +517,14 @@ async function forwardCall(
       clearTimeout(idleTimer.current);
     }
     idleTimer.current = setTimeout(() => {
-      if (abortReason === null) {
+      if (abortState.reason === null) {
         abortWith("idle-timeout");
       }
     }, timings.idleMs);
   };
   armIdle();
   const totalTimer = setTimeout(() => {
-    if (abortReason === null) {
+    if (abortState.reason === null) {
       abortWith("total-timeout");
     }
   }, timings.totalMs);
@@ -533,8 +544,8 @@ async function forwardCall(
           try {
             read = await reader.read();
           } catch (error: unknown) {
-            if (abortReason !== null) {
-              outcome = abortReason as CallOutcome;
+            if (abortState.reason !== null) {
+              outcome = abortState.reason;
             } else {
               outcome = "upstream-broken";
             }
@@ -544,17 +555,18 @@ async function forwardCall(
             break;
           }
           armIdle();
-          tap.push(read.value);
-          bytesOut += read.value.length;
+          const chunk = read.value as Uint8Array;
+          tap.push(chunk);
+          bytesOut += chunk.length;
           if (!clientGone) {
             try {
-              controller.enqueue(read.value);
+              controller.enqueue(chunk);
             } catch {
               clientGone = true;
             }
           }
-          if (abortReason !== null) {
-            outcome = abortReason as CallOutcome;
+          if (abortState.reason !== null) {
+            outcome = abortState.reason;
             try {
               await reader.cancel();
             } catch {
@@ -568,7 +580,7 @@ async function forwardCall(
         }
       } catch {
         if (outcome === null) {
-          outcome = abortReason !== null ? (abortReason as CallOutcome) : "upstream-broken";
+          outcome = abortState.reason ?? "upstream-broken";
         }
         if (!clientGone) {
           try {
@@ -593,11 +605,15 @@ async function forwardCall(
             : { inputTokens: null, outputTokens: null };
         let finalOutcome = outcome ?? "ok";
         let billed = true;
-        if (finalOutcome === "ok" && !seen.seen && status === 200 && status !== null) {
+        if (finalOutcome === "ok" && !seen.seen && status === 200) {
           finalOutcome = "no-usage";
         }
         if (finalOutcome === "ok" && seen.seen) {
           billed = true;
+        }
+        let errorReason: string | null = null;
+        if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
+          errorReason = outcome ?? "upstream-broken";
         }
         try {
           await finishEnd({
@@ -613,15 +629,9 @@ async function forwardCall(
         } finally {
           release();
         }
-        if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
-          try {
-            controller.error(new Error(outcome ?? "upstream-broken"));
-            return;
-          } catch {
-            // The caller left while the end was written; nothing to close.
-          }
-        }
-        if (!streamClosed) {
+        if (errorReason !== null) {
+          controller.error(new Error(errorReason));
+        } else if (!streamClosed) {
           try {
             controller.close();
           } catch {

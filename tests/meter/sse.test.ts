@@ -39,7 +39,7 @@ test("choices usage alone leaves nothing seen", () => {
 
 test("a line over the scan limit is discarded with a later usage line", () => {
   const tap = createSseUsageTap(16);
-  tap.push(chunk("data: {\"usage\": {\"prompt_tokens\": 5, \"completion_tokens\": 5}}\n\n"));
+  tap.push(chunk('data: {"usage": {"prompt_tokens": 5, "completion_tokens": 5}}\n\n'));
   tap.push(chunk('data: {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}\n\n'));
   expect(tap.end().seen).toBe(false);
 });

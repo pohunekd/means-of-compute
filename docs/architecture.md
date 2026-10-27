@@ -73,5 +73,36 @@ host, 2 on any input or config error.
 - Contracts live under `contracts/` and are versioned by tag (`contracts-v1`).
 - Providers, prices, caps, and host aliases are configuration in `config/`.
 
+## Metering proxy
+
+All model traffic from worker sessions flows through the metering proxy
+(`src/meter/`). The proxy holds the provider keys: the host environment
+carries only a short-lived caller token (`moc1.` + base64url grant id +
+HMAC) minted by `openGrant` for one request id. The caller token travels in
+the `Authorization` header; the proxy verifies it before anything else,
+checks the caller address against the host map, confirms the grant is bound
+to the session and not past its TTL, and only then forwards the call with
+the key taken from the configured environment variable. Provider keys never
+appear in the usage log, the factory log, or error responses.
+
+Before forwarding, the proxy overwrites the request body with the grant's
+provider, model, and (for streams) `stream_options.include_usage`, and
+rejects a caller-supplied `model`. Usage is recorded twice: a `call-start`
+record guards the concurrency limit per session, and a `call-end` record
+carries the outcome, the billed flag, and the input/output token counts
+(`null` when the upstream never sent usage). The proxy passes failures
+through without retry or failover: non-2xx upstream statuses return
+unchanged and unbilled, timeouts map to 504 (first-byte timeouts billed,
+connection failures unbilled), and no budget check runs inside the proxy.
+A caller disconnect still records the observed usage with `clientGone`.
+
+When the session ends, `settle` closes the grant (refusing later calls with
+a guarded `grant-close` record), drains in-flight calls up to
+`drainTimeoutMs` and then aborts them (`closed-abort`, unbilled), and joins
+the ended call records into one `PortUsage` per billed provider and model.
+The join reads only the records `appendUnguarded` replayed from the usage
+log, so `settle` is idempotent across restarts. See
+[config/meter.json](../config/meter.json) for the timeouts and limits.
+
 The component list and the rules behind these boundaries are in
 [.agents/instructions/project.md](../.agents/instructions/project.md).

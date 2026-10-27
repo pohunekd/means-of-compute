@@ -206,7 +206,7 @@ test("determinism: settle twice, restart, settle again", async () => {
     try {
       const again = await second.settle("sess-1", "finished");
       expect(again).toEqual(once);
-      void events;
+      expect(events).toEqual([]);
     } finally {
       await second.close();
     }

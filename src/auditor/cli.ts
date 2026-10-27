@@ -1,17 +1,17 @@
-// CLI entry point: bun run audit --repo-dir <dir> --branch <ref> --base
-// <ref> --issue <n> --ledger <path> --authors <source>
-// [--author-model <id>...] [--pull <n>] [--post yes]. --branch aliases
-// --ref; --issue <n> reads <repo-dir>/issues/<n>.json, so --item <file>
-// is required only without --issue. Exit 0 prints the verdict file path,
-// then the
+// CLI entry point: bun run audit --repo-dir <dir> --ref <ref> --base
+// <ref> --item <file> [--authors <source>]
+// [--author-model <id>...] [--pull <n>] [--post yes]. The WorkItem comes
+// only from --item, supplied by the caller. Exit 0 prints the verdict file
+// path, then the
 // rendered comment (or a note when there is no pull request). Exit 3 is a
 // domain refusal, 4 a model, provider or post failure, 2 any input,
-// config or data error. Posting uses gh and verifies the posted comment.
+// config or data error. Usage is appended to the configured ledger
+// (config/ledger.json), the same ledger the budget gate reads. Posting
+// uses gh and verifies the posted comment.
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { contractErrors, isWorkItem } from "../../contracts/v1/validate.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
-import { authorModelsOf, readLedger } from "../ledger/read.js";
+import { authorModelsOf, loadLedgerConfig, readLedger } from "../ledger/read.js";
 import { LedgerDataError, LedgerRefusal } from "../ledger/errors.js";
 import { createCliBudgetGate, loadBudgetGateConfig } from "../budget/gate.js";
 import { callProviderOnce } from "../providers/router.js";
@@ -68,11 +68,8 @@ function checkUnknownFlags(args: string[]): void {
   const known = new Set([
     "--repo-dir",
     "--ref",
-    "--branch",
     "--base",
-    "--issue",
     "--item",
-    "--ledger",
     "--authors",
     "--author-model",
     "--pull",
@@ -90,7 +87,6 @@ interface CliOptions {
   ref: string;
   base: string;
   itemPath: string;
-  ledgerPath: string;
   authors: string;
   authorModels: string[];
   pull: number | null;
@@ -100,37 +96,18 @@ interface CliOptions {
 function parseOptions(args: string[]): CliOptions {
   checkUnknownFlags(args);
   const repoDir = flagValue(args, "--repo-dir");
-  const branch = flagValue(args, "--branch");
-  const refFlag = flagValue(args, "--ref");
+  const ref = flagValue(args, "--ref");
   const base = flagValue(args, "--base");
-  const issueRaw = flagValue(args, "--issue");
-  const itemFlag = flagValue(args, "--item");
-  const ledgerPath = flagValue(args, "--ledger");
+  const itemPath = flagValue(args, "--item");
   const authors = flagValue(args, "--authors");
   const pullRaw = flagValue(args, "--pull");
   const postRaw = flagValue(args, "--post");
   const authorModels = flagValues(args, "--author-model");
-  if (branch !== null && refFlag !== null) {
-    throw new Error("audit: use only one of --branch and --ref");
-  }
-  const ref = branch ?? refFlag;
-  if (issueRaw !== null && itemFlag !== null) {
-    throw new Error("audit: use only one of --issue and --item");
-  }
-  if (issueRaw !== null && !/^[1-9][0-9]*$/.test(issueRaw)) {
-    throw new Error("audit: --issue must be an integer >= 1");
-  }
-  if (issueRaw !== null && repoDir === null) {
-    throw new Error("audit: --issue needs --repo-dir");
-  }
-  const itemPath =
-    itemFlag ?? (issueRaw !== null ? join(repoDir as string, "issues", `${issueRaw}.json`) : null);
   const required: Readonly<Record<string, string | null>> = {
     "--repo-dir": repoDir,
-    "--branch/--ref": ref,
+    "--ref": ref,
     "--base": base,
-    "--issue/--item": itemPath,
-    "--ledger": ledgerPath,
+    "--item": itemPath,
     "--authors": authors,
   };
   for (const [name, value] of Object.entries(required)) {
@@ -143,7 +120,6 @@ function parseOptions(args: string[]): CliOptions {
     ref === null ||
     base === null ||
     itemPath === null ||
-    ledgerPath === null ||
     authors === null
   ) {
     throw new Error("audit: required flags are missing");
@@ -184,7 +160,6 @@ function parseOptions(args: string[]): CliOptions {
     ref,
     base,
     itemPath,
-    ledgerPath,
     authors,
     authorModels,
     pull,
@@ -211,12 +186,16 @@ async function readItem(path: string): Promise<WorkItem> {
   return raw;
 }
 
-async function resolveAuthors(options: CliOptions, item: WorkItem): Promise<readonly string[]> {
+async function resolveAuthors(
+  ledgerPath: string,
+  options: CliOptions,
+  item: WorkItem,
+): Promise<readonly string[]> {
   if (options.authors === "flags") {
     return options.authorModels;
   }
   try {
-    const contents = await readLedger("Audit ledger", options.ledgerPath);
+    const contents = await readLedger("Audit ledger", ledgerPath);
     return authorModelsOf(contents, item.id);
   } catch (error: unknown) {
     if (error instanceof LedgerDataError || error instanceof LedgerRefusal) {
@@ -313,10 +292,11 @@ async function run(): Promise<number> {
       throw new Error(`audit: Repo dir ${options.repoDir}: not a git repo (${stdout})`);
     }
     const item = await readItem(options.itemPath);
-    await requireWritableTarget("Audit ledger", options.ledgerPath);
+    const { ledgerPath } = await loadLedgerConfig();
+    await requireWritableTarget("Audit ledger", ledgerPath);
     const config = await loadAuditorConfig(AUDITOR_CONFIG_PATH);
     const budgetConfig = await loadBudgetGateConfig(BUDGET_CONFIG_PATH);
-    const authors = await resolveAuthors(options, item);
+    const authors = await resolveAuthors(ledgerPath, options, item);
     const input: AuditInput = {
       item,
       repoDir: options.repoDir,
@@ -334,7 +314,7 @@ async function run(): Promise<number> {
         cwd: process.cwd(),
       }),
       call: callProviderOnce,
-      ledgerPath: options.ledgerPath,
+      ledgerPath,
       now: () => new Date(),
     });
     if (outcome.kind === "refused") {

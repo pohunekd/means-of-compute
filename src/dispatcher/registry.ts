@@ -1,7 +1,8 @@
 // Durable dispatcher session registry: one writer (the factory process).
 // Reads go through src/fs/input.ts where an absent path with an existing
 // parent means empty; writes go through writeFileAtomic in src/fs/write.ts.
-// An in-process promise chain serializes writes.
+// An in-process promise chain serializes writes. Entries are provisional
+// until the port start settles them; only settled entries carry a session id.
 import Ajv from "ajv/dist/2020";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
@@ -21,15 +22,16 @@ export interface RegistryTerminal {
   readonly ledgerAppended: boolean;
 }
 
-export interface RegistryEntry {
+interface RegistryEntryBase {
   readonly requestId: string;
   readonly workItemId: string;
-  readonly sessionId: string;
+  readonly repo: string;
   readonly hostAlias: string;
   readonly branch: string;
-  readonly worktree: string;
-  readonly baseCommit: string | null;
+  readonly baseRef: string;
+  readonly resume: boolean;
   readonly model: ModelSelection;
+  readonly briefSha256: string;
   readonly startedAt: string;
   readonly cursor: string | null;
   readonly unreachableCount: number;
@@ -37,7 +39,22 @@ export interface RegistryEntry {
   readonly lastSeenAt: string;
   readonly cancelReason: CancelReason | null;
   readonly terminal: RegistryTerminal | null;
+  readonly revision: number;
 }
+
+export interface SettledRegistryEntry extends RegistryEntryBase {
+  readonly sessionId: string;
+  readonly worktree: string;
+  readonly baseCommit: string | null;
+}
+
+export interface ProvisionalRegistryEntry extends RegistryEntryBase {
+  readonly sessionId: null;
+  readonly worktree: null;
+  readonly baseCommit: null;
+}
+
+export type RegistryEntry = SettledRegistryEntry | ProvisionalRegistryEntry;
 
 export class RegistryDataError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -59,7 +76,11 @@ function isRegistryEntry(value: unknown): value is RegistryEntry {
   if (typeof entry["requestId"] !== "string" || entry["requestId"].length === 0) {
     return false;
   }
-  if (typeof entry["sessionId"] !== "string" || entry["sessionId"].length === 0) {
+  const sessionId = entry["sessionId"] as unknown;
+  if (sessionId !== null && (typeof sessionId !== "string" || sessionId.length === 0)) {
+    return false;
+  }
+  if (!Number.isInteger(entry["revision"]) || (entry["revision"] as number) < 0) {
     return false;
   }
   const terminal = entry["terminal"] as { state?: unknown } | null;
@@ -82,6 +103,10 @@ function checkUniqueSessions(entries: readonly RegistryEntry[], path: string): v
       );
     }
     requestIds.add(entry.requestId);
+    // Provisional entries carry no session yet, so null ids never collide.
+    if (entry.sessionId === null) {
+      continue;
+    }
     if (sessionIds.has(entry.sessionId)) {
       throw new RegistryDataError(
         `Dispatcher registry ${path}: duplicate sessionId "${entry.sessionId}"`,
@@ -155,13 +180,21 @@ async function persistDocument(path: string, entries: readonly RegistryEntry[]):
 
 export function insertRegistryEntry(path: string, entry: RegistryEntry): Promise<void> {
   const task = writeChain.then(async () => {
+    if (entry.revision !== 0) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: new entry "${entry.requestId}" must have revision 0`,
+      );
+    }
     const current = await readRegistry(path);
     if (current.some((candidate) => candidate.requestId === entry.requestId)) {
       throw new RegistryDataError(
         `Dispatcher registry ${path}: duplicate requestId "${entry.requestId}"`,
       );
     }
-    if (current.some((candidate) => candidate.sessionId === entry.sessionId)) {
+    if (
+      entry.sessionId !== null &&
+      current.some((candidate) => candidate.sessionId === entry.sessionId)
+    ) {
       throw new RegistryDataError(
         `Dispatcher registry ${path}: duplicate sessionId "${entry.sessionId}"`,
       );
@@ -178,14 +211,52 @@ export function insertRegistryEntry(path: string, entry: RegistryEntry): Promise
 export function replaceRegistryEntry(path: string, entry: RegistryEntry): Promise<void> {
   const task = writeChain.then(async () => {
     const current = await readRegistry(path);
-    if (!current.some((candidate) => candidate.requestId === entry.requestId)) {
+    const stored = current.find((candidate) => candidate.requestId === entry.requestId);
+    if (stored === undefined) {
       throw new RegistryDataError(
         `Dispatcher registry ${path}: unknown requestId "${entry.requestId}"`,
+      );
+    }
+    // A write built from a stale snapshot fails loudly instead of losing
+    // another hold's update.
+    if (stored.revision !== entry.revision - 1) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: stale revision for "${entry.requestId}"`,
       );
     }
     await persistDocument(
       path,
       current.map((candidate) => (candidate.requestId === entry.requestId ? entry : candidate)),
+    );
+  });
+  writeChain = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+export function removeProvisionalEntry(
+  path: string,
+  requestId: string,
+  revision: number,
+): Promise<void> {
+  const task = writeChain.then(async () => {
+    const current = await readRegistry(path);
+    const stored = current.find((candidate) => candidate.requestId === requestId);
+    if (
+      stored === undefined ||
+      stored.sessionId !== null ||
+      stored.terminal !== null ||
+      stored.revision !== revision
+    ) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: no open provisional entry "${requestId}" at revision ${String(revision)}`,
+      );
+    }
+    await persistDocument(
+      path,
+      current.filter((candidate) => candidate.requestId !== requestId),
     );
   });
   writeChain = task.then(

@@ -85,7 +85,10 @@ if (target === "all") {
 
 if (existsSync(outDir)) {
   const isDirectory = statSync(outDir, { throwIfNoEntry: false })?.isDirectory() ?? false;
-  if (!isDirectory || readdirSync(outDir).length > 0) {
+  if (!isDirectory) {
+    usageError(`output path ${out} is not a directory`);
+  }
+  if (readdirSync(outDir).length > 0) {
     usageError(`output directory ${out} is not empty`);
   }
 } else {

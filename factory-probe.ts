@@ -485,12 +485,12 @@ function deriveIdle(
     return { idle: false, reason: `power unknown: ${powerCause || "unavailable"}` };
   }
   const idleMinutesSec = idleMinutes * 60;
-  const batteryOk = batteryPercent === null || batteryPercent >= batteryThreshold;
+  const batteryOk = batteryPercent === null || batteryPercent > batteryThreshold;
 
   if (!batteryOk) {
     return {
       idle: false,
-      reason: `battery at ${String(batteryPercent)} percent, below the ${String(batteryThreshold)} percent floor`,
+      reason: `battery at ${String(batteryPercent)} percent, at or below the ${String(batteryThreshold)} percent floor`,
     };
   }
   if (!acPower) {

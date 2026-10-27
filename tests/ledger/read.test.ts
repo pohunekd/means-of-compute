@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
-import { authorModelsOf, loadLedgerConfig, readLedger } from "../../src/ledger/read.js";
+import { loadLedgerConfig, readLedger } from "../../src/ledger/read.js";
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -177,63 +177,3 @@ test("loadLedgerConfig reads the ledger path and rejects extras", async () => {
   }
 });
 
-test("author models unions session models and record attempts", () => {
-  const sessionEntry = pending({
-    startModel: "meta/muse-glimmer-30b",
-    tokens: [
-      {
-        provider: "meta-api",
-        model: "muse-spark-1.3-contributor",
-        inputTokens: 100,
-        outputTokens: 50,
-        requests: 1,
-        source: "provider-usage",
-      },
-    ],
-  });
-  const auditEntry: PendingUsage = {
-    entryId: "e2-audit",
-    kind: "audit",
-    workItemId: "w1-demo",
-    finishedAt: "2026-10-26T10:50:00.000Z",
-    startModel: "muse-spark-1.3-contributor",
-    tokens: [
-      {
-        provider: "meta-api",
-        model: "muse-spark-1.3-contributor",
-        inputTokens: 10,
-        outputTokens: 5,
-        requests: 1,
-        source: "auditor-usage",
-      },
-    ],
-    session: null,
-  };
-  const finished = record({
-    attempts: [
-      { model: "meta/muse-glimmer-30b", result: "failure" },
-      { model: "muse-spark-1.3-contributor", result: "success" },
-    ],
-    tokens: [
-      {
-        provider: "meta-api",
-        model: "muse-spark-1.3-contributor",
-        inputTokens: 100,
-        outputTokens: 50,
-        requests: 1,
-        source: "provider-usage",
-      },
-      {
-        provider: "meta-api",
-        model: "muse-spark-1.3-contributor",
-        inputTokens: 10,
-        outputTokens: 5,
-        requests: 1,
-        source: "auditor-usage",
-      },
-    ],
-  });
-  expect(
-    authorModelsOf({ records: [finished], pending: [sessionEntry, auditEntry] }, "w1-demo"),
-  ).toEqual(["meta/muse-glimmer-30b", "muse-spark-1.3-contributor"]);
-});

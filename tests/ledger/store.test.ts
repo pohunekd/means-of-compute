@@ -199,23 +199,40 @@ test("finalize with decreasing counters exits 2", async () => {
   }
 });
 
-test("author models from stored pending and record content", async () => {
+test("author models unions distinct models per source", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
   const ledgerPath = join(dir, "ledger.jsonl");
   try {
-    await appendPending(ledgerPath, sessionEntry({ workItemId: "w2-other" }));
     await appendPending(
       ledgerPath,
       sessionEntry({
-        entryId: "e2-audit",
-        kind: "audit",
+        entryId: "e-session",
         workItemId: "w1-demo",
-        finishedAt: "2026-10-26T10:50:00.000Z",
-        startModel: "muse-spark-1.3-contributor",
+        startModel: "attempt-only-model",
         tokens: [
           {
             provider: "meta-api",
-            model: "muse-spark-1.3-contributor",
+            model: "token-only-model",
+            inputTokens: 10,
+            outputTokens: 5,
+            requests: 1,
+            source: "provider-usage",
+          },
+        ],
+      }),
+    );
+    await appendPending(
+      ledgerPath,
+      sessionEntry({
+        entryId: "e-audit",
+        kind: "audit",
+        workItemId: "w1-demo",
+        finishedAt: "2026-10-26T10:50:00.000Z",
+        startModel: "other-session-model",
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "audit-only-model",
             inputTokens: 10,
             outputTokens: 5,
             requests: 1,
@@ -225,24 +242,77 @@ test("author models from stored pending and record content", async () => {
         session: null,
       }),
     );
-    const contents = await readLedger("Budget ledger", ledgerPath);
-    expect(authorModelsOf(contents, "w1-demo")).toEqual([]);
-    expect(authorModelsOf(contents, "w2-other")).toEqual([
-      "meta/muse-glimmer-30b",
-      "muse-spark-1.3-contributor",
-    ]);
-    await appendPending(
+    const record = {
+      schemaVersion: "v1",
+      workItemId: "w1-demo",
+      finishedAt: "2026-10-26T11:00:00.000Z",
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "record-token-only",
+          inputTokens: 10,
+          outputTokens: 5,
+          requests: 1,
+          source: "provider-usage",
+        },
+        {
+          provider: "meta-api",
+          model: "audit-only-record-model",
+          inputTokens: 10,
+          outputTokens: 5,
+          requests: 1,
+          source: "auditor-usage",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "desktop", seconds: 60, source: "dispatcher-clock" }],
+      attempts: [{ model: "record-attempt-only", result: "success" }],
+      retries: 0,
+      humanInterventions: 0,
+      result: "success",
+    };
+    const session = sessionEntry({
+      entryId: "e-session",
+      workItemId: "w1-demo",
+      startModel: "attempt-only-model",
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "token-only-model",
+          inputTokens: 10,
+          outputTokens: 5,
+          requests: 1,
+          source: "provider-usage",
+        },
+      ],
+    });
+    const audit = sessionEntry({
+      entryId: "e-audit",
+      kind: "audit",
+      workItemId: "w1-demo",
+      finishedAt: "2026-10-26T10:50:00.000Z",
+      startModel: "unrelated-start-model",
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "audit-only-model",
+          inputTokens: 10,
+          outputTokens: 5,
+          requests: 1,
+          source: "auditor-usage",
+        },
+      ],
+      session: null,
+    });
+    await Bun.write(
       ledgerPath,
-      sessionEntry({
-        entryId: "e3-session",
-        workItemId: "w1-demo",
-        finishedAt: "2026-10-26T10:55:00.000Z",
-      }),
+      `${JSON.stringify(record)}\n${JSON.stringify({ pending: session })}\n${JSON.stringify({ pending: audit })}\n`,
     );
-    const withSession = await readLedger("Budget ledger", ledgerPath);
-    expect(authorModelsOf(withSession, "w1-demo")).toEqual([
-      "meta/muse-glimmer-30b",
-      "muse-spark-1.3-contributor",
+    const contents = await readLedger("Budget ledger", ledgerPath);
+    expect(authorModelsOf(contents, "w1-demo")).toEqual([
+      "attempt-only-model",
+      "record-attempt-only",
+      "record-token-only",
+      "token-only-model",
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

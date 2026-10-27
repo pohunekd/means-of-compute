@@ -1,13 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
-
 import { lstatSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export function configPath(...parts: string[]): string {
-  return join(repoRoot, "config", ...parts);
-}
+import { join } from "node:path";
 
 export type ProbeConfig = {
   idleMinutes: number;
@@ -39,8 +31,8 @@ export function readJson<T>(path: string): T {
   }
 }
 
-export function loadConfig(path?: string): ProbeConfig {
-  const raw = readJson<Record<string, unknown>>(path ?? configPath("probe.json"));
+export function loadConfig(path: string): ProbeConfig {
+  const raw = readJson<Record<string, unknown>>(path);
   const num = (key: string, min: number, max = Number.POSITIVE_INFINITY): number => {
     const v = raw[key];
     if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
@@ -112,11 +104,12 @@ export function assertSysfsRoot(root: unknown, label: string): void {
   }
 }
 
-export function loadHostAlias(hostnameVal: string): string {
-  const hostsRaw = readJson<HostMap>(configPath("hosts.json"));
+export function loadHostAlias(configDir: string, hostnameVal: string): string {
+  const hostsPath = join(configDir, "hosts.json");
+  const hostsRaw = readJson<HostMap>(hostsPath);
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
   if (typeof alias !== "string") {
-    throw new Error(`host ${hostnameVal} not in config/hosts.json`);
+    throw new Error(`host ${hostnameVal} not in ${hostsPath}`);
   }
   return alias;
 }

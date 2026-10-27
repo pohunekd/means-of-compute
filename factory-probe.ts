@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 
+import { hostname } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runProbe } from "./src/probe/probe.js";
+import { loadHostAlias } from "./src/probe/config.js";
 import { FactsError } from "./src/probe/facts.js";
+
+const configDir = join(dirname(fileURLToPath(import.meta.url)), "config");
 
 async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
@@ -17,7 +23,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const output = await runProbe({ factsPath, scenario });
+  const output = await runProbe({
+    configDir,
+    resolveHostAlias: () => loadHostAlias(configDir, hostname()),
+    factsPath,
+    scenario,
+  });
   console.log(JSON.stringify(output));
 }
 

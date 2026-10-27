@@ -1,12 +1,35 @@
 // Minimal HTML builder. The tagged template is the only markup factory:
 // every string/number interpolation is escaped, SafeHtml passes through,
 // and an array of SafeHtml joins with "". No other module concatenates markup.
-export class SafeHtml {
-  private constructor(readonly value: string) {}
+// Brand key that never leaves this module. The static factory needs it,
+// so no code outside this module can build a SafeHtml: markup flows only
+// through the html tag or the constant-only helper below.
+const trusted = Symbol("dashboard.trusted-html");
+type Trusted = typeof trusted;
 
-  static raw(value: string): SafeHtml {
-    return new SafeHtml(value);
+export class SafeHtml {
+  readonly value: string;
+  private readonly brand: Trusted;
+
+  private constructor(value: string, brand: Trusted) {
+    this.value = value;
+    this.brand = brand;
   }
+
+  static create(value: string, brand: Trusted): SafeHtml {
+    return new SafeHtml(value, brand);
+  }
+}
+
+function raw(value: string): SafeHtml {
+  return SafeHtml.create(value, trusted);
+}
+
+// Constant-only helper for module-level string constants (the <style> body
+// and empty markup). Never call it with dynamic data: interpolation through
+// the html tag is the only path for runtime strings.
+export function constantHtml(value: string): SafeHtml {
+  return raw(value);
 }
 
 export function escapeHtml(text: string): string {
@@ -36,5 +59,5 @@ export function html(
     }
     out += strings[index + 1] ?? "";
   }
-  return SafeHtml.raw(out);
+  return raw(out);
 }

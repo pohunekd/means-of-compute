@@ -339,6 +339,17 @@ describe("dashboard work items (mutation: ignore status rule 1)", () => {
   });
 });
 
+describe("dashboard parked with ledger-invalid (mutation: ledger error blames the wrong input)", () => {
+  test("ledger-invalid keeps parked on the work-item source", async () => {
+    const model = buildDashboard(await loadInputs(INVALID));
+    const autonomy = model.panels[4] as (typeof model.panels)[number];
+    expect(figureOf(autonomy, "Parked tasks").cell).toEqual({
+      kind: "no-data",
+      reason: "no work item source (#15, #17)",
+    });
+  });
+});
+
 describe("dashboard input failures (mutation: collapse error into no-data; drop the caps)", () => {
   test("ledger-invalid poisons every ledger cell and the caps still stand", async () => {
     const model = buildDashboard(await loadInputs(INVALID));
@@ -370,7 +381,14 @@ describe("dashboard input failures (mutation: collapse error into no-data; drop 
     }
     const autonomy = model.panels[4] as (typeof model.panels)[number];
     for (const figure of autonomy.figures) {
-      expect(figure.cell).toEqual({ kind: "error", code: "ledger-invalid" });
+      if (figure.label === "Parked tasks") {
+        expect(figure.cell).toEqual({
+          kind: "no-data",
+          reason: "no work item source (#15, #17)",
+        });
+      } else {
+        expect(figure.cell).toEqual({ kind: "error", code: "ledger-invalid" });
+      }
     }
   });
 

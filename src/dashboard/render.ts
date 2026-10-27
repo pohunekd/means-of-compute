@@ -4,7 +4,7 @@
 // server). Error messages, paths other than the log path, and the forbidden
 // fields of rule 4.6 never reach a cell source.
 import { createHash } from "node:crypto";
-import { html, SafeHtml } from "./html.js";
+import { constantHtml, html, SafeHtml } from "./html.js";
 import type { Cell, DashboardModel, Panel, Table } from "./model.js";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -26,7 +26,7 @@ export const DASHBOARD_CSS = [
 ].join("\n");
 
 const STYLE_ELEMENT = "<style>" + DASHBOARD_CSS + "</style>";
-const STYLE_HTML = SafeHtml.raw(STYLE_ELEMENT);
+const STYLE_HTML = constantHtml(STYLE_ELEMENT);
 
 export const CSS_HASH = `sha256-${createHash("sha256").update(DASHBOARD_CSS, "utf8").digest("base64")}`;
 
@@ -91,7 +91,7 @@ function renderTable(table: Table): SafeHtml {
       </tr>`,
   );
   const cite = html`<p class="cite">source: ${table.source}</p>`;
-  const note = table.note === null ? SafeHtml.raw("") : html`<p class="note">${table.note}</p>`;
+  const note = table.note === null ? constantHtml("") : html`<p class="note">${table.note}</p>`;
   return html`<table>
       <caption>
         ${table.caption}

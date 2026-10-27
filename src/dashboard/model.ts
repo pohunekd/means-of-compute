@@ -140,10 +140,10 @@ function cachedClause(ids: readonly string[], pricing: ReadonlyMap<string, NanoP
 
 function moneyUnknown(entry: SpendEntry, pricing: ReadonlyMap<string, NanoPricing>): boolean {
   return entry.tokens.some((token) => {
-    const entry_pricing = pricing.get(token.provider);
+    const providerPricing = pricing.get(token.provider);
     return (
-      entry_pricing !== undefined &&
-      isPriced(entry_pricing) &&
+      providerPricing !== undefined &&
+      isPriced(providerPricing) &&
       (token.inputTokens === null || token.outputTokens === null)
     );
   });
@@ -916,24 +916,6 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
 }
 
 function buildAutonomyPanel(inputs: DashboardInputs): Panel {
-  if (!inputs.ledger.ok) {
-    return {
-      id: "autonomy",
-      title: "Autonomy",
-      figures: [
-        failedFigure("Human interventions", inputs.ledger.failure, "ledger records"),
-        failedFigure("Retries", inputs.ledger.failure, "ledger records"),
-        failedFigure("Parked tasks", inputs.ledger.failure, "ledger records"),
-        failedFigure("Finished tasks", inputs.ledger.failure, "ledger records"),
-      ],
-      tables: [],
-    };
-  }
-  const records = inputs.ledger.value.records;
-  const interventions = records.reduce((sum, record) => sum + record.humanInterventions, 0);
-  const retries = records.reduce((sum, record) => sum + record.retries, 0);
-  const success = records.filter((record) => record.result === "success").length;
-  const blocked = records.filter((record) => record.result === "blocked").length;
   const parked: Figure =
     inputs.workItems === null
       ? {
@@ -946,6 +928,24 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
           groupDigits(inputs.workItems.filter((item) => item.status === "parked").length),
           "work items with status parked",
         );
+  if (!inputs.ledger.ok) {
+    return {
+      id: "autonomy",
+      title: "Autonomy",
+      figures: [
+        failedFigure("Human interventions", inputs.ledger.failure, "ledger records"),
+        failedFigure("Retries", inputs.ledger.failure, "ledger records"),
+        parked,
+        failedFigure("Finished tasks", inputs.ledger.failure, "ledger records"),
+      ],
+      tables: [],
+    };
+  }
+  const records = inputs.ledger.value.records;
+  const interventions = records.reduce((sum, record) => sum + record.humanInterventions, 0);
+  const retries = records.reduce((sum, record) => sum + record.retries, 0);
+  const success = records.filter((record) => record.result === "success").length;
+  const blocked = records.filter((record) => record.result === "blocked").length;
   const modelRows = queryLedger(inputs.ledger.value, new Set(["model"])).byModel ?? [];
   return {
     id: "autonomy",

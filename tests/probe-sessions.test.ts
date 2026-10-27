@@ -133,7 +133,10 @@ describe.skipIf(process.platform !== "linux")("loginctl session rule", () => {
       };
       expect(doc.idle).toBe(true);
       expect(doc.idleReason).toBe("no user logged in, on AC power");
-      expect(doc.secondsSinceInput).toBeGreaterThan(3500);
+      // The pinned timestamp (2026-10-27T12:00:00Z, epoch 1793102400) minus
+      // the fixture hint (1793082023.347 s) is 20376 s; a wall-clock age
+      // would drift away from this value.
+      expect(doc.secondsSinceInput).toBe(20376);
     });
   });
 

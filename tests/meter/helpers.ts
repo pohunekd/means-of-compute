@@ -7,41 +7,72 @@ import { randomBytes } from "node:crypto";
 import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type Meter, type MeterLogEvent } from "../../src/meter/meter.js";
-import { resetProvidersCache } from "../../src/providers/config.js";
-import { systemTimers } from "../../src/meter/timers.js";
+import type { UsageLogIo } from "../../src/meter/usage-log.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
+import { resetProvidersCache } from "../../src/providers/config.js";
 import { startLoopback } from "../../src/providers/loopback.js";
+import { createManualTimers, type ManualTimers } from "./manual-timers.js";
 
 export interface MeterFixture {
   readonly meter: Meter;
   readonly events: MeterLogEvent[];
   readonly logPath: string;
+  readonly loopback: Awaited<ReturnType<typeof startLoopback>>;
+  readonly timers: ManualTimers;
   readonly tokenFor: (requestId: string) => string;
+  readonly waitForEvent: (match: (e: MeterLogEvent) => boolean) => Promise<MeterLogEvent>;
 }
 
 const META_MODEL = "muse-spark-1.3-contributor";
 const NVIDIA_MODEL = "meta/muse-glimmer-30b";
 
+export interface MeterOverrides {
+  config?: Partial<MeterConfig>;
+  logIo?: UsageLogIo;
+  hosts?: Record<string, string[]>;
+  now?: () => Date;
+  upstreamBaseUrl?: string;
+}
+
 export async function withMeter(
   recordingsPath: string,
   run: (fixture: MeterFixture) => Promise<void>,
-  meterOverrides: Partial<MeterConfig> = {},
+  overrides: MeterOverrides = {},
 ): Promise<void> {
   const secret = randomBytes(32).toString("base64");
   const dir = mkdtempSync(join(tmpdir(), "meter-proxy-"));
   const hostsFile = join(dir, "hosts.json");
   const logPath = join(dir, "usage.jsonl");
-  await Bun.write(hostsFile, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
+  await Bun.write(hostsFile, JSON.stringify(overrides.hosts ?? { "laptop-a": ["127.0.0.1"] }));
   const loopback = await startLoopback(recordingsPath);
   resetProvidersCache();
   process.env.META_API_KEY = "test-meta-key";
   process.env.NVIDIA_API_KEY = "test-nvidia-key";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
-  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(loopback.port)}`;
-  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(loopback.port)}`;
+  const upstream = overrides.upstreamBaseUrl ?? `http://127.0.0.1:${String(loopback.port)}`;
+  process.env.PROVIDER_META_API_BASE_URL = upstream;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = upstream;
   const events: MeterLogEvent[] = [];
+  const eventWaiters: Array<{
+    match: (e: MeterLogEvent) => boolean;
+    resolve: (e: MeterLogEvent) => void;
+  }> = [];
+  const log = (e: MeterLogEvent): void => {
+    events.push(e);
+    for (let i = eventWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = eventWaiters[i] as {
+        match: (e: MeterLogEvent) => boolean;
+        resolve: (e: MeterLogEvent) => void;
+      };
+      if (waiter.match(e)) {
+        eventWaiters.splice(i, 1);
+        waiter.resolve(e);
+      }
+    }
+  };
+  const timers = createManualTimers();
   const base = await loadMeterConfig();
-  const config: MeterConfig = { ...base, usageLogPath: logPath, ...meterOverrides };
+  const config: MeterConfig = { ...base, usageLogPath: logPath, ...overrides.config };
   const env = await resolveMeterEnv(config, {
     MOC_METER_LISTEN: "127.0.0.1:0",
     MOC_METER_SECRET: secret,
@@ -53,19 +84,32 @@ export async function withMeter(
     config,
     env,
     providers,
-    timers: systemTimers,
-    logIo: systemUsageLogIo,
-    now: () => new Date(),
-    log: (e) => events.push(e),
+    timers,
+    logIo: overrides.logIo ?? systemUsageLogIo,
+    now: overrides.now ?? (() => new Date()),
+    log,
   });
+  const waitForEvent = (match: (e: MeterLogEvent) => boolean): Promise<MeterLogEvent> => {
+    const past = events.find(match);
+    if (past !== undefined) {
+      return Promise.resolve(past);
+    }
+    return new Promise<MeterLogEvent>((resolve) => {
+      eventWaiters.push({ match, resolve });
+    });
+  };
   try {
     await run({
       meter,
       events,
       logPath,
+      loopback,
+      timers,
       tokenFor: (requestId: string) => meter.tokenFor(requestId),
+      waitForEvent,
     });
   } finally {
+    loopback.release();
     await meter.close();
     await loopback.stop();
     resetProvidersCache();

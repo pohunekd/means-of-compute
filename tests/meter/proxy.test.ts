@@ -356,7 +356,7 @@ test("first-byte timeout is billed with null counts", async () => {
       expect(end["billed"]).toBe(true);
       expect(end["inputTokens"]).toBeNull();
     },
-    { firstByteTimeoutMs: 50 },
+    { config: { firstByteTimeoutMs: 50 } },
   );
 });
 
@@ -398,7 +398,7 @@ test("only config timeouts apply, never the descriptor timeout", async () => {
       >;
       expect(end["outcome"]).toBe("ok");
     },
-    { firstByteTimeoutMs: 60000, idleTimeoutMs: 60000, totalTimeoutMs: 60000 },
+    { config: { firstByteTimeoutMs: 60000, idleTimeoutMs: 60000, totalTimeoutMs: 60000 } },
   );
 });
 
@@ -418,7 +418,7 @@ test("idle timeout aborts a slow stream", async () => {
       expect(end["outcome"]).toBe("idle-timeout");
       expect(end["billed"]).toBe(true);
     },
-    { idleTimeoutMs: 50, firstByteTimeoutMs: 60000 },
+    { config: { idleTimeoutMs: 50, firstByteTimeoutMs: 60000 } },
   );
 });
 
@@ -495,7 +495,7 @@ test("concurrency limit rejects without a call-start", async () => {
       const lines = await readLogLines(logPath);
       expect(lines.filter((l) => l.includes('"kind":"call-start"')).length).toBe(1);
     },
-    { maxInFlightPerSession: 1, idleTimeoutMs: 60000, totalTimeoutMs: 60000 },
+    { config: { maxInFlightPerSession: 1, idleTimeoutMs: 60000, totalTimeoutMs: 60000 } },
   );
 });
 

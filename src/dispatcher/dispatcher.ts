@@ -338,12 +338,17 @@ function handleOf(entry: RegistryEntry): SessionHandle {
   };
 }
 
-function checkHandle(
+interface HandleFailure {
+  readonly check: string;
+  readonly detail: string;
+}
+
+function collectHandleFailures(
   handle: SessionHandle,
   request: StartRequest,
   entries: readonly RegistryEntry[],
-): void {
-  const failures: Array<{ readonly check: string; readonly detail: string }> = [];
+): HandleFailure[] {
+  const failures: HandleFailure[] = [];
   if (handle.requestId !== request.requestId) {
     failures.push({
       check: "request-id",
@@ -377,14 +382,44 @@ function checkHandle(
       detail: `sessionId "${handle.sessionId}" is already registered`,
     });
   }
+  return failures;
+}
+
+function checkHandle(
+  handle: SessionHandle,
+  request: StartRequest,
+  entries: readonly RegistryEntry[],
+): void {
+  const failures = collectHandleFailures(handle, request, entries);
   if (failures.length > 0) {
-    const first = failures[0] as { readonly check: string; readonly detail: string };
+    const first = failures[0] as HandleFailure;
     throw new DispatchStateError(
       "invalid-handle",
       request.requestId,
       `dispatcher state invalid-handle: ${first.check}: ${first.detail}`,
     );
   }
+}
+
+function checkHandleLogged(
+  handle: SessionHandle,
+  request: StartRequest,
+  entries: readonly RegistryEntry[],
+  log: DispatcherDeps["log"],
+  workItemId: string,
+): void {
+  const failures = collectHandleFailures(handle, request, entries);
+  if (failures.length > 0) {
+    const first = failures[0] as HandleFailure;
+    log({
+      level: "error",
+      event: "invalid-handle",
+      requestId: request.requestId,
+      workItemId,
+      detail: first.check,
+    });
+  }
+  checkHandle(handle, request, entries);
 }
 
 export function briefSha256Of(brief: string): string {
@@ -777,7 +812,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         }
         throw error;
       }
-      checkHandle(handle, request, existing);
+      checkHandleLogged(handle, request, existing, deps.log, request.workItemId);
       // startedAt stays the provisional insert time: the port call does
       // not move the session clock.
       const settled: RegistryEntry = {

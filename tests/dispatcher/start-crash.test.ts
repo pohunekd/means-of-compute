@@ -458,6 +458,7 @@ test("K5: a rejected start removes its provisional entry", async () => {
 
 test("K6: an invalid handle keeps the provisional entry", async () => {
   await withHarness(async ({ control, gate, registryPath, config, ledgerPath }) => {
+    const events: Array<Record<string, unknown>> = [];
     const logging = createDispatcher({
       port: {
         ...control.port,
@@ -470,7 +471,9 @@ test("K6: an invalid handle keeps the provisional entry", async () => {
       ledgerPath,
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
-      log: () => undefined,
+      log: (event) => {
+        events.push({ ...event });
+      },
     });
     let error: unknown;
     try {
@@ -490,6 +493,15 @@ test("K6: an invalid handle keeps the provisional entry", async () => {
     // The invalid handle surfaces as the thrown invalid-handle state
     // error: its code names the failure.
     expect((error as DispatchStateError).code).toBe("invalid-handle");
+    // The failure is logged with the failed check as the detail.
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      level: "error",
+      event: "invalid-handle",
+      requestId: "item-a:0",
+      workItemId: "item-a",
+      detail: "worktree",
+    });
     // A replay with the same inputs reports the same stuck entry.
     let replayed: unknown;
     try {
@@ -503,6 +515,53 @@ test("K6: an invalid handle keeps the provisional entry", async () => {
       replayed = caught;
     }
     expect(String(replayed)).toContain("invalid-handle");
+  });
+});
+
+test("K6b: a handle for the wrong host logs invalid-handle", async () => {
+  await withHarness(async ({ control, gate, registryPath, config, ledgerPath }) => {
+    const events: Array<Record<string, unknown>> = [];
+    const misplaced = createDispatcher({
+      port: {
+        ...control.port,
+        start(request: StartRequest): Promise<SessionHandle> {
+          return control.port
+            .start(request)
+            .then((handle) => ({ ...handle, hostAlias: "laptop-b" }));
+        },
+      },
+      budget: gate.gate,
+      config,
+      ledgerPath,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: (event) => {
+        events.push({ ...event });
+      },
+    });
+    let error: unknown;
+    try {
+      await misplaced.start(
+        item("item-a") as never,
+        decision("item-a", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+    } catch (caught) {
+      error = caught;
+    }
+    expect((error as DispatchStateError).code).toBe("invalid-handle");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      level: "error",
+      event: "invalid-handle",
+      requestId: "item-a:0",
+      workItemId: "item-a",
+      detail: "host",
+    });
+    const entries = await readRegistry(registryPath);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.sessionId).toBeNull();
   });
 });
 

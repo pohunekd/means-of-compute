@@ -4,7 +4,6 @@
 // brief replaced by its sha256 and byte count) and exits 0 without calling
 // the gate or the port and without writing anything. Any other use
 // exits 2: the factory process owns real starts.
-import { createHash } from "node:crypto";
 import {
   contractErrors,
   isPlacementDecision,
@@ -15,7 +14,7 @@ import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
 import { loadDispatcherConfig } from "./config.js";
-import { deriveStartRequest } from "./dispatcher.js";
+import { briefSha256Of, deriveStartRequest } from "./dispatcher.js";
 import type { ModelSelection } from "./port.js";
 
 function flagValue(args: string[], flag: string): string | null {
@@ -122,7 +121,7 @@ async function readProviderDescriptor(providerId: string, model: string): Promis
 
 function briefSummary(brief: string): { briefSha256: string; briefBytes: number } {
   return {
-    briefSha256: createHash("sha256").update(brief, "utf8").digest("hex"),
+    briefSha256: briefSha256Of(brief),
     briefBytes: Buffer.byteLength(brief, "utf8"),
   };
 }

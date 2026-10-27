@@ -26,7 +26,12 @@ import type {
   WaitResult,
 } from "./port.js";
 import { PortRejectedError, PortUnreachableError } from "./port.js";
-import { insertRegistryEntry, readRegistry, removeProvisionalEntry, replaceRegistryEntry } from "./registry.js";
+import {
+  insertRegistryEntry,
+  readRegistry,
+  removeProvisionalEntry,
+  replaceRegistryEntry,
+} from "./registry.js";
 import type { RegistryEntry, RegistryTerminal } from "./registry.js";
 
 export interface DispatcherDeps {
@@ -64,7 +69,12 @@ export type DispatchStateCode =
 export class DispatchStateError extends Error {
   readonly code: DispatchStateCode;
   readonly requestId: string;
-  constructor(code: DispatchStateCode, requestId: string, message?: string, options?: ErrorOptions) {
+  constructor(
+    code: DispatchStateCode,
+    requestId: string,
+    message?: string,
+    options?: ErrorOptions,
+  ) {
     super(message ?? `${code}: ${requestId}`, options);
     this.name = "DispatchStateError";
     this.code = code;
@@ -167,25 +177,26 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): Pendi
     workItemId: entry.workItemId,
     finishedAt: stored.observedAt,
     startModel: entry.model.model,
-    tokens: stored.usage !== null
-      ? stored.usage.tokens.map((token) => ({
-          provider: token.provider,
-          model: token.model,
-          inputTokens: token.inputTokens,
-          outputTokens: token.outputTokens,
-          requests: token.requests,
-          source: token.source,
-        }))
-      : [
-          {
-            provider: entry.model.providerId,
-            model: entry.model.model,
-            inputTokens: null,
-            outputTokens: null,
-            requests: null,
-            source: stored.usageValid ? "usage-unreported" : "usage-invalid",
-          },
-        ],
+    tokens:
+      stored.usage !== null
+        ? stored.usage.tokens.map((token) => ({
+            provider: token.provider,
+            model: token.model,
+            inputTokens: token.inputTokens,
+            outputTokens: token.outputTokens,
+            requests: token.requests,
+            source: token.source,
+          }))
+        : [
+            {
+              provider: entry.model.providerId,
+              model: entry.model.model,
+              inputTokens: null,
+              outputTokens: null,
+              requests: null,
+              source: stored.usageValid ? "usage-unreported" : "usage-invalid",
+            },
+          ],
     session: {
       hostAlias: entry.hostAlias,
       seconds: stored.seconds,
@@ -580,9 +591,7 @@ export function createDispatcher(deps: DispatcherDeps): {
 
   async function finishLost(entry: RegistryEntry, count: number): Promise<FinishOutcome> {
     const observedAt = deps.now().toISOString();
-    const seconds = Math.floor(
-      (Date.parse(entry.lastSeenAt) - Date.parse(entry.startedAt)) / 1000,
-    );
+    const seconds = Math.floor((Date.parse(entry.lastSeenAt) - Date.parse(entry.startedAt)) / 1000);
     if (seconds < 0) {
       throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
     }
@@ -736,9 +745,14 @@ export function createDispatcher(deps: DispatcherDeps): {
               workItemId: request.workItemId,
               detail: error.code,
             });
-            throw new DispatchStateError("port-binding-conflict", request.requestId, error.message, {
-              cause: error,
-            });
+            throw new DispatchStateError(
+              "port-binding-conflict",
+              request.requestId,
+              error.message,
+              {
+                cause: error,
+              },
+            );
           }
           await removeProvisionalEntry(
             deps.config.registryPath,

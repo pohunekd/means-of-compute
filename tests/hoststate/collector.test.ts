@@ -397,12 +397,7 @@ describe("collector time bounds", () => {
   test("leap-second timestamp is contract-invalid and never placed (mutation: drop the finite check)", async () => {
     const capacity = fixtureCapacity();
     const leap = { ...capacity, timestamp: "2020-01-01T23:59:60Z" };
-    const direct = observe(
-      "desktop",
-      replyFor(leap),
-      CONFIG,
-      new Date("2026-10-27T12:00:01.000Z"),
-    );
+    const direct = observe("desktop", replyFor(leap), CONFIG, new Date("2026-10-27T12:00:01.000Z"));
     if (direct.kind !== "unavailable") throw new Error("expected unavailable");
     expect(direct.cause).toBe("contract-invalid");
     expect(direct.detail).toBe("timestamp unparseable");
@@ -592,9 +587,7 @@ describe("collector logs", () => {
     expect(reported.packageVersion).toBe("0.1.0");
     expect(reported.packageDigest).toBe(DIGEST);
     expect(reported.stdoutBytes).toBe(Buffer.byteLength(stdout, "utf8"));
-    expect(reported.stdoutSha256).toBe(
-      createHash("sha256").update(stdout, "utf8").digest("hex"),
-    );
+    expect(reported.stdoutSha256).toBe(createHash("sha256").update(stdout, "utf8").digest("hex"));
   });
 });
 

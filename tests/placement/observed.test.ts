@@ -75,7 +75,10 @@ function reported(hostAlias: string): HostObservation {
   };
 }
 
-function unavailable(hostAlias: string, cause: UnavailableCause = "host-unreachable"): HostObservation {
+function unavailable(
+  hostAlias: string,
+  cause: UnavailableCause = "host-unreachable",
+): HostObservation {
   return {
     kind: "unavailable",
     hostAlias,

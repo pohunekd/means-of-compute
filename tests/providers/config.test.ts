@@ -92,3 +92,49 @@ test("config: duplicated route ids throw (mutation: restore the lenient parser)"
     removeTempConfig(dir);
   }
 });
+
+test("config: schema timeoutMs.maximum 2147483648 fails the load (mutation: drop the setTimeout limit)", async () => {
+  const { join } = await import("node:path");
+  const dir = await makeTempConfig();
+  try {
+    const schemaPath = join(dir, "config", "providers", "schema.json");
+    const schema = await Bun.file(schemaPath).json();
+    schema.properties.timeoutMs.maximum = 2147483648;
+    await Bun.write(schemaPath, JSON.stringify(schema));
+    const result = await runLoadCheck(dir);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("config/providers/schema.json");
+    expect(result.output).toContain("timeoutMs.maximum");
+  } finally {
+    removeTempConfig(dir);
+  }
+});
+
+test("config: schema timeoutMs.maximum 2147483647 loads (mutation: >= instead of <=)", async () => {
+  const { join } = await import("node:path");
+  const dir = await makeTempConfig();
+  try {
+    const schemaPath = join(dir, "config", "providers", "schema.json");
+    const schema = await Bun.file(schemaPath).json();
+    schema.properties.timeoutMs.maximum = 2147483647;
+    await Bun.write(schemaPath, JSON.stringify(schema));
+    const result = await runLoadCheck(dir);
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("loaded");
+  } finally {
+    removeTempConfig(dir);
+  }
+});
+
+test("config: missing schema rejects getProviders, not the import (mutation: load the schema at module top level)", async () => {
+  const { join } = await import("node:path");
+  const dir = await makeTempConfig();
+  try {
+    await Bun.file(join(dir, "config", "providers", "schema.json")).remove();
+    const result = await runLoadCheck(dir);
+    expect(result.code).toBe(1);
+    expect(result.output.trim()).toBe("Provider schema config/providers/schema.json: file is missing");
+  } finally {
+    removeTempConfig(dir);
+  }
+});

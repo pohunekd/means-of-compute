@@ -170,7 +170,7 @@ test(
   "gate signal branch bounds its stderr read by the deadline (P1)",
   async () => {
     const gate = createCliBudgetGate({
-      command: ["sh", "-c", "(sleep 6 &); kill -9 $$"],
+      command: ["sh", "-c", "(sleep 60 &); kill -9 $$"],
       timeoutMs: 10000,
       cwd: process.cwd(),
     });
@@ -184,9 +184,9 @@ test(
     const elapsed = Date.now() - started;
     expect(error).toBeInstanceOf(BudgetGateError);
     expect((error as Error).message).toContain("killed by signal SIGKILL");
-    expect(elapsed).toBeLessThan(10000);
+    expect(elapsed).toBeLessThan(30000);
   },
-  { timeout: 30000 },
+  { timeout: 60000 },
 );
 
 test(

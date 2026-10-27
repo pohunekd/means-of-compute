@@ -111,8 +111,8 @@ async function callProvider(
       }),
       signal: controller.signal,
     });
-    // A 200 answer may be billed from this point on, so failures below
-    // append a ledger entry; the non-200 throw above never does.
+    // The provider has answered. The non-200 throw below is never billed; a
+    // later failure of a 200 may be, so it sets reachedProvider for the caller.
     state.responded = true;
     if (!resp.ok) {
       throw new ProviderCallError(

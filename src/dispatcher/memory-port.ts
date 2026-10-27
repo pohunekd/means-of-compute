@@ -98,7 +98,13 @@ export function createMemoryPort(): MemoryPortControl {
     session.terminalDetail = detail;
   }
 
-  async function start(request: StartRequest): Promise<SessionHandle> {
+  function start(request: StartRequest): Promise<SessionHandle> {
+    // Async only for the port shape; the body runs through a resolved
+    // promise so throws become rejections instead of sync throws.
+    return Promise.resolve().then(() => startNow(request));
+  }
+
+  function startNow(request: StartRequest): SessionHandle {
     checkReachable(request.hostAlias);
     const existingId = sessionByRequest.get(request.requestId);
     if (existingId !== undefined) {
@@ -130,7 +136,7 @@ export function createMemoryPort(): MemoryPortControl {
     } else {
       baseCommit = originTip(toBranch(request.baseRef));
     }
-    const sessionId = `mem-${nextId}`;
+    const sessionId = `mem-${String(nextId)}`;
     nextId += 1;
     const handle: SessionHandle = {
       sessionId,
@@ -155,11 +161,11 @@ export function createMemoryPort(): MemoryPortControl {
     return handle;
   }
 
-  async function wait(
-    ref: SessionRef,
-    _timeoutMs: number,
-    cursor: string | null,
-  ): Promise<WaitResult> {
+  function wait(ref: SessionRef, _timeoutMs: number, cursor: string | null): Promise<WaitResult> {
+    return Promise.resolve().then(() => waitNow(ref, cursor));
+  }
+
+  function waitNow(ref: SessionRef, cursor: string | null): WaitResult {
     const session = findSession(ref);
     checkReachable(session.handle.hostAlias);
     session.cursor = cursor;
@@ -168,10 +174,17 @@ export function createMemoryPort(): MemoryPortControl {
     if (terminal !== null) {
       return terminal;
     }
+    if (session.state !== "starting" && session.state !== "running") {
+      throw new PortRejectedError("session-not-found", `unknown session ${ref.sessionId}`);
+    }
     return { state: session.state, sessionId: session.handle.sessionId, cursor: session.cursor };
   }
 
-  async function diff(ref: SessionRef, base: string): Promise<DiffResult> {
+  function diff(ref: SessionRef, base: string): Promise<DiffResult> {
+    return Promise.resolve().then(() => diffNow(ref, base));
+  }
+
+  function diffNow(ref: SessionRef, base: string): DiffResult {
     const session = findSession(ref);
     checkReachable(session.handle.hostAlias);
     const commits = originCommits.get(session.handle.branch) ?? [];
@@ -188,7 +201,11 @@ export function createMemoryPort(): MemoryPortControl {
     };
   }
 
-  async function cancel(ref: SessionRef, reason: CancelReason): Promise<WaitResult> {
+  function cancel(ref: SessionRef, reason: CancelReason): Promise<WaitResult> {
+    return Promise.resolve().then(() => cancelNow(ref, reason));
+  }
+
+  function cancelNow(ref: SessionRef, reason: CancelReason): WaitResult {
     const session = findSession(ref);
     checkReachable(session.handle.hostAlias);
     const terminal = terminalOf(session);
@@ -203,8 +220,8 @@ export function createMemoryPort(): MemoryPortControl {
     return result;
   }
 
-  async function close(): Promise<void> {
-    return undefined;
+  function close(): Promise<void> {
+    return Promise.resolve();
   }
 
   const port: DispatcherPort = { start, wait, diff, cancel, close };

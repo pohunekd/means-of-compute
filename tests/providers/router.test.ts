@@ -1,6 +1,7 @@
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
+import { ProvidersExhaustedError } from "../../src/providers/router.js";
 
 async function withProviders(
   primaryPath: string,
@@ -110,4 +111,60 @@ test("router fails over on invalid content", async () => {
   if (result.failoverReason !== "server_error")
     throw new Error("Expected failover reason server_error");
   if (result.content !== "fallback response") throw new Error("Unexpected content");
+});
+
+test("router fails over on a non-JSON 200 (mutation: parse with resp.json() again)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-non-json.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("server_error");
+  expect(result.content).toBe("fallback response");
+});
+
+test("router throws ProvidersExhaustedError naming the last reason (mutation: plain Error)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-429.json",
+    "tests/providers/recordings/fallback-500.json",
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProvidersExhaustedError);
+  const exhausted = caught as ProvidersExhaustedError;
+  expect(exhausted.lastReason).toBe("server_error");
+  expect(exhausted.message).toContain("server_error");
+  expect(exhausted.cause).toBeInstanceOf(Error);
+});
+
+test("router rejects a bad timeout override naming the variable (mutation: isNaN fallback)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-429.json",
+    "tests/providers/recordings/fallback-200.json",
+    { PROVIDER_NVIDIA_BUILD_TIMEOUT_MS: "abc" },
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  let message = "";
+  try {
+    await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(message).toContain("PROVIDER_NVIDIA_BUILD_TIMEOUT_MS");
 });

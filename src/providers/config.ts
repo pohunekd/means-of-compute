@@ -72,9 +72,7 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   }
   const descriptor = raw as RawProvider;
   if (descriptor.id !== id) {
-    throw new Error(
-      `${label} ${file}: id "${String(descriptor.id)}" does not match file name`,
-    );
+    throw new Error(`${label} ${file}: id "${descriptor.id}" does not match file name`);
   }
 
   let baseUrl = descriptor.baseUrl;
@@ -111,9 +109,17 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
     }
   }
 
-  const { baseUrlEnv, ...rest } = descriptor;
-  void baseUrlEnv;
-  return { ...rest, baseUrl, timeoutMs };
+  const resolved: ProviderDescriptor = {
+    id: descriptor.id,
+    name: descriptor.name,
+    baseUrl,
+    model: descriptor.model,
+    timeoutMs,
+    ...(descriptor.apiKeyEnv === undefined ? {} : { apiKeyEnv: descriptor.apiKeyEnv }),
+    ...(descriptor.pricing === undefined ? {} : { pricing: descriptor.pricing }),
+    ...(descriptor.rateLimit === undefined ? {} : { rateLimit: descriptor.rateLimit }),
+  };
+  return resolved;
 }
 
 async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {

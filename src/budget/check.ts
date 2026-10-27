@@ -17,6 +17,7 @@ import { decideAdmission } from "./decision.js";
 import { capKindOfReason, eventKeyString, maybeEscalate } from "./escalation.js";
 import { loadPricingForIds } from "./pricing.js";
 import { summarizeSpend } from "./cost.js";
+import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 
 interface CliArgs {
   readonly spendTotal: string | null;
@@ -24,7 +25,7 @@ interface CliArgs {
   readonly totalCap: string | null;
 }
 
-async function loadRoute(routePath = "config/providers/route.json"): Promise<string[]> {
+async function loadRoute(routePath = PROVIDER_ROUTE_PATH): Promise<string[]> {
   const label = "Budget route";
   if ((await statInputPath(label, routePath)) === "absent") {
     throw new Error(`${label} ${routePath}: file is missing`);
@@ -166,7 +167,7 @@ async function run(): Promise<number> {
             : decimalToNanoUsd(parsed.totalCap, "total-cap", "budget:check"),
       };
       // The override never touches the ledger: it prices nothing.
-      await loadPricingForIds("config/providers", [...route, config.nvidiaProviderId]);
+      await loadPricingForIds(PROVIDERS_DIR, [...route, config.nvidiaProviderId]);
       const overrideNano = decimalToNanoUsd(overrideTotal, "spend", "budget:check");
       decision = decideAdmission(
         {
@@ -185,7 +186,7 @@ async function run(): Promise<number> {
       const contents = await readLedger("Budget ledger", ledgerPath);
       const entries = spendEntriesOf(contents);
       const ledgerIds = entries.flatMap((entry) => entry.tokens.map((token) => token.provider));
-      const pricing = await loadPricingForIds("config/providers", [
+      const pricing = await loadPricingForIds(PROVIDERS_DIR, [
         ...route,
         config.nvidiaProviderId,
         ...ledgerIds,

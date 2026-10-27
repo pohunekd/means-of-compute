@@ -1,47 +1,14 @@
 #!/usr/bin/env bun
-/* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
 
 import { hostname as osHostname, cpus } from "node:os";
 import { contractErrors, isHostCapacity } from "./contracts/v1/validate.js";
-import { assertSysfsRoot, configPath, loadConfig, loadHostAlias, readJson } from "./src/probe/config.js";
+import { configPath, loadConfig, loadHostAlias } from "./src/probe/config.js";
 import { linuxCpu, linuxGpu, linuxManagerIdleSecs, linuxMemory, linuxPower, linuxSecondsSinceInput, linuxUptimeSecs } from "./src/probe/linux.js";
 import { deriveIdle, insideWindow } from "./src/probe/idle-rule.js";
+import { loadFacts, type Facts } from "./src/probe/facts.js";
 import { macosConsoleOwner, macosCpu, macosGpu, macosHidIdle, macosMemory, macosPower, macosSecondsSinceInput } from "./src/probe/macos.js";
 
 export { loadConfig };
-
-type Facts = Partial<{
-  secondsSinceInput: number;
-  // Simulates a failed user-activity reader: the probe reports activity as
-  // unknown (never idle) with this cause instead of reading live input state.
-  userActivityError: string;
-  // Simulates a host where the login query ran and found no local session
-  // of class user (remote sessions excluded): idle when on AC, battery above
-  // threshold, inside the window. Requires an explicit secondsSinceInput
-  // fact (combine the two in every scenario); without it the probe exits 1.
-  // A failed query is userActivityError instead (never idle). The live
-  // manager hint failure fallback (/proc/uptime) is covered by the loginctl
-  // test double, not by a fact.
-  noLocalUserSession: boolean;
-  // Fixture override for every sysfs path (power_supply, drm): a scenario
-  // may point it at a committed fixture tree, as an absolute path.
-  sysfsRoot: string;
-  acPower: boolean;
-  batteryPercent: number | null;
-  cpuCores: number;
-  cpuLoad1m: number;
-  memoryTotalMb: number;
-  memoryFreeMb: number;
-  gpuPresent: boolean;
-  gpuName: string | null;
-  gpuFreeMb: number | null;
-  localModelsReachable: boolean;
-  localModels: string[];
-  hostAlias: string;
-  timestamp: string;
-  policyAllowedWindowStart: string;
-  policyAllowedWindowEnd: string;
-}>;
 
 async function queryLocalModels(
   baseUrl: string,
@@ -98,21 +65,13 @@ async function main(): Promise<void> {
 
   let facts: Facts = {};
   if (factsPath) {
-    facts = readJson<Facts>(factsPath);
+    facts = loadFacts(factsPath);
   } else if (scenario) {
-    facts = readJson<Facts>(configPath("scenarios", `${scenario}.json`));
+    facts = loadFacts(configPath("scenarios", `${scenario}.json`));
   }
 
   const cfg = loadConfig();
-  let sysfsRoot = cfg.sysfsRoot;
-  if (facts.sysfsRoot !== undefined) {
-    sysfsRoot = facts.sysfsRoot;
-    // loadConfig already asserted the config root on Linux; a facts
-    // override gets the same rule with the matching label.
-    if (process.platform === "linux") {
-      assertSysfsRoot(sysfsRoot, "facts: invalid sysfsRoot");
-    }
-  }
+  const sysfsRoot = facts.sysfsRoot ?? cfg.sysfsRoot;
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();
   const timestamp = facts.timestamp ?? now.toISOString();
@@ -139,13 +98,10 @@ async function main(): Promise<void> {
 
   let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
-  if (facts.noLocalUserSession === false) {
-    throw new Error("noLocalUserSession must be true or absent");
-  }
   let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
   if (loggedOut && facts.secondsSinceInput === undefined) {
-    throw new Error("noLocalUserSession needs secondsSinceInput");
+    throw new Error(`facts ${factsPath ?? scenario ?? "facts"}: secondsSinceInput: required with noLocalUserSession`);
   }
   let powerUnknown = false;
   let powerCause = "";

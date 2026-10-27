@@ -1,0 +1,9 @@
+{
+  "ledgerPath": "logs/usage-ledger.jsonl",
+  "statePath": "logs/budget-state.json",
+  "escalationLogPath": "logs/budget-escalations.log",
+  "dayCapUsd": 12,
+  "totalCapUsd": 140,
+  "nvidiaDailyRequestLimit": 1000,
+  "nvidiaProviderId": "nvidia-build"
+}

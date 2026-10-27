@@ -1,12 +1,15 @@
 // Pure adapter decisions, part 1 (design sections 3.1 and 3.2): the
 // metadata binding, the request digest and the session.new parameters.
 import { createHash } from "node:crypto";
+import { ClientError } from "@pohunek/sdk";
 import type {
   HostCapabilities,
   SessionInfo,
   SessionNewParams,
   SessionNewResult,
+  SessionWaitTurnResult,
 } from "@pohunek/sdk";
+import { PortRejectedError, PortUnreachableError } from "../port.js";
 import type { StartRequest, TerminalState } from "../port.js";
 import type { PohunekAdapterConfig } from "./config.js";
 
@@ -123,10 +126,7 @@ export type LookupDecision =
   | { kind: "void"; session: SessionInfo }
   | { kind: "reject"; code: "request-conflict" | "request-duplicated" };
 
-export function lookupDecision(
-  bound: readonly SessionInfo[],
-  digest: string,
-): LookupDecision {
+export function lookupDecision(bound: readonly SessionInfo[], digest: string): LookupDecision {
   if (bound.length >= 2) {
     return { kind: "reject", code: "request-duplicated" };
   }
@@ -191,3 +191,181 @@ export type WaitTerminal = {
   stop: boolean;
 };
 export type WaitDecision = WaitRunning | WaitTerminal;
+
+const TERMINAL_DETAILS = new Set([
+  "exited 0",
+  "session failed",
+  "session stopped",
+  "turn completed",
+  "agent_blocked",
+  "approval_required",
+  "idle after turn",
+  "agent blocked",
+  "session missing",
+]);
+
+function exitedDetail(code: number | undefined): string {
+  if (code === 0) {
+    return "exited 0";
+  }
+  return WAIT_DETAILS.exited(code);
+}
+
+export function waitDecision(
+  id: string,
+  r: SessionWaitTurnResult,
+  info: SessionInfo,
+): WaitDecision {
+  const outcome = info.metadata?.[MOC_METADATA.outcome];
+  const outcomeDetail = info.metadata?.[MOC_METADATA.outcomeDetail];
+  if (
+    (outcome === "finished" || outcome === "failed" || outcome === "lost") &&
+    typeof outcomeDetail === "string" &&
+    TERMINAL_DETAILS.has(outcomeDetail)
+  ) {
+    const live = info.state === "starting" || info.state === "running";
+    return { kind: "terminal", state: outcome, detail: outcomeDetail, mark: false, stop: live };
+  }
+  if (info.state === "done" && info.exit_code === 0) {
+    return { kind: "terminal", state: "finished", detail: "exited 0", mark: false, stop: false };
+  }
+  if (info.state === "done") {
+    return {
+      kind: "terminal",
+      state: "failed",
+      detail: exitedDetail(info.exit_code),
+      mark: false,
+      stop: false,
+    };
+  }
+  if (info.state === "failed") {
+    return {
+      kind: "terminal",
+      state: "failed",
+      detail: WAIT_DETAILS.sessionFailed,
+      mark: false,
+      stop: false,
+    };
+  }
+  if (info.state === "stopped") {
+    return {
+      kind: "terminal",
+      state: "cancelled",
+      detail: WAIT_DETAILS.sessionStopped,
+      mark: false,
+      stop: false,
+    };
+  }
+  if (r.reason === "event" && r.event?.session_id === id) {
+    if (r.event.kind === "turn_completed") {
+      return {
+        kind: "terminal",
+        state: "finished",
+        detail: WAIT_DETAILS.turnCompleted,
+        mark: true,
+        stop: true,
+      };
+    }
+    if (r.event.kind === "agent_blocked" || r.event.kind === "approval_required") {
+      return {
+        kind: "terminal",
+        state: "failed",
+        detail: r.event.kind,
+        mark: true,
+        stop: true,
+      };
+    }
+  }
+  if (
+    info.runtime?.state === "lost" ||
+    info.runtime?.state === "conflict" ||
+    info.runtime?.state === "incompatible"
+  ) {
+    return {
+      kind: "terminal",
+      state: "lost",
+      detail: `runtime ${info.runtime.state}`,
+      mark: true,
+      stop: true,
+    };
+  }
+  const progress = r.progress.find((entry) => entry.session_id === id);
+  if (
+    r.reason === "timeout" &&
+    progress?.activity === "idle" &&
+    progress.turn_started_at !== undefined
+  ) {
+    return {
+      kind: "terminal",
+      state: "finished",
+      detail: WAIT_DETAILS.idleAfterTurn,
+      mark: true,
+      stop: true,
+    };
+  }
+  if (r.reason === "timeout" && progress?.activity === "blocked") {
+    return {
+      kind: "terminal",
+      state: "failed",
+      detail: WAIT_DETAILS.agentBlocked,
+      mark: true,
+      stop: true,
+    };
+  }
+  return { kind: "running", state: info.state === "starting" ? "starting" : "running" };
+}
+
+const KEBAB_PATTERN = /^[a-z0-9]+(_[a-z0-9]+)*$/;
+
+export function kebabCode(code: string): string {
+  if (KEBAB_PATTERN.test(code)) {
+    return code.replaceAll("_", "-");
+  }
+  return "daemon-error";
+}
+
+const UNREACHABLE_KINDS: ReadonlySet<string> = new Set([
+  "daemonUnreachable",
+  "hostUnreachable",
+  "remoteDaemonUnavailable",
+  "requestTimeout",
+  "sessionStopOutcomeUnknown",
+  "io",
+  "framing",
+]);
+
+const REJECTED_KINDS: ReadonlySet<string> = new Set([
+  "protocol",
+  "remoteProtocol",
+  "versionMismatch",
+  "daemonProtocolTooOld",
+  "versionTranslation",
+  "json",
+  "inputWaitContract",
+]);
+
+export function portErrorOf(
+  error: unknown,
+  alias: string,
+): PortUnreachableError | PortRejectedError | null {
+  if (!(error instanceof ClientError)) {
+    return null;
+  }
+  if (UNREACHABLE_KINDS.has(error.kind)) {
+    return new PortUnreachableError(`${alias}: ${error.code}`);
+  }
+  if (REJECTED_KINDS.has(error.kind)) {
+    return new PortRejectedError(kebabCode(error.code));
+  }
+  return null;
+}
+
+export function isSessionNotFound(error: unknown): boolean {
+  if (!(error instanceof ClientError)) {
+    return false;
+  }
+  if (error.kind !== "protocol" && error.kind !== "remoteProtocol") {
+    return false;
+  }
+  return error.code === "session_not_found";
+}

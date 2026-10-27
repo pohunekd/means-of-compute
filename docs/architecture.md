@@ -28,6 +28,26 @@ README.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
 
+## Placement
+
+`place(item, hosts, running, weights)` in `src/placement/place.ts` is a pure
+function: no clock, no I/O. It reads idleness and the policy window from the
+probe facts, counts items with `status: "running"` on each host alias for
+the agent limit, and returns a `PlacementDecision` validated against its
+contract before use.
+
+Exclusions apply in order, each with its own reason: not idle (`excluded:
+not idle (<idleReason>)`), outside the policy window, or at the agent limit
+(`excluded: at agent limit (<n>/<max>)`). Eligible hosts score
+`round4(w.cpu * cpuFree + w.memory * memFree + w.gpu * gpuFree)` with weights
+from `config/placement.json` (validated at load: finite, 0..1, summing to 1).
+The winner has the highest score; ties break on lower CPU load, then on alias
+order. When every host is excluded the decision carries
+`chosenHostAlias: null`. The `place` script (`src/placement/cli.ts`) reads
+`--item`, `--hosts`, and `--running` through `src/fs/input.ts`, validates
+them against contracts-v1, and exits 0 on a chosen host, 3 on no eligible
+host, 2 on any input or config error.
+
 ## Boundaries
 
 - `DispatcherPort` is the only seam to the session daemon. Its adapter uses

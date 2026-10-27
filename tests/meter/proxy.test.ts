@@ -344,6 +344,43 @@ test("first-byte timeout is billed with null counts", async () => {
   );
 });
 
+test("stream 200 without usage is billed with null counts", async () => {
+  await withMeter("tests/meter/recordings/stream-no-usage.json", async ({ meter, tokenFor, logPath }) => {
+    const { requestId } = await openBoundGrant(meter);
+    const resp = await post(meter, tokenFor(requestId), chatBody());
+    expect(resp.status).toBe(200);
+    await resp.text();
+    const lines = await readLogLines(logPath);
+    const end = JSON.parse(
+      lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
+    ) as Record<string, unknown>;
+    expect(end["outcome"]).toBe("no-usage");
+    expect(end["billed"]).toBe(true);
+    expect(end["inputTokens"]).toBeNull();
+    expect(end["outputTokens"]).toBeNull();
+  });
+});
+
+test("only config timeouts apply, never the descriptor timeout", async () => {
+  const source = await Bun.file("src/meter/proxy.ts").text();
+  expect(source.includes("descriptor.timeoutMs")).toBe(false);
+  await withMeter(
+    "tests/meter/recordings/stream-ok.json",
+    async ({ meter, tokenFor, logPath }) => {
+      const { requestId } = await openBoundGrant(meter);
+      const resp = await post(meter, tokenFor(requestId), chatBody());
+      expect(resp.status).toBe(200);
+      await resp.text();
+      const lines = await readLogLines(logPath);
+      const end = JSON.parse(
+        lines.find((l) => l.includes('"kind":"call-end"')) ?? "{}",
+      ) as Record<string, unknown>;
+      expect(end["outcome"]).toBe("ok");
+    },
+    { firstByteTimeoutMs: 60000, idleTimeoutMs: 60000, totalTimeoutMs: 60000 },
+  );
+});
+
 test("idle timeout aborts a slow stream", async () => {
   await withMeter(
     "tests/meter/recordings/stream-slow-chunks.json",

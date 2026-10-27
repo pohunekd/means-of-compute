@@ -349,11 +349,11 @@ export async function openUsageAppender(
       try {
         await handle.write(`${JSON.stringify(record)}\n`);
         await handle.datasync();
+        applyRecord(mutable, record, path, 0);
       } catch (error: unknown) {
         failLatch(error);
         throw new MeterLogError(`Meter usage log ${path}: append failed`);
       }
-      applyRecord(mutable, record, path, 0);
     });
     // A caller awaiting one step must not observe another step's rejection.
     chain = step.catch(() => {});
@@ -378,12 +378,12 @@ export async function openUsageAppender(
         try {
           await handle.write(`${JSON.stringify(record)}\n`);
           await handle.datasync();
+          applyRecord(mutable, record, path, 0);
         } catch (error: unknown) {
           failLatch(error);
           verdict = "meter-unavailable";
           throw new MeterLogError(`Meter usage log ${path}: append failed`);
         }
-        applyRecord(mutable, record, path, 0);
       });
       chain = step.catch(() => {});
       await step.catch(() => {});

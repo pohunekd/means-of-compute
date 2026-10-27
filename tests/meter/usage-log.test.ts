@@ -185,7 +185,7 @@ test(
 );
 
 test(
-  "write-ahead: append fault on call-start latches the meter",
+  "write-ahead: a failing fsync leaves the in-memory index unchanged",
   withDir(async (dir) => {
     const path = join(dir, "usage.jsonl");
     await writeLog(path, [openGrant()]);
@@ -193,11 +193,31 @@ test(
     const index = await replayUsageLog(path, "repair", () => {});
     const appender = await openUsageAppender(path, index, (e) => events.push(e));
     // Force the append to fail by closing the handle first; the write then
-    // rejects and the failure latch must engage.
+    // rejects and the failure latch must engage. The in-memory index must
+    // not contain the failed record: applyRecord runs only after the fsync.
     await appender.close();
     const verdict = await appender.appendGuarded(start(), () => null);
     expect(verdict).toBe("meter-unavailable");
     expect(appender.failed).toBe(true);
+    expect(index.starts.has("call-1")).toBe(false);
+    const replayed = await replayUsageLog(path, "read-only", () => {});
+    expect(replayed.starts.has("call-1")).toBe(false);
     expect(events.some((e) => e.event === "usage-log-failed")).toBe(true);
   }),
 );
+
+test("write-ahead: the fsync precedes the in-memory apply in source order", async () => {
+  // A failing fsync must not leave an applied-but-undurable record behind.
+  // The order is structural, so assert it structurally: every handle.write
+  // in the appender is followed by a datasync before the next applyRecord.
+  const source = await Bun.file("src/meter/usage-log.ts").text();
+  const writes = [...source.matchAll(/await handle\.write\([^;]+;/g)];
+  expect(writes.length).toBe(2);
+  for (const write of writes) {
+    const rest = source.slice((write.index ?? 0) + write[0].length);
+    const syncAt = rest.indexOf("await handle.datasync();");
+    const applyAt = rest.indexOf("applyRecord(mutable, record, path, 0);");
+    expect(syncAt).toBeGreaterThanOrEqual(0);
+    expect(applyAt).toBeGreaterThan(syncAt);
+  }
+});

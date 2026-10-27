@@ -129,15 +129,19 @@ function assertSysfsRoot(root: unknown, label: string): void {
   if (typeof root !== "string" || !root.startsWith("/")) {
     throw new Error(`${label}: ${String(root)}: not an absolute path`);
   }
-  let stat;
+  // A valid sysfs tree always has class/ (Linux hosts and the committed
+  // fixtures alike); an existing directory without it is not sysfs.
+  const classDir = `${root}/class`;
   try {
-    stat = lstatSync(root);
+    if (!lstatSync(classDir).isDirectory()) {
+      throw new Error(`${label}: ${root}: no class directory`);
+    }
   } catch (e) {
+    if (e instanceof Error && e.message.startsWith(`${label}:`)) throw e;
     throw new Error(`${label}: ${root}: ${(e as NodeJS.ErrnoException).code ?? "unknown"}`, {
       cause: e,
     });
   }
-  if (!stat.isDirectory()) throw new Error(`${label}: ${root}: not a directory`);
 }
 
 function loadHostAlias(hostnameVal: string): string {

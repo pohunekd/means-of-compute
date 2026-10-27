@@ -507,6 +507,33 @@ test("D3: spend unknown escalates again on the next UTC day", async () => {
   }
 });
 
+test("D3: a read-only state file exits 2 with nothing written", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
+  try {
+    const statePath = join(dir, "state.json");
+    const logPath = join(dir, "escalations.log");
+    await Bun.write(statePath, '{"escalated":[]}');
+    await chmod(statePath, 0o444);
+    const refused = refusedDecision("daily cap reached", 12, 12, 5);
+    let message = "";
+    try {
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T12:00:00.000Z"),
+      });
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      await chmod(statePath, 0o600);
+    }
+    expect(message).toContain("not writable");
+    expect(await Bun.file(logPath).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("D3: a directory as state exits 2 before any log line is written", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
   try {

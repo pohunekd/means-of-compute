@@ -778,6 +778,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         sessionId: handle.sessionId,
         worktree: handle.worktree,
         baseCommit: handle.baseCommit,
+        unreachableCount: 0,
         lastSeenAt: deps.now().toISOString(),
         revision: provisional.revision + 1,
       };

@@ -18,7 +18,9 @@ import {
   PortUnreachableError,
   type ModelSelection,
   type SessionHandle,
+  type SessionRef,
   type StartRequest,
+  type WaitResult,
 } from "../../src/dispatcher/port.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import { readLedger } from "../../src/ledger/read.js";
@@ -297,6 +299,99 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
     const next = await last;
     startedOf(next);
     expect(next.request.requestId).toBe("item-a:1");
+  });
+});
+
+test("K4b: two unreachable starts then a settle reset the count", async () => {
+  await withHarness(async ({ control, ledgerPath, registryPath, config }) => {
+    const plain = createDispatcher({
+      port: control.port,
+      budget: gateUnused(),
+      config,
+      ledgerPath,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    control.setUnreachable("laptop-a", true);
+    for (let round = 0; round < 2; round += 1) {
+      let error: unknown;
+      try {
+        await plain.start(
+          item("item-a") as never,
+          decision("item-a", "laptop-a") as never,
+          MODEL,
+          "Do the work.",
+        );
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(PortUnreachableError);
+    }
+    control.setUnreachable("laptop-a", false);
+    const outcome = await plain.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    startedOf(outcome);
+    const settled = await readRegistry(registryPath);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.unreachableCount).toBe(0);
+    // One wait miss leaves the settled entry non-terminal with count 1.
+    let calls = 0;
+    let releaseSecond!: (value: WaitResult) => void;
+    const secondGate = new Promise<WaitResult>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const flaky = {
+      ...control.port,
+      wait(
+        ref: SessionRef,
+        timeoutMs: number,
+        cursor: string | null,
+      ): ReturnType<typeof control.port.wait> {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.reject(new PortUnreachableError("host unreachable"));
+        }
+        if (calls === 2) {
+          return secondGate;
+        }
+        return control.port.wait(ref, timeoutMs, cursor);
+      },
+    };
+    const watcher = createDispatcher({
+      port: flaky,
+      budget: gateUnused(),
+      config,
+      ledgerPath,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const watching = watcher.watch(outcome.request.requestId);
+    let mid: Awaited<ReturnType<typeof readRegistry>> | null = null;
+    for (let poll = 0; poll < 200; poll += 1) {
+      const current = await readRegistry(registryPath);
+      if (current[0]?.unreachableCount === 1) {
+        mid = current;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(mid?.[0]?.unreachableCount).toBe(1);
+    expect(mid?.[0]?.terminal).toBeNull();
+    releaseSecond({
+      state: "finished",
+      sessionId: outcome.handle.sessionId,
+      cursor: null,
+      usage: null,
+      detail: "done",
+    });
+    const finished = await watching;
+    expect(finished.result.state).toBe("finished");
   });
 });
 

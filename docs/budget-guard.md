@@ -57,8 +57,10 @@ bun run budget:check --spend 3.20 --day-cap 12 --total-cap 140   # admit (exit 0
 bun run budget:check --spend 12.00 --day-cap 12 --total-cap 140  # refuse (exit 3)
 ```
 
-Exits 0 on admit, 3 on refuse, 2 on a config or data error. The `--spend` /
-`--day-cap` / `--total-cap` flags are a test override that injects totals into
-the same decision function; `--day-cap` or `--total-cap` without `--spend`
-exits 2, and the override path never writes escalation state or the log — it
-only prints `would escalate: <event key>` on stderr.
+Exits 0 on admit, 3 on refuse, 2 on a config or data error. `MOC_BUDGET_NOW`
+is test-only: when set, it must be an ISO-8601 UTC timestamp and pins the
+evaluation time the CLI uses for "today"; an invalid value exits 2. The
+`--spend` / `--day-cap` / `--total-cap` flags are a test override that
+injects totals into the same decision function; `--day-cap` or `--total-cap`
+without `--spend` exits 2, and the override path never writes escalation
+state or the log — it only prints `would escalate: <event key>` on stderr.

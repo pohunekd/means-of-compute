@@ -439,7 +439,7 @@ interface SpawnResult {
 
 interface CliSandbox {
   readonly dir: string;
-  run(args: readonly string[]): Promise<SpawnResult>;
+  run(args: readonly string[], env?: Record<string, string>): Promise<SpawnResult>;
   writeEntry(entry: UsageRecord): Promise<void>;
 }
 
@@ -465,11 +465,15 @@ async function makeCliSandbox(): Promise<CliSandbox> {
     await Bun.write(join(providersDir, name), await source.text());
   }
   const script = join(repoRoot, "src", "budget", "check.ts");
-  const run = async (args: readonly string[]): Promise<SpawnResult> => {
+  const run = async (
+    args: readonly string[],
+    extraEnv: Record<string, string> = {},
+  ): Promise<SpawnResult> => {
     const proc = Bun.spawn(["bun", script, ...args], {
       cwd: dir,
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env, ...extraEnv },
     });
     const [stdout, stderr, code] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -528,13 +532,25 @@ test("CLI: override refusal writes no state and prints would-escalate", async ()
   }
 });
 
+test("CLI: invalid MOC_BUDGET_NOW exits 2", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const result = await sandbox.run([], { MOC_BUDGET_NOW: "not-a-date" });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("MOC_BUDGET_NOW");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI: ledger over the daily cap refuses once per event", async () => {
   const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
   try {
     await sandbox.writeEntry(
       record({
         workItemId: "w1-over",
-        finishedAt: new Date().toISOString().replace(/\.\d+Z$/, ".000Z"),
+        finishedAt: `${day}T12:00:00.000Z`,
         tokens: [
           {
             provider: "meta-api",
@@ -547,7 +563,8 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
         ],
       }),
     );
-    const first = await sandbox.run([]);
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00.000Z` };
+    const first = await sandbox.run([], env);
     expect(first.code).toBe(3);
     expect(first.stdout).toContain("refused: daily cap reached");
     expect(first.stderr).toContain("budget escalation:");
@@ -555,7 +572,7 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
       .trim()
       .split("\n");
     expect(logLines).toHaveLength(1);
-    const second = await sandbox.run([]);
+    const second = await sandbox.run([], env);
     expect(second.code).toBe(3);
     expect(second.stderr).not.toContain("budget escalation:");
     const logAgain = (await Bun.file(join(sandbox.dir, "escalations.log")).text())

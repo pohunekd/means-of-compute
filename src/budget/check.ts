@@ -63,7 +63,33 @@ export function parseCliArgs(argv: string[]): CliArgs {
   return { spendTotal, dayCap, totalCap };
 }
 
+interface EvaluationClock {
+  readonly now: Date;
+}
+
+// Single evaluation-time reader for the CLI. MOC_BUDGET_NOW is test-only:
+// a fixed ISO-8601 UTC timestamp used to pin "today" in CLI tests. An
+// invalid value exits 2; when unset, the CLI uses the clock.
+export function readEvaluationTime(env: NodeJS.ProcessEnv = process.env): Date {
+  const raw = env.MOC_BUDGET_NOW;
+  if (raw === undefined) {
+    return new Date();
+  }
+  const at = Date.parse(raw);
+  if (Number.isNaN(at) || !/Z$/.test(raw) || new Date(at).toISOString() !== raw) {
+    throw new Error("budget:check: MOC_BUDGET_NOW must be an ISO-8601 UTC timestamp");
+  }
+  return new Date(at);
+}
+
 async function run(): Promise<number> {
+  let clock: EvaluationClock;
+  try {
+    clock = { now: readEvaluationTime() };
+  } catch (error: unknown) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 2;
+  }
   let parsed: CliArgs;
   try {
     parsed = parseCliArgs(Bun.argv);
@@ -107,7 +133,7 @@ async function run(): Promise<number> {
       );
     } else {
       const records = await readUsageLedger(config.ledgerPath);
-      const summary = summarizeSpend(records, pricing, config.nvidiaProviderId, new Date());
+      const summary = summarizeSpend(records, pricing, config.nvidiaProviderId, clock.now);
       decision = decideAdmission(summary, config, { route });
     }
   } catch (error: unknown) {
@@ -126,7 +152,7 @@ async function run(): Promise<number> {
       console.error(`budget:check: unknown refusal reason "${decision.reason}"`);
       return 2;
     }
-    process.stderr.write(`would escalate: ${eventKeyString(kind, new Date())}\n`);
+    process.stderr.write(`would escalate: ${eventKeyString(kind, clock.now)}\n`);
     console.log(
       `refused: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)})`,
     );
@@ -143,7 +169,7 @@ async function run(): Promise<number> {
     await maybeEscalate(decision, {
       statePath: ledgerStatePath,
       escalationLogPath: ledgerEscalationLogPath,
-      now: new Date(),
+      now: clock.now,
     });
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));

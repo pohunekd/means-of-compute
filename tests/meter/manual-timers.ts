@@ -50,10 +50,15 @@ export function createManualTimers(): ManualTimers {
     },
     advance(ms: number): void {
       const target = clock + ms;
+      clock = target;
+      // Fire every live timer with due <= target in (due, schedule)
+      // order, including timers scheduled while firing. A timer
+      // scheduled during a fire with a due at or before the target runs
+      // in a later pass of this loop.
       for (;;) {
         let next: Pending | null = null;
         for (const t of pending) {
-          if (t.settled || t.due <= clock || t.due > target) {
+          if (t.settled || t.due > target) {
             continue;
           }
           if (next === null || t.due < next.due || (t.due === next.due && t.seq < next.seq)) {
@@ -63,11 +68,9 @@ export function createManualTimers(): ManualTimers {
         if (next === null) {
           break;
         }
-        clock = next.due;
         next.settled = true;
         next.fire();
       }
-      clock = target;
     },
     waitForTimer(ms: number): Promise<void> {
       if (pending.some((t) => !t.settled && t.duration === ms)) {

@@ -96,8 +96,6 @@ export class MeterLogError extends Error {
   }
 }
 
-export type GuardFailure = "grant-closed" | "session-concurrency" | "meter-unavailable";
-
 export interface UsageAppender {
   appendGuarded<F extends string>(
     record: UsageLogRecord,
@@ -161,23 +159,11 @@ function checkAt(path: string, line: number, at: string): void {
 // applies the record to the index. Replay calls both; the append chain
 // calls checkRecord before the write and commitRecord after the datasync,
 // so a record can never become durable that replay would reject.
-function checkRecord(
-  record: UsageLogRecord,
-  seen: {
-    readonly grantOf: (requestId: string) => GrantState | undefined;
-    readonly startOf: (callId: string) => CallStartRecord | undefined;
-    readonly endOf: (callId: string) => CallEndRecord | undefined;
-    readonly sessionGrantOf: (sessionId: string) => string | undefined;
-    readonly hasStart: (callId: string) => boolean;
-    readonly hasEnd: (callId: string) => boolean;
-  },
-  path: string,
-  line: number,
-): void {
+function checkRecord(index: UsageIndex, record: UsageLogRecord, path: string, line: number): void {
   checkAt(path, line, record.at);
   switch (record.kind) {
     case "grant-open": {
-      const existing = seen.grantOf(record.requestId);
+      const existing = index.grants.get(record.requestId);
       if (existing !== undefined) {
         const first = existing.open;
         if (
@@ -192,7 +178,7 @@ function checkRecord(
       break;
     }
     case "grant-bind": {
-      const grant = seen.grantOf(record.requestId);
+      const grant = index.grants.get(record.requestId);
       if (grant === undefined) {
         fail(path, line, "grant-bind without an earlier grant-open");
       }
@@ -202,14 +188,14 @@ function checkRecord(
       if (grant.sessionId !== null) {
         fail(path, line, "grant already bound to another session");
       }
-      const other = seen.sessionGrantOf(record.sessionId);
+      const other = index.requestBySession.get(record.sessionId);
       if (other !== undefined && other !== record.requestId) {
         fail(path, line, "session already bound to another grant");
       }
       break;
     }
     case "grant-close": {
-      const grant = seen.grantOf(record.requestId);
+      const grant = index.grants.get(record.requestId);
       if (grant === undefined) {
         fail(path, line, "grant-close without an earlier grant-open");
       }
@@ -219,14 +205,14 @@ function checkRecord(
       break;
     }
     case "call-start": {
-      const grant = seen.grantOf(record.requestId);
+      const grant = index.grants.get(record.requestId);
       if (grant === undefined) {
         fail(path, line, "call-start without an earlier grant-open");
       }
       if (grant.closed) {
         fail(path, line, "call-start after grant-close");
       }
-      if (seen.hasStart(record.callId)) {
+      if (index.starts.has(record.callId)) {
         fail(path, line, "duplicate callId");
       }
       if (record.providerId !== grant.open.providerId || record.model !== grant.open.model) {
@@ -235,11 +221,11 @@ function checkRecord(
       break;
     }
     case "call-end": {
-      const start = seen.startOf(record.callId);
+      const start = index.starts.get(record.callId);
       if (start === undefined || start.requestId !== record.requestId) {
         fail(path, line, "call-end without a matching call-start");
       }
-      if (seen.hasEnd(record.callId)) {
+      if (index.ends.has(record.callId)) {
         fail(path, line, "duplicate call-end");
       }
       if (billedForOutcome(record.outcome) !== record.billed) {
@@ -289,29 +275,18 @@ function commitRecord(mutable: MutableIndex, record: UsageLogRecord): void {
   }
 }
 
-function indexView(mutable: MutableIndex): {
-  readonly grantOf: (requestId: string) => GrantState | undefined;
-  readonly startOf: (callId: string) => CallStartRecord | undefined;
-  readonly endOf: (callId: string) => CallEndRecord | undefined;
-  readonly sessionGrantOf: (sessionId: string) => string | undefined;
-  readonly hasStart: (callId: string) => boolean;
-  readonly hasEnd: (callId: string) => boolean;
+// L5: the torn-tail cut and the dropped count are in bytes.
+function readTornTail(text: string): {
+  readonly body: string;
+  readonly dropped: number;
+  readonly cutBytes: number;
 } {
-  return {
-    grantOf: (requestId) => mutable.grants.get(requestId),
-    startOf: (callId) => mutable.starts.get(callId),
-    endOf: (callId) => mutable.ends.get(callId),
-    sessionGrantOf: (sessionId) => mutable.requestBySession.get(sessionId),
-    hasStart: (callId) => mutable.starts.has(callId),
-    hasEnd: (callId) => mutable.ends.has(callId),
-  };
-}
-function readTornTail(text: string): { readonly body: string; readonly dropped: number } {
   if (text === "" || text.endsWith("\n")) {
-    return { body: text, dropped: 0 };
+    return { body: text, dropped: 0, cutBytes: Buffer.byteLength(text, "utf8") };
   }
-  const cut = text.lastIndexOf("\n") + 1;
-  return { body: text.slice(0, cut), dropped: text.length - cut };
+  const body = text.slice(0, text.lastIndexOf("\n") + 1);
+  const cutBytes = Buffer.byteLength(body, "utf8");
+  return { body, dropped: Buffer.byteLength(text, "utf8") - cutBytes, cutBytes };
 }
 
 async function readLogBody(
@@ -325,12 +300,12 @@ async function readLogBody(
   }
   const file = Bun.file(path);
   const text = await file.text();
-  const { body, dropped } = readTornTail(text);
+  const { body, dropped, cutBytes } = readTornTail(text);
   if (dropped > 0) {
     if (mode === "repair") {
       const handle = await open(path, "r+");
       try {
-        await handle.truncate(body.length);
+        await handle.truncate(cutBytes);
         await handle.sync();
       } finally {
         await handle.close();
@@ -394,7 +369,7 @@ export async function replayUsageLog(
       fail(path, lineNo, "line does not match the usage-log schema");
     }
     const record = parsed as UsageLogRecord;
-    checkRecord(record, indexView(mutable), path, lineNo);
+    checkRecord(toUsageIndex(mutable), record, path, lineNo);
     commitRecord(mutable, record);
   }
   return toUsageIndex(mutable);
@@ -443,7 +418,7 @@ export async function openUsageAppender(
       return verdict;
     }
     try {
-      checkRecord(record, indexView(mutable), path, 0);
+      checkRecord(index, record, path, 0);
     } catch (error: unknown) {
       if (error instanceof MeterLogError) {
         log({ level: "error", event: "usage-log-rejected", requestId });

@@ -37,9 +37,27 @@ test("choices usage alone leaves nothing seen", () => {
   expect(tap.end().seen).toBe(false);
 });
 
-test("a line over the scan limit is discarded with a later usage line", () => {
-  const tap = createSseUsageTap(16);
-  tap.push(chunk('data: {"usage": {"prompt_tokens": 5, "completion_tokens": 5}}\n\n'));
+test("an overflowed line makes the whole stream unseen", () => {
+  const tap = createSseUsageTap(1024);
+  tap.push(chunk(`data: ${"x".repeat(2000)}\n`));
+  tap.push(chunk('data: {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}\n\n'));
+  expect(tap.end().seen).toBe(false);
+});
+
+test("an earlier overflow nulls a later usage", () => {
+  const tap = createSseUsageTap(1024);
+  tap.push(chunk('data: {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}\n\n'));
+  tap.push(chunk(`data: ${"x".repeat(2000)}\n`));
+  tap.push(chunk('data: {"usage": {"prompt_tokens": 5, "completion_tokens": 4}}\n\n'));
+  expect(tap.end().seen).toBe(false);
+});
+
+test("the limit counts bytes, not characters", () => {
+  const tap = createSseUsageTap(10);
+  // "data: €€€€\n" is 6 + 12 + 1 = 19 bytes but 11 UTF-16 units: a
+  // character-counting tap would stay under a limit of 10 and see the
+  // later usage, a byte-counting tap overflows and stays unseen.
+  tap.push(chunk("data: €€€€\n"));
   tap.push(chunk('data: {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}\n\n'));
   expect(tap.end().seen).toBe(false);
 });

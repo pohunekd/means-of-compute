@@ -64,7 +64,7 @@ export function verifyBearer(secret: Buffer, header: string | null): string | nu
   } catch {
     return null;
   }
-  if (given.length !== 32) {
+  if (given.length !== 32 || given.toString("base64url") !== macText) {
     return null;
   }
   const expected = macFor(secret, requestId);

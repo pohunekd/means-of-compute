@@ -39,8 +39,8 @@ export class MeterGrantError extends Error {
 }
 
 export class MeterUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "MeterUnavailableError";
   }
 }
@@ -211,7 +211,10 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     }
     // F5: the open-vs-reopen decision happens inside the chain step, not
     // here — a pre-check would race with a concurrent opener.
-    const openVerdict = await appender.appendGuarded(
+    // S6: a checkRecord rejection throws MeterUnavailableError with cause.
+    let openVerdict: "request-conflict" | "grant-closed" | "meter-unavailable" | null;
+    try {
+      openVerdict = await appender.appendGuarded(
       {
         kind: "grant-open",
         at: now().toISOString(),
@@ -239,7 +242,10 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
         }
         return null;
       },
-    );
+      );
+    } catch (error: unknown) {
+      throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });
+    }
     // F5: a byte-identical reopen settles nothing and logs grant-opened
     // again; a conflicting reopen throws request-conflict.
     checkFailed(appender);
@@ -251,6 +257,9 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     }
     if (openVerdict === "grant-closed") {
       throw new MeterGrantError("grant-closed", "meter: grant is closed");
+    }
+    if (openVerdict === "meter-unavailable") {
+      throw new MeterUnavailableError("meter: usage log failed");
     }
     log({
       level: "info",
@@ -265,8 +274,16 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   async function bindGrant(requestId: string, sessionId: string): Promise<void> {
     checkFailed(appender);
     // F3: the bind decision happens inside the chain step, not here — a
-    // pre-check would race with a concurrent binder.
-    const bindVerdict = await appender.appendGuarded(
+    // pre-check would race with a concurrent binder. S6: a checkRecord
+    // rejection throws MeterUnavailableError with cause.
+    let bindVerdict:
+      | "unknown-request"
+      | "already-bound"
+      | "session-conflict"
+      | "meter-unavailable"
+      | null;
+    try {
+      bindVerdict = await appender.appendGuarded(
       {
         kind: "grant-bind",
         at: now().toISOString(),
@@ -290,10 +307,16 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
         }
         return null;
       },
-    );
+      );
+    } catch (error: unknown) {
+      throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });
+    }
     checkFailed(appender);
     if (bindVerdict === "already-bound") {
       return;
+    }
+    if (bindVerdict === "meter-unavailable") {
+      throw new MeterUnavailableError("meter: usage log failed");
     }
     if (bindVerdict === "unknown-request") {
       throw new MeterGrantError("unknown-request", "meter: unknown grant");
@@ -325,15 +348,20 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     if (grant === undefined) {
       return null;
     }
-    const closeVerdict = await appender.appendGuarded(
-      {
-        kind: "grant-close",
-        at: now().toISOString(),
-        requestId,
-        state,
-      },
-      (guarded) => (guarded.grants.get(requestId)?.closed === true ? "already-closed" : null),
-    );
+    let closeVerdict: "already-closed" | "meter-unavailable" | null;
+    try {
+      closeVerdict = await appender.appendGuarded(
+        {
+          kind: "grant-close",
+          at: now().toISOString(),
+          requestId,
+          state,
+        },
+        (guarded) => (guarded.grants.get(requestId)?.closed === true ? "already-closed" : null),
+      );
+    } catch (error: unknown) {
+      throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });
+    }
     if (closeVerdict === "meter-unavailable") {
       throw new MeterUnavailableError("meter: usage log failed");
     }

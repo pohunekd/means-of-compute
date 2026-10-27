@@ -108,6 +108,160 @@ function withDir(run: (dir: string) => Promise<void>): () => Promise<void> {
   };
 }
 
+// One row per 4.3 predicate: replay must reject with MeterLogError
+// naming the line and the given text. Rows M23 and M26 kill their
+// mutations at the round-2 head.
+const replayRows: ReadonlyArray<{
+  readonly name: string;
+  readonly records: () => UsageLogRecord[];
+  readonly tail: string;
+  readonly line: number;
+  readonly text: string;
+}> = [
+  {
+    name: "not JSON",
+    records: () => [openGrant()],
+    tail: "{bad\n",
+    line: 2,
+    text: "line is not valid JSON",
+  },
+  {
+    name: "schema",
+    records: () => [openGrant(), start({ stream: "yes" as unknown as boolean })],
+    tail: "",
+    line: 2,
+    text: "does not match the usage-log schema",
+  },
+  {
+    name: "bad at",
+    records: () => [openGrant({ at: "2026-10-27T10:00:00Z" })],
+    tail: "",
+    line: 1,
+    text: "invalid at timestamp",
+  },
+  {
+    name: "open conflict",
+    records: () => [openGrant(), openGrant({ hostAlias: "laptop-b", at: at(6) })],
+    tail: "",
+    line: 2,
+    text: "grant-open conflicts",
+  },
+  {
+    name: "bind without open",
+    records: () => [bind()],
+    tail: "",
+    line: 1,
+    text: "grant-bind without an earlier grant-open",
+  },
+  {
+    name: "duplicate bind",
+    records: () => [openGrant(), bind(), bind({ at: at(6) })],
+    tail: "",
+    line: 3,
+    text: "duplicate grant-bind",
+  },
+  {
+    name: "grant bound twice",
+    records: () => [openGrant(), bind(), bind({ sessionId: "sess-2", at: at(6) })],
+    tail: "",
+    line: 3,
+    text: "grant already bound to another session",
+  },
+  {
+    name: "session on two grants",
+    records: () => [
+      openGrant(),
+      openGrant({ requestId: "w2-demo:0", workItemId: "w2-demo", at: at(6) }),
+      bind(),
+      bind({ requestId: "w2-demo:0", at: at(7) }),
+    ],
+    tail: "",
+    line: 4,
+    text: "session already bound to another grant",
+  },
+  {
+    name: "close without open",
+    records: () => [closeGrant()],
+    tail: "",
+    line: 1,
+    text: "grant-close without an earlier grant-open",
+  },
+  {
+    name: "duplicate close",
+    records: () => [openGrant(), closeGrant(), closeGrant({ at: at(6) })],
+    tail: "",
+    line: 3,
+    text: "duplicate grant-close",
+  },
+  {
+    name: "start without open",
+    records: () => [start()],
+    tail: "",
+    line: 1,
+    text: "call-start without an earlier grant-open",
+  },
+  {
+    name: "call-start after grant-close",
+    records: () => [openGrant(), closeGrant(), start()],
+    tail: "",
+    line: 3,
+    text: "call-start after grant-close",
+  },
+  {
+    name: "duplicate callId",
+    records: () => [openGrant(), start(), start({ at: at(6) })],
+    tail: "",
+    line: 3,
+    text: "duplicate callId",
+  },
+  {
+    name: "start provider differs",
+    records: () => [openGrant(), start({ providerId: "nvidia-build" })],
+    tail: "",
+    line: 2,
+    text: "provider or model differs",
+  },
+  {
+    name: "end without start",
+    records: () => [openGrant(), end()],
+    tail: "",
+    line: 2,
+    text: "call-end without a matching call-start",
+  },
+  {
+    name: "duplicate end",
+    records: () => [openGrant(), start(), end(), end({ at: at(6) })],
+    tail: "",
+    line: 4,
+    text: "duplicate call-end",
+  },
+  {
+    name: "billed mismatch",
+    records: () => [openGrant(), start(), end({ outcome: "upstream-status", billed: true })],
+    tail: "",
+    line: 3,
+    text: "billed flag does not match",
+  },
+];
+
+for (const row of replayRows) {
+  test(
+    `replay predicate ${row.name} fails with its line`,
+    withDir(async (dir) => {
+      const path = join(dir, "usage.jsonl");
+      await writeLog(path, row.records(), row.tail);
+      let message = "";
+      try {
+        await replayUsageLog(path, "read-only", () => {});
+      } catch (error: unknown) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain(`:${String(row.line)}:`);
+      expect(message).toContain(row.text);
+    }),
+  );
+}
+
 test(
   "replay accepts a valid sequence",
   withDir(async (dir) => {
@@ -118,21 +272,6 @@ test(
     expect(index.grants.get("w1-demo:0")?.sessionId).toBe("sess-1");
     expect(index.ends.has("call-1")).toBe(true);
     expect(events.length).toBe(0);
-  }),
-);
-
-test(
-  "conflicting grant-open fails with its line",
-  withDir(async (dir) => {
-    const path = join(dir, "usage.jsonl");
-    await writeLog(path, [openGrant(), openGrant({ model: "other-model", at: at(6) })]);
-    let message = "";
-    try {
-      await replayUsageLog(path, "read-only", () => {});
-    } catch (error: unknown) {
-      message = (error as Error).message;
-    }
-    expect(message).toContain(":2:");
   }),
 );
 
@@ -152,36 +291,29 @@ test(
 );
 
 test(
-  "call-end billed flag must match its outcome",
+  "torn tail after a non-ASCII session id is cut at the byte boundary",
   withDir(async (dir) => {
     const path = join(dir, "usage.jsonl");
-    await writeLog(path, [
-      openGrant(),
-      start(),
-      end({ outcome: "upstream-unreachable", billed: true }),
-    ]);
-    let message = "";
-    try {
-      await replayUsageLog(path, "read-only", () => {});
-    } catch (error: unknown) {
-      message = (error as Error).message;
-    }
-    expect(message).toContain(":3:");
-  }),
-);
-
-test(
-  "torn tail is truncated with one warn event",
-  withDir(async (dir) => {
-    const path = join(dir, "usage.jsonl");
-    await writeLog(path, [openGrant()], '{"kind":"grant-bin');
+    // L5: two complete lines, then a torn tail without a newline. The cut
+    // and the dropped count are in bytes, not UTF-16 units.
+    await writeLog(path, [openGrant(), bind({ sessionId: "séance-1" })], '{"kind":"call-st');
     const events: MeterLogEvent[] = [];
     const index = await replayUsageLog(path, "repair", (e) => events.push(e));
-    expect(index.grants.has("w1-demo:0")).toBe(true);
-    expect(events.length).toBe(1);
-    expect(events[0]?.event).toBe("usage-log-torn-tail");
+    expect(index.requestBySession.get("séance-1")).toBe("w1-demo:0");
+    const reread = await Bun.file(path).text();
+    const expected = [openGrant(), bind({ sessionId: "séance-1" })]
+      .map((r) => JSON.stringify(r))
+      .join("\n");
+    expect(reread).toBe(`${expected}\n`);
+    expect(reread.endsWith("\n")).toBe(true);
+    expect(Buffer.byteLength(reread, "utf8")).toBe(
+      Buffer.byteLength(`${expected}\n`, "utf8"),
+    );
+    const tail = '{"kind":"call-st';
+    const torn = events.find((e) => e.event === "usage-log-torn-tail");
+    expect(torn?.count).toBe(Buffer.byteLength(tail, "utf8"));
     const indexAgain = await replayUsageLog(path, "read-only", () => {});
-    expect(indexAgain.grants.has("w1-demo:0")).toBe(true);
+    expect(indexAgain.requestBySession.get("séance-1")).toBe("w1-demo:0");
   }),
 );
 
@@ -222,7 +354,7 @@ test("write-ahead: the fsync precedes the in-memory apply in source order", asyn
   const at = source.indexOf(marker);
   expect(at).toBeGreaterThanOrEqual(0);
   const body = source.slice(at);
-  const checkAt = body.indexOf("checkRecord(record, indexView(mutable), path, 0);");
+  const checkAt = body.indexOf("checkRecord(index, record, path, 0);");
   const writeAt = body.indexOf("await handle.write(");
   const syncAt = body.indexOf("await handle.datasync();");
   const commitAt = body.indexOf("commitRecord(mutable, record);");
@@ -230,4 +362,5 @@ test("write-ahead: the fsync precedes the in-memory apply in source order", asyn
   expect(writeAt).toBeGreaterThan(checkAt);
   expect(syncAt).toBeGreaterThan(writeAt);
   expect(commitAt).toBeGreaterThan(syncAt);
+  expect(source.match(/await handle\.write\(/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
 });

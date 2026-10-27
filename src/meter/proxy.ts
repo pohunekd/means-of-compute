@@ -127,9 +127,16 @@ export async function handleMeterRequest(
 ): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname !== "/v1/chat/completions") {
+    state.log({ level: "warn", event: "request-rejected", code: "not-found", status: 404 });
     return errorResponse("not-found", 404);
   }
   if (req.method !== "POST") {
+    state.log({
+      level: "warn",
+      event: "request-rejected",
+      code: "method-not-allowed",
+      status: 405,
+    });
     return errorResponse("method-not-allowed", 405);
   }
   const auth = authorize(state, index, req, remoteAddress);
@@ -187,6 +194,13 @@ export async function handleMeterRequest(
     return errorResponse("invalid-json", 400);
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    state.log({
+      level: "warn",
+      event: "request-rejected",
+      code: "invalid-body",
+      status: 400,
+      requestId: auth.requestId,
+    });
     return errorResponse("invalid-body", 400);
   }
   const fields = body as Record<string, unknown>;
@@ -197,6 +211,13 @@ export async function handleMeterRequest(
         fields["stream_options"] === null ||
         Array.isArray(fields["stream_options"])))
   ) {
+    state.log({
+      level: "warn",
+      event: "request-rejected",
+      code: "invalid-body",
+      status: 400,
+      requestId: auth.requestId,
+    });
     return errorResponse("invalid-body", 400);
   }
   if (fields["model"] !== state.config.sessionModelId) {
@@ -242,19 +263,21 @@ export async function handleMeterRequest(
     model: descriptor.model,
     stream,
   };
-  const slot: { reserved: Pick<LiveCall, "finish"> | null } = { reserved: null };
+  const holder: { reserved: LiveCall | null } = { reserved: null };
   let proceed = false;
   try {
     const verdict = await state.appender().appendGuarded(callStart, (index) => {
-      const result = callStartGuard(
+      const failure = callStartGuard(
         index,
         grantId,
-        callId,
-        state,
+        state.liveCount(grantId),
         state.config.maxInFlightPerSession,
+        state.closing(),
       );
-      slot.reserved = result.reserved;
-      return result.failure;
+      if (failure === null) {
+        holder.reserved = state.reserveCall(grantId, callId);
+      }
+      return failure;
     });
     if (verdict !== null) {
       state.log({
@@ -287,22 +310,30 @@ export async function handleMeterRequest(
     return errorResponse("meter-unavailable", 503);
   } finally {
     if (!proceed) {
-      slot.reserved?.finish();
+      holder.reserved?.finish();
     }
   }
-  // The LiveCall passes into forwardCall, which owns its finish().
-  const call = slot.reserved as unknown as LiveCall;
+  // The LiveCall passes into forwardCall, which owns its finish(). The
+  // handler catch also finishes it; finish is idempotent (L8).
+  const call = holder.reserved;
+  if (call === null) {
+    throw new Error("meter: call-start step reserved nothing");
+  }
   try {
-    return await forwardCall(
-      state,
-      descriptor,
-      auth.requestId,
-      call,
-      auth.grant.hostAlias,
-      bodyText,
-      fields,
-      stream,
-    );
+    try {
+      return await forwardCall(
+        state,
+        descriptor,
+        auth.requestId,
+        call,
+        auth.grant.hostAlias,
+        bodyText,
+        fields,
+        stream,
+      );
+    } finally {
+      call.finish();
+    }
   } catch (error: unknown) {
     call.finish();
     throw error;
@@ -311,34 +342,25 @@ export async function handleMeterRequest(
 
 // F1: a call joins the live set inside its call-start chain step, when
 // the guard passes and before the write. It leaves when its call-end
-// append settles; a failed call-start write removes it. The exported
-// guard also returns the reserved LiveCall so the caller can finish it
-// when the append fails.
+// append settles; a failed call-start write removes it.
 export function callStartGuard(
   index: UsageIndex,
   requestId: string,
-  callId: string,
-  state: {
-    liveCount: (requestId: string) => number;
-    reserveCall: (requestId: string, callId: string) => LiveCall;
-    closing: () => boolean;
-  },
+  liveCount: number,
   max: number,
-): {
-  failure: "grant-closed" | "session-concurrency" | "meter-unavailable" | null;
-  reserved: LiveCall | null;
-} {
-  if (state.closing()) {
-    return { failure: "meter-unavailable", reserved: null };
+  closing: boolean,
+): "grant-closed" | "session-concurrency" | "meter-unavailable" | null {
+  if (closing) {
+    return "meter-unavailable";
   }
   const grant = index.grants.get(requestId);
   if (grant === undefined || grant.closed) {
-    return { failure: "grant-closed", reserved: null };
+    return "grant-closed";
   }
-  if (state.liveCount(requestId) >= max) {
-    return { failure: "session-concurrency", reserved: null };
+  if (liveCount >= max) {
+    return "session-concurrency";
   }
-  return { failure: null, reserved: state.reserveCall(requestId, callId) };
+  return null;
 }
 
 async function forwardCall(

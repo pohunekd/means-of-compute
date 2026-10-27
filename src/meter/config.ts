@@ -182,10 +182,22 @@ function resolveListen(
       `meter: environment variable ${config.listenEnv} holds an invalid IP (listen ${config.listenAlias})`,
     );
   }
-  if (host.replace(/[0.:]/g, "") === "") {
-    throw new MeterConfigError(
-      `meter: environment variable ${config.listenEnv} must not be a wildcard (listen ${config.listenAlias})`,
-    );
+  if (match[1] !== undefined) {
+    // F6 rule 2.2: an IPv4 zero host is refused.
+    if (host === "0.0.0.0") {
+      throw new MeterConfigError(
+        `meter: environment variable ${config.listenEnv} must not be a wildcard or mapped address (listen ${config.listenAlias})`,
+      );
+    }
+  } else {
+    // F6 rule 2.2: canonicalize the IPv6 host, then refuse the zero
+    // address and every IPv4-mapped address.
+    const canon = new URL(`http://[${host}]/`).hostname;
+    if (canon === "[::]" || canon.startsWith("[::ffff:")) {
+      throw new MeterConfigError(
+        `meter: environment variable ${config.listenEnv} must not be a wildcard or mapped address (listen ${config.listenAlias})`,
+      );
+    }
   }
   const port = Number(portText);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) {

@@ -49,10 +49,11 @@ test("atomic write failure after the temp write removes the temp file", async ()
   }));
   try {
     const path = join(dir, "state.json");
-    const mocked = await import("../../src/fs/write.js?rename-fail");
+    const specifier = "../../src/fs/write.js?rename-fail";
+    const mocked = (await import(specifier)) as { writeFileAtomic: typeof writeFileAtomic };
     let message = "";
     try {
-      await (mocked.writeFileAtomic as typeof writeFileAtomic)("Test state", path, "new\n");
+      await mocked.writeFileAtomic("Test state", path, "new\n");
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }

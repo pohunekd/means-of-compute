@@ -23,7 +23,7 @@ export interface NanoPricing {
   readonly cachedInputNanoPer1M?: bigint;
 }
 
-export const SCHEMA_PATH = "config/providers/schema.json";
+const SCHEMA_PATH = "config/providers/schema.json";
 
 let cachedValidator: ValidateFunction | null = null;
 

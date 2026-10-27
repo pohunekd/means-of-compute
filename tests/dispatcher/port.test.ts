@@ -108,10 +108,11 @@ test("terminal result wins over unreachable host in wait and cancel", async () =
   await control.port.close();
 });
 
-test("D2: diff of a finished session returns the pushed change untruncated", async () => {
+test("D2: diff of a finished session returns the pushed changes untruncated", async () => {
   const control = createMemoryPort();
   const handle = await control.port.start(request());
   control.pushCommit("moc/demo-item", "sha1");
+  control.pushCommit("moc/demo-item", "sha2");
   control.complete(handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
   const result = await control.port.diff(
     { sessionId: handle.sessionId, hostAlias: handle.hostAlias },
@@ -120,6 +121,7 @@ test("D2: diff of a finished session returns the pushed change untruncated", asy
   expect(result.sessionId).toBe(handle.sessionId);
   expect(result.base).toBe("origin/main");
   expect(result.truncated).toBe(false);
-  expect(result.unifiedDiff).toContain("sha1");
+  expect(result.unifiedDiff).toContain("\n+sha1\n");
+  expect(result.unifiedDiff).toContain("\n+sha2\n");
   await control.port.close();
 });

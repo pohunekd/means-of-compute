@@ -1,19 +1,18 @@
 // K2b: a failed settle write keeps the provisional entry and one session.
-// The settle write fails because the registry directory is read-only while
-// the dispatcher writes it, so a regression that drops the provisional
-// entry after a failed settle is observable: the entry stays, the port
-// holds one live session, and a replayed start settles that same session.
+// The settle write fails once through a spy on the registry module, so a
+// regression that drops the provisional entry after a failed settle is
+// observable: the entry stays, the port holds one live session, and a
+// replayed start settles that same session.
 // Deterministic: memory port, in-process switch gate, temp ledger and registry.
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
+import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
+import { readRegistry } from "../../src/dispatcher/registry.js";
 import * as registryModule from "../../src/dispatcher/registry.js";
-// Dynamic imports load the modules under test after the static helpers above.
-const { createDispatcher } = await import("../../src/dispatcher/dispatcher.js");
-const { createMemoryPort } = await import("../../src/dispatcher/memory-port.js");
-const { readRegistry } = await import("../../src/dispatcher/registry.js");
-const { createSwitchGate, gatePort } = await import("./gated-port.js");
+import { createSwitchGate, gatePort } from "./gated-port.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import type { ModelSelection } from "../../src/dispatcher/port.js";
 import type { StartOutcome } from "../../src/dispatcher/dispatcher.js";
@@ -111,8 +110,8 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
     const parked = await starts.next("start");
     // The spy is armed after the provisional insert, so only the settle
     // write fails; every later write (a wrongful removal included) passes.
-    const settleWrite = spyOn(registryModule, "replaceRegistryEntry").mockImplementationOnce(
-      () => Promise.reject(new Error("injected settle failure")),
+    const settleWrite = spyOn(registryModule, "replaceRegistryEntry").mockImplementationOnce(() =>
+      Promise.reject(new Error("injected settle failure")),
     );
     let failure: unknown;
     try {

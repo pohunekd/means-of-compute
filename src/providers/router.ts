@@ -1,4 +1,5 @@
 import { getProviders } from "./config.js";
+import { loadProviderRoute } from "./route.js";
 import type { ProviderDescriptor } from "./types.js";
 
 export interface ModelCallResult {
@@ -82,15 +83,12 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
   }
 }
 
-async function loadRoute(): Promise<string[]> {
-  const routeFile = Bun.file("config/providers/route.json");
-  const json = (await routeFile.json()) as { providers: string[] };
-  return json.providers;
-}
-
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
   const providers = await getProviders();
-  const route = await loadRoute();
+  const route = await loadProviderRoute(
+    "config/providers/route.json",
+    new Set(Object.keys(providers)),
+  );
   let lastReason: string | undefined;
   let lastError: unknown;
   for (const id of route) {

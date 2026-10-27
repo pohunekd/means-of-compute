@@ -93,7 +93,9 @@ async function readWithDeadline<T>(promise: Promise<T>, deadlineMs: number): Pro
     return await Promise.race([
       promise,
       new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), deadlineMs);
+        timer = setTimeout(() => {
+          resolve(null);
+        }, deadlineMs);
       }),
     ]);
   } finally {

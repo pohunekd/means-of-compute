@@ -37,7 +37,7 @@ test("query ignores pending entries in every breakdown", async () => {
   expect(text).not.toContain("e9-open");
 });
 
-test("query byProvider keeps null input tokens null", async () => {
+test("query byProvider keeps null input tokens null", () => {
   const contents: LedgerContents = {
     records: [
       {
@@ -77,7 +77,7 @@ test("query byProvider keeps null input tokens null", async () => {
   expect(result.byProvider?.[0]?.requests).toBe(2);
 });
 
-test("query byModel is attempt-level, not record-level", async () => {
+test("query byModel is attempt-level, not record-level", () => {
   const contents: LedgerContents = {
     records: [
       {

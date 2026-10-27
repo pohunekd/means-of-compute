@@ -3,6 +3,7 @@
 // guards of the test matrix. Each test names the mutation that must fail it.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startLoopback } from "../../src/providers/loopback.js";
@@ -239,6 +240,55 @@ test("bad location exits 4 with no verdict (mutation: drop the invalid finding)"
     delete process.env.PROVIDER_META_API_BASE_URL;
     delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
     delete process.env.PROVIDER_WONDER_BASE_URL;
+    resetProvidersCache();
+    removeTempRepo(repo.dir);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("work item without DoD refuses 3 with no verdict (no DoD, no audit)", async () => {
+  const repo = await makeTempRepo();
+  const workdir = mkdtempSync(join(tmpdir(), "auditor-nodod-"));
+  const verdictDir = join(workdir, "verdicts");
+  await mkdir(verdictDir, { recursive: true });
+  const ledgerPath = join(workdir, "ledger.jsonl");
+  await Bun.write(ledgerPath, "");
+  for (const [key, value] of Object.entries(AUDITOR_ENV)) {
+    process.env[key] = value;
+  }
+  resetProvidersCache();
+  try {
+    const config = await loadAuditorConfig();
+    const item = {
+      ...(demoItem("demo-good") as unknown as AuditInput["item"]),
+      dod: [],
+    };
+    const outcome = await runAudit(
+      {
+        item,
+        repoDir: repo.dir,
+        ref: "demo-good",
+        baseRef: "main",
+        pullNumber: 99,
+        authorModels: ["meta/muse-glimmer-30b"],
+      },
+      {
+        config: { ...config, verdictDir },
+        git: createReadOnlyGit(repo.dir),
+        budget: createCliBudgetGate({
+          command: ["bun", "src/budget/check.ts"],
+          timeoutMs: 30000,
+          cwd: process.cwd(),
+        }),
+        call: callProviderOnce,
+        ledgerPath,
+        now: () => new Date("2026-10-27T10:00:00.000Z"),
+      },
+    );
+    expect(outcome.kind).toBe("refused");
+    const files = await Array.fromAsync(new Bun.Glob("**/*.json").scan({ cwd: verdictDir }));
+    expect(files).toHaveLength(0);
+  } finally {
     resetProvidersCache();
     removeTempRepo(repo.dir);
     rmSync(workdir, { recursive: true, force: true });

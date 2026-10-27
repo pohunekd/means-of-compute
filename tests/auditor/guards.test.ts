@@ -74,6 +74,11 @@ test("empty authorModels refuses 3 with zero model calls (mutation: authors.leng
       },
     );
     expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") {
+      // The empty-author guard fires before selection and budget: with
+      // the gate refusing, any other reason means the guard was lost.
+      expect(outcome.reason).toContain("no author models");
+    }
     expect(requests).toBe(0);
   } finally {
     cleanup();

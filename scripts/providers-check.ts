@@ -1,28 +1,31 @@
-import Ajv from "ajv/dist/2020";
-import addFormats from "ajv-formats";
-
-const schemaPath = "config/providers/schema.json";
-const schema = (await Bun.file(schemaPath).json()) as object;
-
-const ajv = new Ajv({ allErrors: true, strict: true });
-addFormats(ajv);
-const validate = ajv.compile(schema);
+import { readdir } from "node:fs/promises";
+import { readInputText, statInputPath } from "../src/fs/input.js";
+import { providerDescriptorErrors } from "../src/providers/schema.js";
 
 const dir = "config/providers";
-const glob = new Bun.Glob(`${dir}/*.json`);
-const files: string[] = [];
-for await (const file of glob.scan({ cwd: "." })) {
-  files.push(file);
-}
+const entries = await readdir(dir);
 let failed = 0;
 
-for (const file of files) {
-  if (file.endsWith("schema.json") || file.endsWith("route.json")) continue;
-  const data = (await Bun.file(file).json()) as unknown;
-  const ok = validate(data);
-  if (!ok) {
+for (const name of entries.sort()) {
+  if (!name.endsWith(".json") || name === "schema.json" || name === "route.json") continue;
+  const file = `${dir}/${name}`;
+  if ((await statInputPath("Providers check", file)) !== "file") {
+    console.error(`FAIL ${file}: not a regular file`);
+    failed += 1;
+    continue;
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(await readInputText("Providers check", file)) as unknown;
+  } catch {
+    console.error(`FAIL ${file}: not valid JSON`);
+    failed += 1;
+    continue;
+  }
+  const errors = providerDescriptorErrors(data);
+  if (errors !== null) {
     console.error(`FAIL ${file}`);
-    console.error(validate.errors);
+    console.error(errors);
     failed += 1;
   } else {
     console.log(`ok ${file}`);

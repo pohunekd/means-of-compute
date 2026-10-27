@@ -1,4 +1,5 @@
 import { readInputText, statInputPath } from "../fs/input.js";
+import { providerDescriptorErrors } from "./schema.js";
 import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
@@ -67,8 +68,9 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   } catch (error: unknown) {
     throw new Error(`${label} ${file}: not valid JSON`, { cause: error });
   }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new Error(`${label} ${file}: invalid descriptor`);
+  const errors = providerDescriptorErrors(raw);
+  if (errors !== null) {
+    throw new Error(`${label} ${file}: ${errors}`);
   }
   const descriptor = raw as RawProvider;
   if (descriptor.id !== id) {

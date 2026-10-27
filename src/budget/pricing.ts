@@ -7,51 +7,18 @@
 // stem. Free providers must state explicit zero prices.
 //
 // The value used is the JSON number as parsed: each descriptor is validated
-// against config/providers/schema.json (pricing required, non-array object)
-// and each validated price number goes through Number.prototype.toString().
+// by the shared provider schema loader (src/providers/schema.ts) and each
+// validated price number goes through Number.prototype.toString().
 // A result with e/E or more than 9 decimals is rejected, so a source text
 // with more digits than a double holds is outside the rule and not detected.
-import Ajv from "ajv/dist/2020";
-import addFormats from "ajv-formats";
-import type { ValidateFunction } from "ajv/dist/2020";
 import { readInputText, statInputPath } from "../fs/input.js";
+import { loadProviderSchema } from "../providers/schema.js";
 import { NANO_PER_USD, priceToNanoUsd } from "./money.js";
 
 export interface NanoPricing {
   readonly inputNanoPer1M: bigint;
   readonly outputNanoPer1M: bigint;
   readonly cachedInputNanoPer1M?: bigint;
-}
-
-const SCHEMA_PATH = "config/providers/schema.json";
-
-let cachedValidator: ValidateFunction | null = null;
-
-async function loadValidator(): Promise<ValidateFunction> {
-  if (cachedValidator !== null) {
-    return cachedValidator;
-  }
-  const label = "Budget pricing";
-  if ((await statInputPath(label, SCHEMA_PATH)) === "absent") {
-    throw new Error(`${label} ${SCHEMA_PATH}: file is missing`);
-  }
-  const text = await readInputText(label, SCHEMA_PATH);
-  let schema: unknown;
-  try {
-    schema = JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new Error(`${label} ${SCHEMA_PATH}: not valid JSON`, { cause: error });
-  }
-  const ajv = new Ajv({ strict: true });
-  addFormats(ajv);
-  let validate: ValidateFunction;
-  try {
-    validate = ajv.compile(schema as Parameters<Ajv["compile"]>[0]);
-  } catch (error: unknown) {
-    throw new Error(`${label} ${SCHEMA_PATH}: invalid schema`, { cause: error });
-  }
-  cachedValidator = validate;
-  return validate;
 }
 
 interface ValidatedPricing {
@@ -90,11 +57,10 @@ export async function loadDescriptor(dir: string, id: string): Promise<NanoPrici
   if (raw.id !== id) {
     throw new Error(`${label} ${file}: id "${String(raw.id)}" does not match file name`);
   }
-  const validateDescriptor = await loadValidator();
-  if (!validateDescriptor(parsed)) {
-    throw new Error(
-      `${label} ${file}: invalid descriptor ${JSON.stringify(validateDescriptor.errors)}`,
-    );
+  const schema = await loadProviderSchema();
+  const errors = schema.descriptorErrors(parsed);
+  if (errors !== null) {
+    throw new Error(`${label} ${file}: invalid descriptor ${errors}`);
   }
   const descriptor = parsed as unknown as ValidatedDescriptor;
   const pricing: NanoPricing = {

@@ -163,59 +163,61 @@ test("K0: an unwritable registry stops start before port.start", async () => {
 });
 
 test("K1: a crash before port.start settles on replay", async () => {
-  await withHarness(async ({ control, waits, gate, dispatcher, config, ledgerPath, registryPath }) => {
-    const first = dispatcher.start(
-      item("item-a") as never,
-      decision("item-a", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    const parked = await waits.next("start");
-    // The crash happens before port.start reaches the port: the caller
-    // sees the injected error while no session exists in the port yet.
-    parked.fail(new Error("injected"));
-    let failure: unknown;
-    try {
-      await first;
-    } catch (error) {
-      failure = error;
-    }
-    expect(String(failure)).toContain("injected");
-    expect(control.sessions()).toHaveLength(0);
-    // A fresh dispatcher on the same files and memory control: the gate
-    // now refuses, but the provisional hit settles without a gate call.
-    // The refusal above would stop a fresh placement, but the
-    // provisional hit replays without touching the gate.
-    gate.refuse("test refusal");
-    const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
-    const replayed = createDispatcher({
-      port: control.port,
-      budget: gate.gate,
-      config,
-      ledgerPath,
-      now: () => ticks.now,
-      sleep: () => Promise.resolve(),
-      log: () => undefined,
-    });
-    // The refusal above would stop a fresh placement, but the
-    // provisional hit replays without touching the gate.
-    const outcome = await replayed.start(
-      item("item-a") as never,
-      decision("item-a", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    startedOf(outcome);
-    expect(gate.calls()).toBe(1);
-    expect(control.sessions()).toHaveLength(1);
-    expect(outcome.request.requestId).toBe("item-a:0");
-    // The replay itself created the session through port.start and
-    // settled it onto the provisional entry.
-    expect(control.sessions()[0]?.handle.sessionId).toBe(outcome.handle.sessionId);
-    const entries = await readRegistry(registryPath);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.sessionId).toBe(outcome.handle.sessionId);
-  });
+  await withHarness(
+    async ({ control, waits, gate, dispatcher, config, ledgerPath, registryPath }) => {
+      const first = dispatcher.start(
+        item("item-a") as never,
+        decision("item-a", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+      const parked = await waits.next("start");
+      // The crash happens before port.start reaches the port: the caller
+      // sees the injected error while no session exists in the port yet.
+      parked.fail(new Error("injected"));
+      let failure: unknown;
+      try {
+        await first;
+      } catch (error) {
+        failure = error;
+      }
+      expect(String(failure)).toContain("injected");
+      expect(control.sessions()).toHaveLength(0);
+      // A fresh dispatcher on the same files and memory control: the gate
+      // now refuses, but the provisional hit settles without a gate call.
+      // The refusal above would stop a fresh placement, but the
+      // provisional hit replays without touching the gate.
+      gate.refuse("test refusal");
+      const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
+      const replayed = createDispatcher({
+        port: control.port,
+        budget: gate.gate,
+        config,
+        ledgerPath,
+        now: () => ticks.now,
+        sleep: () => Promise.resolve(),
+        log: () => undefined,
+      });
+      // The refusal above would stop a fresh placement, but the
+      // provisional hit replays without touching the gate.
+      const outcome = await replayed.start(
+        item("item-a") as never,
+        decision("item-a", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+      startedOf(outcome);
+      expect(gate.calls()).toBe(1);
+      expect(control.sessions()).toHaveLength(1);
+      expect(outcome.request.requestId).toBe("item-a:0");
+      // The replay itself created the session through port.start and
+      // settled it onto the provisional entry.
+      expect(control.sessions()[0]?.handle.sessionId).toBe(outcome.handle.sessionId);
+      const entries = await readRegistry(registryPath);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.sessionId).toBe(outcome.handle.sessionId);
+    },
+  );
 });
 
 test("K2: a crash after port.start keeps one session", async () => {

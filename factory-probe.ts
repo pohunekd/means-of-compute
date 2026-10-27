@@ -835,7 +835,9 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(output));
 }
 
-main().catch((e: unknown) => {
-  console.error(e);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e: unknown) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

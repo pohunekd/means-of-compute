@@ -565,6 +565,39 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
     expect(JSON.stringify(model)).not.toContain("host-unreachable");
   });
 
+  test("running stays no-data when the collector fails (mutation: running copies the failure)", async () => {
+    const failing: HostStateCollector = {
+      collect: () => Promise.reject(new Error("boom")),
+    };
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        new Date("2026-10-27T12:00:00.000Z"),
+        failing,
+      ),
+    );
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const table = fleet.tables[0] as (typeof fleet.tables)[number];
+    for (const row of table.rows) {
+      expect(row[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
+    }
+  });
+
+  test("running stays no-data with hostState null (mutation: running copies the missing state)", async () => {
+    const model = buildDashboard(await loadInputs(FIXTURE));
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const table = fleet.tables[0] as (typeof fleet.tables)[number];
+    for (const row of table.rows) {
+      expect(row[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
+    }
+  });
+
   test("a failing collector gives error (fleet-round-failed)", async () => {
     const failing: HostStateCollector = {
       collect: () => Promise.reject(new Error("boom")),

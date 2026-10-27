@@ -175,19 +175,20 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
       byAlias.set(observation.hostAlias, observation);
     }
   }
+  const running = noDataCell("dispatcher registry not wired");
   const rows = ordered.map((alias): readonly Cell[] => {
     const observation = byAlias.get(alias);
     if (!inputs.hosts.ok) {
       const failure = failureCell(inputs.hosts.failure);
-      return [aliasesCell([alias]), failure, failure, failure, failure];
+      return [aliasesCell([alias]), failure, failure, running, failure];
     }
     if (observation === undefined) {
       const missing = noDataCell("not in this collector round");
-      return [aliasesCell([alias]), missing, missing, missing, missing];
+      return [aliasesCell([alias]), missing, missing, running, missing];
     }
     if (observation.kind === "unavailable") {
       const state = textCell(`unavailable: ${CAUSE_LABELS[observation.cause]}`);
-      return [aliasesCell([alias]), state, state, state, textCell(observation.observedAt)];
+      return [aliasesCell([alias]), state, state, running, textCell(observation.observedAt)];
     }
     const state = observation.capacity.idle
       ? textCell("idle")
@@ -202,7 +203,6 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
     const capacity = textCell(
       `CPU ${String(free)}% free, memory ${groupDigits(memory.freeMb)} of ${groupDigits(memory.totalMb)} MB free, ${gpuText}`,
     );
-    const running = noDataCell("dispatcher registry not wired");
     return [aliasesCell([alias]), state, capacity, running, textCell(observation.observedAt)];
   });
   return {

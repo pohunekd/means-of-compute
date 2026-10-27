@@ -11,7 +11,6 @@ import {
   acceptanceFailure,
   hostPreflightFailure,
   isSessionNotFound,
-  kebabCode,
   lookupDecision,
   portErrorOf,
   requestDigestOf,
@@ -450,6 +449,54 @@ test("R1 keeps a marked outcome and stops a live session", () => {
   });
 });
 
+test("R1 keeps a lost runtime outcome on a stopped session", () => {
+  for (const detail of ["runtime lost", "runtime conflict", "runtime incompatible"]) {
+    const info = runningInfo({
+      state: "stopped",
+      metadata: { [MOC_METADATA.outcome]: "lost", [MOC_METADATA.outcomeDetail]: detail },
+    });
+    expect(waitDecision("fake-1", waitReply(), info)).toEqual({
+      kind: "terminal",
+      state: "lost",
+      detail,
+      mark: false,
+      stop: false,
+    });
+  }
+});
+
+test("R1 accepts the exited family of stored details", () => {
+  for (const detail of ["exited 3", "exited none"]) {
+    const info = runningInfo({
+      state: "stopped",
+      metadata: { [MOC_METADATA.outcome]: "failed", [MOC_METADATA.outcomeDetail]: detail },
+    });
+    expect(waitDecision("fake-1", waitReply(), info)).toEqual({
+      kind: "terminal",
+      state: "failed",
+      detail,
+      mark: false,
+      stop: false,
+    });
+  }
+});
+
+test("R1 ignores details outside the fixed set", () => {
+  for (const detail of ["exited 03", "exited", "exited 1.5", "runtime gone"]) {
+    const info = runningInfo({
+      state: "stopped",
+      metadata: { [MOC_METADATA.outcome]: "finished", [MOC_METADATA.outcomeDetail]: detail },
+    });
+    expect(waitDecision("fake-1", waitReply(), info)).toEqual({
+      kind: "terminal",
+      state: "cancelled",
+      detail: "session stopped",
+      mark: false,
+      stop: false,
+    });
+  }
+});
+
 test("R1 ignores an unknown detail", () => {
   const info = runningInfo({
     metadata: { [MOC_METADATA.outcome]: "finished", [MOC_METADATA.outcomeDetail]: "mystery" },
@@ -635,10 +682,11 @@ test("R11 reports the starting state while the session starts", () => {
 // seam; that client answers on the "remote" host, so the kind is
 // remoteProtocol with the daemon code intact.
 
-test("kebab maps daemon codes and guards unknown text", () => {
-  expect(kebabCode("branch_diverged")).toBe("branch-diverged");
-  expect(kebabCode("session_not_found")).toBe("session-not-found");
-  expect(kebabCode("Weird Code")).toBe("daemon-error");
+test("rejected codes map through the kebab helper", () => {
+  expect(portErrorOf(fakeErrors.versionMismatch(), "laptop-a")).toBeInstanceOf(PortRejectedError);
+  expect((portErrorOf(fakeErrors.versionMismatch(), "laptop-a") as PortRejectedError).code).toBe(
+    "version-mismatch",
+  );
 });
 
 test("a non-client error maps to null", () => {
@@ -701,6 +749,7 @@ test("a local err reply decodes as protocol and maps its code", async () => {
     const mapped = portErrorOf(caught, "laptop-a");
     expect(mapped).toBeInstanceOf(PortRejectedError);
     expect((mapped as PortRejectedError).code).toBe("bad-request");
+    expect(isSessionNotFound(caught)).toBe(false);
   } finally {
     await fake.connector.close();
   }
@@ -716,6 +765,39 @@ test("resumeOutcomeUnknown maps to null", () => {
   expect(portErrorOf(fakeErrors.resumeOutcomeUnknown("laptop-a"), "laptop-a")).toBeNull();
 });
 
-test("isSessionNotFound only matches the not-found code", () => {
+test("isSessionNotFound only matches the not-found code", async () => {
   expect(isSessionNotFound(new Error("boom"))).toBe(false);
+  const fake = createFakeDaemon(["laptop-a"], "moc-worker");
+  try {
+    const remote = await fake.connector.client("laptop-a");
+    for (const kind of ["protocol", "remoteProtocol"] as const) {
+      let caught: unknown;
+      if (kind === "protocol") {
+        const ctor = remote.constructor as unknown as {
+          connectTransport(transport: unknown, opts?: unknown): Promise<LocalClient>;
+        };
+        const local = await ctor.connectTransport(localErrTransport("session_not_found"));
+        try {
+          await local.call("session.inspect", "fake-9");
+        } catch (error) {
+          caught = error;
+        } finally {
+          await local.close();
+        }
+      } else {
+        fake.failNext("laptop-a", "session.inspect", {
+          errCode: "session_not_found",
+          apply: false,
+        });
+        try {
+          await remote.call("session.inspect", "fake-9");
+        } catch (error) {
+          caught = error;
+        }
+      }
+      expect(isSessionNotFound(caught)).toBe(true);
+    }
+  } finally {
+    await fake.connector.close();
+  }
 });

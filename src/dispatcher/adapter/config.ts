@@ -15,7 +15,7 @@ export interface PohunekAdapterConfig {
   readonly hostRoutesFileEnv: string;
 }
 
-export const POHUNEK_ADAPTER_CONFIG_PATH = "config/pohunek-adapter.json";
+const POHUNEK_ADAPTER_CONFIG_PATH = "config/pohunek-adapter.json";
 
 const ALLOWED_KEYS = new Set([
   "agentProfile",
@@ -38,7 +38,7 @@ function isIntegerIn(value: unknown, low: number, high: number): value is number
   return typeof value === "number" && Number.isInteger(value) && value >= low && value <= high;
 }
 
-export function checkPohunekAdapterConfig(value: unknown): string | null {
+function checkPohunekAdapterConfig(value: unknown): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return "must be a JSON object";
   }

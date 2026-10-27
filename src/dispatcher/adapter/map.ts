@@ -79,7 +79,7 @@ export function sessionNewParams(
   return params;
 }
 
-export type PreflightName =
+type PreflightName =
   | "worktree_supported"
   | "git_available"
   | "session_wait_turn_supported"

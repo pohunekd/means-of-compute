@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
-import { ProviderError, ProvidersExhaustedError } from "../../src/providers/router.js";
+import {
+  ProviderCallError,
+  ProviderError,
+  ProvidersExhaustedError,
+} from "../../src/providers/router.js";
 
 async function withProviders(
   primaryPath: string,
@@ -224,6 +228,91 @@ test("callProviderOnce without usage gives null token counts (mutation: default 
   expect(result.content).toBe("single response");
   expect(result.inputTokens).toBeNull();
   expect(result.outputTokens).toBeNull();
+});
+
+test("callProviderOnce on a 200 with null content throws ProviderCallError with usage (mutation: plain ProviderError)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const server = await startLoopback("tests/providers/recordings/primary-invalid-content.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  void server.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderCallError);
+  const failure = caught as ProviderCallError;
+  expect(failure).toBeInstanceOf(ProviderError);
+  expect(failure.reachedProvider).toBe(true);
+  expect(failure.usage).toEqual({ inputTokens: null, outputTokens: null });
+});
+
+test("callProviderOnce on a non-JSON 200 throws ProviderCallError with null usage", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const server = await startLoopback("tests/providers/recordings/primary-non-json.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  void server.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderCallError);
+  const failure = caught as ProviderCallError;
+  expect(failure.reachedProvider).toBe(true);
+  expect(failure.usage).toBeNull();
+});
+
+test("callProviderOnce on a refused connection throws ProviderCallError that did not reach the provider", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:9";
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderCallError);
+  const failure = caught as ProviderCallError;
+  expect(failure.reachedProvider).toBe(false);
+  expect(failure.usage).toBeNull();
+});
+
+test("callProviderOnce on a non-200 keeps the router error text (no billed call)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-429.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderError);
+  expect(caught).not.toBeInstanceOf(ProviderCallError);
+  expect((caught as ProviderError).message).toBe("Provider nvidia-build responded 429");
 });
 
 test("callProviderOnce rejects an unknown provider id", async () => {

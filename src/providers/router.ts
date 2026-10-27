@@ -22,6 +22,31 @@ export class ProviderError extends Error {
   }
 }
 
+export interface ProviderUsage {
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
+export class ProviderCallError extends ProviderError {
+  readonly reachedProvider: boolean;
+  readonly usage: ProviderUsage | null;
+  constructor(
+    message: string,
+    status: number,
+    reachedProvider: boolean,
+    usage: ProviderUsage | null,
+    options?: ErrorOptions,
+  ) {
+    super(message, status);
+    this.name = "ProviderCallError";
+    this.reachedProvider = reachedProvider;
+    this.usage = usage;
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
 export class ProvidersExhaustedError extends Error {
   readonly lastReason: string;
   constructor(lastReason: string, lastError: unknown) {
@@ -44,6 +69,10 @@ function usageCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function isAbortError(value: unknown): boolean {
+  return value instanceof Error && value.name === "AbortError";
+}
+
 async function callProvider(
   provider: ProviderDescriptor,
   request: ModelRequest,
@@ -59,7 +88,9 @@ async function callProvider(
   }
   const controller = new AbortController();
   const timeoutMs = provider.timeoutMs;
+  let timedOut = false;
   const timeoutId = setTimeout(() => {
+    timedOut = true;
     controller.abort();
   }, timeoutMs);
   try {
@@ -83,22 +114,65 @@ async function callProvider(
       data = JSON.parse(await resp.text()) as unknown;
     } catch (error: unknown) {
       if (error instanceof SyntaxError) {
-        throw new ProviderError(`Provider ${provider.id} returned a non-JSON body`, 502);
+        // The provider answered 200, so the call may be billed even
+        // though the body cannot be parsed: usage is unknown.
+        throw new ProviderCallError(
+          `Provider ${provider.id} returned a non-JSON body`,
+          502,
+          true,
+          null,
+          { cause: error },
+        );
       }
       throw error;
     }
     const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
       ?.message?.content;
-    if (typeof content !== "string") {
-      throw new ProviderError(`Provider ${provider.id} returned invalid content`, 502);
-    }
     const usage = (data as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } })
       .usage;
+    if (typeof content !== "string") {
+      // The provider answered 200 with usage attached, so the call may
+      // be billed: carry the parsed usage for the ledger entry.
+      throw new ProviderCallError(
+        `Provider ${provider.id} returned invalid content`,
+        502,
+        true,
+        { inputTokens: usageCount(usage?.prompt_tokens), outputTokens: usageCount(usage?.completion_tokens) },
+        { cause: data },
+      );
+    }
     return {
       content,
       inputTokens: usageCount(usage?.prompt_tokens),
       outputTokens: usageCount(usage?.completion_tokens),
     };
+  } catch (error: unknown) {
+    if (isAbortError(error)) {
+      // The request was sent before the abort, so the call may be billed:
+      // a late reply still counts server-side. Usage is unknown.
+      if (timedOut) {
+        throw new ProviderCallError(
+          `Provider ${provider.id} timed out`,
+          504,
+          true,
+          null,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    if (error instanceof TypeError) {
+      // A connection failure happens before any response, so nothing
+      // was billed: the call never reached the provider.
+      throw new ProviderCallError(
+        `Provider ${provider.id} connection failed: ${error.message}`,
+        503,
+        false,
+        null,
+        { cause: error },
+      );
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -145,7 +219,22 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       }
       return { providerId: provider.id, model: provider.model, content };
     } catch (e: unknown) {
-      if (e instanceof ProviderError) {
+      if (e instanceof ProviderCallError) {
+        // Single-call failures carry their own reason: a timed-out call
+        // fails over as a timeout, a call that never reached the provider
+        // as a connection failure, anything else by status.
+        if (e.status === 504) {
+          lastReason = "timeout";
+        } else if (!e.reachedProvider) {
+          lastReason = "connection";
+        } else if (e.status === 429) {
+          lastReason = "rate_limit";
+        } else if (e.status >= 500 && e.status < 600) {
+          lastReason = "server_error";
+        } else {
+          throw e;
+        }
+      } else if (e instanceof ProviderError) {
         const status = e.status;
         if (status === 429) {
           lastReason = "rate_limit";

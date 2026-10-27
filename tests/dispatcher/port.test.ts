@@ -58,6 +58,42 @@ test("P3/P4: waits with different cursors and cancel stay deep-equal", async () 
   await control.port.close();
 });
 
+test("mutating the usage after complete leaves the stored result unchanged", async () => {
+  const control = createMemoryPort();
+  const handle = await control.port.start(request());
+  const tokens = [
+    {
+      provider: "nvidia-build",
+      model: "meta/muse-glimmer-30b",
+      inputTokens: 10,
+      outputTokens: 20,
+      requests: 1,
+      source: "provider-usage",
+    },
+  ];
+  control.complete(handle.sessionId, { state: "finished", usage: { tokens }, detail: "exited 0" });
+  const ref = { sessionId: handle.sessionId, hostAlias: handle.hostAlias };
+  const first = await control.port.wait(ref, 1000, null);
+  const frozen = structuredClone(first);
+  tokens.push({
+    provider: "nvidia-build",
+    model: "meta/muse-glimmer-30b",
+    inputTokens: 30,
+    outputTokens: 40,
+    requests: 2,
+    source: "provider-usage",
+  });
+  if (first.state === "finished" && first.usage !== null) {
+    first.usage.tokens[0]!.inputTokens = 999;
+  }
+  const second = await control.port.wait(ref, 1000, null);
+  expect(second).toEqual(frozen);
+  if (second.state === "finished") {
+    expect(second.usage?.tokens).toHaveLength(1);
+  }
+  await control.port.close();
+});
+
 test("terminal result wins over unreachable host in wait and cancel", async () => {
   const control = createMemoryPort();
   const handle = await control.port.start(request());

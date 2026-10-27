@@ -42,8 +42,7 @@ function terminalOf(session: MemorySession): Extract<WaitResult, { state: Termin
   if (stored === null) {
     return null;
   }
-  const usage = stored.usage === null ? null : { tokens: [...stored.usage.tokens] };
-  return { ...stored, usage };
+  return structuredClone(stored);
 }
 
 function toBranch(baseRef: string): string {
@@ -82,14 +81,15 @@ export function createMemoryPort(): MemoryPortControl {
     usage: PortUsage | null,
     detail: string,
   ): void {
-    // The terminal result is frozen here; later waits and cancels return a
-    // deep copy of it, so a changed cursor can never alter it (P3).
+    // The terminal result is frozen here with a deep copy; later waits and
+    // cancels return a deep copy of it, so neither the caller nor a changed
+    // cursor can alter the stored value (P3).
     session.state = state;
     session.terminal = {
       state,
       sessionId: session.handle.sessionId,
       cursor: session.cursor,
-      usage,
+      usage: structuredClone(usage),
       detail,
     };
   }

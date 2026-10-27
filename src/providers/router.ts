@@ -13,7 +13,7 @@ export interface ModelRequest {
   messages: Array<{ role: string; content: string }>;
 }
 
-class ProviderError extends Error {
+export class ProviderError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
     super(message);
@@ -32,7 +32,22 @@ export class ProvidersExhaustedError extends Error {
   }
 }
 
-async function callProvider(provider: ProviderDescriptor, request: ModelRequest): Promise<string> {
+export interface SingleCallResult {
+  readonly providerId: string;
+  readonly model: string;
+  readonly content: string;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
+function usageCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+async function callProvider(
+  provider: ProviderDescriptor,
+  request: ModelRequest,
+): Promise<Omit<SingleCallResult, "providerId" | "model">> {
   const base = provider.baseUrl.replace(/\/$/, "");
   const url = `${base}/chat/completions`;
   const headers: Record<string, string> = {
@@ -77,10 +92,35 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
     if (typeof content !== "string") {
       throw new ProviderError(`Provider ${provider.id} returned invalid content`, 502);
     }
-    return content;
+    const usage = (data as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } })
+      .usage;
+    return {
+      content,
+      inputTokens: usageCount(usage?.prompt_tokens),
+      outputTokens: usageCount(usage?.completion_tokens),
+    };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function callProviderOnce(
+  providerId: string,
+  request: ModelRequest,
+): Promise<SingleCallResult> {
+  const providers = await getProviders();
+  const provider = providers[providerId];
+  if (!provider) {
+    throw new Error(`Unknown provider ${providerId}`);
+  }
+  const result = await callProvider(provider, request);
+  return {
+    providerId: provider.id,
+    model: provider.model,
+    content: result.content,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  };
 }
 
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
@@ -94,7 +134,7 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       throw new Error(`Unknown provider ${id}`);
     }
     try {
-      const content = await callProvider(provider, request);
+      const { content } = await callProvider(provider, request);
       if (lastReason) {
         return {
           providerId: provider.id,

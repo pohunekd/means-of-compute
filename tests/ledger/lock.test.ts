@@ -5,7 +5,6 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LedgerDataError } from "../../src/ledger/store.js";
 import { withLedgerLock } from "../../src/ledger/lock.js";
 
 test("lock held by a live child refuses naming its pid", async () => {
@@ -20,7 +19,7 @@ test("lock held by a live child refuses naming its pid", async () => {
     await Bun.write(`${ledgerPath}.lock`, `${String(pid)}\n`);
     let message = "";
     try {
-      await withLedgerLock(ledgerPath, async () => "wrote");
+      await withLedgerLock(ledgerPath, () => Promise.resolve("wrote"));
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
@@ -41,15 +40,15 @@ test("lock of an exited child is stale: removed once and the write succeeds", as
   });
   const pid = child.pid;
   await child.exited;
-  const errors: string[] = [];
+  const errors: unknown[] = [];
   const originalWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: unknown): boolean => {
-    errors.push(String(chunk));
+  process.stderr.write = (chunk: unknown): boolean => {
+    errors.push(chunk);
     return true;
-  }) as typeof process.stderr.write;
+  };
   try {
     await Bun.write(`${ledgerPath}.lock`, `${String(pid)}\n`);
-    const result = await withLedgerLock(ledgerPath, async () => "wrote");
+    const result = await withLedgerLock(ledgerPath, () => Promise.resolve("wrote"));
     expect(result).toBe("wrote");
     expect(await Bun.file(`${ledgerPath}.lock`).exists()).toBe(false);
     expect(errors.join("")).toContain(`removed stale lock of pid ${String(pid)}`);

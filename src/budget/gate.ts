@@ -11,7 +11,6 @@ export type Admission =
 export interface BudgetGate {
   admit(): Promise<Admission>;
 }
-
 export interface BudgetGateOptions {
   readonly command: readonly string[];
   readonly timeoutMs: number;
@@ -35,7 +34,7 @@ function requiredCommand(record: Record<string, unknown>, path: string): readonl
     command.length === 0 ||
     command.some((entry: unknown) => typeof entry !== "string" || entry.length === 0)
   ) {
-    throw new Error(`${path}: \"command\" must be a non-empty array of non-empty strings`);
+    throw new Error(`${path}: 'command' must be a non-empty array of non-empty strings`);
   }
   return command as string[];
 }
@@ -48,7 +47,7 @@ function requiredTimeout(record: Record<string, unknown>, path: string): number 
     timeoutMs < 1 ||
     timeoutMs > 600000
   ) {
-    throw new Error(`${path}: \"timeoutMs\" must be an integer in 1..600000`);
+    throw new Error(`${path}: 'timeoutMs' must be an integer in 1..600000`);
   }
   return timeoutMs;
 }
@@ -73,7 +72,7 @@ export async function loadBudgetGateConfig(
   const record = raw as Record<string, unknown>;
   const keys = Object.keys(record).sort();
   if (keys.length !== 2 || keys[0] !== "command" || keys[1] !== "timeoutMs") {
-    throw new Error(`${label} ${path}: only \"command\" and \"timeoutMs\" are allowed`);
+    throw new Error(`${label} ${path}: only 'command' and 'timeoutMs' are allowed`);
   }
   return { command: requiredCommand(record, path), timeoutMs: requiredTimeout(record, path) };
 }
@@ -84,54 +83,57 @@ const REFUSED_PATTERN = /^refused: (.+?) \(today /m;
 export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
   return {
     async admit(): Promise<Admission> {
+      const exit: { code: number | null; signal: NodeJS.Signals | number | null } = {
+        code: null,
+        signal: null,
+      };
       const proc = Bun.spawn([...options.command], {
         cwd: options.cwd,
         stdout: "pipe",
         stderr: "pipe",
         stdin: "ignore",
+        timeout: options.timeoutMs,
+        killSignal: "SIGKILL",
+        onExit(_child, code, signal): void {
+          exit.code = code;
+          exit.signal = signal;
+        },
       });
-      const timeout = setTimeout(() => {
-        try {
-          proc.kill(9);
-        } catch {
-          // The child may have exited already; the timeout path throws below.
-        }
-      }, options.timeoutMs);
-      let stdout: string;
-      let stderr: string;
-      let code: number | null;
-      let signal: string | null;
-      try {
-        [stdout, stderr, code] = await Promise.all([
-          new Response(proc.stdout as ReadableStream).text(),
-          new Response(proc.stderr as ReadableStream).text(),
-          proc.exited,
-        ]);
-        signal = proc.signalCode;
-      } finally {
-        clearTimeout(timeout);
-      }
-      if (signal !== null && signal !== undefined) {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      await proc.exited;
+      const commandText = JSON.stringify(options.command);
+      const exitCode: number | null = exit.code;
+      const exitSignal: NodeJS.Signals | number | null = exit.signal;
+      if (exitCode === null) {
         const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
         throw new BudgetGateError(
-          `budget gate command ${JSON.stringify(options.command)} killed by signal ${signal}: ${snippet}`,
+          `budget gate command ${commandText} exited without a code (signal ${String(exitSignal)}): ${snippet}`,
         );
       }
-      if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
-        const line = stdout.split("\n").find((entry) => /^admitted: /.test(entry)) as string;
-        return { admit: true, line };
+      if (exitCode === 0 && ADMITTED_PATTERN.test(stdout)) {
+        const line = findLine(stdout, /^admitted: /);
+        if (line !== undefined) {
+          return { admit: true, line };
+        }
       }
-      if (code === 3) {
-        const match = REFUSED_PATTERN.exec(stdout);
-        if (match?.[1] !== undefined) {
-          const line = stdout.split("\n").find((entry) => /^refused: /.test(entry)) as string;
-          return { admit: false, reason: match[1], line };
+      if (exitCode === 3) {
+        const reason = REFUSED_PATTERN.exec(stdout)?.[1];
+        const line = findLine(stdout, /^refused: /);
+        if (reason !== undefined && line !== undefined) {
+          return { admit: false, reason, line };
         }
       }
       const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
       throw new BudgetGateError(
-        `budget gate command ${JSON.stringify(options.command)} failed with rc ${String(code)}: ${snippet}`,
+        `budget gate command ${commandText} failed with rc ${String(exitCode)}: ${snippet}`,
       );
     },
   };
+}
+
+function findLine(stdout: string, pattern: RegExp): string | undefined {
+  return stdout.split("\n").find((entry) => pattern.test(entry));
 }

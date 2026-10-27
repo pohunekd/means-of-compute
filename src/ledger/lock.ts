@@ -41,11 +41,20 @@ function ownerAlive(pid: number): boolean {
   }
 }
 
+async function openLocked(lockPath: string): Promise<void> {
+  const handle = await open(lockPath, "wx", 0o600);
+  try {
+    await handle.writeFile(`${String(process.pid)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 async function acquire(lockPath: string): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    let handle: Awaited<ReturnType<typeof open>> | null = null;
     try {
-      handle = await open(lockPath, "wx", 0o600);
+      await openLocked(lockPath);
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw new LedgerDataError(
@@ -68,12 +77,6 @@ async function acquire(lockPath: string): Promise<void> {
       }
       process.stderr.write(`ledger: removed stale lock of pid ${String(pid)}\n`);
       continue;
-    }
-    try {
-      await handle.writeFile(`${String(process.pid)}\n`, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
     }
     return;
   }

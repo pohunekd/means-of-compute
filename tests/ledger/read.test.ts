@@ -123,7 +123,7 @@ test("reader unterminated last line exits 2", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-read-"));
   try {
     const path = join(dir, "ledger.jsonl");
-    await Bun.write(path, `${JSON.stringify(record())}`);
+    await Bun.write(path, JSON.stringify(record()));
     let message = "";
     try {
       await readLedger("Budget ledger", path);
@@ -177,7 +177,7 @@ test("loadLedgerConfig reads the ledger path and rejects extras", async () => {
   }
 });
 
-test("author models unions session models and record attempts", async () => {
+test("author models unions session models and record attempts", () => {
   const sessionEntry = pending({
     startModel: "meta/muse-glimmer-30b",
     tokens: [

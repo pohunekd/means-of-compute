@@ -41,14 +41,15 @@ test("atomic write to a directory exits 2 with no tmp files left", async () => {
 
 test("atomic write failure after the temp write removes the temp file", async () => {
   const dir = mkdtempSync(join(tmpdir(), "fs-write-"));
-  mock.module("node:fs/promises", () => ({
+  const failingRename = (): Promise<void> => {
+    throw Object.assign(new Error("mocked rename failure"), { code: "MOCKRENAME" });
+  };
+  void mock.module("node:fs/promises", () => ({
     ...fsPromises,
-    rename: async (): Promise<void> => {
-      throw Object.assign(new Error("mocked rename failure"), { code: "MOCKRENAME" });
-    },
+    rename: (): Promise<void> => failingRename(),
   }));
   try {
-    const path = join(dir, "state.json");
+    const path = join(dir, "ledger.jsonl");
     const specifier = "../../src/fs/write.js?rename-fail";
     const mocked = (await import(specifier)) as { writeFileAtomic: typeof writeFileAtomic };
     let message = "";

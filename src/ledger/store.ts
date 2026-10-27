@@ -43,9 +43,6 @@ function checkFinalizeInput(input: FinalizeInput): void {
   if (!isRecordId(input.workItemId)) {
     throw new LedgerDataError(`ledger: invalid workItemId ${JSON.stringify(input.workItemId)}`);
   }
-  if (input.result !== "success" && input.result !== "blocked") {
-    throw new LedgerDataError(`ledger: invalid result ${JSON.stringify(input.result)}`);
-  }
   if (!isNonNegativeInteger(input.retries)) {
     throw new LedgerDataError(`ledger: invalid retries ${JSON.stringify(input.retries)}`);
   }
@@ -56,7 +53,7 @@ function checkFinalizeInput(input: FinalizeInput): void {
   }
 }
 
-const TOKEN_KEY_SEP = "\^@";
+const TOKEN_KEY_SEP = "^@";
 
 function nullSum(values: readonly (number | null)[]): number | null {
   let sum = 0;

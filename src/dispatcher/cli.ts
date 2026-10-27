@@ -1,9 +1,9 @@
 // CLI entry point for dispatch: bun run dispatch:start --dry-run --item
-// <file> --decision <file> --provider <id> --model <model>
-// --ledger <path>. Dry-run prints the StartRequest as JSON (with the brief
-// replaced by its sha256 and byte count) and exits 0 without calling the
-// gate or the port and without writing anything. Any other use exits 2:
-// the factory process owns real starts.
+// <file> --decision <file> --provider <id> --model <model> --ledger <path>
+// --brief-file <path>. Dry-run prints the StartRequest as JSON (with the
+// brief replaced by its sha256 and byte count) and exits 0 without calling
+// the gate or the port and without writing anything. Any other use
+// exits 2: the factory process owns real starts.
 import { createHash } from "node:crypto";
 import {
   contractErrors,
@@ -13,7 +13,9 @@ import {
 } from "../../contracts/v1/validate.js";
 import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
+import { readLedger } from "../ledger/read.js";
 import { loadDispatcherConfig } from "./config.js";
+import { deriveStartRequest } from "./dispatcher.js";
 import type { ModelSelection } from "./port.js";
 
 function flagValue(args: string[], flag: string): string | null {
@@ -126,25 +128,27 @@ function briefSummary(brief: string): { briefSha256: string; briefBytes: number 
 }
 
 async function runDryRun(): Promise<number> {
-  const args = Bun.argv.slice(2);
-  const itemPath = flagValue(args, "--item");
-  const decisionPath = flagValue(args, "--decision");
-  const providerId = flagValue(args, "--provider");
-  const modelName = flagValue(args, "--model");
-  const ledgerPath = flagValue(args, "--ledger");
-  if (
-    itemPath === null ||
-    decisionPath === null ||
-    providerId === null ||
-    modelName === null ||
-    ledgerPath === null
-  ) {
-    console.error(
-      "dispatch: --item, --decision, --provider, --model and --ledger are all required",
-    );
-    return 2;
-  }
   try {
+    const args = Bun.argv.slice(2);
+    const itemPath = flagValue(args, "--item");
+    const decisionPath = flagValue(args, "--decision");
+    const providerId = flagValue(args, "--provider");
+    const modelName = flagValue(args, "--model");
+    const ledgerPath = flagValue(args, "--ledger");
+    const briefPath = flagValue(args, "--brief-file");
+    if (
+      itemPath === null ||
+      decisionPath === null ||
+      providerId === null ||
+      modelName === null ||
+      ledgerPath === null ||
+      briefPath === null
+    ) {
+      console.error(
+        "dispatch: --item, --decision, --provider, --model, --ledger and --brief-file are all required",
+      );
+      return 2;
+    }
     const config = await loadDispatcherConfig();
     const item = readWorkItem(itemPath, await readJsonFile("Dispatch item", itemPath));
     const decision = readDecision(
@@ -161,61 +165,14 @@ async function runDryRun(): Promise<number> {
       throw new Error(`dispatch: work item status must be "queued", got "${item.status}"`);
     }
     await readProviderDescriptor(providerId, modelName);
-    // The ledger is read so the request number matches a real start, which
-    // counts pending session entries plus finalized attempts for the item.
-    let pendingSessions = 0;
-    let attempts = 0;
-    if ((await statInputPath("Dispatch ledger", ledgerPath)) !== "absent") {
-      const text = await readInputText("Dispatch ledger", ledgerPath);
-      for (const line of text.split("\n")) {
-        if (line.length === 0) {
-          continue;
-        }
-        let entry: unknown;
-        try {
-          entry = JSON.parse(line) as unknown;
-        } catch {
-          throw new Error(`Dispatch ledger ${ledgerPath}: not valid JSON`);
-        }
-        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-          throw new Error(`Dispatch ledger ${ledgerPath}: invalid ledger line`);
-        }
-        const record = entry as Record<string, unknown>;
-        const pending = record["pending"] as Record<string, unknown> | undefined;
-        if (pending !== undefined) {
-          if (pending["workItemId"] === item.id && pending["kind"] === "session") {
-            pendingSessions += 1;
-          }
-          continue;
-        }
-        if (record["workItemId"] === item.id) {
-          const list = record["attempts"];
-          attempts = Array.isArray(list) ? list.length : 0;
-        }
-      }
+    const brief = await readInputText("Dispatch brief", briefPath);
+    if (brief.trim().length === 0) {
+      throw new Error("dispatch: brief must not be blank");
     }
-    const branch = item.branch !== null ? item.branch : `${config.branchPrefix}${item.id}`;
-    const resume = item.branch !== null;
-    const baseRef = resume ? `origin/${branch}` : `origin/${config.baseBranch}`;
-    const n = pendingSessions + attempts;
     const model: ModelSelection = { providerId, model: modelName };
-    const briefPath = flagValue(args, "--brief-file");
-    let brief = "";
-    if (briefPath !== null) {
-      brief = await readInputText("Dispatch brief", briefPath);
-    }
-    const request = {
-      requestId: `${item.id}:${String(n)}`,
-      workItemId: item.id,
-      repo: item.repo,
-      hostAlias: decision.chosenHostAlias,
-      branch,
-      baseRef,
-      resume,
-      model,
-      brief: briefSummary(brief),
-    };
-    console.log(JSON.stringify(request, null, 2));
+    const contents = await readLedger("Dispatch ledger", ledgerPath);
+    const request = deriveStartRequest(item, decision, model, brief, config, contents);
+    console.log(JSON.stringify({ ...request, brief: briefSummary(request.brief) }, null, 2));
     return 0;
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));

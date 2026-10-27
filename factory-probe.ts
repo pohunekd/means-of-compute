@@ -134,6 +134,95 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
   return { acPower, batteryPercent };
 }
 
+async function linuxGpu(): Promise<{
+  present: boolean;
+  name: string | null;
+  freeMb: number | null;
+}> {
+  const base = "/sys/class/drm";
+  try {
+    const entries = readdirSync(base).filter((e) => /^card\d+$/.test(e));
+    let best: { present: boolean; name: string | null; freeMb: number | null } | null = null;
+    for (const card of entries) {
+      const deviceDir = `${base}/${card}/device`;
+      const vendor = readFileIfExists(`${deviceDir}/vendor`);
+      if (!vendor) continue;
+      const name = readFileIfExists(`${deviceDir}/uevent`)
+        ?.split("\n")
+        .find((l) => l.startsWith("DRIVER="))
+        ?.slice("DRIVER=".length);
+      const totalKb = readFileIfExists(`${deviceDir}/mem_info_vram_total`);
+      const usedKb = readFileIfExists(`${deviceDir}/mem_info_vram_used`);
+      let freeMb: number | null = null;
+      if (totalKb !== null && usedKb !== null) {
+        const total = Number(totalKb);
+        const used = Number(usedKb);
+        if (Number.isFinite(total) && Number.isFinite(used)) {
+          freeMb = Math.max(0, Math.round((total - used) / 1024 / 1024));
+        }
+      }
+      best = { present: true, name: name || null, freeMb };
+    }
+    const nvidia = await nvidiaGpu();
+    if (nvidia) return nvidia;
+    if (best) return best;
+    return { present: false, name: null, freeMb: null };
+  } catch (e) {
+    throw new Error(`gpu unknown: ${String(e)}`, { cause: e });
+  }
+}
+
+async function nvidiaGpu(): Promise<{
+  present: boolean;
+  name: string | null;
+  freeMb: number | null;
+} | null> {
+  try {
+    const proc = Bun.spawn(
+      ["nvidia-smi", "--query-gpu=name,memory.free", "--format=csv,noheader,nounits"],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    const out = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    if (proc.exitCode !== 0 || !out) return null;
+    const first = out
+      .split("\n")[0]
+      ?.split(",")
+      .map((s) => s.trim());
+    if (!first || !first[0]) return null;
+    const free = first[1] ? Number(first[1]) : NaN;
+    return {
+      present: true,
+      name: first[0],
+      freeMb: Number.isFinite(free) ? free : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function macosGpu(): Promise<{
+  present: boolean;
+  name: string | null;
+  freeMb: number | null;
+}> {
+  try {
+    const proc = Bun.spawn(["system_profiler", "SPDisplaysDataType", "-json"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const out = await new Response(proc.stdout).text();
+    await proc.exited;
+    if (proc.exitCode !== 0 || !out) throw new Error("system_profiler failed");
+    const data = JSON.parse(out) as { SPDisplaysDataType?: { sppci_model?: string }[] };
+    const cards = data.SPDisplaysDataType ?? [];
+    if (cards.length === 0) return { present: false, name: null, freeMb: null };
+    return { present: true, name: cards[0]?.sppci_model ?? null, freeMb: null };
+  } catch (e) {
+    throw new Error(`gpu unknown: ${String(e)}`, { cause: e });
+  }
+}
+
 function linuxMemory(): { totalMb: number; freeMb: number } {
   const txt = readFileIfExists("/proc/meminfo");
   if (!txt) throw new Error("meminfo missing");
@@ -373,9 +462,9 @@ async function main(): Promise<void> {
   let cpuLoad1m = facts.cpuLoad1m ?? 0;
   let memoryTotalMb = facts.memoryTotalMb ?? 0;
   let memoryFreeMb = facts.memoryFreeMb ?? 0;
-  const gpuPresent = facts.gpuPresent ?? false;
-  const gpuName = facts.gpuName ?? null;
-  const gpuFreeMb = facts.gpuFreeMb ?? null;
+  let gpuPresent = facts.gpuPresent ?? false;
+  let gpuName = facts.gpuName ?? null;
+  let gpuFreeMb = facts.gpuFreeMb ?? null;
   let localModelsReachable = facts.localModelsReachable ?? false;
   let localModelsList = facts.localModels ?? [];
 
@@ -429,6 +518,17 @@ async function main(): Promise<void> {
     const cpu = platformOrThrow() === "linux" ? linuxCpu() : await macosCpu();
     cpuCores = cpu.cores;
     cpuLoad1m = cpu.load1m;
+  }
+
+  if (
+    facts.gpuPresent === undefined &&
+    facts.gpuName === undefined &&
+    facts.gpuFreeMb === undefined
+  ) {
+    const gpu = platformOrThrow() === "linux" ? await linuxGpu() : await macosGpu();
+    gpuPresent = gpu.present;
+    gpuName = gpu.name;
+    gpuFreeMb = gpu.freeMb;
   }
 
   if (localModelsList.length === 0 && !facts.localModelsReachable) {

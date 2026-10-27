@@ -475,7 +475,7 @@ test("resume-only S5 failures void and a replay creates a new session", async ()
   }
 });
 
-function finishedTurn(id: string): SessionWaitTurnResult {
+function finishedTurn(id: string, cursor = "cursor-1"): SessionWaitTurnResult {
   return {
     reason: "event",
     event: {
@@ -483,7 +483,183 @@ function finishedTurn(id: string): SessionWaitTurnResult {
       kind: "turn_completed",
       at: "2026-10-27T00:00:00Z",
     },
-    cursor: "cursor-1",
+    cursor,
     progress: [{ session_id: id, state: "running", output_advanced: true }],
   };
 }
+
+test("wait stores a finished terminal with set_metadata then stop (W5, W6)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(
+      { sessionId: handle.sessionId, hostAlias: "laptop-a" },
+      1000,
+      null,
+    );
+    expect(result).toEqual({
+      state: "finished",
+      sessionId: handle.sessionId,
+      cursor: "cursor-1",
+      usage: null,
+      detail: "turn completed",
+    });
+    const methods = methodNames(fake, "laptop-a");
+    const markIndex = methods.lastIndexOf("session.set_metadata");
+    const stopIndex = methods.lastIndexOf("session.stop");
+    expect(markIndex).toBeGreaterThan(-1);
+    expect(stopIndex).toBeGreaterThan(markIndex);
+    expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.outcome]).toBe("finished");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a marked live session is stopped and finished (WC2)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setSession("laptop-a", handle.sessionId, {
+      metadata: {
+        [MOC_METADATA.outcome]: "finished",
+        [MOC_METADATA.outcomeDetail]: "turn completed",
+      },
+    });
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
+    const second = await port.wait(ref, 1000, "cursor-1");
+    expect(second).toMatchObject({ state: "finished", detail: "turn completed" });
+    expect(fake.sessions("laptop-a")[0]?.state).toBe("running");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a restart after stop keeps finished (WC3)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    await port.wait({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, 1000, null);
+    const secondLog: AdapterLogEvent[] = [];
+    const second = createPohunekPort(CONFIG, {
+      connector: fake.connector,
+      log: (event) => {
+        secondLog.push(event);
+      },
+    });
+    try {
+      fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
+      const result = await second.wait(
+        { sessionId: handle.sessionId, hostAlias: "laptop-a" },
+        1000,
+        "cursor-1",
+      );
+      expect(result).toMatchObject({ state: "finished", detail: "turn completed" });
+      void secondLog;
+    } finally {
+      await second.close();
+    }
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("LOST-2 on wait_turn gives lost session missing", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.failNext("laptop-a", "session.wait_turn", { errCode: "session_not_found", apply: false });
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toEqual({
+      state: "lost",
+      sessionId: handle.sessionId,
+      cursor: "",
+      usage: null,
+      detail: "session missing",
+    });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("LOST-2 on inspect gives lost session missing", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.failNext("laptop-a", "session.inspect", { errCode: "session_not_found", apply: false });
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toMatchObject({ state: "lost", detail: "session missing" });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("LOST-3 on a lost runtime gives lost runtime lost", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setSession("laptop-a", handle.sessionId, {
+      runtime: { state: "lost", runtime_generation: "1" },
+    });
+    fake.queueWaitTurn("laptop-a", {
+      reason: "timeout",
+      cursor: "cursor-1",
+      progress: [{ session_id: handle.sessionId, state: "running", output_advanced: false }],
+    });
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toMatchObject({ state: "lost", detail: "runtime lost" });
+    expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.outcome]).toBe("lost");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("after a terminal, changing the fake state does not change the result (P3)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const first = await port.wait(ref, 1000, null);
+    fake.setSession("laptop-a", handle.sessionId, { state: "failed" });
+    const second = await port.wait(ref, 1000, "cursor-1");
+    expect(second).toEqual(first);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("wait rejects a bad timeout with RangeError (W0)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    await expect(port.wait(ref, 0, null)).rejects.toBeInstanceOf(RangeError);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("wait rejects a progress mismatch (W2)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.queueWaitTurn("laptop-a", {
+      reason: "event",
+      event: { session_id: "fake-9", kind: "turn_completed", at: "2026-10-27T00:00:00Z" },
+      cursor: "cursor-1",
+      progress: [{ session_id: handle.sessionId, state: "running", output_advanced: true }],
+    });
+    await expect(
+      port.wait({ sessionId: handle.sessionId, hostAlias: "laptop-a" }, 1000, null),
+    ).rejects.toMatchObject({ code: "progress-mismatch" });
+  } finally {
+    await teardown(fake, port);
+  }
+});

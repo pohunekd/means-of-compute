@@ -146,6 +146,26 @@ describe("dashboard config keys", () => {
     expect(message).toContain("maxRequestBytes");
   });
 
+  test("empty and overlong source throw naming the key (mutation: parseSource returns the value)", async () => {
+    for (const source of ["", "x".repeat(301)]) {
+      const raw = validConfig();
+      (raw["baselines"] as Record<string, unknown>)["frontierTokens"] = {
+        label: "frontier",
+        inputPer1M: 3,
+        outputPer1M: 15,
+        source,
+        asOf: "2026-10-01",
+      };
+      let message = "";
+      try {
+        await loadTemp(raw);
+      } catch (error: unknown) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain("baselines.frontierTokens.source");
+    }
+  });
+
   test("baseline without source throws (mutation: skip the source check)", async () => {
     const raw = validConfig();
     (raw["baselines"] as Record<string, unknown>)["frontierTokens"] = {

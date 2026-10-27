@@ -577,6 +577,15 @@ test("I7: a replayed start during a watch returns the stored session", async () 
     const { control, gate, waits, dispatcher } = dispatcherAt(registryPath, ledgerPath, {
       now: new Date("2026-10-27T10:00:00.000Z"),
     });
+    // Count port.start calls by wrapping control.port.start: the gate
+    // holds the same port object, so the replay below must leave the
+    // count at exactly one start overall.
+    const innerStart = control.port.start.bind(control.port);
+    let startCalls = 0;
+    control.port.start = (request) => {
+      startCalls += 1;
+      return innerStart(request);
+    };
     const started = await dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-a") as never,
@@ -604,8 +613,9 @@ test("I7: a replayed start during a watch returns the stored session", async () 
     }
     expect(replayed.handle.sessionId).toBe(started.handle.sessionId);
     expect(replayed.request.requestId).toBe(requestId);
-    // The replay returns the stored session with no new port call and no
-    // registry write: one port session and the settled revision unchanged.
+    // The replay returns the stored session with exactly one port.start
+    // call overall and no registry write: the settled revision unchanged.
+    expect(startCalls).toBe(1);
     expect(control.sessions()).toHaveLength(1);
     const before = await readRegistry(registryPath);
     expect(before[0]?.revision).toBe(1);

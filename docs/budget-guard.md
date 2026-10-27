@@ -23,10 +23,11 @@ coordinator's daily digest channel.
   `config/providers/schema.json` (Ajv 2020, `pricing` required): an invalid
   descriptor exits 2 with the validation errors and the file name. The value
   used is the JSON number as parsed: each validated price number goes through
-  `Number.prototype.toString()`, which rejects `e`/`E` and more than
-  9 decimals. A source text with more digits than a double holds is outside
-  the rule and is not detected. The guard prices all input tokens at `inputPer1M`
-  comparisons are exact BigInt: cost accumulates undivided as tokens *
+  `Number.prototype.toString()`; the guard rejects a `toString()` result
+  containing `e`/`E` or with more than 9 decimals. A source text with more
+  digits than a double holds is outside the rule and is not detected. The
+  guard prices all input tokens at `inputPer1M` and output tokens at
+  `outputPer1M` per 1M tokens. All sums and cap comparisons are exact BigInt: cost accumulates undivided as tokens *
   priceNanoPer1M per scope and is compared with capNano * 1_000_000; a
   float appears only for display. Cached pricing is not applied because
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper

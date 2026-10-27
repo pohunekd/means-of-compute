@@ -136,6 +136,7 @@ test("a drop between two opens leaves the second open intact", async () => {
     // A is dropped before it resolves; B starts after the drop and must
     // reuse the pending entry instead of starting a third connect.
     let calls = 0;
+    let firstClientObject: FakeClient | undefined;
     const firstClosed = { current: false };
     const secondClosed = { current: false };
     let firstGate!: () => void;
@@ -156,6 +157,7 @@ test("a drop between two opens leaves the second open intact", async () => {
             return Promise.resolve();
           },
         };
+        firstClientObject = client;
         return client;
       }
       await secondWait;
@@ -190,6 +192,7 @@ test("a drop between two opens leaves the second open intact", async () => {
     expect(firstCaught).toBeInstanceOf(PortUnreachableError);
     expect((firstCaught as PortUnreachableError).message).toBe("laptop-a: host_unreachable");
     expect(secondClient).toBeDefined();
+    expect(secondClient).not.toBe(firstClientObject);
     expect(calls).toBe(2);
     // B's own resolution must have cached its client.
     expect(await connector.client("laptop-a")).toBe(secondClient);

@@ -744,6 +744,9 @@ test("CLI: invalid MOC_BUDGET_NOW exits 2", async () => {
       expect(result.code).toBe(2);
       expect(result.stderr).toContain("MOC_BUDGET_NOW");
     }
+    const rolledOver = await sandbox.run([], { MOC_BUDGET_NOW: "2026-02-30T12:00:00Z" });
+    expect(rolledOver.code).toBe(2);
+    expect(rolledOver.stderr).toContain("MOC_BUDGET_NOW");
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }
@@ -773,7 +776,9 @@ test("CLI: pinned time prints a stderr line and pins today", async () => {
     const result = await sandbox.run([], env);
     expect(result.code).toBe(3);
     expect(result.stdout).toContain("refused: daily cap reached");
-    expect(result.stderr).toContain(`evaluation time pinned by MOC_BUDGET_NOW: ${day}T23:00:00Z`);
+    expect(result.stderr).toContain(
+      `evaluation time pinned by MOC_BUDGET_NOW: ${day}T23:00:00.000Z`,
+    );
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

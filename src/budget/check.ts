@@ -99,7 +99,13 @@ export function readEvaluationTime(env: NodeJS.ProcessEnv = process.env): Date {
   if (!PINNED_TIME_PATTERN.test(raw) || Number.isNaN(at)) {
     throw new Error("budget:check: MOC_BUDGET_NOW must be an ISO-8601 UTC timestamp");
   }
-  return new Date(at);
+  const now = new Date(at);
+  const canonical = now.toISOString();
+  const normalized = raw.includes(".") ? raw : raw.replace("Z", ".000Z");
+  if (canonical !== normalized) {
+    throw new Error("budget:check: MOC_BUDGET_NOW must be an ISO-8601 UTC timestamp");
+  }
+  return now;
 }
 
 async function run(): Promise<number> {
@@ -111,9 +117,7 @@ async function run(): Promise<number> {
     return 2;
   }
   if (process.env.MOC_BUDGET_NOW !== undefined) {
-    process.stderr.write(
-      `evaluation time pinned by MOC_BUDGET_NOW: ${process.env.MOC_BUDGET_NOW}\n`,
-    );
+    process.stderr.write(`evaluation time pinned by MOC_BUDGET_NOW: ${clock.now.toISOString()}\n`);
   }
   let parsed: CliArgs;
   try {

@@ -1,6 +1,6 @@
 import { readInputText, statInputPath } from "../fs/input.js";
 import { loadProviderRoute } from "./route.js";
-import { MAX_TIMEOUT_MS, providerDescriptorErrors } from "./schema.js";
+import { loadProviderSchema } from "./schema.js";
 import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "./paths.js";
 import type { ProviderDescriptor } from "./types.js";
 
@@ -41,7 +41,8 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   } catch (error: unknown) {
     throw new Error(`${label} ${file}: not valid JSON`, { cause: error });
   }
-  const errors = providerDescriptorErrors(raw);
+  const schema = await loadProviderSchema();
+  const errors = schema.descriptorErrors(raw);
   if (errors !== null) {
     throw new Error(`${label} ${file}: ${errors}`);
   }
@@ -69,9 +70,9 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   const timeoutEnv = timeoutOverrideEnv(id);
   const timeoutRaw = process.env[timeoutEnv];
   if (timeoutRaw !== undefined && timeoutRaw !== "") {
-    if (!TIMEOUT_PATTERN.test(timeoutRaw) || Number(timeoutRaw) > MAX_TIMEOUT_MS) {
+    if (!TIMEOUT_PATTERN.test(timeoutRaw) || Number(timeoutRaw) > schema.maxTimeoutMs) {
       throw new Error(
-        `Provider ${id}: ${timeoutEnv} must be an integer in 1..${String(MAX_TIMEOUT_MS)}`,
+        `Provider ${id}: ${timeoutEnv} must be an integer in 1..${String(schema.maxTimeoutMs)}`,
       );
     }
     timeoutMs = Number(timeoutRaw);

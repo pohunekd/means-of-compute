@@ -10,6 +10,7 @@ import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type Meter, type MeterLogEvent } from "../../src/meter/meter.js";
 import { callStartGuard, handleMeterRequest } from "../../src/meter/proxy.js";
+import type { UsageIndex } from "../../src/meter/usage-log.js";
 import { createFaultyIo } from "./faulty-io.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { createManualTimers } from "./manual-timers.js";

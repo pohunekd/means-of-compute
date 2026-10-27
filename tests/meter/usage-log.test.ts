@@ -9,11 +9,7 @@ import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type MeterLogEvent } from "../../src/meter/meter.js";
 import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
-import {
-  openUsageAppender,
-  replayUsageLog,
-  systemUsageLogIo,
-} from "../../src/meter/usage-log.js";
+import { openUsageAppender, replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { createFaultyIo } from "./faulty-io.js";
 import { createManualTimers } from "./manual-timers.js";
 import type { UsageLogRecord } from "../../src/meter/usage-log.js";
@@ -351,7 +347,9 @@ test(
           message = (error as Error).message;
         }
         expect(message).toContain("meter: usage log rejected a record");
-        expect(events.some((e) => e.event === "usage-log-rejected" && e.level === "error")).toBe(true);
+        expect(events.some((e) => e.event === "usage-log-rejected" && e.level === "error")).toBe(
+          true,
+        );
         await meter.bindGrant("w1-demo:0", "sess-1");
       } finally {
         await meter.close();

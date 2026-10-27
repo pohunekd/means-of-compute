@@ -24,6 +24,7 @@ export type MeterRejectCode =
   | "invalid-json"
   | "invalid-body"
   | "model-mismatch"
+  | "provider-not-routed"
   | "provider-key-missing"
   | "session-concurrency"
   | "meter-unavailable"

@@ -1,0 +1,4 @@
+{
+  "command": ["bun", "run", "budget:check"],
+  "timeoutMs": 30000
+}

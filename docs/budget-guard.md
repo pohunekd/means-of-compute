@@ -7,13 +7,21 @@ coordinator's daily digest channel.
 
 ## Inputs
 
-- Spend source: `UsageRecord` documents (contracts-v1) as JSON lines in the
-  ledger file at `config/budget.json` `ledgerPath`. The guard only reads it;
-  the ledger writer lives in #12. A missing file with an existing parent
-  directory means zero spend; a missing or dangling parent, or a parent
-  that is not a directory, exits 2 naming the path and the error code.
-  A present line that fails `contracts/v1/validate.ts` is an error naming the
-  line number and is never skipped.
+- Spend source: `UsageRecord` documents (contracts-v1) and pending usage
+  entries as JSON lines in the ledger file at `config/ledger.json`
+  `ledgerPath`. A record line is a bare `UsageRecord`; a pending line is a
+  `{"pending": PendingUsage}` object. The guard reads both through
+  `spendEntriesOf`: pending lines count as spend, so tokens are visible to
+  the caps from session end instead of only at task completion. A missing
+  file with an existing parent directory means zero spend; a missing or
+  dangling parent, or a parent that is not a directory, exits 2 naming the
+  path and the error code. A present line that fails validation is an error
+  naming the line number and is never skipped.
+- NVIDIA requests: a token on the NVIDIA provider with `requests: null` on
+  the evaluation day is unknown spend, not zero: its `workItemId` is
+  reported once in `unknownWorkItemIds` and the guard refuses with reason
+  `spend unknown`. Null `inputTokens`/`outputTokens` on a priced provider
+  keep the existing `SpendUnknownError` path.
 - Prices: one descriptor per needed provider id at
   `config/providers/<id>.json` (see `config/providers/schema.json`), where the
   needed ids are every route id, `nvidiaProviderId` and every ledger provider.

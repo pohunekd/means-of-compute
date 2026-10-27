@@ -83,27 +83,32 @@ const REFUSED_PATTERN = /^refused: (.+?) \(today /m;
 export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
   return {
     async admit(): Promise<Admission> {
-      const proc = Bun.spawn([...options.command], {
-        cwd: options.cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: "ignore",
-        timeout: options.timeoutMs,
-        killSignal: "SIGKILL",
-      });
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      const signal = proc.signalCode;
-      const commandText = JSON.stringify(options.command);
-      if (signal !== null) {
-        const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
+      let proc: ReturnType<typeof Bun.spawn>;
+      try {
+        proc = Bun.spawn([...options.command], {
+          cwd: options.cwd,
+          stdout: "pipe",
+          stderr: "pipe",
+          stdin: "ignore",
+          timeout: options.timeoutMs,
+          killSignal: "SIGKILL",
+        });
+      } catch (error: unknown) {
         throw new BudgetGateError(
-          `budget gate command ${commandText} killed by signal ${String(signal)}: ${snippet}`,
+          `budget gate: cannot start ${options.command[0] as string} (${error instanceof Error ? error.message : String(error)})`,
+          { cause: error },
         );
       }
+      const stdoutPromise = new Response(proc.stdout).text();
+      const stderrPromise = new Response(proc.stderr).text();
+      const code = await proc.exited;
+      if (proc.signalCode !== null) {
+        throw new BudgetGateError(
+          `budget gate: timed out after ${String(options.timeoutMs)} ms`,
+        );
+      }
+      const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+      const commandText = JSON.stringify(options.command);
       if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
         const line = findLine(stdout, /^admitted: /);
         if (line !== undefined) {

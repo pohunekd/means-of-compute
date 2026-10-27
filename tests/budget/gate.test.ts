@@ -12,7 +12,7 @@ import {
 
 test("gate config loads the default command", async () => {
   const loaded = await loadBudgetGateConfig();
-  expect(loaded.command).toEqual(["bun", "run", "budget:check"]);
+  expect(loaded.command).toEqual(["bun", "src/budget/check.ts"]);
   expect(loaded.timeoutMs).toBe(30000);
 });
 
@@ -115,4 +115,36 @@ test("gate throws on a non-guard failure instead of refusing", async () => {
     error = thrown;
   }
   expect(error).toBeInstanceOf(BudgetGateError);
+});
+
+test("gate wraps a missing command as BudgetGateError", async () => {
+  const gate = createCliBudgetGate({
+    command: ["no-such-cmd-mocgate"],
+    timeoutMs: 60000,
+    cwd: process.cwd(),
+  });
+  let error: unknown;
+  try {
+    await gate.admit();
+  } catch (thrown: unknown) {
+    error = thrown;
+  }
+  expect(error).toBeInstanceOf(BudgetGateError);
+  expect((error as Error).message).toContain("cannot start no-such-cmd-mocgate");
+});
+
+test("gate timeout throws naming the timeout without waiting for pipes", async () => {
+  const gate = createCliBudgetGate({
+    command: ["sh", "-c", "sleep 6; true"],
+    timeoutMs: 300,
+    cwd: process.cwd(),
+  });
+  let error: unknown;
+  try {
+    await gate.admit();
+  } catch (thrown: unknown) {
+    error = thrown;
+  }
+  expect(error).toBeInstanceOf(BudgetGateError);
+  expect((error as Error).message).toContain("timed out after 300 ms");
 });

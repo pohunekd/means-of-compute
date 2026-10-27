@@ -3,7 +3,7 @@
 // and ledger. Deterministic only: synthetic records with UTC finishedAt,
 // real contract validation.
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { chmod, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { costOfRecord, summarizeSpend } from "../../src/budget/cost.js";
 import { decideAdmission } from "../../src/budget/decision.js";
 import type { BudgetConfig } from "../../src/budget/config.js";
 import { maybeEscalate } from "../../src/budget/escalation.js";
-import { loadPricing } from "../../src/budget/pricing.js";
+import { loadDescriptor } from "../../src/budget/pricing.js";
 
 const PRICING = new Map([
   ["meta-api", { inputPer1M: 0.1, cachedInputPer1M: 0.002, outputPer1M: 0.2 }],
@@ -512,31 +512,78 @@ test("D3: a directory as state exits 2 before any log line is written", async ()
   }
 });
 
-test("pricing reads Meta prices from config descriptors", async () => {
-  const pricing = await loadPricing();
-  const meta = pricing.get("meta-api");
-  expect(meta?.inputPer1M).toBe(0.1);
-  expect(meta?.outputPer1M).toBe(0.2);
-  expect(meta?.cachedInputPer1M).toBe(0.002);
-  expect(pricing.get("nvidia-build")?.inputPer1M).toBe(0);
+test("pricing reads Meta prices by id", async () => {
+  const meta = await loadDescriptor("config/providers", "meta-api");
+  expect(meta.inputPer1M).toBe(0.1);
+  expect(meta.outputPer1M).toBe(0.2);
+  expect(meta.cachedInputPer1M).toBe(0.002);
+  expect((await loadDescriptor("config/providers", "nvidia-build")).inputPer1M).toBe(0);
 });
 
-test("pricing: duplicate provider id names both files", async () => {
+test("pricing: stale same-id copy next to the descriptor has no effect", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
   try {
-    const first = { id: "dup-api", pricing: { inputPer1M: 1, outputPer1M: 2 } };
-    const second = { id: "dup-api", pricing: { inputPer1M: 9, outputPer1M: 9 } };
-    await Bun.write(join(dir, "b-second.json"), JSON.stringify(second));
-    await Bun.write(join(dir, "a-first.json"), JSON.stringify(first));
+    const live = { id: "live-api", pricing: { inputPer1M: 1, outputPer1M: 2 } };
+    const stale = { id: "live-api", pricing: { inputPer1M: 0, outputPer1M: 0 } };
+    await Bun.write(join(dir, "live-api.json"), JSON.stringify(live));
+    await Bun.write(join(dir, "live-api.stale.json"), JSON.stringify(stale));
+    const pricing = await loadDescriptor(dir, "live-api");
+    expect(pricing.inputPer1M).toBe(1);
+    expect(pricing.outputPer1M).toBe(2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pricing: symlink to a shared descriptor is read", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  const shared = mkdtempSync(join(tmpdir(), "budget-shared-"));
+  try {
+    const live = { id: "linked-api", pricing: { inputPer1M: 3, outputPer1M: 4 } };
+    await Bun.write(join(shared, "shared.json"), JSON.stringify(live));
+    symlinkSync(join(shared, "shared.json"), join(dir, "linked-api.json"));
+    const pricing = await loadDescriptor(dir, "linked-api");
+    expect(pricing.inputPer1M).toBe(3);
+    expect(pricing.outputPer1M).toBe(4);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(shared, { recursive: true, force: true });
+  }
+});
+
+test("pricing: dangling descriptor symlink exits with an error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    symlinkSync(join(dir, "missing.json"), join(dir, "dangling-api.json"));
     let message = "";
     try {
-      await loadPricing(dir);
+      await loadDescriptor(dir, "dangling-api");
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toContain('duplicate provider id "dup-api"');
-    expect(message).toContain("a-first.json");
-    expect(message).toContain("b-second.json");
+    expect(message).toContain("Budget pricing");
+    expect(message).toContain("dangling-api.json");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pricing: descriptor id must match the file name", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    const mismatched = {
+      id: "other-api",
+      pricing: { inputPer1M: 1, outputPer1M: 2 },
+    };
+    await Bun.write(join(dir, "claimed-api.json"), JSON.stringify(mismatched));
+    let message = "";
+    try {
+      await loadDescriptor(dir, "claimed-api");
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("claimed-api.json");
+    expect(message).toContain("does not match file name");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -737,10 +784,11 @@ test("CLI: missing config file and missing providers dir exit 2", async () => {
     expect(missing.code).toBe(2);
     expect(missing.stderr).toContain("Budget config");
     await Bun.write(configPath, backup);
-    rmSync(join(sandbox.dir, "config", "providers"), { recursive: true, force: true });
+    rmSync(join(sandbox.dir, "config", "providers", "meta-api.json"));
     const noProviders = await sandbox.run([]);
     expect(noProviders.code).toBe(2);
     expect(noProviders.stderr).toContain("Budget pricing");
+    expect(noProviders.stderr).toContain("meta-api.json");
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

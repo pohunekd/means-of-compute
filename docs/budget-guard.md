@@ -14,11 +14,13 @@ coordinator's daily digest channel.
   that is not a directory, exits 2 naming the path and the error code.
   A present line that fails `contracts/v1/validate.ts` is an error naming the
   line number and is never skipped.
-- Prices: provider descriptors under `config/providers/` (see
-  `config/providers/schema.json`). The directory must exist; the file list is
-  sorted and a duplicate provider id exits 2 naming both files. A descriptor
-  without a `pricing` block is a load error naming the file; "free" must be
-  stated with explicit zero prices. The guard prices all input tokens at `inputPer1M` and output tokens
+- Prices: one descriptor per needed provider id at
+  `config/providers/<id>.json` (see `config/providers/schema.json`), where the
+  needed ids are every route id, `nvidiaProviderId` and every ledger provider.
+  Other files in the directory are ignored, so a stale copy has no effect.
+  The descriptor `id` must equal the file name stem; a missing, dangling or
+  non-regular path exits 2. A descriptor without a `pricing` block is a load
+  error naming the file; "free" must be stated with explicit zero prices. The guard prices all input tokens at `inputPer1M` and output tokens
   at `outputPer1M` per 1M tokens. Cached pricing is not applied because
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
   bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the

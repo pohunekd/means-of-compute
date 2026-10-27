@@ -1,11 +1,12 @@
-// Pricing reader for the budget guard. It parses provider descriptors directly
-// from config so cost math never needs API keys and never hard-codes prices.
-// A descriptor without a pricing block is an error: "free" must be stated
-// with explicit zero prices.
+// Pricing reader for the budget guard. It loads exactly one descriptor per
+// provider id the guard needs, from config/providers/<id>.json, so it never
+// scans the directory: other files in the directory are ignored and a stale
+// copy has no effect. Each file is read under the lstat/stat rules; a
+// symlink to a regular file is allowed and a missing, dangling or
+// non-regular path exits 2. The descriptor id must equal the file name
+// stem. Free providers must state explicit zero prices.
 import type { ProviderPricing } from "../providers/types.js";
-import { readInputText, requireInputDir, statInputPath } from "./fs.js";
-
-const DEFAULT_PRICING_DIR = "config/providers";
+import { readInputText, statInputPath } from "./fs.js";
 
 interface RawPricing {
   readonly inputPer1M?: unknown;
@@ -47,50 +48,41 @@ function readPricing(raw: unknown, file: string): ProviderPricing {
   return pricing;
 }
 
-export async function loadPricing(
-  dir: string = DEFAULT_PRICING_DIR,
+export async function loadDescriptor(dir: string, id: string): Promise<ProviderPricing> {
+  const label = "Budget pricing";
+  const file = `${dir}/${id}.json`;
+  if (id === "" || id.includes("/") || id === "." || id === "..") {
+    throw new Error(`${label} ${file}: invalid provider id "${id}"`);
+  }
+  if ((await statInputPath(label, file)) === "absent") {
+    throw new Error(`${label} ${file}: file is missing`);
+  }
+  const text = await readInputText(label, file);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch (error: unknown) {
+    throw new Error(`${label} ${file}: not valid JSON`, { cause: error });
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`${label} ${file}: missing provider id`);
+  }
+  const raw = parsed as RawDescriptor;
+  if (raw.id !== id) {
+    throw new Error(`${label} ${file}: id "${String(raw.id)}" does not match file name`);
+  }
+  return readPricing(raw.pricing, file);
+}
+
+export async function loadPricingForIds(
+  dir: string,
+  ids: readonly string[],
 ): Promise<ReadonlyMap<string, ProviderPricing>> {
   const pricing = new Map<string, ProviderPricing>();
-  const owners = new Map<string, string>();
-  await requireInputDir("Budget pricing", dir);
-  const glob = new Bun.Glob(`${dir}/*.json`);
-  const files: string[] = [];
-  for await (const file of glob.scan({ cwd: "." })) {
-    files.push(file);
-  }
-  files.sort();
-  if (files.length === 0) {
-    throw new Error(`Budget pricing ${dir}: no provider descriptors found`);
-  }
-  for (const file of files) {
-    if (file.endsWith("schema.json") || file.endsWith("route.json")) {
-      continue;
+  for (const id of [...ids].sort()) {
+    if (!pricing.has(id)) {
+      pricing.set(id, await loadDescriptor(dir, id));
     }
-    if ((await statInputPath("Budget pricing", file)) === "absent") {
-      throw new Error(`Budget pricing ${file}: file is missing`);
-    }
-    const text = await readInputText("Budget pricing", file);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text) as unknown;
-    } catch (error: unknown) {
-      throw new Error(`Budget pricing ${file}: not valid JSON`, { cause: error });
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error(`Budget pricing ${file}: missing provider id`);
-    }
-    const raw = parsed as RawDescriptor;
-    if (typeof raw.id !== "string") {
-      throw new Error(`Budget pricing ${file}: missing provider id`);
-    }
-    const owner = owners.get(raw.id);
-    if (owner !== undefined) {
-      throw new Error(
-        `Budget pricing ${file}: duplicate provider id "${raw.id}" (also in ${owner})`,
-      );
-    }
-    owners.set(raw.id, file);
-    pricing.set(raw.id, readPricing(raw.pricing, file));
   }
   return pricing;
 }

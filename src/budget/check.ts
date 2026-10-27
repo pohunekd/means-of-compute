@@ -13,7 +13,7 @@ import { readUsageLedger } from "./ledger.js";
 import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
 import { capKindOfReason, eventKeyString, maybeEscalate } from "./escalation.js";
-import { loadPricing } from "./pricing.js";
+import { loadPricingForIds } from "./pricing.js";
 import { summarizeSpend } from "./cost.js";
 
 interface CliArgs {
@@ -122,7 +122,6 @@ async function run(): Promise<number> {
   let override = false;
   try {
     const config = await loadBudgetConfig();
-    const pricing = await loadPricing();
     const route = await loadRoute();
     ledgerStatePath = config.statePath;
     ledgerEscalationLogPath = config.escalationLogPath;
@@ -137,6 +136,8 @@ async function run(): Promise<number> {
       if (overrideTotal === null) {
         throw new Error("budget:check: --spend needs a value");
       }
+      // The override never touches the ledger: it prices nothing.
+      await loadPricingForIds("config/providers", [...route, config.nvidiaProviderId]);
       decision = decideAdmission(
         {
           spentTodayUsd: overrideTotal,
@@ -149,6 +150,12 @@ async function run(): Promise<number> {
       );
     } else {
       const records = await readUsageLedger(config.ledgerPath);
+      const ledgerIds = records.flatMap((record) => record.tokens.map((entry) => entry.provider));
+      const pricing = await loadPricingForIds("config/providers", [
+        ...route,
+        config.nvidiaProviderId,
+        ...ledgerIds,
+      ]);
       const summary = summarizeSpend(records, pricing, config.nvidiaProviderId, clock.now);
       decision = decideAdmission(summary, config, { route });
     }

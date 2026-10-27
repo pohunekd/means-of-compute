@@ -45,7 +45,13 @@ function checkFinalizeInput(input: FinalizeInput): void {
   }
 }
 
-const TOKEN_KEY_SEP = "^@";
+function tokenGroupKey(token: PendingTokenUsage): string {
+  return JSON.stringify([token.provider, token.model, token.source]);
+}
+
+function sessionGroupKey(hostAlias: string, source: string): string {
+  return JSON.stringify([hostAlias, source]);
+}
 
 function nullSum(values: readonly (number | null)[]): number | null {
   let sum = 0;
@@ -78,7 +84,7 @@ function foldTokens(
     if (token.requests === null) {
       throw new LedgerDataError("ledger: cannot fold pending entry with unknown requests");
     }
-    const key = `${token.provider}${TOKEN_KEY_SEP}${token.model}${TOKEN_KEY_SEP}${token.source}`;
+    const key = tokenGroupKey(token);
     let group = groups.get(key);
     if (group === undefined) {
       group = {
@@ -133,7 +139,7 @@ function foldSessions(
   const order: string[] = [];
   const groups = new Map<string, { hostAlias: string; source: string; seconds: number }>();
   const collect = (hostAlias: string, source: string, seconds: number): void => {
-    const key = `${hostAlias}${TOKEN_KEY_SEP}${source}`;
+    const key = sessionGroupKey(hostAlias, source);
     const group = groups.get(key);
     if (group === undefined) {
       groups.set(key, { hostAlias, source, seconds });

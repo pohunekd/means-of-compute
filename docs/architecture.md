@@ -28,6 +28,39 @@ README.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
 
+## Auditor
+
+`runAudit(input, deps)` in `src/auditor/audit.ts` is a read-only check of one
+result branch against its issue's DoD. It resolves the head SHA of `--branch`
+(or `--ref`), refuses a second audit of an already-audited SHA, reads the
+merge-base diff and only the DoD-listed paths through `execGit` (the allowlist
+is `rev-parse`, `merge-base`, `diff`, `ls-tree`, `cat-file`; any other
+subcommand or a diff output flag throws `ReadOnlyViolation` before spawn),
+selects the first configured auditor whose model is not among the authors
+(`authorModelsOf` over `--ledger`, or `--author-model` flags),
+asks it once via `callProviderOnce` (no fallback), validates the reply
+against `src/auditor/reply.schema.json` plus blob existence and line bounds
+checked with `cat-file`/`ls-tree`, recalculates counts from the valid
+findings, stores the `AuditVerdict` at
+`<verdictDir>/<workItemId>/<headSha>.json` claimed atomically with
+`link(2)` (an existing file is exit 3), appends
+`kind: "audit", source: "auditor-usage"` to the ledger, and renders the
+comment whose first line is the marker
+`<!-- audit:v1:<repo>#<PR number>@<sha>:auditor=<model>:high=<n>:medium=<n>:low=<n> -->`
+followed by the findings table (`path:line`, defect, failure scenario, fix
+direction) or `No findings.` Model text in the table is neutralized so a
+finding can never emit a second marker line. The CLI
+(`bun run audit --repo-dir <dir> --branch <name> --base <ref> --issue <n>`
+reads `<repo-dir>/issues/<n>.json`; `--item <file>` replaces `--issue`)
+exits 0 with the verdict path, the marker, and the body; 3 on a domain
+refusal (unknown revision, empty diff, empty or partial reply, invalid
+location, no eligible auditor, verdict exists); 4 on a provider, config, or
+wonder-model failure; 2 on any input or data error. `--post yes` posts the
+comment with `gh` and fails closed when the posted body differs.
+`callProviderOnce(providerId, request)` in `src/providers/router.ts` makes one
+model call with no fallback: a 429 (or any provider error) throws
+`ProviderError` instead of moving to the next provider.
+
 ## Placement
 
 `place(item, hosts, running, config)` in `src/placement/place.ts` is a pure

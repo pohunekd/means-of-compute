@@ -8,6 +8,7 @@
     "providers:check": "bun run scripts/providers-check.ts",
     "gates": "bun run scripts/gates.ts",
     "budget:check": "bun run src/budget/check.ts",
+    "dispatch:start": "bun run src/dispatcher/cli.ts start",
     "place": "bun run src/placement/cli.ts",
     "fmt": "prettier --write .",
     "lint": "eslint .",

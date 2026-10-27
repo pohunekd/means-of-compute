@@ -136,8 +136,7 @@ test("the in-flight client is closed when close wins the race", async () => {
 
 test("a drop between two opens leaves the second open intact", async () => {
   await runtimeEnv(async (env) => {
-    // A is dropped before it resolves; B starts after the drop and must
-    // reuse the pending entry instead of starting a third connect.
+    // A is dropped before it resolves; B starts the second connect after the drop.
     let calls = 0;
     let firstClientObject: FakeClient | undefined;
     const firstClosed = { current: false };

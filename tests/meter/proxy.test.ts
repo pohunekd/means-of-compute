@@ -2,7 +2,6 @@
 // to 4.6 and 5.1 to 5.8, plus one test per surviving mutation named in
 // the round-2 decisions.
 import { expect, test } from "bun:test";
-import { MeterGrantError } from "../../src/meter/meter.js";
 import { callStartGuard } from "../../src/meter/proxy.js";
 import type { UsageIndex } from "../../src/meter/usage-log.js";
 import { createFaultyIo } from "./faulty-io.js";
@@ -93,9 +92,9 @@ test("wrong host gives 403", async () => {
       // L6: nothing upstream; the grant-open record stays. A1 held, so
       // the event carries the requestId.
       expect(loopback.requests().length).toBe(0);
-      expect(await readLogLines(logPath)).toEqual(
-        expect.arrayContaining([expect.stringContaining('"kind":"grant-open"')]),
-      );
+      expect(
+        (await readLogLines(logPath)).some((line) => line.includes('"kind":"grant-open"')),
+      ).toBe(true);
       const rejected = events.filter((event) => event.event === "request-rejected");
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.code).toBe("wrong-host");
@@ -477,7 +476,11 @@ test("a non-2xx body that stalls times out as upstream-status", async () => {
       // and the caller pull now rejects with the pump's error.
       const finished = await waitForEvent((e) => e.event === "call-finished");
       expect(finished.outcome).toBe("upstream-status");
-      await expect(resp.text()).rejects.toThrow();
+      const textOutcome = await resp.text().then(
+        () => "resolved",
+        () => "rejected",
+      );
+      expect(textOutcome).toBe("rejected");
       const end = readEnd(await readLogLines(logPath));
       expect(end["outcome"]).toBe("upstream-status");
       expect(end["billed"]).toBe(false);

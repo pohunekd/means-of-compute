@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { loadMeterConfig, resolveMeterEnv, MeterConfigError } from "../../src/meter/config.js";
+import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import {
   startMeter,
@@ -13,7 +13,7 @@ import {
   MeterGrantError,
   type MeterLogEvent,
 } from "../../src/meter/meter.js";
-import { resetProvidersCache } from "../../src/providers/config.js";
+import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
 import { joinUsage } from "../../src/meter/join.js";
 import { replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { startLoopback } from "../../src/providers/loopback.js";
@@ -151,7 +151,7 @@ test("drain with drainTimeoutMs 0 still awaits the end", async () => {
 test("close race: concurrent calls are either counted or refused", async () => {
   await withMeter(
     "tests/meter/recordings/stream-hold-after-first.json",
-    async ({ meter, loopback, timers, tokenFor }) => {
+    async ({ meter, loopback, timers }) => {
       const { token, sessionId } = await openBoundGrant(meter);
       // Ten calls reach the upstream hold: every one is live and held.
       const pendings = Array.from({ length: 10 }, () => post(meter, token, chatBody()));
@@ -195,7 +195,7 @@ test("a latched call-end does not free a sibling slot twice", async () => {
   };
   await withMeter(
     "tests/meter/recordings/latch-pair.json",
-    async ({ live, loopback, meter, tokenFor, waitForEvent }) => {
+    async ({ live, loopback, meter, waitForEvent }) => {
       // Call B runs on faulty IO: every call-end append fails, so the
       // meter latches on B's end while B's caller stream errors.
       const { token } = await openBoundGrant(meter);
@@ -233,8 +233,11 @@ test("a latched call-end does not free a sibling slot twice", async () => {
       expect(live.liveCount("w1-demo:0")).toBe(0);
       const respA = await pendingA;
       expect(respA.status).toBe(200);
-      await expect(respA.text()).rejects.toThrow();
-      void tokenFor;
+      const textOutcome = await respA.text().then(
+        () => "resolved",
+        () => "rejected",
+      );
+      expect(textOutcome).toBe("rejected");
     },
     overrides,
   );
@@ -255,8 +258,8 @@ test("concurrent identical binds write one record", async () => {
     ]);
     // The first bind wins the chain step; the second's guard sees the
     // same session and returns already-bound, a success with no record.
-    expect(both[0]?.status).toBe("fulfilled");
-    expect(both[1]?.status).toBe("fulfilled");
+    expect(both[0].status).toBe("fulfilled");
+    expect(both[1].status).toBe("fulfilled");
     const lines = await readLogLines(logPath);
     expect(lines.filter((line) => line.includes('"kind":"grant-bind"')).length).toBe(1);
     await replayUsageLog(logPath, "repair", () => {});
@@ -287,11 +290,15 @@ test("concurrent conflicting binds keep one", async () => {
     ]);
     // Exactly one writer wins; the loser meets session-conflict.
     expect(both.filter((r) => r.status === "fulfilled").length).toBe(1);
-    const rejected = both.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    const rejected = both.filter((r) => r.status === "rejected");
     expect(rejected.length).toBe(1);
-    const reason = (rejected[0] as PromiseRejectedResult).reason as MeterGrantError;
+    const first = rejected[0];
+    if (first === undefined) {
+      throw new Error("expected one rejected bind");
+    }
+    const reason: unknown = first.reason;
     expect(reason).toBeInstanceOf(MeterGrantError);
-    expect(reason.code).toBe("session-conflict");
+    expect((reason as MeterGrantError).code).toBe("session-conflict");
     const lines = await readLogLines(logPath);
     expect(lines.filter((line) => line.includes('"kind":"grant-bind"')).length).toBe(1);
     await replayUsageLog(logPath, "repair", () => {});
@@ -323,7 +330,6 @@ test("a taken port fails with the alias and the code only", async () => {
       MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
       ...overrides,
     });
-    const { getProviders } = await import("../../src/providers/config.js");
     const providers = await getProviders();
     const configA: MeterConfig = {
       ...base,
@@ -398,15 +404,14 @@ test("determinism: settle twice, restart, settle again", async () => {
   const events: MeterLogEvent[] = [];
   try {
     const base = await loadMeterConfig();
-    const config: MeterConfig = { ...base, usageLogPath: logPath };
-    const envOf = async (): Promise<Awaited<ReturnType<typeof resolveMeterEnv>>> =>
-      resolveMeterEnv(config, {
-        MOC_METER_LISTEN: "127.0.0.1:0",
-        MOC_METER_SECRET: secret,
-        MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
-      });
-    const { getProviders } = await import("../../src/providers/config.js");
-    const providers = await getProviders();
+  const config: MeterConfig = { ...base, usageLogPath: logPath };
+  const envOf = (): Promise<Awaited<ReturnType<typeof resolveMeterEnv>>> =>
+    resolveMeterEnv(config, {
+      MOC_METER_LISTEN: "127.0.0.1:0",
+      MOC_METER_SECRET: secret,
+      MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
+    });
+  const providers = await getProviders();
     const startArgs = {
       config,
       providers,
@@ -445,5 +450,4 @@ test("determinism: settle twice, restart, settle again", async () => {
     delete process.env.LOCAL_MODEL_BASE_URL;
     rmSync(dir, { recursive: true, force: true });
   }
-  void MeterConfigError;
 });

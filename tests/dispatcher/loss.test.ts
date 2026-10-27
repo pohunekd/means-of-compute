@@ -292,6 +292,17 @@ test("unreachable: two misses recover, the third is lost", async () => {
     if (lost.result.state === "lost") {
       expect(lost.result.detail).toBe("unreachable 3 times");
     }
+    // A synthesized lost keeps the last observation and stores the
+    // final unreachable count: setup observed nothing after the
+    // 10:00:00 start, and the third miss ends the session.
+    const { readRegistry } = await import("../../src/dispatcher/registry.js");
+    const entries = await readRegistry(join(dir, "registry2.json"));
+    const entry = entries.find(
+      (candidate) => candidate.requestId === started2.request.requestId,
+    );
+    expect(entry?.lastSeenAt).toBe("2026-10-27T10:00:00.000Z");
+    expect(entry?.unreachableCount).toBe(3);
+    expect(entry?.terminal?.seconds).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -447,6 +458,133 @@ test("replay after a crash between append and write returns unchanged", async ()
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("a start on an unappended terminal asks for watch first", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-unappended-"));
+  try {
+    const ledgerDir = join(dir, "ledger-dir");
+    await mkdir(ledgerDir, { recursive: true });
+    const ledgerPath = join(ledgerDir, "ledger.jsonl");
+    await writeFile(ledgerPath, "", "utf8");
+    await chmod(ledgerPath, 0o444);
+    await chmod(ledgerDir, 0o555);
+    const registryPath = join(dir, "registry.json");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const control = createMemoryPort();
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    let firstError: unknown;
+    try {
+      await dispatcher.watch(started.request.requestId);
+    } catch (err) {
+      firstError = err;
+    }
+    expect(firstError).toBeDefined();
+    // The terminal hit cannot start another attempt: watch must
+    // append the pending line first.
+    let startError: unknown;
+    try {
+      await dispatcher.start(
+        queuedItem() as never,
+        decision("laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+    } catch (err) {
+      startError = err;
+    }
+    const { DispatchStateError } = await import("../../src/dispatcher/dispatcher.js");
+    expect(startError).toBeInstanceOf(DispatchStateError);
+    expect((startError as { code: string }).code).toBe("request-unappended");
+    expect((startError as { requestId: string }).requestId).toBe("demo-item:0");
+    await chmod(ledgerDir, 0o755);
+    await chmod(ledgerPath, 0o644);
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.ledger).toBe("appended");
+    const next = await dispatcher.start(
+      queuedItem({ branch: "moc/demo-item" }) as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (next.kind !== "started") {
+      throw new Error("expected the next attempt to start");
+    }
+    expect(next.request.requestId).toBe("demo-item:1");
+  } finally {
+    await chmod(join(dir, "ledger-dir"), 0o755).catch(() => undefined);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a terminal hit whose ledger line is missing throws request-ledger-mismatch", async () => {
+  await withHarness(async ({ control, dispatcher, ledgerPath, dir }) => {
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.ledger).toBe("appended");
+    // Drop the ledger line while the registry keeps the appended
+    // terminal: the data guard must refuse to hand back a session
+    // the ledger cannot account for.
+    await writeFile(ledgerPath, "", "utf8");
+    let startError: unknown;
+    try {
+      await dispatcher.start(
+        queuedItem() as never,
+        decision("laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+    } catch (err) {
+      startError = err;
+    }
+    const { DispatchStateError } = await import("../../src/dispatcher/dispatcher.js");
+    expect(startError).toBeInstanceOf(DispatchStateError);
+    expect((startError as { code: string }).code).toBe("request-ledger-mismatch");
+    expect((startError as { requestId: string }).requestId).toBe("demo-item:0");
+    expect(dir.length).toBeGreaterThan(0);
+  });
 });
 
 test("no replay after finalize: watch returns unchanged and skips the ledger", async () => {

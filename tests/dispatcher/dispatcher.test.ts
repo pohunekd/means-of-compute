@@ -159,6 +159,38 @@ test("precondition 2.1.5: a missing provider descriptor throws", async () => {
   expect((error as Error).message).toContain("model-provider");
 });
 
+test("2.1 order: a non-WorkItem with a bad provider reports contract", async () => {
+  const dispatcher = testDispatcher(join(tmpdir(), "unused-ledger.jsonl"));
+  let error: unknown;
+  try {
+    await dispatcher.start(
+      { not: "a work item" } as never,
+      decision() as never,
+      { providerId: "no-such-provider", model: "x" },
+      "brief",
+    );
+  } catch (err) {
+    error = err;
+  }
+  expect((error as Error).message).toContain("precondition contract");
+});
+
+test("2.1 order: a non-queued item with a bad provider reports item-queued", async () => {
+  const dispatcher = testDispatcher(join(tmpdir(), "unused-ledger.jsonl"));
+  let error: unknown;
+  try {
+    await dispatcher.start(
+      queuedItem({ status: "running" }) as never,
+      decision() as never,
+      { providerId: "no-such-provider", model: "x" },
+      "brief",
+    );
+  } catch (err) {
+    error = err;
+  }
+  expect((error as Error).message).toContain("item-queued");
+});
+
 test("2.1 order: a blank brief and a bad provider report model-provider", async () => {
   const dispatcher = testDispatcher(join(tmpdir(), "unused-ledger.jsonl"));
   let error: unknown;
@@ -234,6 +266,7 @@ test("invalid port usage is stored as null and stays readable", async () => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
     const control = createMemoryPort();
+    const events: Array<Record<string, unknown>> = [];
     const dispatcher = createDispatcher({
       port: control.port,
       budget: ADMIT_GATE,
@@ -241,7 +274,9 @@ test("invalid port usage is stored as null and stays readable", async () => {
       config: { ...CONFIG, registryPath },
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
-      log: () => undefined,
+      log: (event) => {
+        events.push(event as unknown as Record<string, unknown>);
+      },
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -277,6 +312,15 @@ test("invalid port usage is stored as null and stays readable", async () => {
     const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
     expect(entry?.terminal?.usageValid).toBe(false);
     expect(entry?.terminal?.usage).toBeNull();
+    // The invalid usage is visible: one usage-invalid error event and
+    // a pending token with source usage-invalid, never zeroed usage.
+    const usageEvents = events.filter((event) => event["event"] === "usage-invalid");
+    expect(usageEvents).toHaveLength(1);
+    expect(usageEvents[0]?.["level"]).toBe("error");
+    const contents = await readLedger("Test ledger", ledgerPath);
+    expect(contents.pending).toHaveLength(1);
+    expect(contents.pending[0]?.tokens[0]?.source).toBe("usage-invalid");
+    expect(contents.pending[0]?.tokens[0]?.requests).toBeNull();
     // A later start of another item still works on the same registry.
     const other = await dispatcher.start(
       queuedItem({ id: "other-item" }) as never,
@@ -285,6 +329,53 @@ test("invalid port usage is stored as null and stays readable", async () => {
       "Do the work.",
     );
     expect(other.kind).toBe("started");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("replaceRegistryEntry rejects a stale revision", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-stale-revision-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config: { ...CONFIG, registryPath },
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    const { readRegistry, replaceRegistryEntry, RegistryDataError } = await import(
+      "../../src/dispatcher/registry.js"
+    );
+    const entries = await readRegistry(registryPath);
+    const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
+    if (entry === undefined) {
+      throw new Error("expected a stored entry");
+    }
+    // A write built from a stale snapshot fails loudly instead of
+    // losing the concurrent hold's update.
+    let error: unknown;
+    try {
+      await replaceRegistryEntry(registryPath, { ...entry, unreachableCount: 9 });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(RegistryDataError);
+    expect((error as Error).message).toContain("stale revision");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

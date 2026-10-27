@@ -30,42 +30,34 @@ README.
 
 ## Auditor
 
-`runAudit(input, deps)` in `src/auditor/audit.ts` is a read-only check of one
-result branch against its issue's DoD. It resolves the head SHA of `--branch`
-(or `--ref`), refuses a second audit of an already-audited SHA, reads the
-merge-base diff and only the DoD-listed paths through `execGit` (the allowlist
-is `rev-parse`, `merge-base`, `diff`, `ls-tree`, `cat-file`; any other
-subcommand or a diff output flag throws `ReadOnlyViolation` before spawn),
-selects the first configured auditor whose model is not among the authors
-(`authorModelsOf` over `--ledger`, or `--author-model` flags),
-asks it once via `callProviderOnce` (no fallback), validates the reply
-against `src/auditor/reply.schema.json` plus blob existence and line bounds
-checked with `cat-file`/`ls-tree`, recalculates counts from the valid
-findings, stores the `AuditVerdict` at
-`<verdictDir>/<workItemId>/<headSha>.json` claimed atomically with
-`link(2)` (an existing file is exit 3), appends
-`kind: "audit", source: "auditor-usage"` to the ledger, and renders the
-comment whose first line is the marker
-`<!-- audit:v1:<repo>#<PR number>@<sha>:auditor=<model>:high=<n>:medium=<n>:low=<n> -->`
-followed by the findings table (`path:line`, defect, failure scenario, fix
-direction) or `No findings.` Model text in the table is neutralized so a
-finding can never emit a second marker line. Every provider call that
-reaches the server is billed and recorded: `callProviderOnce` throws
-`ProviderCallError` carrying `reachedProvider` and `usage`, so a 200 with
-an empty or non-JSON body still appends the billed `kind: "audit"` usage
-entry with the reported tokens (or null tokens when the body has none)
-before the run fails with exit 4, while a refused connection never
-reaches the provider and records nothing. The CLI
-(`bun run audit --repo-dir <dir> --branch <name> --base <ref> --issue <n>`
-reads `<repo-dir>/issues/<n>.json`; `--item <file>` replaces `--issue`)
-exits 0 with the verdict path, the marker, and the body; 3 on a domain
-refusal (unknown revision, empty diff, empty or partial reply, invalid
-location, no eligible auditor, verdict exists); 4 on a provider, config, or
-wonder-model failure; 2 on any input or data error. `--post yes` posts the
-comment with `gh` and fails closed when the posted body differs.
-`callProviderOnce(providerId, request)` in `src/providers/router.ts` makes one
-model call with no fallback: a 429 (or any provider error) throws
-`ProviderError` instead of moving to the next provider.
+`runAudit` in `src/auditor/audit.ts` is a read-only check of one revision
+against a `WorkItem`'s DoD. The CLI takes the item only from
+`--item <file>`, the revision from `--ref`, and the PR number from
+`--pull`. It resolves the revision to a 40-character commit with
+`git rev-parse --verify`. It reads the merge-base diff, and file contents
+only at the locations the model cites. Every git call goes through an
+allowlist; `--output`, `--ext-diff` and `--textconv` are refused before
+any process starts. The author models come from the configured ledger
+(`config/ledger.json`). The auditor is the first configured auditor model
+that is not an author. An empty author set, or no eligible auditor,
+refuses with exit 3. The budget gate runs before the model call; a refusal
+is exit 3. It makes exactly one model call through `callProviderOnce`,
+with no retry and no fallback. Every call that got an HTTP response, and
+every call that timed out after the response began, appends one
+`kind: "audit"` pending entry to the configured ledger before the reply is
+parsed. Its tokens are `null` when the provider gave no usage. A call that
+never got a response appends nothing. The reply is validated (schema,
+cited file and line); an empty, invalid or out-of-tree reply is exit 4.
+Counts are recomputed from the findings. The verdict is stored once at
+`<verdictDir>/<item id>/<sha>.json` by temp file plus `link(2)`. An
+existing verdict refuses with exit 3, unless `--post` is given: then the
+stored verdict is posted with no model call, no budget gate and no ledger
+entry, if it belongs to the same PR or has none. `--post` posts the
+marker comment with `gh pr comment` and checks that the newest comment's
+first line equals the marker. A post failure is exit 4. Exit codes:
+0 done; 2 input, config, unknown revision or data error; 3 refusal
+(verdict exists, empty diff, no eligible auditor, budget); 4 model call,
+reply or post failure.
 
 ## Placement
 

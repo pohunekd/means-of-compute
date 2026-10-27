@@ -37,6 +37,12 @@ export async function loadProviderSchema(): Promise<ProviderSchema> {
     throw new Error(`${label} ${path}: not valid JSON`, { cause });
   }
 
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `${label} ${path}: timeoutMs.maximum must be an integer in 1..${String(SET_TIMEOUT_MAX_MS)}`,
+    );
+  }
+
   const maximum = (parsed as { properties?: { timeoutMs?: { maximum?: unknown } } }).properties
     ?.timeoutMs?.maximum;
   if (

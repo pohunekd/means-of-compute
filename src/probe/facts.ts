@@ -64,7 +64,10 @@ function failureReason(): string {
   return "invalid value";
 }
 
-export function validateFactsValue(value: unknown, rawPath: string | undefined): asserts value is Facts {
+export function validateFactsValue(
+  value: unknown,
+  rawPath: string | undefined,
+): asserts value is Facts {
   const path = rawPath ?? "facts";
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`facts ${path}: facts: not an object`);

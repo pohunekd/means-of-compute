@@ -5,7 +5,7 @@ import { readInputText, statInputPath } from "../fs/input.js";
 
 export async function loadProviderRoute(
   path: string,
-  knownIds: ReadonlySet<string>,
+  isKnownId: (id: string) => Promise<boolean>,
 ): Promise<readonly string[]> {
   const label = "Provider route";
   if ((await statInputPath(label, path)) === "absent") {
@@ -39,7 +39,7 @@ export async function loadProviderRoute(
       throw new Error(`${label} ${path}: duplicate provider id "${id}"`);
     }
     seen.add(id);
-    if (!knownIds.has(id)) {
+    if (!(await isKnownId(id))) {
       throw new Error(`${label} ${path}: unknown provider id "${id}"`);
     }
   }

@@ -1,4 +1,4 @@
-import { getProviders } from "./config.js";
+import { getProviders, providerDescriptorExists, ROUTE_PATH } from "./config.js";
 import { loadProviderRoute } from "./route.js";
 import type { ProviderDescriptor } from "./types.js";
 
@@ -85,10 +85,7 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
 
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
   const providers = await getProviders();
-  const route = await loadProviderRoute(
-    "config/providers/route.json",
-    new Set(Object.keys(providers)),
-  );
+  const route = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
   let lastReason: string | undefined;
   let lastError: unknown;
   for (const id of route) {

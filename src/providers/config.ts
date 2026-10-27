@@ -1,47 +1,23 @@
 import { readInputText, statInputPath } from "../fs/input.js";
+import { loadProviderRoute } from "./route.js";
 import { providerDescriptorErrors } from "./schema.js";
 import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
 
-const ROUTE_PATH = "config/providers/route.json";
+export const ROUTE_PATH = "config/providers/route.json";
 const DESCRIPTOR_DIR = "config/providers";
 const MAX_TIMEOUT_MS = 600000;
 const TIMEOUT_PATTERN = /^[1-9][0-9]*$/;
 const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
 
-// Route ids come from the route file: descriptors are loaded by id, so any
-// other file in the descriptor directory is ignored and a stale copy of a
-// descriptor has no effect.
-async function readRouteIds(routePath: string): Promise<string[]> {
-  const label = "Provider route";
-  if ((await statInputPath(label, routePath)) === "absent") {
-    throw new Error(`${label} ${routePath}: file is missing`);
+// True exactly when a descriptor file exists for the id. The route parser
+// uses it so the known ids never come from the route itself.
+export async function providerDescriptorExists(id: string): Promise<boolean> {
+  if (!PROVIDER_ID_PATTERN.test(id)) {
+    return false;
   }
-  const text = await readInputText(label, routePath);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new Error(`${label} ${routePath}: not valid JSON`, { cause: error });
-  }
-  if (
-    typeof raw !== "object" ||
-    raw === null ||
-    !Array.isArray((raw as { providers?: unknown }).providers)
-  ) {
-    throw new Error(`${label} ${routePath}: needs a string array "providers"`);
-  }
-  const ids: string[] = [];
-  for (const entry of (raw as { providers: unknown[] }).providers) {
-    if (typeof entry !== "string") {
-      throw new Error(`${label} ${routePath}: needs a string array "providers"`);
-    }
-    if (!ids.includes(entry)) {
-      ids.push(entry);
-    }
-  }
-  return ids;
+  return (await statInputPath("Provider descriptor", `${DESCRIPTOR_DIR}/${id}.json`)) === "file";
 }
 
 function baseUrlOverrideEnv(id: string): string {
@@ -125,7 +101,7 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
 }
 
 async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
-  const ids = await readRouteIds(ROUTE_PATH);
+  const ids = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
   const providers: Record<string, ProviderDescriptor> = {};
   for (const id of ids) {
     providers[id] = await loadDescriptor(id);

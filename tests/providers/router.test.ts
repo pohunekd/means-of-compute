@@ -168,3 +168,22 @@ test("router rejects a bad timeout override naming the variable (mutation: isNaN
   cleanupEnv();
   expect(message).toContain("PROVIDER_NVIDIA_BUILD_TIMEOUT_MS");
 });
+
+test("router rejects an unknown route id (mutation: predicate always true)", async () => {
+  const { makeTempConfig, removeTempConfig, runCallCheck } = await import("./temp-config.js");
+  const dir = await makeTempConfig();
+  try {
+    const { join } = await import("node:path");
+    await Bun.write(
+      join(dir, "config", "providers", "route.json"),
+      JSON.stringify({ providers: ["nvidia-build", "ghost-api"] }),
+    );
+    const result = await runCallCheck(dir);
+    if (result.code === 0) throw new Error("Expected the unknown route id to fail");
+    if (!result.output.includes('unknown provider id "ghost-api"')) {
+      throw new Error(`Unexpected output: ${result.output}`);
+    }
+  } finally {
+    removeTempConfig(dir);
+  }
+});

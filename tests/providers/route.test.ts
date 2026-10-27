@@ -10,6 +10,10 @@ import { loadProviderRoute } from "../../src/providers/route.js";
 const KNOWN = new Set(["nvidia-build", "meta-api"]);
 const PATH = "route.json";
 
+async function isKnownId(id: string): Promise<boolean> {
+  return KNOWN.has(id);
+}
+
 async function writeCase(dir: string, contents: string | null): Promise<string> {
   const path = join(dir, PATH);
   if (contents !== null) {
@@ -18,18 +22,14 @@ async function writeCase(dir: string, contents: string | null): Promise<string> 
   return path;
 }
 
-async function expectRule(
-  contents: string | null,
-  fragment: string,
-  extraKnown: ReadonlySet<string> = KNOWN,
-): Promise<void> {
+async function expectRule(contents: string | null, fragment: string): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "provider-route-"));
   try {
     const path = await writeCase(dir, contents);
     let message = "";
     let cause: unknown;
     try {
-      await loadProviderRoute(path, extraKnown);
+      await loadProviderRoute(path, isKnownId);
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
       cause = error instanceof Error ? error.cause : undefined;
@@ -47,7 +47,7 @@ test("route loads the ids in order", async () => {
   const dir = mkdtempSync(join(tmpdir(), "provider-route-"));
   try {
     const path = await writeCase(dir, JSON.stringify({ providers: ["nvidia-build", "meta-api"] }));
-    const ids = await loadProviderRoute(path, KNOWN);
+    const ids = await loadProviderRoute(path, isKnownId);
     expect([...ids]).toEqual(["nvidia-build", "meta-api"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

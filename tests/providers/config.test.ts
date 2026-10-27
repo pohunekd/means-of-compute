@@ -49,3 +49,19 @@ test("config: valid descriptors load", async () => {
     removeTempConfig(dir);
   }
 });
+
+test("config: duplicated route ids throw (mutation: restore the lenient parser)", async () => {
+  const { join } = await import("node:path");
+  const dir = await makeTempConfig();
+  try {
+    await Bun.write(
+      join(dir, "config", "providers", "route.json"),
+      JSON.stringify({ providers: ["nvidia-build", "nvidia-build"] }),
+    );
+    const result = await runLoadCheck(dir);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain('duplicate provider id "nvidia-build"');
+  } finally {
+    removeTempConfig(dir);
+  }
+});

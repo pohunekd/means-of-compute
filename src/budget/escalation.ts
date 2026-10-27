@@ -1,10 +1,12 @@
 // Once-per-event escalation for the budget guard. The state file keeps
 // every escalated event key: "day:<UTC day>" for the daily cap,
 // "nvidia:<UTC day>" for the NVIDIA daily limit, "total" for the total
-// cap (once regardless of the day). An event escalates only when its key is
-// absent; keys are never dropped because the set grows by at most a few
-// keys a day. Each escalation appends one JSON line to the escalation log
-// and prints one line on stderr for the coordinator's daily digest channel.
+// cap (once regardless of the day), "spend-unknown:<UTC day>" for
+// unknown spend (once per day while spend stays unknown). An event
+// escalates only when its key is absent; keys are never dropped because the
+// set grows by at most a few keys a day. Each escalation appends one JSON
+// line to the escalation log and prints one line on stderr for the
+// coordinator's daily digest channel.
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
@@ -34,8 +36,9 @@ export function capKindOfReason(reason: string): CapKind | null {
 export function eventKeyString(kind: CapKind, now: Date): string {
   switch (kind) {
     case "total":
-    case "spend-unknown":
       return kind;
+    case "spend-unknown":
+      return `spend-unknown:${utcCalendarDay(now)}`;
     case "day":
       return `day:${utcCalendarDay(now)}`;
     case "nvidia-daily":

@@ -434,6 +434,54 @@ test("D3: interleaved cap events escalate total@D, day@D, total@D+1, total@D+1 -
   }
 });
 
+test("D3: spend unknown escalates again on the next UTC day", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
+  try {
+    const statePath = join(dir, "state.json");
+    const logPath = join(dir, "escalations.log");
+    const stderr: string[] = [];
+    const push = (line: string): void => {
+      stderr.push(line);
+    };
+    const refused = {
+      admit: false,
+      reason: "spend unknown",
+      spentTodayUsd: 0,
+      spentTotalUsd: 0,
+      nvidiaRequestsToday: 0,
+    } as const;
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T12:00:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(true);
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T18:00:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(false);
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-27T00:01:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(true);
+    expect(stderr).toHaveLength(2);
+    const state = JSON.parse(await Bun.file(statePath).text()) as { escalated: string[] };
+    expect(state.escalated).toEqual(["spend-unknown:2026-10-26", "spend-unknown:2026-10-27"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pricing reads Meta prices from config descriptors", async () => {
   const pricing = await loadPricing();
   const meta = pricing.get("meta-api");

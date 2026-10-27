@@ -40,12 +40,13 @@ nvidiaRequestsToday }`.
 
 One per cap event: the state file under the configured `statePath`
 (gitignored under `logs/`) keeps every escalated event key,
-`{"escalated": ["total", "day:<UTC day>", ...]}`: `day:<UTC day>` for
-the daily cap, `nvidia:<UTC day>` for the NVIDIA daily limit, `total` for the
-total cap (once regardless of the day). An event escalates only when its key
-is absent; keys are never dropped because the set grows by at most a few
-keys a day. The log line is
-appended first, then the state is persisted. Each escalation appends one JSON
+`{"escalated": ["total", "day:<UTC day>", ...]}`. The four key forms
+are: `day:<UTC day>` for the daily cap, `nvidia:<UTC day>` for the
+NVIDIA daily limit, `total` for the total cap (once regardless of the
+day), `spend-unknown:<UTC day>` for unknown spend (once per day while
+spend stays unknown). An event escalates only when its key is absent;
+keys are never dropped because the set grows by at most a few keys a day.
+The log line is
 line to `logs/budget-escalations.log` and prints one line on stderr. A second
 refusal for the same event writes nothing.
 

@@ -72,10 +72,7 @@ async function claimVerdictFile(dir: string, name: string, text: string): Promis
   return target;
 }
 
-export async function writeVerdict(
-  verdictDir: string,
-  verdict: AuditVerdict,
-): Promise<string> {
+export async function writeVerdict(verdictDir: string, verdict: AuditVerdict): Promise<string> {
   if (!isAuditVerdict(verdict)) {
     throw new Error(
       `Verdict store: verdict fails the AuditVerdict contract ${JSON.stringify(contractErrors("audit-verdict", verdict))}`,

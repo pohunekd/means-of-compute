@@ -102,17 +102,28 @@ function parseOptions(args: string[]): CliOptions {
   const pullRaw = flagValue(args, "--pull");
   const postRaw = flagValue(args, "--post");
   const authorModels = flagValues(args, "--author-model");
-  for (const [name, value] of [
-    ["--repo-dir", repoDir],
-    ["--ref", ref],
-    ["--base", base],
-    ["--item", itemPath],
-    ["--ledger", ledgerPath],
-    ["--authors", authors],
-  ] as const) {
+  const required: Readonly<Record<string, string | null>> = {
+    "--repo-dir": repoDir,
+    "--ref": ref,
+    "--base": base,
+    "--item": itemPath,
+    "--ledger": ledgerPath,
+    "--authors": authors,
+  };
+  for (const [name, value] of Object.entries(required)) {
     if (value === null) {
       throw new Error(`audit: ${name} is required`);
     }
+  }
+  if (
+    repoDir === null ||
+    ref === null ||
+    base === null ||
+    itemPath === null ||
+    ledgerPath === null ||
+    authors === null
+  ) {
+    throw new Error("audit: required flags are missing");
   }
   if (authors !== "ledger" && authors !== "flags") {
     throw new Error(`audit: --authors must be "ledger" or "flags"`);
@@ -146,12 +157,12 @@ function parseOptions(args: string[]): CliOptions {
     throw new Error(`audit: --post requires --pull`);
   }
   return {
-    repoDir: repoDir as string,
-    ref: ref as string,
-    base: base as string,
-    itemPath: itemPath as string,
-    ledgerPath: ledgerPath as string,
-    authors: authors as string,
+    repoDir,
+    ref,
+    base,
+    itemPath,
+    ledgerPath,
+    authors,
     authorModels,
     pull,
     post,
@@ -207,10 +218,11 @@ async function postComment(repo: string, pull: number, comment: string): Promise
   await writeFileAtomic("Audit comment", temp, comment);
   const { unlink } = await import("node:fs/promises");
   try {
-    const proc = Bun.spawn(
-      ["gh", "pr", "comment", String(pull), "-R", repo, "--body-file", temp],
-      { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
-    );
+    const proc = Bun.spawn(["gh", "pr", "comment", String(pull), "-R", repo, "--body-file", temp], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+    });
     const [stderr, rc] = await Promise.all([
       new Response(proc.stderr as ReadableStream).text(),
       proc.exited,
@@ -267,13 +279,15 @@ async function run(): Promise<number> {
     if ((await statInputPath("Repo dir", options.repoDir)) === "absent") {
       throw new Error(`audit: Repo dir ${options.repoDir}: not a directory`);
     }
-    const { stdout, rc } = await createReadOnlyGit(options.repoDir).resolveCommit("HEAD").then(
-      (sha) => ({ stdout: sha, rc: 0 }),
-      (error: unknown) => ({
-        stdout: error instanceof Error ? error.message : String(error),
-        rc: error instanceof GitReadError ? error.rc : 128,
-      }),
-    );
+    const { stdout, rc } = await createReadOnlyGit(options.repoDir)
+      .resolveCommit("HEAD")
+      .then(
+        (sha) => ({ stdout: sha, rc: 0 }),
+        (error: unknown) => ({
+          stdout: error instanceof Error ? error.message : String(error),
+          rc: error instanceof GitReadError ? error.rc : 128,
+        }),
+      );
     if (rc !== 0 || stdout === "") {
       throw new Error(`audit: Repo dir ${options.repoDir}: not a git repo (${stdout})`);
     }

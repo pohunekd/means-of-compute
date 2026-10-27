@@ -41,19 +41,28 @@ export async function makeTempRepo(): Promise<TempRepo> {
   const dir = mkdtempSync(join(tmpdir(), "auditor-repo-"));
   try {
     await git(dir, ["init", "-b", "main"]);
-    await Bun.write(join(dir, "src", "add.ts"), "export function add(a: number, b: number): number {\n  return a + b;\n}\n");
+    await Bun.write(
+      join(dir, "src", "add.ts"),
+      "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+    );
     await git(dir, ["add", "."]);
     await git(dir, ["commit", "-m", "base"]);
     const baseSha = await git(dir, ["rev-parse", "HEAD"]);
     await git(dir, ["checkout", "-b", "demo-good"]);
-    await Bun.write(join(dir, "src", "add.ts"), "export function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function version(): string {\n  return \"good\";\n}\n");
+    await Bun.write(
+      join(dir, "src", "add.ts"),
+      'export function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function version(): string {\n  return "good";\n}\n',
+    );
     await git(dir, ["add", "."]);
     await git(dir, ["commit", "-m", "good"]);
     const goodSha = await git(dir, ["rev-parse", "HEAD"]);
     await git(dir, ["checkout", "main"]);
     await git(dir, ["checkout", "-b", "demo-bad"]);
     await Bun.write(join(dir, "notes.txt"), "bad branch note\n");
-    await Bun.write(join(dir, "src", "add.ts"), "export function add(a: number, b: number): number {\n  return a - b;\n}\n");
+    await Bun.write(
+      join(dir, "src", "add.ts"),
+      "export function add(a: number, b: number): number {\n  return a - b;\n}\n",
+    );
     await git(dir, ["add", "."]);
     await git(dir, ["commit", "-m", "bad"]);
     const badSha = await git(dir, ["rev-parse", "HEAD"]);

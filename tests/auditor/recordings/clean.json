@@ -1,1 +1,9 @@
-[{ "status": 200, "body": { "choices": [{ "message": { "content": "{\"findings\": []}" } }], "usage": { "prompt_tokens": 120, "completion_tokens": 8 } } }]
+[
+  {
+    "status": 200,
+    "body": {
+      "choices": [{ "message": { "content": "{\"findings\": []}" } }],
+      "usage": { "prompt_tokens": 120, "completion_tokens": 8 }
+    }
+  }
+]

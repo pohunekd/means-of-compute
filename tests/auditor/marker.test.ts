@@ -3,11 +3,7 @@
 // a verdict without a marker.
 // Mutations: drop newline neutralization; drop the < and > escaping; render #null.
 import { expect, test } from "bun:test";
-import {
-  MARKER_LINE,
-  parseMarkerLine,
-  renderComment,
-} from "../../src/auditor/verdict.js";
+import { MARKER_LINE, parseMarkerLine, renderComment } from "../../src/auditor/verdict.js";
 import type { AuditVerdict } from "../../contracts/v1/types.js";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
@@ -81,6 +77,10 @@ test("marker parses the exact head and counts", () => {
   expect(fields?.number).toBe(7);
   expect(fields?.headSha).toBe(HEAD);
   expect(fields?.high).toBe(1);
-  expect(parseMarkerLine("<!-- audit:v1:factory/demo#7@short:auditor=m:high=0:medium=0:low=0 -->")).toBeNull();
-  expect(parseMarkerLine(`<!-- audit:v1:factory/demo#null@${HEAD}:auditor=m:high=0:medium=0:low=0 -->`)).toBeNull();
+  expect(
+    parseMarkerLine("<!-- audit:v1:factory/demo#7@short:auditor=m:high=0:medium=0:low=0 -->"),
+  ).toBeNull();
+  expect(
+    parseMarkerLine(`<!-- audit:v1:factory/demo#null@${HEAD}:auditor=m:high=0:medium=0:low=0 -->`),
+  ).toBeNull();
 });

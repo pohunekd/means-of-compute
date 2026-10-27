@@ -19,10 +19,7 @@ export interface AuditDeps {
   readonly config: AuditorConfig;
   readonly git: ReadOnlyGit;
   readonly budget: BudgetGate;
-  readonly call: (
-    providerId: string,
-    request: ModelRequest,
-  ) => Promise<SingleCallResult>;
+  readonly call: (providerId: string, request: ModelRequest) => Promise<SingleCallResult>;
   readonly ledgerPath: string;
   readonly now: () => Date;
 }

@@ -1,11 +1,7 @@
 // Verdict build, comment render, and marker parse. Counts are always
 // recomputed from the findings; a count reported by the model is never
 // read. Findings sort by severity rank, then by location.
-import type {
-  AuditCounts,
-  AuditFinding,
-  AuditVerdict,
-} from "../../contracts/v1/types.js";
+import type { AuditCounts, AuditFinding, AuditVerdict } from "../../contracts/v1/types.js";
 import type { AuditInput } from "./audit-types.js";
 
 const SEVERITY_RANK: Record<AuditFinding["severity"], number> = {

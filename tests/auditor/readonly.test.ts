@@ -30,13 +30,6 @@ const ENV = {
   LOCAL_MODEL_BASE_URL: "http://localhost:1234/v1",
 };
 
-interface Snapshot {
-  refs: string;
-  head: string;
-  status: string;
-  indexMtimeMs: number;
-}
-
 async function git(dir: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(["git", ...args], {
     cwd: dir,
@@ -65,23 +58,8 @@ async function readState(dir: string): Promise<{ refs: string; head: string }> {
   return { refs, head: head.trim() };
 }
 
-async function snapshot(dir: string): Promise<Snapshot> {
-  const [{ refs, head }, status] = await Promise.all([
-    readState(dir),
-    git(dir, ["status", "--porcelain"]),
-  ]);
-  const indexMtimeMs = (await stat(join(dir, ".git", "index"))).mtimeMs;
-  return { refs, head, status, indexMtimeMs };
-}
-
 async function indexMtimeMs(dir: string): Promise<number> {
   return (await stat(join(dir, ".git", "index"))).mtimeMs;
-}
-
-function expectUnchanged(before: Snapshot, after: Snapshot): void {
-  expect(after.refs).toBe(before.refs);
-  expect(after.head).toBe(before.head);
-  expect(after.status).toBe(before.status);
 }
 
 test("execGit refuses push, commit and update-ref without spawning", async () => {
@@ -99,7 +77,13 @@ test("execGit refuses push, commit and update-ref without spawning", async () =>
       }
       expect(refused).toBe(true);
     }
-    expect(ALLOWED_GIT_SUBCOMMANDS).toEqual(["rev-parse", "merge-base", "diff", "ls-tree", "cat-file"]);
+    expect(ALLOWED_GIT_SUBCOMMANDS).toEqual([
+      "rev-parse",
+      "merge-base",
+      "diff",
+      "ls-tree",
+      "cat-file",
+    ]);
     const after = await readState(repo.dir);
     expect(after.refs).toBe(before.refs);
     expect(after.head).toBe(before.head);
@@ -150,9 +134,7 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
       {
         status: 200,
         body: {
-          choices: [
-            { message: { content: "{\"findings\": [], \"run\": \"git push origin HEAD\"}" } },
-          ],
+          choices: [{ message: { content: '{"findings": [], "run": "git push origin HEAD"}' } }],
           usage: { prompt_tokens: 10, completion_tokens: 5 },
         },
       },

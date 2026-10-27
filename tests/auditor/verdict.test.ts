@@ -102,7 +102,7 @@ test("clean branch gets a SHA-bound clean verdict (mutation: bind the marker to 
     expect(marker).toContain(outcome.verdict.headSha);
     expect(marker).toContain("high=0:medium=0");
     expect(marker).not.toContain("demo-good@");
-    const stored = await Bun.file(
+    const stored: unknown = await Bun.file(
       join(verdictDir, "w9-demo", `${outcome.verdict.headSha}.json`),
     ).json();
     expect(isAuditVerdict(stored)).toBe(true);
@@ -115,10 +115,7 @@ test("clean branch gets a SHA-bound clean verdict (mutation: bind the marker to 
 });
 
 test("defect branch gets a high finding with path:line evidence (mutation: take counts from the model)", async () => {
-  const { outcome, cleanup } = await runCase(
-    "demo-bad",
-    "tests/auditor/recordings/defect.json",
-  );
+  const { outcome, cleanup } = await runCase("demo-bad", "tests/auditor/recordings/defect.json");
   try {
     if (outcome.kind !== "verdict") {
       throw new Error(`expected a verdict, got refusal: ${outcome.reason}`);

@@ -20,10 +20,15 @@ import { ProviderError } from "../providers/router.js";
 import { BudgetGateError } from "../budget/gate.js";
 
 export type AuditOutcome =
-  | { readonly kind: "verdict"; readonly verdict: ReturnType<typeof buildVerdict>; readonly comment: string | null; readonly path: string }
+  | {
+      readonly kind: "verdict";
+      readonly verdict: ReturnType<typeof buildVerdict>;
+      readonly comment: string | null;
+      readonly path: string;
+    }
   | { readonly kind: "refused"; readonly reason: string };
 
-async function refused(reason: string): Promise<AuditOutcome> {
+function refused(reason: string): AuditOutcome {
   return { kind: "refused", reason };
 }
 
@@ -83,7 +88,9 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
   }
   const diff = await deps.git.unifiedDiff(baseSha, headSha);
   if (Buffer.byteLength(diff, "utf8") > deps.config.maxDiffBytes) {
-    return refused(`diff too large for one audit (${String(Buffer.byteLength(diff, "utf8"))} > ${String(deps.config.maxDiffBytes)} bytes)`);
+    return refused(
+      `diff too large for one audit (${String(Buffer.byteLength(diff, "utf8"))} > ${String(deps.config.maxDiffBytes)} bytes)`,
+    );
   }
 
   const stored = await readVerdicts(deps.config.verdictDir, input.item.id);

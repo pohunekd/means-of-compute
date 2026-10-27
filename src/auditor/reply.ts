@@ -85,7 +85,7 @@ export async function parseReply(
     const colon = location.lastIndexOf(":");
     const path = location.slice(0, colon);
     const line = Number(location.slice(colon + 1));
-    let blob: string | null = null;
+    let blob: string | null;
     let lines = 0;
     try {
       blob = await git.blobAt(headSha, path);
@@ -102,12 +102,7 @@ export async function parseReply(
         );
       }
     }
-    if (
-      blob === null ||
-      !Number.isSafeInteger(line) ||
-      line < 1 ||
-      line > lines
-    ) {
+    if (blob === null || !Number.isSafeInteger(line) || line < 1 || line > lines) {
       throw new AuditModelError(
         `finding ${String(index)} location ${location} is not in the tree at ${headSha}`,
       );

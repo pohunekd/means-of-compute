@@ -55,10 +55,14 @@ async function providerModelOf(providerId: string): Promise<unknown> {
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`Auditor config ${AUDITOR_CONFIG_PATH}: provider file ${path} is not valid JSON`);
+    throw new Error(
+      `Auditor config ${AUDITOR_CONFIG_PATH}: provider file ${path} is not valid JSON`,
+    );
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new Error(`Auditor config ${AUDITOR_CONFIG_PATH}: provider file ${path} is not an object`);
+    throw new Error(
+      `Auditor config ${AUDITOR_CONFIG_PATH}: provider file ${path} is not an object`,
+    );
   }
   return (raw as Record<string, unknown>)["model"];
 }

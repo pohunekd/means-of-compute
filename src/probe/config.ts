@@ -107,11 +107,10 @@ export function assertSysfsRoot(root: unknown, label: string): void {
 }
 
 export function loadHostAlias(configDir: string, hostnameVal: string): string {
-  const hostsPath = join(configDir, "hosts.json");
-  const hostsRaw = readJson<HostMap>(hostsPath);
+  const hostsRaw = readJson<HostMap>(join(configDir, "hosts.json"));
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
   if (typeof alias !== "string") {
-    throw new Error(`host ${hostnameVal} not in ${hostsPath}`);
+    throw new Error(`host ${hostnameVal} not in config/hosts.json`);
   }
   return alias;
 }
@@ -119,12 +118,18 @@ export function loadHostAlias(configDir: string, hostnameVal: string): string {
 const hostAliasPattern = /^[a-z][a-z0-9-]{0,31}$/;
 
 export function loadHostFile(path: string): string {
-  let raw: unknown;
+  let text: string;
   try {
-    raw = readJson<unknown>(path);
+    text = readFileSync(path, "utf-8");
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code ?? "unknown";
     throw new Error(`host file ${path}: ${code}`, { cause: e });
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text) as unknown;
+  } catch (e) {
+    throw new Error(`host file ${path}: invalid hostAlias`, { cause: e });
   }
   if (
     typeof raw !== "object" ||

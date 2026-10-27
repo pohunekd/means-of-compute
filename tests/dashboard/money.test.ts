@@ -17,6 +17,10 @@ describe("dashboard money rounding", () => {
     expect(formatUsd(-hourCostScaled(1, 180_000_000n))).toBe("-$0.0001");
   });
 
+  test("inexact-in-float scaled units format exactly (mutation: float division in formatUsd)", () => {
+    expect(formatUsd(9_007_199_254_740_993n)).toBe("$0.0025");
+  });
+
   test("tiny value rounds to zero without a sign", () => {
     expect(formatUsd(hourCostScaled(1, 1n))).toBe("$0.0000");
     expect(formatUsd(-hourCostScaled(1, 1n))).toBe("$0.0000");

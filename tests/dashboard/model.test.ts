@@ -694,6 +694,38 @@ describe("dashboard unknown requests (mutation: provider ids instead of work ite
   });
 });
 
+describe("dashboard per-record rounding (mutation: round each record before summing)", () => {
+  test("two rows of 0.00005 USD sum to $0.0001 (mutation: per-record rounding gives $0.0002)", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-rounding-");
+    try {
+      const record = (id: string): string =>
+        `{"schemaVersion":"v1","workItemId":"${id}","finishedAt":"2026-10-26T15:00:00.000Z",` +
+        `"tokens":[{"provider":"meta-api","model":"muse-spark-1.3-contributor",` +
+        `"inputTokens":1000,"outputTokens":0,"requests":1,"source":"meter-proxy"}],` +
+        `"sessionSeconds":[{"hostAlias":"laptop-a","seconds":60,"source":"dispatcher-clock"}],` +
+        `"attempts":[{"model":"muse-spark-1.3-contributor","result":"success"}],` +
+        `"retries":0,"humanInterventions":0,"result":"success"}\n`;
+      await writeFile(`${dir}/ledger.jsonl`, record("r1") + record("r2"), "utf8");
+      await mkdir(`${dir}/verdicts`, { recursive: true });
+      const inputs = await loadInputs(`${dir}/ledger.jsonl`, `${dir}/verdicts`);
+      if (!inputs.pricing.ok) {
+        throw new Error("expected pricing to load");
+      }
+      const pricing = new Map(inputs.pricing.value);
+      // 1000 tokens at 0.05 USD per 1M: each record costs exactly 0.00005 USD.
+      pricing.set("meta-api", { inputNanoPer1M: 50_000_000n, outputNanoPer1M: 50_000_000n });
+      const model = buildDashboard({ ...inputs, pricing: { ok: true as const, value: pricing } });
+      const savings = model.panels[3] as (typeof model.panels)[number];
+      expect(figureOf(savings, "Actual token cost").cell).toEqual({
+        kind: "text",
+        text: "$0.0001",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("dashboard failures (mutation: message text in the page, or missing log path)", () => {
   test("ledger-invalid page carries the code only, never the message", async () => {
     const model = buildDashboard(await loadInputs(INVALID));

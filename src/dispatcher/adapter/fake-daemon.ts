@@ -21,9 +21,10 @@ import type { HostConnector } from "./connection.js";
 
 export interface SessionPatch {
   readonly state?: SessionState;
-  readonly exitCode?: number;
+  readonly exit_code?: number;
   readonly runtime?: SessionRuntime;
   readonly activity?: AgentActivity;
+  readonly turn_started_at?: string;
   readonly metadata?: Record<string, string>;
 }
 
@@ -73,6 +74,14 @@ interface AliasState {
 }
 
 const DAEMON_VERSION = "0.37.0-fake";
+
+const FAKE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+
+const AGENT_ACTIVITIES: ReadonlySet<unknown> = new Set(["working", "idle", "blocked"]);
+
+function isAgentActivity(value: unknown): value is AgentActivity {
+  return AGENT_ACTIVITIES.has(value);
+}
 
 function defaultCaps(profile: string): HostCapabilities {
   return {
@@ -292,7 +301,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
             ? { applied_input: true, prompt_delivered: true }
             : {}),
           ...(typed.branch_source === "remote"
-            ? { worktree_source: { ref: `origin/${String(typed.branch)}`, commit: "" } }
+            ? { worktree_source: { ref: `origin/${String(typed.branch)}`, commit: FAKE_COMMIT } }
             : {}),
         };
         const reply: SessionNewResult = { ...base, ...state.newOverride?.(typed) };
@@ -327,7 +336,8 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
         return okLine(request.id, result);
       }
       case "session.inspect": {
-        const info = state.sessions.get(String(request.params));
+        const params = String(request.params);
+        const info = state.sessions.get(params);
         if (info === undefined) {
           return errLine(request.id, "session_not_found");
         }
@@ -342,7 +352,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
         const patch = params["metadata"] as Record<string, string | null>;
         const nextMetadata: Record<string, string> = {};
         for (const [keptKey, keptValue] of Object.entries(info.metadata ?? {})) {
-          if (keptKey !== target || patch[keptKey] !== null) {
+          if (patch[keptKey] !== null) {
             nextMetadata[keptKey] = keptValue;
           }
         }
@@ -372,19 +382,28 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
           return okLine(request.id, queued);
         }
         state.cursor += 1;
+        const ids = (params["session_ids"] as readonly unknown[] | undefined) ?? [];
+        const progress = waitProgress(state, ids).map((entry) => {
+          const info = state.sessions.get(entry.session_id) as
+            | Record<string, unknown>
+            | undefined;
+          const activity = info?.["activity"];
+          const startedAt = info?.["turn_started_at"];
+          return {
+            ...entry,
+            ...(isAgentActivity(activity) ? { activity } : {}),
+            ...(typeof startedAt === "string" ? { turn_started_at: startedAt } : {}),
+          };
+        });
         return okLine(request.id, {
           reason: "timeout",
           cursor: `cursor-${String(state.cursor)}`,
-          progress: waitProgress(
-            state,
-            (params["session_ids"] as readonly unknown[] | undefined) ?? [],
-          ),
+          progress,
         } satisfies SessionWaitTurnResult);
       }
       case "session.diff": {
         const target = params["session_id"] as string;
-        const info = state.sessions.get(target);
-        if (info === undefined) {
+        if (!state.sessions.has(target)) {
           return errLine(request.id, "session_not_found");
         }
         const stored = state.diffs.get(target);
@@ -515,9 +534,12 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
       state.sessions.set(id, {
         ...info,
         ...(patch.state !== undefined ? { state: patch.state } : {}),
-        ...(patch.exitCode !== undefined ? { exit_code: patch.exitCode } : {}),
+        ...(patch.exit_code !== undefined ? { exit_code: patch.exit_code } : {}),
         ...(patch.runtime !== undefined ? { runtime: patch.runtime } : {}),
         ...(patch.activity !== undefined ? { activity: patch.activity } : {}),
+        ...(patch.turn_started_at !== undefined
+          ? { turn_started_at: patch.turn_started_at }
+          : {}),
         ...(patch.metadata !== undefined
           ? { metadata: { ...(info.metadata ?? {}), ...patch.metadata } }
           : {}),

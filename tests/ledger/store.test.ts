@@ -98,6 +98,27 @@ test("null input tokens propagate as null through finalize", async () => {
   }
 });
 
+test("append with an invalid date throws LedgerDataError", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    let error: unknown;
+    try {
+      await appendPending(
+        ledgerPath,
+        sessionEntry({ finishedAt: "2026-13-01T00:00:00.000Z" }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LedgerDataError);
+    expect((error as Error).message).toContain("finishedAt is not a valid date");
+    expect(await Bun.file(ledgerPath).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("finalize with no pending and no record refuses and writes nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
   const ledgerPath = join(dir, "ledger.jsonl");

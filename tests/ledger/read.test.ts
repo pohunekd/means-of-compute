@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
 import { loadLedgerConfig, readLedger } from "../../src/ledger/read.js";
+import { LedgerDataError } from "../../src/ledger/errors.js";
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -208,6 +209,18 @@ test("reader code-predicate failure names its reason, never null", async () => {
     }
     expect(dateMessage).toContain("finishedAt is not canonical");
     expect(dateMessage).not.toContain("null");
+    const invalidDate = pending({ finishedAt: "2026-13-01T00:00:00.000Z" });
+    await Bun.write(path, `${JSON.stringify({ pending: invalidDate })}\n`);
+    let invalidMessage = "";
+    try {
+      await readLedger("Ledger query", path);
+    } catch (error: unknown) {
+      invalidMessage = error instanceof Error ? error.message : String(error);
+      expect(error).toBeInstanceOf(LedgerDataError);
+    }
+    expect(invalidMessage).toContain("Ledger query");
+    expect(invalidMessage).toContain("line 1");
+    expect(invalidMessage).toContain("finishedAt is not a valid date");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

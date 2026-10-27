@@ -72,6 +72,7 @@ function insideWindow(now: Date, start: string, end: string): boolean {
   const nowM = now.getHours() * 60 + now.getMinutes();
   const startM = parseMinutes(start);
   const endM = parseMinutes(end);
+  if (startM === endM) return true;
   if (startM <= endM) {
     return nowM >= startM && nowM < endM;
   }
@@ -369,8 +370,21 @@ async function queryLocalModels(
     });
     clearTimeout(t);
     if (!res.ok) return { reachable: false, models: [] };
-    const data = (await res.json()) as { data?: { id: string }[] };
-    const models = (data.data ?? []).map((d) => d.id);
+    const data: unknown = await res.json();
+    const items =
+      typeof data === "object" && data !== null && Array.isArray((data as { data?: unknown }).data)
+        ? (data as { data: unknown[] }).data
+        : null;
+    if (!items) return { reachable: false, models: [] };
+    const seen = new Set<string>();
+    const models: string[] = [];
+    for (const entry of items) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const id = (entry as { id?: unknown }).id;
+      if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
+      seen.add(id);
+      models.push(id);
+    }
     return { reachable: true, models };
   } catch {
     return { reachable: false, models: [] };

@@ -8,9 +8,7 @@
       "inputTokens": 700,
       "outputTokens": 300,
       "requests": 2,
-      "sources": [
-        "provider-usage"
-      ]
+      "sources": ["provider-usage"]
     },
     {
       "provider": "meta-api",
@@ -18,10 +16,7 @@
       "inputTokens": null,
       "outputTokens": 800,
       "requests": 4,
-      "sources": [
-        "auditor-usage",
-        "provider-usage"
-      ]
+      "sources": ["auditor-usage", "provider-usage"]
     },
     {
       "provider": "nvidia-build",
@@ -29,10 +24,7 @@
       "inputTokens": 16200,
       "outputTokens": 4450,
       "requests": 21,
-      "sources": [
-        "auditor-usage",
-        "provider-usage"
-      ]
+      "sources": ["auditor-usage", "provider-usage"]
     }
   ],
   "byHost": [
@@ -40,17 +32,13 @@
       "hostAlias": "desktop",
       "seconds": 600,
       "hours": "0.17",
-      "sources": [
-        "dispatcher-clock"
-      ]
+      "sources": ["dispatcher-clock"]
     },
     {
       "hostAlias": "laptop",
       "seconds": 2700,
       "hours": "0.75",
-      "sources": [
-        "dispatcher-clock"
-      ]
+      "sources": ["dispatcher-clock"]
     }
   ],
   "byModel": [

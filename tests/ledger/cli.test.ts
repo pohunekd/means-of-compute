@@ -76,7 +76,9 @@ test("record of the same completion twice refuses the replay and changes nothing
     expect(totals.code).toBe(0);
     const replay = await runCli(["record", "--ledger", ledger, "--completion", completion]);
     expect(replay.code).toBe(3);
-    expect(replay.stderr).toContain("pending entry e1-demo is not newer than the record of w1-demo");
+    expect(replay.stderr).toContain(
+      "pending entry e1-demo is not newer than the record of w1-demo",
+    );
     expect(await Bun.file(ledger).text()).toBe(before);
     const after = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
     expect(after.code).toBe(0);

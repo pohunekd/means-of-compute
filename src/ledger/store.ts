@@ -235,10 +235,7 @@ export function applyPending(
     );
   }
   const record = contents.records.find((item) => item.workItemId === entry.workItemId) ?? null;
-  if (
-    record !== null &&
-    Date.parse(entry.finishedAt) <= Date.parse(record.finishedAt)
-  ) {
+  if (record !== null && Date.parse(entry.finishedAt) <= Date.parse(record.finishedAt)) {
     throw new LedgerRefusal(
       `pending entry ${entry.entryId} is not newer than the record of ${entry.workItemId}`,
     );

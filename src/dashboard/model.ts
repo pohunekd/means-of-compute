@@ -414,14 +414,33 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
           ),
         )
       : [];
+  // The caps need no ledger or prices (5.3): they stand on every failure,
+  // in the same figure positions as the success path.
+  const dayCapFigure = textFigure(
+    "Day cap",
+    formatUsd(capScaled(inputs.budget.dayCapNanoUsd)),
+    "config/budget.json dayCapUsd",
+  );
+  const totalCapFigure = textFigure(
+    "Total cap",
+    formatUsd(capScaled(inputs.budget.totalCapNanoUsd)),
+    "config/budget.json totalCapUsd",
+  );
   if (!inputs.ledger.ok) {
     figures.push(
       failedFigure(`Spent today (UTC ${day})`, inputs.ledger.failure, "ledger records"),
+      dayCapFigure,
       failedFigure("Spent total", inputs.ledger.failure, "ledger records"),
+      totalCapFigure,
       failedFigure(
         `NVIDIA Build requests today (UTC ${day})`,
         inputs.ledger.failure,
         "ledger records",
+      ),
+      failedFigure(
+        "New sessions",
+        inputs.ledger.failure,
+        "budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)",
       ),
     );
   } else if (!inputs.pricing.ok) {
@@ -431,11 +450,18 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         inputs.pricing.failure,
         "ledger records and pending entries",
       ),
+      dayCapFigure,
       failedFigure("Spent total", inputs.pricing.failure, "ledger records and pending entries"),
+      totalCapFigure,
       failedFigure(
         `NVIDIA Build requests today (UTC ${day})`,
         inputs.pricing.failure,
         "ledger records and pending entries",
+      ),
+      failedFigure(
+        "New sessions",
+        inputs.pricing.failure,
+        "budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)",
       ),
     );
   } else if (scope !== null) {

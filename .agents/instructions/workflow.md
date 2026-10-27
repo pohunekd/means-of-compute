@@ -31,7 +31,7 @@ Each pushed head is audited read-only against the issue's DoD by a model other t
 the author's. The audit posts one comment whose first line is:
 
 ```
-<!-- audit:v1:<owner>/<repo>#<N>@<40-char head sha>:auditor=<model id>:high=<n>:medium=<n>:low=<n> -->
+<!-- audit:v1:<owner>/<repo>#<PR number>@<40-char head sha>:auditor=<model id>:high=<n>:medium=<n>:low=<n> -->
 ```
 
 followed by a findings table (severity, `path:line`, defect, failure scenario, fix

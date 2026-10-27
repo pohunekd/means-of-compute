@@ -101,7 +101,7 @@ async function recordAuditUsage(
     });
   } catch (error: unknown) {
     throw new Error(
-      `audit: cannot record usage: ${error instanceof Error ? error.message : String(error)}`,
+      `cannot record usage: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
@@ -110,14 +110,14 @@ async function recordAuditUsage(
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
   if (!isWorkItem(input.item)) {
     throw new Error(
-      `audit: invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`,
+      `invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`,
     );
   }
   if (
     input.pullNumber !== null &&
     (!Number.isSafeInteger(input.pullNumber) || input.pullNumber < 1)
   ) {
-    throw new Error(`audit: invalid pull number ${JSON.stringify(input.pullNumber)}`);
+    throw new Error(`invalid pull number ${JSON.stringify(input.pullNumber)}`);
   }
 
   let headSha: string;
@@ -127,12 +127,12 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     baseSha = await deps.git.mergeBase(await deps.git.resolveCommit(input.baseRef), headSha);
   } catch (error: unknown) {
     if (error instanceof GitReadError) {
-      throw new Error(`audit: ${error.message}`, { cause: error });
+      throw new Error(error.message, { cause: error });
     }
     throw error;
   }
   if (!HEX40_PATTERN.test(headSha) || !HEX40_PATTERN.test(baseSha)) {
-    throw new Error(`audit: git returned a non-sha head ${headSha} or base ${baseSha}`);
+    throw new Error(`git returned a non-sha head ${headSha} or base ${baseSha}`);
   }
 
   const files = await deps.git.changedFiles(baseSha, headSha);
@@ -170,7 +170,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     admission = await deps.budget.admit();
   } catch (error: unknown) {
     if (error instanceof BudgetGateError) {
-      throw new Error(`audit: ${error.message}`, { cause: error });
+      throw new Error(error.message, { cause: error });
     }
     throw error;
   }
@@ -192,7 +192,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
       (error instanceof Error && (error.name === "AbortError" || error instanceof TypeError))
     ) {
       throw new AuditModelError(
-        `audit: model call failed: ${error instanceof Error ? error.message : String(error)}`,
+        `model call failed: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
       );
     }
@@ -215,7 +215,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
       throw error;
     }
     throw new AuditModelError(
-      `audit: invalid model reply: ${error instanceof Error ? error.message : String(error)}`,
+      `invalid model reply: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
@@ -227,7 +227,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     verdict.authorModels.includes(verdict.auditorModel) ||
     !Bun.deepEquals(verdict.counts, recount(verdict.findings), true)
   ) {
-    throw new Error("audit: built verdict fails the self-check");
+    throw new Error("built verdict fails the self-check");
   }
 
   let path: string;
@@ -238,7 +238,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
       return refused(`verdict exists for ${headSha}`);
     }
     throw new Error(
-      `audit: cannot store verdict: ${error instanceof Error ? error.message : String(error)}`,
+      `cannot store verdict: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }

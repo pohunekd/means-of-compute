@@ -171,18 +171,18 @@ function parseOptions(args: string[]): CliOptions {
 
 async function readItem(path: string): Promise<WorkItem> {
   if ((await statInputPath("Work item", path)) === "absent") {
-    throw new Error(`audit: Work item ${path}: file is missing`);
+    throw new Error(`Work item ${path}: file is missing`);
   }
   const text = await readInputText("Work item", path);
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`audit: Work item ${path}: not valid JSON`);
+    throw new Error(`Work item ${path}: not valid JSON`);
   }
   if (!isWorkItem(raw)) {
     throw new Error(
-      `audit: Work item ${path}: invalid work item ${JSON.stringify(contractErrors("work-item", raw))}`,
+      `Work item ${path}: invalid work item ${JSON.stringify(contractErrors("work-item", raw))}`,
     );
   }
   return raw;
@@ -207,7 +207,7 @@ async function resolveAuthors(
       throw error;
     }
     throw new Error(
-      `audit: cannot read ledger: ${error instanceof Error ? error.message : String(error)}`,
+      `cannot read ledger: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
@@ -215,7 +215,7 @@ async function resolveAuthors(
 
 async function postComment(repo: string, pull: number, comment: string): Promise<void> {
   if (!REPO_PATTERN.test(repo)) {
-    throw new Error(`audit: invalid repo ${JSON.stringify(repo)}`);
+    throw new Error(`invalid repo ${JSON.stringify(repo)}`);
   }
   const markerLine = comment.split("\n")[0] as string;
   const temp = `${process.env["TMPDIR"] ?? "/tmp"}/audit-comment-${randomUUID()}.md`;
@@ -287,7 +287,7 @@ async function run(): Promise<number> {
         }),
       );
     if (rc !== 0 || stdout === "") {
-      throw new Error(`audit: Repo dir ${options.repoDir}: not a git repo (${stdout})`);
+      throw new Error(`Repo dir ${options.repoDir}: not a git repo (${stdout})`);
     }
     const item = await readItem(options.itemPath);
     const { ledgerPath } = await loadLedgerConfig();
@@ -308,7 +308,7 @@ async function run(): Promise<number> {
         // refuses instead of posting a marker that rule 2.6 rejects.
         if (match.pullNumber !== null && match.pullNumber !== options.pull) {
           console.error(
-            `audit: stored verdict ${headSha} is for #${String(match.pullNumber)}, not #${String(options.pull)}`,
+            `stored verdict ${headSha} is for #${String(match.pullNumber)}, not #${String(options.pull)}`,
           );
           return 2;
         }
@@ -317,7 +317,7 @@ async function run(): Promise<number> {
             ? renderComment({ ...match, pullNumber: options.pull })
             : renderComment(match);
         if (comment === null || options.pull === null) {
-          console.error("audit: --post requires a pull request");
+          console.error("--post requires a pull request");
           return 2;
         }
         await postComment(item.repo, options.pull, comment);
@@ -359,7 +359,7 @@ async function run(): Promise<number> {
     }
     if (options.post) {
       if (outcome.comment === null || options.pull === null) {
-        console.error("audit: --post requires a pull request");
+        console.error("--post requires a pull request");
         return 2;
       }
       await postComment(item.repo, options.pull, outcome.comment);

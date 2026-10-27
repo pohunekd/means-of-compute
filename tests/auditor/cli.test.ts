@@ -287,6 +287,8 @@ test("M4: a failing gh post exits 4 with a single audit: prefix", async () => {
     expect(run.code).toBe(4);
     expect(run.stderr).toContain("audit: gh pr comment failed");
     expect(run.stderr).not.toContain("audit: audit:");
+    // Exactly one prefix: the CLI catch adds it, the layers below do not.
+    expect(run.stderr.split("audit:")).toHaveLength(2);
   } finally {
     tree.cleanup();
     removeTempRepo(repo.dir);
@@ -469,6 +471,28 @@ test("C-1: a marker on the second page verifies with rc 0 (mutation: read only t
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);
     expect(run.stdout.trim()).toBe(`posted stored verdict ${head}`);
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L-2: an invalid item exits 2 with a single audit: prefix", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    // An item with an empty DoD fails isWorkItem in the library as in
+    // the CLI: the catch adds the only prefix.
+    const item = { ...demoItem("demo-good"), dod: [] };
+    await Bun.write(join(tree.dir, "item.json"), `${JSON.stringify(item)}\n`);
+    await installFakeGh(tree, "ok");
+    const run = await runCliWithGh(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
+      "--pull",
+      "99",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("audit: Work item");
+    expect(run.stderr.split("audit:")).toHaveLength(2);
   } finally {
     tree.cleanup();
     removeTempRepo(repo.dir);

@@ -377,16 +377,19 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
         return okLine(request.id, { stopped: false });
       }
       case "session.wait_turn": {
+        const wanted = (params["session_ids"] as readonly unknown[] | undefined) ?? [];
+        const missing = wanted.filter((id) => !state.sessions.has(String(id)));
+        if (missing.length > 0) {
+          return errLine(request.id, "session_not_found");
+        }
         const queued = state.waitQueue.shift();
         if (queued !== undefined) {
           return okLine(request.id, queued);
         }
         state.cursor += 1;
-        const ids = (params["session_ids"] as readonly unknown[] | undefined) ?? [];
-        const progress = waitProgress(state, ids).map((entry) => {
-          const info = state.sessions.get(entry.session_id) as
-            | Record<string, unknown>
-            | undefined;
+        const progressIds = (params["session_ids"] as readonly unknown[] | undefined) ?? [];
+        const progress = waitProgress(state, progressIds).map((entry) => {
+          const info = state.sessions.get(entry.session_id) as Record<string, unknown> | undefined;
           const activity = info?.["activity"];
           const startedAt = info?.["turn_started_at"];
           return {
@@ -537,9 +540,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
         ...(patch.exit_code !== undefined ? { exit_code: patch.exit_code } : {}),
         ...(patch.runtime !== undefined ? { runtime: patch.runtime } : {}),
         ...(patch.activity !== undefined ? { activity: patch.activity } : {}),
-        ...(patch.turn_started_at !== undefined
-          ? { turn_started_at: patch.turn_started_at }
-          : {}),
+        ...(patch.turn_started_at !== undefined ? { turn_started_at: patch.turn_started_at } : {}),
         ...(patch.metadata !== undefined
           ? { metadata: { ...(info.metadata ?? {}), ...patch.metadata } }
           : {}),

@@ -32,7 +32,10 @@ writes.
 
 `appendPending` adds one pending entry (`session` or `audit` kind). A replay
 of the identical entry returns `unchanged` without a write; the same
-`entryId` with different content exits 2.
+`entryId` with different content exits 2. An entry whose `finishedAt` is at
+or before the finished record of its `workItemId` exits 3: a record's
+`finishedAt` is the latest `finishedAt` of everything folded into it, so
+such an entry was folded already or belongs to a finished completion.
 
 `finalizeUsage` folds every pending entry of the item into its record:
 
@@ -99,8 +102,13 @@ bun run ledger:query --ledger <path> (--by <list> | --record <workItemId>)
 ```
 
 The completion file holds `{"pending": PendingUsage[] (minItems 1),
-"finalize": FinalizeInput}` with no other keys. Record appends each entry in
-order, then finalizes, prints `recorded <workItemId> (<outcome>)` and exits 0.
+"finalize": FinalizeInput}` with no other keys. Every pending entry's
+`workItemId` must equal the finalize `workItemId`, and the pending
+`entryId`s must be unique; either violation exits 2. Record is one locked
+atomic write: it applies each entry in order, then finalizes, and writes
+at most once. Any error or refusal writes nothing, so exit 2 and exit 3
+both leave the ledger bytes unchanged. On success it prints
+`recorded <workItemId> (<outcome>)` and exits 0.
 
 Query prints `JSON.stringify(result, null, 2)` for `--by`, a comma list that
 is a non-empty, duplicate-free subset of `provider,host,model`, and exits 0.
@@ -121,7 +129,8 @@ exits 2 with `ledger: <message>`. Exits follow the budget guard: 0 ok,
   `loadLedgerConfig`.
 - `src/ledger/lock.ts` — `withLedgerLock`, the in-process chain plus the
   kernel `flock`.
-- `src/ledger/store.ts` — `appendPending`, `finalizeUsage`, `foldRecord`,
+- `src/ledger/store.ts` — `recordCompletion`, `applyPending`,
+  `applyFinalize`, `appendPending`, `finalizeUsage`, `foldRecord`,
   `LedgerRefusal` (exit 3), `LedgerDataError` (exit 2).
 - `src/ledger/query.ts` — `queryLedger`, pure aggregation for the dashboard.
 - `src/ledger/cli.ts` — the `ledger:record` and `ledger:query` commands.

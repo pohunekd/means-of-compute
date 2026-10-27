@@ -56,7 +56,7 @@ function idleHost(hostAlias: string): Record<string, unknown> {
 }
 
 async function makeSandbox(
-  configBody = '{"batteryFloorPercent": 50, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}',
+  configBody = '{"batteryFloorPercent": 50, "minInputIdleSeconds": 900, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}',
 ): Promise<{
   dir: string;
   run: (args: readonly string[]) => Promise<SpawnResult>;
@@ -112,7 +112,7 @@ test("all hosts excluded: CLI exits 3 with a null decision (mutation: return the
 
 test("weights summing to 0.9: CLI exits 2 (mutation: drop the sum check)", async () => {
   const sandbox = await makeSandbox(
-    '{"batteryFloorPercent": 50, "weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}',
+    '{"batteryFloorPercent": 50, "minInputIdleSeconds": 900, "weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}',
   );
   try {
     const result = await sandbox.run([
@@ -157,7 +157,7 @@ test("freeMb above totalMb: CLI exits 2 naming the index (mutation: drop the bou
 
 test("extra top-level config key: CLI exits 2 (mutation: drop the top-level key check)", async () => {
   const sandbox = await makeSandbox(
-    '{"batteryFloorPercent": 50, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}, "extra": true}',
+    '{"batteryFloorPercent": 50, "minInputIdleSeconds": 900, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}, "extra": true}',
   );
   try {
     const result = await sandbox.run([

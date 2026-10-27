@@ -145,6 +145,30 @@ test("an idle host on AC at the battery floor is never chosen (mutation: drop ex
   );
 });
 
+test("a low-battery host with the most capacity is never chosen (mutation: drop exclusion 1)", () => {
+  const hosts = [
+    host({ hostAlias: "desktop" }),
+    host({
+      hostAlias: "laptop-b",
+      idle: false,
+      idleReason: "battery at 34 percent, below the 50 percent floor",
+      acPower: true,
+      batteryPercent: 34,
+      cores: 32,
+      load1m: 0.1,
+      totalMb: 131072,
+      freeMb: 120000,
+      gpuPresent: true,
+    }),
+  ];
+  const decision = place(item(), hosts, [], CONFIG);
+  expect(isPlacementDecision(decision)).toBe(true);
+  expect(decision.chosenHostAlias).toBe("desktop");
+  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-b");
+  expect(candidate?.excluded).toBe(true);
+  expect(candidate?.reason).toBe("excluded: not idle (battery at 34 percent, below the 50 percent floor)");
+});
+
 test("an idle host with recent input and the most capacity is never chosen (mutation: drop exclusion 4)", () => {
   const hosts = [
     host({ hostAlias: "desktop" }),
@@ -167,36 +191,7 @@ test("an idle host with recent input and the most capacity is never chosen (muta
   expect(candidate?.reason).toBe("excluded: user input 40 seconds ago");
 });
 
-test("an idle host above the battery floor is scored (mutation: use < instead of <=)", () => {
-  const hosts = [
-    host({
-      hostAlias: "desktop",
-      acPower: true,
-      batteryPercent: 51,
-      cores: 8,
-      load1m: 4.0,
-      totalMb: 32768,
-      freeMb: 4000,
-    }),
-    host({
-      hostAlias: "laptop-a",
-      acPower: true,
-      batteryPercent: 51,
-      cores: 8,
-      load1m: 0.1,
-      totalMb: 32768,
-      freeMb: 30000,
-    }),
-  ];
-  const decision = place(item(), hosts, [], CONFIG);
-  expect(isPlacementDecision(decision)).toBe(true);
-  expect(decision.chosenHostAlias).toBe("laptop-a");
-  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
-  expect(candidate?.excluded).toBe(false);
-  expect(candidate?.reason).toContain("battery 51%");
-});
-
-test("insideWindow:false with idle:true is excluded (mutation: drop exclusion 2)", () => {
+test("insideWindow:false with idle:true is excluded (mutation: drop exclusion 5)", () => {
   const hosts = [
     host({ hostAlias: "desktop", idle: true, insideWindow: false }),
     host({ hostAlias: "laptop-a" }),

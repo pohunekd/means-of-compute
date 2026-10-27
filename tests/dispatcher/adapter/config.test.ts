@@ -56,15 +56,30 @@ test("the checked-in adapter config loads", async () => {
   expect(config.hostRoutesFileEnv).toBe("MOC_HOST_ROUTES_FILE");
 });
 
-const BAD_CASES: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
-  ["missing key", { ...VALID, cols: undefined }, "cols"],
-  ["extra key", { ...VALID, extra: 1 }, "extra"],
-  ["inputAckTimeoutMs 8001", { ...VALID, inputAckTimeoutMs: 8001 }, "inputAckTimeoutMs"],
-  ["cancelWaitTimeoutMs 0", { ...VALID, cancelWaitTimeoutMs: 0 }, "cancelWaitTimeoutMs"],
-  ["bad env name", { ...VALID, hostRoutesFileEnv: "lower-case" }, "hostRoutesFileEnv"],
+const BAD_CASES: ReadonlyArray<readonly [string, Record<string, unknown>, string, string]> = [
+  ["missing key", { ...VALID, cols: undefined }, "cols", 'missing required key "cols"'],
+  ["extra key", { ...VALID, extra: 1 }, "extra", 'unexpected key "extra"'],
+  [
+    "inputAckTimeoutMs 8001",
+    { ...VALID, inputAckTimeoutMs: 8001 },
+    "inputAckTimeoutMs",
+    '"inputAckTimeoutMs" must be an integer',
+  ],
+  [
+    "cancelWaitTimeoutMs 0",
+    { ...VALID, cancelWaitTimeoutMs: 0 },
+    "cancelWaitTimeoutMs",
+    '"cancelWaitTimeoutMs" must be an integer',
+  ],
+  [
+    "bad env name",
+    { ...VALID, hostRoutesFileEnv: "lower-case" },
+    "hostRoutesFileEnv",
+    '"hostRoutesFileEnv" must match',
+  ],
 ];
 
-for (const [name, value, key] of BAD_CASES) {
+for (const [name, value, key, fragment] of BAD_CASES) {
   test(`adapter config ${name} throws naming the key`, async () => {
     await withTempDir(async (dir) => {
       const path = await writeConfig(dir, value);
@@ -75,6 +90,7 @@ for (const [name, value, key] of BAD_CASES) {
         message = error instanceof Error ? error.message : String(error);
       }
       expect(message).toContain(key);
+      expect(message).toContain(fragment);
     });
   });
 }

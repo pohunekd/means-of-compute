@@ -143,8 +143,10 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
     const outcome = await second;
     startedOf(outcome);
     const live = control.sessions()[0];
-    expect(live).toBeDefined();
-    expect(outcome.handle.sessionId).toBe(live?.handle.sessionId);
+    if (live === undefined) {
+      throw new Error("expected one live session in the port");
+    }
+    expect(outcome.handle.sessionId).toBe(live.handle.sessionId);
     const settled = await readRegistry(registryPath);
     expect(settled).toHaveLength(1);
     expect(settled[0]?.sessionId).toBe(outcome.handle.sessionId);

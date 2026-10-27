@@ -2,8 +2,10 @@
 // arithmetic and section 10.2, never from the code under test.
 import { describe, expect, test } from "bun:test";
 import {
+  capScaled,
   formatUsd,
   groupDigits,
+  guardScaled,
   hourCostScaled,
   priceText,
   tokenCostScaled,

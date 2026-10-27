@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 
 import { runProbe } from "./src/probe/probe.js";
-import { loadConfig } from "./src/probe/config.js";
-
-export { loadConfig };
+import { FactsError } from "./src/probe/facts.js";
 
 async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
@@ -25,6 +23,10 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((e: unknown) => {
+    if (e instanceof FactsError) {
+      process.stderr.write(`${e.message}\n`);
+      process.exit(1);
+    }
     console.error(e);
     process.exit(1);
   });

@@ -67,8 +67,6 @@ export async function runProbe(options: {
   scenario?: string;
 }): Promise<HostCapacity> {
   const { factsPath, scenario } = options;
-  const factsLabel =
-    factsPath ?? (scenario ? configPath("scenarios", `${scenario}.json`) : "facts");
   let facts: Facts = {};
   if (factsPath) {
     facts = loadFacts(factsPath);
@@ -104,12 +102,8 @@ export async function runProbe(options: {
 
   let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
-  const loggedOutInit = facts.noLocalUserSession === true;
-  let loggedOut = loggedOutInit;
+  let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
-  if (loggedOut && facts.secondsSinceInput === undefined) {
-    throw new Error(`facts ${factsLabel}: secondsSinceInput: required with noLocalUserSession`);
-  }
   let powerUnknown = false;
   let powerCause = "";
 

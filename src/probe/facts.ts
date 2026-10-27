@@ -99,6 +99,12 @@ export function validateFactsValue(
       throw new FactsError(`facts ${path}: sysfsRoot: ${detail ?? "invalid"}`, { cause: e });
     }
   }
+  // A logged-out fact still needs an input time: without one the idle
+  // reason has no anchor. This runs here, before loadConfig, so a config
+  // or host-map error cannot mask the facts line.
+  if (record["noLocalUserSession"] === true && record["secondsSinceInput"] === undefined) {
+    throw new FactsError(`facts ${path}: secondsSinceInput: required with noLocalUserSession`);
+  }
 }
 
 export function loadFacts(path: string): Facts {

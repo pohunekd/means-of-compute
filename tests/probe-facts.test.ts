@@ -104,4 +104,12 @@ describe.skipIf(process.platform !== "linux")("facts validation", () => {
       await expectFactsError(await runProbe(p), "timestamp");
     });
   });
+
+  test("logged-out facts without input time exit 1 naming it (mutation: leave the check in runProbe)", async () => {
+    // No hostAlias: the check in validateFactsValue runs before loadConfig
+    // and the host map, so their errors cannot mask the facts line.
+    await withFacts({ noLocalUserSession: true }, async (p) => {
+      await expectFactsError(await runProbe(p), "secondsSinceInput");
+    });
+  });
 });

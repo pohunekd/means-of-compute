@@ -1,12 +1,11 @@
 // CLI entry points for the ledger: bun run ledger:record and
 // bun run ledger:query. Record appends pending entries and finalizes one
 // task; query aggregates records without taking the lock or writing.
-import { isUsageRecord } from "../../contracts/v1/validate.js";
 import { readInputText, statInputPath } from "../fs/input.js";
-import { LedgerDataError, LedgerRefusal } from "./errors.js";
+import { LedgerRefusal } from "./errors.js";
 import { queryLedger, type QueryDimension } from "./query.js";
 import { readLedger } from "./read.js";
-import { appendPending, finalizeUsage } from "./store.js";
+import { recordCompletion } from "./store.js";
 import type { FinalizeInput, PendingUsage } from "./types.js";
 import { isPendingUsage, pendingReason } from "./validate.js";
 
@@ -118,10 +117,19 @@ async function readCompletion(path: string): Promise<CompletionFile> {
       );
     }
   }
-  return {
-    pending: pending as PendingUsage[],
-    finalize: readFinalize(`${label} ${path}`, record.finalize),
-  };
+  const entries = pending as PendingUsage[];
+  const finalize = readFinalize(`${label} ${path}`, record.finalize);
+  for (const entry of entries) {
+    if (entry.workItemId !== finalize.workItemId) {
+      throw new Error(
+        `${label} ${path}: pending entry ${entry.entryId} is for ${entry.workItemId}, not ${finalize.workItemId}`,
+      );
+    }
+  }
+  if (new Set(entries.map((entry) => entry.entryId)).size !== entries.length) {
+    throw new Error(`${label} ${path}: pending entry ids must be unique`);
+  }
+  return { pending: entries, finalize };
 }
 
 async function runRecord(args: string[]): Promise<number> {
@@ -129,11 +137,8 @@ async function runRecord(args: string[]): Promise<number> {
   const ledgerPath = requiredFlag(flags, "--ledger");
   const completionPath = requiredFlag(flags, "--completion");
   const completion = await readCompletion(completionPath);
-  for (const entry of completion.pending) {
-    await appendPending(ledgerPath, entry);
-  }
-  const outcome = await finalizeUsage(ledgerPath, completion.finalize);
-  console.log(`recorded ${completion.finalize.workItemId} (${outcome})`);
+  const result = await recordCompletion(ledgerPath, completion.pending, completion.finalize);
+  console.log(`recorded ${completion.finalize.workItemId} (${result.finalize})`);
   return 0;
 }
 
@@ -164,7 +169,7 @@ async function runQuery(args: string[]): Promise<number> {
   const contents = await readLedger("Ledger query", ledgerPath);
   if (recordId !== undefined) {
     const record = contents.records.find((entry) => entry.workItemId === recordId);
-    if (record === undefined || !isUsageRecord(record)) {
+    if (record === undefined) {
       throw new LedgerRefusal(`ledger: no record for ${recordId}`);
     }
     console.log(JSON.stringify(record));
@@ -194,9 +199,6 @@ async function run(): Promise<number> {
     }
     throw new Error(`ledger: unknown command ${JSON.stringify(command ?? "")}`);
   } catch (error: unknown) {
-    if (error instanceof LedgerDataError) {
-      return report(error);
-    }
     return report(error);
   }
 }

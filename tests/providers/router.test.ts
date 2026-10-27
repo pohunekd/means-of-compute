@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
-import { ProvidersExhaustedError } from "../../src/providers/router.js";
+import { ProviderError, ProvidersExhaustedError } from "../../src/providers/router.js";
 
 async function withProviders(
   primaryPath: string,
@@ -186,6 +186,60 @@ test("router rejects an unknown route id (mutation: predicate always true)", asy
   } finally {
     removeTempConfig(dir);
   }
+});
+
+test("callProviderOnce on a 429 throws without a second call (mutation: fall back to the next provider)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-429.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    caught = error;
+  }
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderError);
+  expect((caught as ProviderError).status).toBe(429);
+});
+
+test("callProviderOnce without usage gives null token counts (mutation: default the counts to 0)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const server = await startLoopback("tests/providers/recordings/single-no-usage.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  const result = await callProviderOnce("nvidia-build", {
+    messages: [{ role: "user", content: "hi" }],
+  });
+  void server.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("nvidia-build");
+  expect(result.content).toBe("single response");
+  expect(result.inputTokens).toBeNull();
+  expect(result.outputTokens).toBeNull();
+});
+
+test("callProviderOnce rejects an unknown provider id", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const { callProviderOnce } = await import("../../src/providers/router.js");
+  let message = "";
+  try {
+    await callProviderOnce("ghost-api", { messages: [{ role: "user", content: "hi" }] });
+  } catch (error: unknown) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  cleanupEnv();
+  expect(message).toBe("Unknown provider ghost-api");
 });
 
 test("router rejects a duplicate route id on a warm cache (mutation: unvalidated route read)", async () => {

@@ -25,7 +25,7 @@ for (const key of ENV_KEYS) {
 afterEach(() => {
   for (const [key, value] of savedEnv) {
     if (value === undefined) {
-      delete process.env[key];
+      Reflect.deleteProperty(process.env, key);
     } else {
       process.env[key] = value;
     }

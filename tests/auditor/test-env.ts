@@ -20,7 +20,7 @@ export function applyTestEnv(): () => void {
   return () => {
     for (const [key, value] of before) {
       if (value === undefined) {
-        delete process.env[key];
+        Reflect.deleteProperty(process.env, key);
       } else {
         process.env[key] = value;
       }

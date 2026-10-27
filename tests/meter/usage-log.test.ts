@@ -348,19 +348,19 @@ test("write-ahead: the fsync precedes the in-memory apply in source order", asyn
   // A failing fsync must not leave an applied-but-undurable record behind.
   // The order is structural, so assert it structurally: the S6 split runs
   // checkRecord (validate) before the write, then write, then datasync,
-  // then commitRecord (apply) — all inside the append step.
+  // then commitRecord (apply) — all inside the append step. The datasync
+  // in the append step is the second datasync site in the file (the
+  // first belongs to the UsageLogHandle wrapper).
   const source = await Bun.file("src/meter/usage-log.ts").text();
-  const marker = "async function runAppend<F extends string>(";
-  const at = source.indexOf(marker);
+  const writeSite = "await handle.write(`${JSON.stringify(record)}\\n`);";
+  const at = source.indexOf(writeSite);
   expect(at).toBeGreaterThanOrEqual(0);
-  const body = source.slice(at);
-  const checkAt = body.indexOf("checkRecord(index, record, path, 0);");
-  const writeAt = body.indexOf("await handle.write(");
-  const syncAt = body.indexOf("await handle.datasync();");
-  const commitAt = body.indexOf("commitRecord(mutable, record);");
-  expect(checkAt).toBeGreaterThanOrEqual(0);
-  expect(writeAt).toBeGreaterThan(checkAt);
-  expect(syncAt).toBeGreaterThan(writeAt);
+  expect(source.match(/await handle\.write\(/g)?.length ?? 0).toBe(2);
+  const syncAt = source.indexOf("await handle.datasync();", at);
+  const commitAt = source.indexOf("commitRecord(mutable, record);", syncAt);
+  expect(syncAt).toBeGreaterThan(at);
   expect(commitAt).toBeGreaterThan(syncAt);
-  expect(source.match(/await handle\.write\(/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
+  const checkAt = source.indexOf("checkRecord(index, record, path, 0);");
+  expect(checkAt).toBeGreaterThanOrEqual(0);
+  expect(checkAt).toBeLessThan(at);
 });

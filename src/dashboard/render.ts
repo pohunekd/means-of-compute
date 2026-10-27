@@ -25,6 +25,9 @@ export const DASHBOARD_CSS = [
   "caption{font-weight:bold;text-align:left;padding-bottom:0.25rem}",
 ].join("\n");
 
+const STYLE_ELEMENT = "<style>" + DASHBOARD_CSS + "</style>";
+const STYLE_HTML = SafeHtml.raw(STYLE_ELEMENT);
+
 export const CSS_HASH = `sha256-${createHash("sha256").update(DASHBOARD_CSS, "utf8").digest("base64")}`;
 
 function checkAliases(aliases: readonly string[]): void {
@@ -125,9 +128,7 @@ export function renderDashboard(model: DashboardModel): string {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Means of Compute dashboard</title>
-        <style>
-          ${SafeHtml.raw(DASHBOARD_CSS)}
-        </style>
+        ${STYLE_HTML}
       </head>
       <body>
         <header>

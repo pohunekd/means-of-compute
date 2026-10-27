@@ -219,4 +219,57 @@ describe("dashboard CSP and fixed texts (mutation: inline style without the hash
       expect(page).not.toContain(needle);
     }
   });
+
+  test("the served style text hashes to the CSP header hash (mutation: style text changed, hash kept)", async () => {
+    const { createHash } = await import("node:crypto");
+    const { startDashboard } = await import("../../src/dashboard/server.js");
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const logged: { event: string }[] = [];
+    const server = await startDashboard({
+      config: {
+        listenEnv: "MOC_DASHBOARD_LISTEN",
+        listenAlias: "dashboard",
+        logPath: "logs/dashboard.jsonl",
+        maxRequestBytes: 1024,
+        idleTimeoutSec: 10,
+        workRowLimit: 50,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+      },
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: {
+        budget,
+        route,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      sources: {
+        ledgerPath: "tests/fixtures/dashboard/ledger.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: null,
+        registryPath: "",
+      },
+      now: () => new Date("2026-10-27T12:00:00.000Z"),
+      log: (event) => {
+        logged.push(event);
+      },
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${String(server.port)}/`, {
+        headers: { host: `127.0.0.1:${String(server.port)}` },
+      });
+      const header = response.headers.get("content-security-policy") ?? "";
+      const page = await response.text();
+      expect(page.match(/<style>/g)?.length).toBe(1);
+      const extracted = page.match(/<style>([\s\S]*?)<\/style>/);
+      expect(extracted?.[1]).toBeDefined();
+      const digest = `sha256-${createHash("sha256")
+        .update(extracted?.[1] ?? "", "utf8")
+        .digest("base64")}`;
+      expect(header).toContain(`style-src '${digest}'`);
+    } finally {
+      await server.stop();
+    }
+  });
 });

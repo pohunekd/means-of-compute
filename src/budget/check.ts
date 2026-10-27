@@ -2,13 +2,14 @@
 // admit, 3 on refuse, 2 on a config or data error. Without flags the guard
 // reads config/budget.json, prices from config/providers/ and spend from the
 // configured ledger. The --spend / --day-cap / --total-cap flags are a test
-// override that injects totals into the same decision function; they do not
-// change stored config or the ledger.
+// override that injects totals into the same decision function; the override
+// never writes escalation state or the escalation log, it only prints
+// `would escalate: <event key>` on stderr.
 import { loadBudgetConfig } from "./config.js";
 import { readUsageLedger } from "./ledger.js";
 import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
-import { maybeEscalate } from "./escalation.js";
+import { capKindOfReason, eventKeyString, maybeEscalate } from "./escalation.js";
 import { loadPricing } from "./pricing.js";
 import { summarizeSpend } from "./cost.js";
 
@@ -55,14 +56,18 @@ async function run(): Promise<number> {
     return 2;
   }
   let decision: BudgetDecision;
-  let statePath: string;
-  let escalationLogPath: string;
+  // On the ledger path the escalation below uses the configured state and
+  // log; the override path returns earlier and never writes escalation data.
+  let ledgerStatePath: string | undefined;
+  let ledgerEscalationLogPath: string | undefined;
+  let override = false;
   try {
     const config = await loadBudgetConfig();
     const pricing = await loadPricing();
-    statePath = config.statePath;
-    escalationLogPath = config.escalationLogPath;
+    ledgerStatePath = config.statePath;
+    ledgerEscalationLogPath = config.escalationLogPath;
     if (parsed.spendTotal !== null || parsed.dayCap !== null || parsed.totalCap !== null) {
+      override = true;
       const effective = {
         ...config,
         dayCapUsd: parsed.dayCap ?? config.dayCapUsd,
@@ -94,10 +99,29 @@ async function run(): Promise<number> {
     );
     return 0;
   }
+  if (override) {
+    const kind = capKindOfReason(decision.reason);
+    if (kind === null) {
+      console.error(`budget:check: unknown refusal reason "${decision.reason}"`);
+      return 2;
+    }
+    process.stderr.write(`would escalate: ${eventKeyString(kind, new Date())}\n`);
+    console.log(
+      `refused: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)})`,
+    );
+    return 3;
+  }
+  // Both paths assign the escalation paths above; a missing value here
+  // means config loading was bypassed.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (ledgerStatePath === undefined || ledgerEscalationLogPath === undefined) {
+    console.error("budget:check: missing escalation paths");
+    return 2;
+  }
   try {
     await maybeEscalate(decision, {
-      statePath,
-      escalationLogPath,
+      statePath: ledgerStatePath,
+      escalationLogPath: ledgerEscalationLogPath,
       now: new Date(),
     });
   } catch (error: unknown) {

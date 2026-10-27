@@ -30,6 +30,18 @@ export function capKindOfReason(reason: string): CapKind | null {
   }
 }
 
+export function eventKeyString(kind: CapKind, now: Date): string {
+  switch (kind) {
+    case "total":
+    case "spend-unknown":
+      return kind;
+    case "day":
+      return `day:${utcCalendarDay(now)}`;
+    case "nvidia-daily":
+      return `nvidia:${utcCalendarDay(now)}`;
+  }
+}
+
 function eventKey(kind: CapKind, now: Date): EscalationState {
   return { capKind: kind, day: utcCalendarDay(now) };
 }

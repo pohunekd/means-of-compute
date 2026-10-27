@@ -33,4 +33,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - run: |
+          mkdir -p config
+          echo "{\"$(hostname)\":\"desktop\"}" > config/hosts.json
       - run: ./factory-probe | bun run scripts/contracts-check.ts host-capacity -

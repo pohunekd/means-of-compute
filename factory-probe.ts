@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unnecessary-type-parameters */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { hostname as osHostname, cpus, totalmem, freemem } from "node:os";
 
 type ProbeConfig = {
@@ -57,15 +57,15 @@ function loadConfig(): ProbeConfig {
 }
 
 function loadHostAlias(hostnameVal: string): string {
-  const hostsRaw =
-    readJson<HostMap>("config/hosts.json") ?? readJson<HostMap>("config/hosts.example.json");
-  if (hostsRaw && typeof hostsRaw === "object") {
-    const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
-    if (typeof alias === "string") return alias;
-    const values = Object.values(hostsRaw).filter((v) => typeof v === "string") as string[];
-    if (values.length > 0) return values[0] ?? "desktop";
+  const hostsRaw = readJson<HostMap>("config/hosts.json");
+  if (!hostsRaw || typeof hostsRaw !== "object") {
+    throw new Error("config/hosts.json missing or invalid");
   }
-  return "desktop";
+  const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
+  if (typeof alias !== "string") {
+    throw new Error(`host ${hostnameVal} not in config/hosts.json`);
+  }
+  return alias;
 }
 
 function parseMinutes(time: string): number {
@@ -93,18 +93,41 @@ function readFileIfExists(p: string): string | null {
 }
 
 function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
-  const acOnline =
-    readFileIfExists("/sys/class/power_supply/AC/online") ??
-    readFileIfExists("/sys/class/power_supply/ACAD/online");
-  const acPower = acOnline === "1";
-  const batCap =
-    readFileIfExists("/sys/class/power_supply/BAT0/capacity") ??
-    readFileIfExists("/sys/class/power_supply/BAT1/capacity");
-  let batteryPercent: number | null = null;
-  if (batCap) {
-    const n = Number(batCap);
-    if (!Number.isNaN(n)) batteryPercent = n;
+  const base = "/sys/class/power_supply";
+  if (!existsSync(base)) {
+    return { acPower: true, batteryPercent: null };
   }
+  let acPower = false;
+  let batteryPercent: number | null = null;
+  let hasMains = false;
+  let hasBattery = false;
+  try {
+    const entries = readdirSync(base);
+    for (const entry of entries) {
+      const typePath = `${base}/${entry}/type`;
+      const type = readFileIfExists(typePath);
+      if (!type) continue;
+      if (type === "Mains") {
+        hasMains = true;
+        const online = readFileIfExists(`${base}/${entry}/online`);
+        acPower = online === "1";
+      }
+      if (type === "Battery") {
+        hasBattery = true;
+        const cap = readFileIfExists(`${base}/${entry}/capacity`);
+        if (cap) {
+          const n = Number(cap);
+          if (!Number.isNaN(n)) batteryPercent = n;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  if (!hasMains && !hasBattery) {
+    return { acPower: true, batteryPercent: null };
+  }
+  if (!hasMains) acPower = true;
   return { acPower, batteryPercent };
 }
 
@@ -131,45 +154,50 @@ function linuxCpu(): { cores: number; load1m: number } {
 }
 
 async function linuxSecondsSinceInput(): Promise<number> {
-  try {
-    const proc = Bun.spawn(["loginctl", "show-session", "-p", "IdleHint"], { stdout: "pipe" });
-    const out = await new Response(proc.stdout).text();
-    const m = /IdleHint=(true|false)/.exec(out);
-    if (m) {
-      return m[1] === "true" ? 3600 : 0;
+  const whoamiProc = Bun.spawn(["whoami"], { stdout: "pipe" });
+  const user = (await new Response(whoamiProc.stdout).text()).trim();
+  const listProc = Bun.spawn(["loginctl", "list-sessions", "--no-legend"], { stdout: "pipe" });
+  const listOut = await new Response(listProc.stdout).text();
+  let sessionId: string | null = null;
+  for (const line of listOut.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 3 && parts[2] === user && parts[0]) {
+      sessionId = parts[0];
+      break;
     }
-  } catch {
-    // fallback
   }
-  return 3600;
+  if (!sessionId) throw new Error("no session for user");
+  const showProc = Bun.spawn(["loginctl", "show-session", sessionId, "-p", "IdleSinceHint"], {
+    stdout: "pipe",
+  });
+  const showOut = await new Response(showProc.stdout).text();
+  const m = /IdleSinceHint=(\d+)/.exec(showOut);
+  if (!m || !m[1]) throw new Error("IdleSinceHint missing");
+  const idleSinceUs = Number(m[1]);
+  if (!Number.isFinite(idleSinceUs)) throw new Error("invalid IdleSinceHint");
+  const idleSinceMs = idleSinceUs / 1000;
+  const nowMs = Date.now();
+  const secs = Math.max(0, Math.floor((nowMs - idleSinceMs) / 1000));
+  return secs;
 }
 
 async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number | null }> {
-  try {
-    const proc = Bun.spawn(["pmset", "-g", "batt"], { stdout: "pipe" });
-    const out = await new Response(proc.stdout).text();
-    const ac = /AC Power/.test(out);
-    const m = /(\d+)%/.exec(out);
-    const batteryPercent = m ? Number(m[1]) : null;
-    return { acPower: ac, batteryPercent };
-  } catch {
-    return { acPower: true, batteryPercent: null };
-  }
+  const proc = Bun.spawn(["pmset", "-g", "batt"], { stdout: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  const ac = /AC Power/.test(out);
+  const m = /(\d+)%/.exec(out);
+  const batteryPercent = m ? Number(m[1]) : null;
+  return { acPower: ac, batteryPercent };
 }
 
 async function macosSecondsSinceInput(): Promise<number> {
-  try {
-    const proc = Bun.spawn(["ioreg", "-c", "IOHIDSystem"], { stdout: "pipe" });
-    const out = await new Response(proc.stdout).text();
-    const m = /"HIDIdleTime"\s+=\s+(\d+)/.exec(out);
-    if (m) {
-      const ms = Number(m[1]);
-      return Math.floor(ms / 1000);
-    }
-  } catch {
-    // fallback
-  }
-  return 3600;
+  const proc = Bun.spawn(["ioreg", "-c", "IOHIDSystem"], { stdout: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  const m = /"HIDIdleTime"\s+=\s+(\d+)/.exec(out);
+  if (!m || !m[1]) throw new Error("HIDIdleTime missing");
+  const ns = BigInt(m[1]);
+  const secs = Number(ns / 1000000000n);
+  return secs;
 }
 
 async function macosCpu(): Promise<{ cores: number; load1m: number }> {
@@ -179,7 +207,10 @@ async function macosCpu(): Promise<{ cores: number; load1m: number }> {
     const out = await new Response(proc.stdout).text();
     const m = /{(.+?)}/.exec(out);
     if (m && m[1]) {
-      const parts = m[1].split(",").map((s) => Number(s.trim()));
+      const parts = m[1]
+        .trim()
+        .split(/\s+/)
+        .map((s) => Number(s));
       return { cores, load1m: parts[0] ?? 0 };
     }
   } catch {
@@ -224,7 +255,17 @@ function deriveIdle(
   insideWindow: boolean,
   idleMinutes: number,
   batteryThreshold: number,
+  userActivityUnknown = false,
+  userActivityCause = "",
+  powerUnknown = false,
+  powerCause = "",
 ): { idle: boolean; reason: string } {
+  if (userActivityUnknown) {
+    return { idle: false, reason: `user activity unknown: ${userActivityCause || "unavailable"}` };
+  }
+  if (powerUnknown) {
+    return { idle: false, reason: `power unknown: ${powerCause || "unavailable"}` };
+  }
   const idleMinutesSec = idleMinutes * 60;
   const inputOk = secondsSinceInput >= idleMinutesSec || !insideWindow;
   const powerOk = acPower;
@@ -265,14 +306,18 @@ async function main(): Promise<void> {
 
   let facts: Facts = {};
   if (factsPath) {
+    if (!existsSync(factsPath)) throw new Error(`facts file not found: ${factsPath}`);
     const raw = readJson<Facts>(factsPath);
-    if (typeof raw === "object" && raw !== null) facts = raw;
+    if (typeof raw !== "object" || raw === null)
+      throw new Error(`facts file invalid: ${factsPath}`);
+    facts = raw;
   } else if (scenario) {
     const mapped = `config/scenarios/${scenario}.json`;
-    if (existsSync(mapped)) {
-      const raw = readJson<Facts>(mapped);
-      if (typeof raw === "object" && raw !== null) facts = raw;
-    }
+    if (!existsSync(mapped)) throw new Error(`scenario not found: ${scenario}`);
+    const raw = readJson<Facts>(mapped);
+    if (typeof raw !== "object" || raw === null)
+      throw new Error(`scenario file invalid: ${scenario}`);
+    facts = raw;
   }
 
   const cfg = loadConfig();
@@ -300,12 +345,28 @@ async function main(): Promise<void> {
   let localModelsReachable = facts.localModelsReachable ?? false;
   let localModelsList = facts.localModels ?? [];
 
+  let userActivityUnknown = false;
+  let userActivityCause = "";
+  let powerUnknown = false;
+  let powerCause = "";
+
   if (facts.secondsSinceInput === undefined) {
     if (platform === "linux") {
-      secondsSinceInput = await linuxSecondsSinceInput();
-      const p = linuxPower();
-      if (facts.acPower === undefined) acPower = p.acPower;
-      if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
+      try {
+        secondsSinceInput = await linuxSecondsSinceInput();
+      } catch (e) {
+        userActivityUnknown = true;
+        userActivityCause = String(e);
+        secondsSinceInput = 0;
+      }
+      try {
+        const p = linuxPower();
+        if (facts.acPower === undefined) acPower = p.acPower;
+        if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
+      } catch (e) {
+        powerUnknown = true;
+        powerCause = String(e);
+      }
       if (!facts.memoryTotalMb) {
         const mem = linuxMemory();
         memoryTotalMb = mem.totalMb;
@@ -317,10 +378,21 @@ async function main(): Promise<void> {
         cpuLoad1m = cpu.load1m;
       }
     } else if (platform === "darwin") {
-      secondsSinceInput = await macosSecondsSinceInput();
-      const p = await macosPower();
-      if (facts.acPower === undefined) acPower = p.acPower;
-      if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
+      try {
+        secondsSinceInput = await macosSecondsSinceInput();
+      } catch (e) {
+        userActivityUnknown = true;
+        userActivityCause = String(e);
+        secondsSinceInput = 0;
+      }
+      try {
+        const p = await macosPower();
+        if (facts.acPower === undefined) acPower = p.acPower;
+        if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
+      } catch (e) {
+        powerUnknown = true;
+        powerCause = String(e);
+      }
       if (!facts.memoryTotalMb) {
         const mem = macosMemory();
         memoryTotalMb = mem.totalMb;
@@ -349,6 +421,10 @@ async function main(): Promise<void> {
     insideWindowBool,
     cfg.idleMinutes,
     cfg.batteryThreshold,
+    userActivityUnknown,
+    userActivityCause,
+    powerUnknown,
+    powerCause,
   );
 
   const output = {

@@ -1,0 +1,17 @@
+{
+  "secondsSinceInput": 3600,
+  "acPower": true,
+  "batteryPercent": null,
+  "cpuCores": 8,
+  "cpuLoad1m": 0.5,
+  "memoryTotalMb": 32768,
+  "memoryFreeMb": 21000,
+  "gpuPresent": false,
+  "gpuName": null,
+  "gpuFreeMb": null,
+  "localModelsReachable": false,
+  "localModels": [],
+  "hostAlias": "desktop",
+  "policyAllowedWindowStart": "08:00",
+  "policyAllowedWindowEnd": "22:00"
+}

@@ -30,7 +30,7 @@ describe("dashboard money rounding", () => {
     // Hour sums use the same scaled units: 3600 s at 1 USD/h is $1.0000.
     expect(formatUsd(hourCostScaled(1800, 1_000_000_000n))).toBe("$0.5000");
     expect(formatUsd(hourCostScaled(7200, 1_000_000_000n) * 2n)).toBe("$4.0000");
-    expect(formatUsd(guardScaled(100_000_000n))).toBe("$0.1000");
+    expect(formatUsd(guardScaled(100_000_000_000_000n))).toBe("$0.1000");
     expect(formatUsd(capScaled(12_000_000_000n))).toBe("$12.0000");
   });
 });

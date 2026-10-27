@@ -20,6 +20,7 @@
     "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**"
   },
   "dependencies": {
+    "@pohunek/sdk": "https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-sdk-0.37.0.tgz",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1"
   },

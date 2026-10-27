@@ -785,13 +785,15 @@ test("a racing wait and cancel return one terminal (J1)", async () => {
     const handle = await port.start(request());
     const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
     fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
-    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
+    const gatePromise = fake.pauseNext("laptop-a", "session.set_metadata");
     const waiting = port.wait(ref, 1000, null);
+    const gate = await gatePromise;
     const cancelling = port.cancel(ref, "operator");
-    const [waited, cancelled] = await Promise.all([waiting, cancelling]);
+    const cancelled = await cancelling;
+    expect(cancelled).toMatchObject({ state: "cancelled", sessionId: handle.sessionId });
+    gate.release();
+    const waited = await waiting;
     expect(waited).toEqual(cancelled);
-    expect(waited).toMatchObject({ sessionId: handle.sessionId });
-    expect(["cancelled", "finished"]).toContain(waited.state);
     const stops = fake.calls("laptop-a").filter((call) => call.method === "session.stop");
     expect(stops.length).toBeGreaterThanOrEqual(1);
   } finally {

@@ -80,6 +80,31 @@ export async function loadBudgetGateConfig(
 const ADMITTED_PATTERN = /^admitted: .+$/m;
 const REFUSED_PATTERN = /^refused: (.+?) \(today /m;
 
+// Bounds a pipe read by a deadline in milliseconds. The bound is a setTimeout
+// handle cleared as soon as the read wins, so the bound leaves no timer
+// behind and a short-lived caller can exit right after admit() resolves (P2).
+// Returns null when the deadline expires first.
+async function readWithDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T | null> {
+  if (deadlineMs <= 0) {
+    return null;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null);
+        }, deadlineMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
   return {
     async admit(): Promise<Admission> {
@@ -108,14 +133,15 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
         const stderrPromise = new Response(proc.stderr as ReadableStream).text();
         const code = await proc.exited;
         clearTimeout(timer);
+        const remaining = options.timeoutMs - (Date.now() - startedAt);
         if (proc.signalCode !== null) {
           if (state.timedOut) {
             throw new BudgetGateError(
               `budget gate: timed out after ${String(options.timeoutMs)} ms`,
             );
           }
-          const snippet = await stderrPromise.then(
-            (stderr) => stderr.slice(0, MAX_STDERR_SNIPPET),
+          const snippet = await readWithDeadline(stderrPromise, remaining).then(
+            (stderr) => (stderr ?? "").slice(0, MAX_STDERR_SNIPPET),
             () => "",
           );
           throw new BudgetGateError(
@@ -125,21 +151,14 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
         if (state.timedOut) {
           throw new BudgetGateError(`budget gate: timed out after ${String(options.timeoutMs)} ms`);
         }
-        const remaining = options.timeoutMs - (Date.now() - startedAt);
         const reads = Promise.all([stdoutPromise, stderrPromise]);
-        const bounded =
-          remaining > 0
-            ? await Promise.race([
-                reads.then((done) => ({ done })),
-                Bun.sleep(remaining).then(() => ({ done: null })),
-              ])
-            : { done: null };
-        if (bounded.done === null) {
+        const bounded = await readWithDeadline(reads, remaining);
+        if (bounded === null) {
           throw new BudgetGateError(
             `budget gate: output not closed within ${String(options.timeoutMs)} ms`,
           );
         }
-        const [stdout, stderr] = bounded.done;
+        const [stdout, stderr] = bounded;
         const commandText = JSON.stringify(options.command);
         if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
           const line = findLine(stdout, /^admitted: /);

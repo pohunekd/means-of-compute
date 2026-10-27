@@ -16,7 +16,9 @@ coordinator's daily digest channel.
   file with an existing parent directory means zero spend; a missing or
   dangling parent, or a parent that is not a directory, exits 2 naming the
   path. A present line that fails validation is an error
-  naming the line number and is never skipped.
+  naming the line number and is never skipped. That includes a record line
+  whose `finishedAt` passes the schema but does not parse (for example a
+  leap second): the reader rejects it the same way.
 - NVIDIA requests: a token on the NVIDIA provider with `requests: null` on
   the evaluation day is unknown spend, not zero: its `workItemId` is
   reported once in `unknownWorkItemIds` and the guard refuses with reason

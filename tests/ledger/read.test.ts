@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
+import { isUsageRecord } from "../../contracts/v1/validate.js";
 import { loadLedgerConfig, readLedger } from "../../src/ledger/read.js";
 import { LedgerDataError } from "../../src/ledger/errors.js";
 
@@ -221,6 +222,29 @@ test("reader code-predicate failure names its reason, never null", async () => {
     expect(invalidMessage).toContain("Ledger query");
     expect(invalidMessage).toContain("line 1");
     expect(invalidMessage).toContain("finishedAt is not a valid date");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader rejects a leap-second finishedAt naming label path and line", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-read-"));
+  try {
+    const path = join(dir, "ledger.jsonl");
+    const leap = record({ finishedAt: "2026-06-30T23:59:60.000Z" });
+    expect(isUsageRecord(leap)).toBe(true);
+    expect(Number.isNaN(Date.parse(leap.finishedAt))).toBe(true);
+    await Bun.write(path, `${JSON.stringify(leap)}\n`);
+    let message = "";
+    try {
+      await readLedger("Ledger query", path);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+      expect(error).toBeInstanceOf(LedgerDataError);
+    }
+    expect(message).toContain("Ledger query");
+    expect(message).toContain(path);
+    expect(message).toContain("line 1");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

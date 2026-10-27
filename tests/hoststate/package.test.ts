@@ -156,17 +156,17 @@ describe("plugin package", () => {
 
   test("plugin:digest exits 2 on an invalid config", async () => {
     const dir = tempDir("hoststate-invalid-");
-    const configPath = join(repoRoot, "config", "host-state.json");
-    const backup = readFileSync(configPath, "utf-8");
-    const doc = JSON.parse(backup) as { package: Record<string, unknown> };
-    doc.package["version"] = "not-a-version";
     try {
-      writeFileSync(configPath, JSON.stringify(doc));
-      const r = await run(["bun", "run", "plugin:digest"]);
+      const configPath = join(dir, "host-state.json");
+      const config = JSON.parse(
+        readFileSync(join(repoRoot, "config", "host-state.json"), "utf-8"),
+      ) as { package: Record<string, unknown>; collector: Record<string, unknown> };
+      config.package["version"] = "not-a-version";
+      writeFileSync(configPath, JSON.stringify(config));
+      const r = await run(["bun", "run", "plugin:digest", "--config", configPath]);
       expect(r.exitCode).toBe(2);
       expect(r.stderr).toContain("config host-state.json: invalid package.version");
     } finally {
-      writeFileSync(configPath, backup);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -178,6 +178,7 @@ describe("plugin package", () => {
       writeFileSync(filePath, "taken");
       const r = await run(["bun", "run", "plugin:build", "--target", "native", "--out", filePath]);
       expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain(`output path ${filePath} is not a directory`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

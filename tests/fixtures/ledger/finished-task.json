@@ -1,0 +1,33 @@
+{
+  "pending": [
+    {
+      "entryId": "e1-demo",
+      "kind": "session",
+      "workItemId": "w1-demo",
+      "finishedAt": "2026-10-26T10:40:00.000Z",
+      "startModel": "meta/muse-glimmer-30b",
+      "tokens": [
+        {
+          "provider": "meta-api",
+          "model": "muse-spark-1.3-contributor",
+          "inputTokens": 1000,
+          "outputTokens": 500,
+          "requests": 2,
+          "source": "provider-usage"
+        }
+      ],
+      "session": {
+        "hostAlias": "desktop",
+        "seconds": 540,
+        "source": "dispatcher-clock",
+        "result": "success"
+      }
+    }
+  ],
+  "finalize": {
+    "workItemId": "w1-demo",
+    "result": "success",
+    "retries": 0,
+    "humanInterventions": 0
+  }
+}

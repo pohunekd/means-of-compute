@@ -166,6 +166,56 @@ test("gate names the signal when the child dies on its own", async () => {
   expect((error as Error).message).not.toContain("timed out");
 });
 
+test(
+  "gate signal branch bounds its stderr read by the deadline (P1)",
+  async () => {
+    const gate = createCliBudgetGate({
+      command: ["sh", "-c", "(sleep 60 &); kill -9 $$"],
+      timeoutMs: 10000,
+      cwd: process.cwd(),
+    });
+    const started = Date.now();
+    let error: unknown;
+    try {
+      await gate.admit();
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    const elapsed = Date.now() - started;
+    expect(error).toBeInstanceOf(BudgetGateError);
+    expect((error as Error).message).toContain("killed by signal SIGKILL");
+    expect(elapsed).toBeLessThan(30000);
+  },
+  { timeout: 60000 },
+);
+
+test(
+  "gate with a fast command does not wait out the timeout (P2)",
+  async () => {
+    const started = Date.now();
+    const proc = Bun.spawn(
+      [
+        "bun",
+        "-e",
+        "const { createCliBudgetGate } = await import('./src/budget/gate.js');" +
+          "const gate = createCliBudgetGate({ command: ['bun', '-e', \"console.log('admitted: x')\"], timeoutMs: 60000, cwd: process.cwd() });" +
+          "const admission = await gate.admit();" +
+          "if (!admission.admit) { process.exit(1); }",
+      ],
+      { stdout: "pipe", stderr: "pipe", stdin: "ignore", cwd: process.cwd() },
+    );
+    const [stderr, code] = await Promise.all([
+      new Response(proc.stderr as ReadableStream).text(),
+      proc.exited,
+    ]);
+    const elapsed = Date.now() - started;
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(elapsed).toBeLessThan(30000);
+  },
+  { timeout: 90000 },
+);
+
 test("gate refuses output held open past the deadline", async () => {
   const gate = createCliBudgetGate({
     command: ["sh", "-c", "(sleep 6 &); echo 'admitted: x'"],

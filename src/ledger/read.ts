@@ -29,6 +29,12 @@ function parseRecord(
       `${label} ${ledgerPath} line ${String(lineNumber)}: invalid UsageRecord ${JSON.stringify(contractErrors("usage-record", raw))} in ${text}`,
     );
   }
+  // Ajv accepts a leap second (60) in date-time, but Date.parse gives NaN.
+  if (Number.isNaN(Date.parse(raw.finishedAt))) {
+    throw new LedgerDataError(
+      `${label} ${ledgerPath} line ${String(lineNumber)}: invalid finishedAt ${JSON.stringify(raw.finishedAt)}`,
+    );
+  }
   return raw;
 }
 

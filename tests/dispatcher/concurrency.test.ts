@@ -34,7 +34,14 @@ function dispatcherAt(registryPath: string, ledgerPath: string, ticks: { now: Da
     budget: gate.gate,
     ledgerPath,
     config,
-    now: () => ticks.now,
+    // The clock advances 1 s per read: two runs that both finish the
+    // session stamp different finishedAt values, so only the hold-B
+    // terminal re-read keeps the second a replay (I1).
+    now: () => {
+      const current = ticks.now;
+      ticks.now = new Date(current.getTime() + 1000);
+      return current;
+    },
     sleep: () => Promise.resolve(),
     log: () => undefined,
   });

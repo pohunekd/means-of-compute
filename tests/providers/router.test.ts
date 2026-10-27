@@ -180,6 +180,51 @@ test("router throws ProvidersExhaustedError naming the last reason (mutation: pl
   expect(exhausted.cause).toBeInstanceOf(Error);
 });
 
+test("router maps HTTP 503 to server_error (mutation: 503 becomes connection)", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-503.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("server_error");
+  expect(result.content).toBe("fallback response");
+});
+
+test("router maps HTTP 504 to server_error", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-504.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("server_error");
+  expect(result.content).toBe("fallback response");
+});
+
+test("router maps HTTP 500 to server_error", async () => {
+  const { primaryServer, fallbackServer } = await withProviders(
+    "tests/providers/recordings/primary-500.json",
+    "tests/providers/recordings/fallback-200.json",
+  );
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  void primaryServer.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("server_error");
+  expect(result.content).toBe("fallback response");
+});
+
 test("router rejects a bad timeout override naming the variable (mutation: isNaN fallback)", async () => {
   const { primaryServer, fallbackServer } = await withProviders(
     "tests/providers/recordings/primary-429.json",

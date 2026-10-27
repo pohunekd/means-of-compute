@@ -48,9 +48,7 @@ export type WaitResult =
     }
   | {
       readonly state: TerminalState;
-      // A request that ends lost while still provisional was never issued
-      // a session id by the port, so the dispatcher reports null here.
-      readonly sessionId: string | null;
+      readonly sessionId: string;
       readonly cursor: string | null;
       readonly usage: PortUsage | null;
       readonly detail: string;

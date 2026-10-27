@@ -198,11 +198,7 @@ function parseInteger(
   return value;
 }
 
-function parseTokenBaseline(
-  value: unknown,
-  keyPath: string,
-  path: string,
-): TokenBaseline | null {
+function parseTokenBaseline(value: unknown, keyPath: string, path: string): TokenBaseline | null {
   if (value === null) {
     return null;
   }
@@ -237,7 +233,14 @@ function parseDashboardConfig(raw: unknown, path: string): DashboardConfig {
   const baselines = asRecord(record["baselines"], "baselines", path);
   checkKeys(baselines, BASELINE_KEYS, path, `"baselines"`);
   return {
-    listenEnv: parseText(record, "listenEnv", "listenEnv", path, LISTEN_ENV_PATTERN, "^[A-Z][A-Z0-9_]*$"),
+    listenEnv: parseText(
+      record,
+      "listenEnv",
+      "listenEnv",
+      path,
+      LISTEN_ENV_PATTERN,
+      "^[A-Z][A-Z0-9_]*$",
+    ),
     listenAlias: parseText(
       record,
       "listenAlias",
@@ -323,9 +326,7 @@ export function resolveDashboardListen(
   const alias = config.listenAlias;
   const raw = env[variable];
   if (raw === undefined || raw === "") {
-    throw new DashboardConfigError(
-      `environment variable ${variable} is not set (listen ${alias})`,
-    );
+    throw new DashboardConfigError(`environment variable ${variable} is not set (listen ${alias})`);
   }
   const match = LISTEN_VALUE_PATTERN.exec(raw);
   if (match === null) {
@@ -351,9 +352,7 @@ export function resolveDashboardListen(
 
 // Test-only clock pin. Unset means the real clock; a set value must match
 // the timestamp form and round-trip through Date, like MOC_BUDGET_NOW.
-export function readDashboardNow(
-  env: Readonly<Record<string, string | undefined>>,
-): Date | null {
+export function readDashboardNow(env: Readonly<Record<string, string | undefined>>): Date | null {
   const raw = env["MOC_DASHBOARD_NOW"];
   if (raw === undefined) {
     return null;

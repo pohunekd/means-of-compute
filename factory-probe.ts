@@ -238,11 +238,11 @@ function linuxMemory(): { totalMb: number; freeMb: number } {
 function linuxCpu(): { cores: number; load1m: number } {
   const cores = cpus().length;
   const txt = readFileIfExists("/proc/loadavg");
-  let load1m = 0;
-  if (txt) {
-    const m = /([\d.]+)\s/.exec(txt);
-    if (m) load1m = Number(m[1]);
-  }
+  if (!txt) throw new Error("loadavg missing");
+  const m = /([\d.]+)\s/.exec(txt);
+  if (!m || !m[1]) throw new Error("loadavg parse");
+  const load1m = Number(m[1]);
+  if (!Number.isFinite(load1m)) throw new Error("loadavg parse");
   return { cores, load1m };
 }
 
@@ -332,21 +332,19 @@ async function macosSecondsSinceInput(): Promise<number> {
 
 async function macosCpu(): Promise<{ cores: number; load1m: number }> {
   const cores = cpus().length;
-  try {
-    const proc = Bun.spawn(["sysctl", "-n", "vm.loadavg"], { stdout: "pipe" });
-    const out = await new Response(proc.stdout).text();
-    const m = /{(.+?)}/.exec(out);
-    if (m && m[1]) {
-      const parts = m[1]
-        .trim()
-        .split(/\s+/)
-        .map((s) => Number(s));
-      return { cores, load1m: parts[0] ?? 0 };
-    }
-  } catch {
-    // fallback
-  }
-  return { cores, load1m: 0 };
+  const proc = Bun.spawn(["sysctl", "-n", "vm.loadavg"], { stdout: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) throw new Error("sysctl vm.loadavg failed");
+  const m = /{(.+?)}/.exec(out);
+  if (!m || !m[1]) throw new Error("loadavg parse");
+  const parts = m[1]
+    .trim()
+    .split(/\s+/)
+    .map((s) => Number(s));
+  const load1m = parts[0];
+  if (load1m === undefined || !Number.isFinite(load1m)) throw new Error("loadavg parse");
+  return { cores, load1m };
 }
 
 function macosMemory(): { totalMb: number; freeMb: number } {
@@ -461,11 +459,11 @@ async function main(): Promise<void> {
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();
   const timestamp = facts.timestamp ?? now.toISOString();
+  const evalAt = new Date(timestamp);
 
-  const insideWindowBool =
-    facts.policyAllowedWindowStart && facts.policyAllowedWindowEnd
-      ? insideWindow(now, facts.policyAllowedWindowStart, facts.policyAllowedWindowEnd)
-      : insideWindow(now, cfg.policy.allowedWindowStart, cfg.policy.allowedWindowEnd);
+  const windowStart = facts.policyAllowedWindowStart ?? cfg.policy.allowedWindowStart;
+  const windowEnd = facts.policyAllowedWindowEnd ?? cfg.policy.allowedWindowEnd;
+  const insideWindowBool = insideWindow(evalAt, windowStart, windowEnd);
 
   const platform = process.platform;
 
@@ -487,10 +485,10 @@ async function main(): Promise<void> {
   let powerUnknown = false;
   let powerCause = "";
 
-  // Facts override the live readers field by field. Any field left unset
-  // falls back to the live reader, so a partial --facts file can never
-  // silently emit schema-invalid defaults. A live value needed on an
-  // unsupported platform fails fast.
+  // Facts override the live readers field by field: a field left undefined
+  // falls back to the live reader. An explicit fact (including an explicit
+  // false or empty list) always wins over the reader. A live value needed on
+  // an unsupported platform fails fast.
   function platformOrThrow(): "linux" | "darwin" {
     if (platform === "linux" || platform === "darwin") return platform;
     throw new Error("unsupported platform");
@@ -519,19 +517,20 @@ async function main(): Promise<void> {
     } catch (e) {
       powerUnknown = true;
       powerCause = String(e);
+      acPower = false;
     }
   }
 
-  if (facts.memoryTotalMb === undefined) {
+  if (facts.memoryTotalMb === undefined || facts.memoryFreeMb === undefined) {
     const mem = platformOrThrow() === "linux" ? linuxMemory() : macosMemory();
-    memoryTotalMb = mem.totalMb;
-    memoryFreeMb = mem.freeMb;
+    if (facts.memoryTotalMb === undefined) memoryTotalMb = mem.totalMb;
+    if (facts.memoryFreeMb === undefined) memoryFreeMb = mem.freeMb;
   }
 
-  if (facts.cpuCores === undefined) {
+  if (facts.cpuCores === undefined || facts.cpuLoad1m === undefined) {
     const cpu = platformOrThrow() === "linux" ? linuxCpu() : await macosCpu();
-    cpuCores = cpu.cores;
-    cpuLoad1m = cpu.load1m;
+    if (facts.cpuCores === undefined) cpuCores = cpu.cores;
+    if (facts.cpuLoad1m === undefined) cpuLoad1m = cpu.load1m;
   }
 
   if (
@@ -545,7 +544,7 @@ async function main(): Promise<void> {
     gpuFreeMb = gpu.freeMb;
   }
 
-  if (localModelsList.length === 0 && !facts.localModelsReachable) {
+  if (facts.localModelsReachable === undefined && facts.localModels === undefined) {
     const lm = await queryLocalModels(cfg.localModelsBaseUrl, cfg.localModelsTimeoutMs);
     localModelsReachable = lm.reachable;
     localModelsList = lm.models;
@@ -578,7 +577,7 @@ async function main(): Promise<void> {
     gpu: { present: gpuPresent, name: gpuName, freeMb: gpuFreeMb },
     localModels: { reachable: localModelsReachable, models: localModelsList },
     policy: {
-      allowedWindow: { start: cfg.policy.allowedWindowStart, end: cfg.policy.allowedWindowEnd },
+      allowedWindow: { start: windowStart, end: windowEnd },
       insideWindow: insideWindowBool,
       maxConcurrentAgents: cfg.policy.maxConcurrentAgents,
     },

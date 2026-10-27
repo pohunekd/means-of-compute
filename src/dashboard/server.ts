@@ -116,11 +116,13 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           });
           return new Response(body, { status: response.status, headers: response.headers });
         };
-        const url = new URL(req.url);
+        // The Host check runs before any routing or URL parsing (1.4, 2.7):
+        // a request without a Host header gets 421, never a 500.
         const boundPort = server.port ?? deps.listen.port;
         if (!allowlist(deps.config, boundPort).has(rawHost)) {
-          return respond(textResponse(421, "misdirected request\n"), url.pathname);
+          return respond(textResponse(421, "misdirected request\n"), "/");
         }
+        const url = new URL(req.url);
         if (req.method !== "GET") {
           return respond(textResponse(405, "method not allowed\n", true), url.pathname);
         }

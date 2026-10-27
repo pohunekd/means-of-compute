@@ -39,9 +39,7 @@ function fail(key: string): never {
 }
 
 function integerInRange(value: unknown, min: number, max: number): value is number {
-  return (
-    typeof value === "number" && Number.isInteger(value) && value >= min && value <= max
-  );
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 }
 
 export function loadHostStateConfig(path: string): HostStateConfig {
@@ -128,9 +126,7 @@ export function loadHostStateConfig(path: string): HostStateConfig {
     !Array.isArray(acceptedVersions) ||
     acceptedVersions.length === 0 ||
     new Set(acceptedVersions).size !== acceptedVersions.length ||
-    !acceptedVersions.every(
-      (v): v is string => typeof v === "string" && versionPattern.test(v),
-    ) ||
+    !acceptedVersions.every((v): v is string => typeof v === "string" && versionPattern.test(v)) ||
     !acceptedVersions.includes(version)
   ) {
     fail("collector.acceptedVersions");

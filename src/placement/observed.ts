@@ -20,12 +20,7 @@ export function placeObserved(
   const reported = observations.filter((entry) => entry.kind === "reported");
   const decision = place(
     item,
-    reported.map((entry) => {
-      if (entry.kind !== "reported") {
-        throw new Error("Placement received an unavailable observation as reported");
-      }
-      return entry.capacity;
-    }),
+    reported.map((entry) => entry.capacity),
     running,
     config,
   );

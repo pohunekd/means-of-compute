@@ -87,7 +87,12 @@ function unavailable(hostAlias: string): HostObservation {
 
 describe("observed placement", () => {
   test("mixed observations choose the reported host and list the outage (mutation: drop unavailable candidates)", () => {
-    const decision = placeObserved(item(), [reported("laptop-a"), unavailable("laptop-b")], [], PLACEMENT);
+    const decision = placeObserved(
+      item(),
+      [reported("laptop-a"), unavailable("laptop-b")],
+      [],
+      PLACEMENT,
+    );
     expect(decision.chosenHostAlias).toBe("laptop-a");
     const entry = decision.candidates.find((candidate) => candidate.hostAlias === "laptop-b");
     expect(entry).toEqual({
@@ -110,8 +115,8 @@ describe("observed placement", () => {
   });
 
   test("duplicate alias throws (mutation: silently dedupe)", () => {
-    expect(() => placeObserved(item(), [reported("laptop-a"), unavailable("laptop-a")], [], PLACEMENT)).toThrow(
-      "Duplicate host alias laptop-a",
-    );
+    expect(() =>
+      placeObserved(item(), [reported("laptop-a"), unavailable("laptop-a")], [], PLACEMENT),
+    ).toThrow("Duplicate host alias laptop-a");
   });
 });

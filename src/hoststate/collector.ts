@@ -77,7 +77,9 @@ function firstErrorDetail(errors: unknown): string {
   return "/ invalid";
 }
 
-function parseSingleDocument(stdout: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+function parseSingleDocument(
+  stdout: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
   // JSON.parse accepts exactly one document: trailing content such as
   // "{}\n{}" throws, which is the multi-document case the design names.
   try {
@@ -222,12 +224,10 @@ async function collectOne(
   const controller = new AbortController();
   const timeout = deps.sleep(guardMs, controller.signal).then(() => "guard" as const);
   timeout.catch(() => {});
-  const reply = deps.port
-    .read(hostAlias, deps.config.package.id, limits)
-    .then(
-      (value) => ({ kind: "reply" as const, value }),
-      (error: unknown) => ({ kind: "thrown" as const, error }),
-    );
+  const reply = deps.port.read(hostAlias, deps.config.package.id, limits).then(
+    (value) => ({ kind: "reply" as const, value }),
+    (error: unknown) => ({ kind: "thrown" as const, error }),
+  );
   reply.catch(() => {});
   const winner = await Promise.race([reply, timeout]);
   controller.abort();

@@ -81,32 +81,32 @@ is a new artifact with a new digest.
 Every failure maps to one `unavailable` observation with a cause; placement
 records it as an excluded candidate. No failure yields a `reported` host.
 
-| Input or condition | Cause |
-|---|---|
-| `config/host-state.json` missing, unreadable, invalid, extra key, or a failed cross-check | throw naming the key; no default |
-| `config/probe.json` missing in the package | `plugin-failed` |
-| host file missing or invalid | `plugin-failed` |
-| unknown plugin argument | `plugin-failed` |
-| host or daemon unreachable, overlay down | `host-unreachable` |
-| daemon older than the extension point | `daemon-unsupported` |
-| protocol version mismatch or translation failure | `daemon-rejected` with code |
-| package not installed, or no host-state program | `plugin-missing` |
-| package disabled | `plugin-disabled` |
-| concurrency limit | `plugin-busy` |
-| plugin exit non-zero or signal | `plugin-failed` |
-| plugin past `pluginTimeoutMs` | `plugin-timeout` |
-| SDK deadline passed | `request-timeout` |
-| adapter never settles | `request-timeout` from the guard |
-| stdout over the cap (daemon or collector) | `output-too-large` |
-| stdout not UTF-8 | `output-invalid` |
-| other package id in the reply | `package-mismatch` |
-| version not accepted | `version-not-accepted` |
-| not JSON, or more than one document | `not-json` |
-| not a `HostCapacity`, or `freeMb > totalMb` | `contract-invalid` |
-| reported alias differs from the asked alias | `alias-mismatch` |
-| timestamp too old | `stale` |
-| timestamp too far ahead | `future-timestamp` |
-| non-port error from the adapter | `collect()` rejects; nothing is placed this round |
+| Input or condition                                                                        | Cause                                             |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `config/host-state.json` missing, unreadable, invalid, extra key, or a failed cross-check | throw naming the key; no default                  |
+| `config/probe.json` missing in the package                                                | `plugin-failed`                                   |
+| host file missing or invalid                                                              | `plugin-failed`                                   |
+| unknown plugin argument                                                                   | `plugin-failed`                                   |
+| host or daemon unreachable, overlay down                                                  | `host-unreachable`                                |
+| daemon older than the extension point                                                     | `daemon-unsupported`                              |
+| protocol version mismatch or translation failure                                          | `daemon-rejected` with code                       |
+| package not installed, or no host-state program                                           | `plugin-missing`                                  |
+| package disabled                                                                          | `plugin-disabled`                                 |
+| concurrency limit                                                                         | `plugin-busy`                                     |
+| plugin exit non-zero or signal                                                            | `plugin-failed`                                   |
+| plugin past `pluginTimeoutMs`                                                             | `plugin-timeout`                                  |
+| SDK deadline passed                                                                       | `request-timeout`                                 |
+| adapter never settles                                                                     | `request-timeout` from the guard                  |
+| stdout over the cap (daemon or collector)                                                 | `output-too-large`                                |
+| stdout not UTF-8                                                                          | `output-invalid`                                  |
+| other package id in the reply                                                             | `package-mismatch`                                |
+| version not accepted                                                                      | `version-not-accepted`                            |
+| not JSON, or more than one document                                                       | `not-json`                                        |
+| not a `HostCapacity`, or `freeMb > totalMb`                                               | `contract-invalid`                                |
+| reported alias differs from the asked alias                                               | `alias-mismatch`                                  |
+| timestamp too old                                                                         | `stale`                                           |
+| timestamp too far ahead                                                                   | `future-timestamp`                                |
+| non-port error from the adapter                                                           | `collect()` rejects; nothing is placed this round |
 
 ## Deadlines
 
@@ -146,8 +146,8 @@ With `c = config.collector`:
    do not change.
 3. Every `unavailable` observation is appended to the candidates, in input
    order, as `{ hostAlias, score: 0, reason: "excluded: host state
-   unavailable (<cause>)", excluded: true }`.
+unavailable (<cause>)", excluded: true }`.
 4. When no host is chosen, the reason becomes `no eligible host: <N> of <N>
-   excluded`, where `N` counts all candidates. Otherwise the `place()` reason
+excluded`, where `N` counts all candidates. Otherwise the `place()` reason
    is kept.
 5. The result is validated with `isPlacementDecision` and returned.

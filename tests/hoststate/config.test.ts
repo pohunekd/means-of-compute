@@ -63,7 +63,12 @@ async function packageWithout(key: "id" | "version" | "sourceDigest" | "targets"
 }
 
 async function collectorWithout(
-  key: "acceptedVersions" | "pluginTimeoutMs" | "transportMarginMs" | "maxOutputBytes" | "maxClockSkewMs",
+  key:
+    | "acceptedVersions"
+    | "pluginTimeoutMs"
+    | "transportMarginMs"
+    | "maxOutputBytes"
+    | "maxClockSkewMs",
 ): Promise<string> {
   const full = JSON.parse(JSON.stringify(validCollector)) as Record<string, unknown>;
   const rest: Record<string, unknown> = {};
@@ -181,9 +186,7 @@ describe("host-state package config", () => {
 describe("host-state collector config", () => {
   test("missing collector section throws", async () => {
     const path = await writeDoc({ package: validPackage });
-    expect(() => loadHostStateConfig(path)).toThrow(
-      /^config host-state\.json: invalid collector$/,
-    );
+    expect(() => loadHostStateConfig(path)).toThrow(/^config host-state\.json: invalid collector$/);
   });
 
   test("extra collector key throws", async () => {

@@ -163,13 +163,7 @@ describe("plugin package", () => {
       ) as { package: Record<string, unknown>; collector: Record<string, unknown> };
       config.package["version"] = "not-a-version";
       writeFileSync(configPath, JSON.stringify(config));
-      const r = await run([
-        "bun",
-        "run",
-        "plugin:digest",
-        "--config",
-        configPath,
-      ]);
+      const r = await run(["bun", "run", "plugin:digest", "--config", configPath]);
       expect(r.exitCode).toBe(2);
       expect(r.stderr).toContain("config host-state.json: invalid package.version");
     } finally {

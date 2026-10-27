@@ -260,12 +260,7 @@ describe("collector reply rules", () => {
       ...capacity,
       memory: { totalMb: capacity.memory.totalMb, freeMb: capacity.memory.totalMb + 1 },
     };
-    const observation = observe(
-      "desktop",
-      replyFor(over),
-      CONFIG,
-      new Date(capacity.timestamp),
-    );
+    const observation = observe("desktop", replyFor(over), CONFIG, new Date(capacity.timestamp));
     if (observation.kind !== "unavailable") throw new Error("expected unavailable");
     expect(observation.cause).toBe("contract-invalid");
     expect(observation.detail).toBe("memory.freeMb above memory.totalMb");
@@ -353,7 +348,13 @@ describe("collector round rules", () => {
     const { deps, control } = depsFor(["laptop-a"]);
     const boom = new Error("socket exploded");
     control.set("laptop-a", { kind: "throw", error: boom });
-    await expect(createCollector(deps).collect()).rejects.toBe(boom);
+    const failure = await createCollector(deps)
+      .collect()
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failure).toBe(boom);
   });
 
   test("two concurrent collects make one read per host (mutation: start a second round)", async () => {
@@ -362,7 +363,7 @@ describe("collector round rules", () => {
     const collector = createCollector({ ...deps, sleep: () => Promise.resolve() });
     const [first, second] = await Promise.all([collector.collect(), collector.collect()]);
     expect(first).toBe(second);
-    expect(control.calls()).toHaveLength(1);
+    expect(control.calls().length).toBe(1);
   });
 });
 

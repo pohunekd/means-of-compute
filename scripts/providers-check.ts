@@ -17,7 +17,7 @@ for await (const file of glob.scan({ cwd: "." })) {
 let failed = 0;
 
 for (const file of files) {
-  if (file.endsWith("schema.json")) continue;
+  if (file.endsWith("schema.json") || file.endsWith("route.json")) continue;
   const data = (await Bun.file(file).json()) as unknown;
   const ok = validate(data);
   if (!ok) {

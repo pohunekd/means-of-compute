@@ -3,5 +3,6 @@
   "name": "Local OpenAI-compatible",
   "baseUrl": "http://localhost:11434/v1",
   "baseUrlEnv": "LOCAL_MODEL_BASE_URL",
-  "model": "local-model"
+  "model": "local-model",
+  "timeoutMs": 10000
 }

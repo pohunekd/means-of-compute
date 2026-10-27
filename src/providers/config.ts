@@ -2,8 +2,6 @@ import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
 
-let cached: Record<string, ProviderDescriptor> | null = null;
-
 async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
   const dir = "config/providers";
   const glob = new Bun.Glob(`${dir}/*.json`);
@@ -14,7 +12,7 @@ async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
   const providers: Record<string, ProviderDescriptor> = {};
 
   for (const file of files) {
-    if (file.endsWith("schema.json")) continue;
+    if (file.endsWith("schema.json") || file.endsWith("route.json")) continue;
     const raw = (await Bun.file(file).json()) as RawProvider;
     const { baseUrlEnv, ...rest } = raw;
 
@@ -34,6 +32,15 @@ async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
     if (overrideVal) {
       baseUrl = overrideVal;
     }
+    let timeoutMs = rest.timeoutMs;
+    const timeoutOverrideEnv = `PROVIDER_${raw.id.toUpperCase().replace(/-/g, "_")}_TIMEOUT_MS`;
+    const timeoutOverrideVal = process.env[timeoutOverrideEnv];
+    if (timeoutOverrideVal) {
+      const parsed = Number(timeoutOverrideVal);
+      if (!Number.isNaN(parsed)) {
+        timeoutMs = parsed;
+      }
+    }
 
     if (raw.apiKeyEnv) {
       const key = process.env[raw.apiKeyEnv];
@@ -44,17 +51,23 @@ async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
       }
     }
 
-    providers[raw.id] = { ...rest, baseUrl };
+    providers[raw.id] = { ...rest, baseUrl, timeoutMs };
   }
 
   return providers;
 }
+
+let cached: Record<string, ProviderDescriptor> | null = null;
 
 export async function getProviders(): Promise<Record<string, ProviderDescriptor>> {
   if (!cached) {
     cached = await loadProviders();
   }
   return cached;
+}
+
+export function resetProvidersCache(): void {
+  cached = null;
 }
 
 export type { ProviderDescriptor } from "./types.js";

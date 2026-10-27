@@ -1,5 +1,5 @@
 {
-  "secondsSinceInput": -1,
+  "userActivityError": "simulated: loginctl reader failed",
   "acPower": true,
   "batteryPercent": null,
   "cpuCores": 4,

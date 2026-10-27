@@ -1,0 +1,15 @@
+{
+  "userActivityError": "simulated: no session for user",
+  "acPower": true,
+  "batteryPercent": null,
+  "cpuCores": 4,
+  "cpuLoad1m": 0.2,
+  "memoryTotalMb": 8192,
+  "memoryFreeMb": 4096,
+  "gpuPresent": false,
+  "gpuName": null,
+  "gpuFreeMb": null,
+  "localModelsReachable": false,
+  "localModels": [],
+  "hostAlias": "desktop"
+}

@@ -3,6 +3,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { hostname as osHostname, cpus, totalmem, freemem } from "node:os";
+import { contractErrors, isHostCapacity } from "./contracts/v1/validate.js";
 
 type ProbeConfig = {
   idleMinutes: number;
@@ -20,6 +21,9 @@ type HostMap = Record<string, string>;
 
 type Facts = Partial<{
   secondsSinceInput: number;
+  // Simulates a failed user-activity reader: the probe reports activity as
+  // unknown (never idle) with this cause instead of reading live input state.
+  userActivityError: string;
   acPower: boolean;
   batteryPercent: number | null;
   cpuCores: number;
@@ -147,38 +151,69 @@ function linuxCpu(): { cores: number; load1m: number } {
   return { cores, load1m };
 }
 
+async function showSessionProps(
+  id: string,
+  names: readonly string[],
+): Promise<Map<string, string>> {
+  const args: string[] = ["show-session", id];
+  for (const name of names) args.push("-p", name);
+  const showProc = Bun.spawn(["loginctl", ...args], { stdout: "pipe" });
+  const out = await new Response(showProc.stdout).text();
+  const props = new Map<string, string>();
+  for (const line of out.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq > 0) props.set(line.slice(0, eq), line.slice(eq + 1));
+  }
+  return props;
+}
+
 async function linuxSecondsSinceInput(): Promise<number> {
   const whoamiProc = Bun.spawn(["whoami"], { stdout: "pipe" });
   const user = (await new Response(whoamiProc.stdout).text()).trim();
   const listProc = Bun.spawn(["loginctl", "list-sessions", "--no-legend"], { stdout: "pipe" });
   const listOut = await new Response(listProc.stdout).text();
-  let sessionId: string | null = null;
+  const ownSessionIds: string[] = [];
   for (const line of listOut.split("\n")) {
     const parts = line.trim().split(/\s+/);
-    if (parts.length >= 3 && parts[2] === user && parts[0]) {
-      sessionId = parts[0];
-      break;
+    const id = parts[0];
+    if (parts.length >= 3 && parts[2] === user && id) {
+      ownSessionIds.push(id);
     }
   }
-  if (!sessionId) throw new Error("no session for user");
-  const showProc = Bun.spawn(
-    ["loginctl", "show-session", sessionId, "-p", "IdleHint", "-p", "IdleSinceHint"],
-    {
-      stdout: "pipe",
-    },
-  );
-  const showOut = await new Response(showProc.stdout).text();
-  const hintMatch = /IdleHint=(yes|no)/.exec(showOut);
-  const sinceMatch = /IdleSinceHint=(\d+)/.exec(showOut);
-  const idleHint = hintMatch?.[1];
-  if (idleHint !== "yes") return 0;
-  if (!sinceMatch || !sinceMatch[1]) throw new Error("IdleSinceHint missing");
-  const idleSinceUs = Number(sinceMatch[1]);
-  if (!Number.isFinite(idleSinceUs) || idleSinceUs === 0) return 0;
-  const idleSinceMs = idleSinceUs / 1000;
-  const nowMs = Date.now();
-  const secs = Math.max(0, Math.floor((nowMs - idleSinceMs) / 1000));
-  return secs;
+  if (ownSessionIds.length === 0) throw new Error("no session for user");
+  // Prefer the active graphical session: Active=yes on a seat with an X11 or
+  // Wayland type. A session without a seat (manager, ssh) must never decide
+  // idleness for a user who is active on the graphical session.
+  const graphicalSessionIds: string[] = [];
+  for (const id of ownSessionIds) {
+    const props = await showSessionProps(id, ["Active", "Type", "Seat", "Remote"]);
+    const seat = props.get("Seat") ?? "";
+    const sessionType = props.get("Type") ?? "";
+    if (
+      props.get("Active") === "yes" &&
+      seat !== "" &&
+      (sessionType === "x11" || sessionType === "wayland") &&
+      props.get("Remote") !== "yes"
+    ) {
+      graphicalSessionIds.push(id);
+    }
+  }
+  if (graphicalSessionIds.length === 0) throw new Error("no active graphical session for user");
+  // Any graphical session with recent input means the user is active; only
+  // when all of them are idle does the most recent idle timestamp decide.
+  let minSecs: number | null = null;
+  for (const id of graphicalSessionIds) {
+    const props = await showSessionProps(id, ["IdleHint", "IdleSinceHint"]);
+    if (props.get("IdleHint") !== "yes") return 0;
+    const sinceRaw = props.get("IdleSinceHint");
+    if (sinceRaw === undefined || sinceRaw === "") throw new Error("IdleSinceHint missing");
+    const idleSinceUs = Number(sinceRaw);
+    if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) return 0;
+    const secs = Math.max(0, Math.floor((Date.now() - idleSinceUs / 1000) / 1000));
+    minSecs = minSecs === null ? secs : Math.min(minSecs, secs);
+  }
+  if (minSecs === null) throw new Error("IdleSinceHint missing");
+  return minSecs;
 }
 
 async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number | null }> {
@@ -260,9 +295,6 @@ function deriveIdle(
   powerUnknown = false,
   powerCause = "",
 ): { idle: boolean; reason: string } {
-  if (secondsSinceInput < 0) {
-    return { idle: false, reason: `user activity unknown: simulated failure` };
-  }
   if (userActivityUnknown) {
     return { idle: false, reason: `user activity unknown: ${userActivityCause || "unavailable"}` };
   }
@@ -342,67 +374,56 @@ async function main(): Promise<void> {
   let localModelsReachable = facts.localModelsReachable ?? false;
   let localModelsList = facts.localModels ?? [];
 
-  let userActivityUnknown = false;
-  let userActivityCause = "";
+  let userActivityUnknown = typeof facts.userActivityError === "string";
+  let userActivityCause = facts.userActivityError ?? "";
   let powerUnknown = false;
   let powerCause = "";
 
-  if (facts.secondsSinceInput === undefined) {
-    if (platform === "linux") {
-      try {
-        secondsSinceInput = await linuxSecondsSinceInput();
-      } catch (e) {
-        userActivityUnknown = true;
-        userActivityCause = String(e);
-        secondsSinceInput = 0;
-      }
-      try {
-        const p = linuxPower();
-        if (facts.acPower === undefined) acPower = p.acPower;
-        if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
-      } catch (e) {
-        powerUnknown = true;
-        powerCause = String(e);
-      }
-      if (!facts.memoryTotalMb) {
-        const mem = linuxMemory();
-        memoryTotalMb = mem.totalMb;
-        memoryFreeMb = mem.freeMb;
-      }
-      if (!facts.cpuCores) {
-        const cpu = linuxCpu();
-        cpuCores = cpu.cores;
-        cpuLoad1m = cpu.load1m;
-      }
-    } else if (platform === "darwin") {
-      try {
-        secondsSinceInput = await macosSecondsSinceInput();
-      } catch (e) {
-        userActivityUnknown = true;
-        userActivityCause = String(e);
-        secondsSinceInput = 0;
-      }
-      try {
-        const p = await macosPower();
-        if (facts.acPower === undefined) acPower = p.acPower;
-        if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
-      } catch (e) {
-        powerUnknown = true;
-        powerCause = String(e);
-      }
-      if (!facts.memoryTotalMb) {
-        const mem = macosMemory();
-        memoryTotalMb = mem.totalMb;
-        memoryFreeMb = mem.freeMb;
-      }
-      if (!facts.cpuCores) {
-        const cpu = await macosCpu();
-        cpuCores = cpu.cores;
-        cpuLoad1m = cpu.load1m;
-      }
-    } else {
-      throw new Error("unsupported platform");
+  // Facts override the live readers field by field. Any field left unset
+  // falls back to the live reader, so a partial --facts file can never
+  // silently emit schema-invalid defaults. A live value needed on an
+  // unsupported platform fails fast.
+  function platformOrThrow(): "linux" | "darwin" {
+    if (platform === "linux" || platform === "darwin") return platform;
+    throw new Error("unsupported platform");
+  }
+
+  if (userActivityUnknown) {
+    secondsSinceInput = 0;
+  } else if (facts.secondsSinceInput === undefined) {
+    try {
+      secondsSinceInput =
+        platformOrThrow() === "linux"
+          ? await linuxSecondsSinceInput()
+          : await macosSecondsSinceInput();
+    } catch (e) {
+      userActivityUnknown = true;
+      userActivityCause = String(e);
+      secondsSinceInput = 0;
     }
+  }
+
+  if (facts.acPower === undefined || facts.batteryPercent === undefined) {
+    try {
+      const p = platformOrThrow() === "linux" ? linuxPower() : await macosPower();
+      if (facts.acPower === undefined) acPower = p.acPower;
+      if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
+    } catch (e) {
+      powerUnknown = true;
+      powerCause = String(e);
+    }
+  }
+
+  if (facts.memoryTotalMb === undefined) {
+    const mem = platformOrThrow() === "linux" ? linuxMemory() : macosMemory();
+    memoryTotalMb = mem.totalMb;
+    memoryFreeMb = mem.freeMb;
+  }
+
+  if (facts.cpuCores === undefined) {
+    const cpu = platformOrThrow() === "linux" ? linuxCpu() : await macosCpu();
+    cpuCores = cpu.cores;
+    cpuLoad1m = cpu.load1m;
   }
 
   if (localModelsList.length === 0 && !facts.localModelsReachable) {
@@ -443,6 +464,12 @@ async function main(): Promise<void> {
       maxConcurrentAgents: cfg.policy.maxConcurrentAgents,
     },
   };
+
+  if (!isHostCapacity(output)) {
+    throw new Error(
+      `probe output violates host-capacity contract: ${JSON.stringify(contractErrors("host-capacity", output))}`,
+    );
+  }
 
   console.log(JSON.stringify(output));
 }

@@ -2,9 +2,7 @@ export interface LoopbackResponse {
   status: number;
   body?: unknown;
   rawBody?: string;
-  delayMs?: number;
   sseChunks?: readonly string[];
-  chunkDelayMs?: number;
   holdBeforeHeaders?: boolean;
   holdAfterChunks?: number;
 }
@@ -16,13 +14,17 @@ export interface LoopbackRequest {
   readonly body: string;
 }
 
-export async function startLoopback(recordingsPath: string): Promise<{
-  port: number;
-  stop: () => void | Promise<void>;
-  requests(): readonly LoopbackRequest[];
-  release(): void;
-  waitHeld(count: number): Promise<void>;
-}> {
+export interface LoopbackControl {
+  readonly port: number;
+  readonly stop: () => void | Promise<void>;
+  readonly requests: () => readonly LoopbackRequest[];
+  readonly release: () => void;
+  readonly waitHeld: (count: number) => Promise<void>;
+}
+
+export async function startLoopback(
+  recordingsPath: string,
+): Promise<LoopbackControl> {
   const file = Bun.file(recordingsPath);
   const text = await file.text();
   const responses = JSON.parse(text) as LoopbackResponse[];
@@ -70,49 +72,48 @@ export async function startLoopback(recordingsPath: string): Promise<{
       if (resp.holdBeforeHeaders === true) {
         await reachHold();
       }
-      if (resp.delayMs) {
-        await new Promise((resolve) => setTimeout(resolve, resp.delayMs));
+      if (resp.sseChunks === undefined) {
+        if (resp.rawBody !== undefined) {
+          return new Response(resp.rawBody, {
+            status: resp.status,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return new Response(JSON.stringify(resp.body), {
+          status: resp.status,
+          headers: { "Content-Type": "application/json" },
+        });
       }
-      if (resp.sseChunks !== undefined) {
-        const chunks = resp.sseChunks;
-        const gap = resp.chunkDelayMs ?? 0;
-        const holdAfter = resp.holdAfterChunks ?? chunks.length;
-        const head = chunks.slice(0, holdAfter);
-        const tail = chunks.slice(holdAfter);
-        const stream = new ReadableStream({
-          async start(controller) {
-            for (const chunk of head) {
-              if (gap > 0) {
-                await new Promise((resolve) => setTimeout(resolve, gap));
-              }
-              controller.enqueue(new TextEncoder().encode(chunk));
+      const chunks = resp.sseChunks;
+      const holdAfter = resp.holdAfterChunks ?? chunks.length;
+      const head = chunks.slice(0, holdAfter);
+      const tail = chunks.slice(holdAfter);
+      // S3 holdAfterChunks n: enqueue the head, reach a hold, await the
+      // gate, enqueue the rest, close. With n = 0 the head is empty, so
+      // one padding frame goes out first: the transport only flushes
+      // headers after start() produces output, and the padding is what
+      // carries the status out while the tail waits for release. SSE
+      // framing treats the lone blank line as a no-op.
+      const stream = new ReadableStream({
+        async start(controller) {
+          for (const chunk of head) {
+            controller.enqueue(new TextEncoder().encode(chunk));
+          }
+          if (tail.length > 0) {
+            if (head.length === 0) {
+              controller.enqueue(new TextEncoder().encode("\n"));
             }
-            if (tail.length > 0) {
-              await reachHold();
-            }
+            await reachHold();
             for (const chunk of tail) {
-              if (gap > 0) {
-                await new Promise((resolve) => setTimeout(resolve, gap));
-              }
               controller.enqueue(new TextEncoder().encode(chunk));
             }
-            controller.close();
-          },
-        });
-        return new Response(stream, {
-          status: resp.status,
-          headers: { "Content-Type": "text/event-stream" },
-        });
-      }
-      if (resp.rawBody !== undefined) {
-        return new Response(resp.rawBody, {
-          status: resp.status,
-          headers: { "Content-Type": "text/plain" },
-        });
-      }
-      return new Response(JSON.stringify(resp.body), {
+          }
+          controller.close();
+        },
+      });
+      return new Response(stream, {
         status: resp.status,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/event-stream" },
       });
     },
   });

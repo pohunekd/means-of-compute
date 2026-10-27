@@ -92,28 +92,30 @@ function authorize(
   index: UsageIndex,
   req: Request,
   remoteAddress: string | null,
-): { requestId: string; grant: GrantView } | { code: MeterRejectCode; status: number } {
+):
+  | { requestId: string; grant: GrantView }
+  | { code: MeterRejectCode; status: number; requestId?: string } {
   const requestId = verifyBearer(state.secret, req.headers.get("authorization"));
   if (requestId === null) {
     return { code: "unauthorized", status: 401 };
   }
   const grant = grantView(index, requestId);
   if (grant === null) {
-    return { code: "no-grant", status: 403 };
+    return { code: "no-grant", status: 403, requestId };
   }
   if (grant.closed) {
-    return { code: "grant-closed", status: 403 };
+    return { code: "grant-closed", status: 403, requestId };
   }
   if (grant.sessionId === null) {
     const age = Date.parse(state.now().toISOString()) - Date.parse(grant.lastOpenAt);
     if (age > state.config.unboundGrantTtlMs) {
-      return { code: "grant-unbound", status: 403 };
+      return { code: "grant-unbound", status: 403, requestId };
     }
   }
   const allowed = state.hostAddresses.get(grant.hostAlias);
   const normalized = normalizeIp(remoteAddress);
   if (allowed === undefined || normalized === null || !allowed.has(normalized)) {
-    return { code: "wrong-host", status: 403 };
+    return { code: "wrong-host", status: 403, requestId };
   }
   return { requestId, grant };
 }
@@ -141,7 +143,17 @@ export async function handleMeterRequest(
   }
   const auth = authorize(state, index, req, remoteAddress);
   if ("code" in auth) {
-    state.log({ level: "warn", event: "request-rejected", code: auth.code, status: auth.status });
+    if (auth.requestId === undefined) {
+      state.log({ level: "warn", event: "request-rejected", code: auth.code, status: auth.status });
+    } else {
+      state.log({
+        level: "warn",
+        event: "request-rejected",
+        code: auth.code,
+        status: auth.status,
+        requestId: auth.requestId,
+      });
+    }
     return errorResponse(auth.code, auth.status);
   }
   const contentType = req.headers.get("content-type") ?? "";
@@ -235,11 +247,11 @@ export async function handleMeterRequest(
     state.log({
       level: "warn",
       event: "request-rejected",
-      code: "no-grant",
+      code: "provider-not-routed",
       status: 403,
       requestId: auth.requestId,
     });
-    return errorResponse("no-grant", 403);
+    return errorResponse("provider-key-missing", 503);
   }
   if (descriptor.apiKeyEnv !== undefined && !process.env[descriptor.apiKeyEnv]) {
     state.log({
@@ -691,7 +703,8 @@ async function forwardCall(
     },
     cancel() {
       // The provider already billed the call, so the pump reads upstream to
-      // its end and discards the bytes to recover usage.
+      // its end and discards the bytes to recover usage. The caller is
+      // gone: mark it now; the pump keeps reading but enqueues nothing.
       clientGone = true;
     },
   });

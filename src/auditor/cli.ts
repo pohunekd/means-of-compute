@@ -308,7 +308,7 @@ async function run(): Promise<number> {
         // refuses instead of posting a marker that rule 2.6 rejects.
         if (match.pullNumber !== null && match.pullNumber !== options.pull) {
           console.error(
-            `stored verdict ${headSha} is for #${String(match.pullNumber)}, not #${String(options.pull)}`,
+            `audit: stored verdict ${headSha} is for #${String(match.pullNumber)}, not #${String(options.pull)}`,
           );
           return 2;
         }
@@ -317,7 +317,7 @@ async function run(): Promise<number> {
             ? renderComment({ ...match, pullNumber: options.pull })
             : renderComment(match);
         if (comment === null || options.pull === null) {
-          console.error("--post requires a pull request");
+          console.error("audit: --post requires a pull request");
           return 2;
         }
         await postComment(item.repo, options.pull, comment);
@@ -359,7 +359,7 @@ async function run(): Promise<number> {
     }
     if (options.post) {
       if (outcome.comment === null || options.pull === null) {
-        console.error("--post requires a pull request");
+        console.error("audit: --post requires a pull request");
         return 2;
       }
       await postComment(item.repo, options.pull, outcome.comment);

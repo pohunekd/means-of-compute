@@ -399,7 +399,7 @@ test("M-2: re-post to another PR exits 2 and makes no gh pr comment call", async
       ["--pull", "100", "--post", "yes"],
     );
     expect(second.code).toBe(2);
-    expect(second.stderr).toContain(`stored verdict ${head} is for #99, not #100`);
+    expect(second.stderr.trim()).toBe(`audit: stored verdict ${head} is for #99, not #100`);
     expect(await ghCommentCalls(tree)).toBe(0);
   } finally {
     tree.cleanup();

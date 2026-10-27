@@ -12,7 +12,11 @@
   "assignedHostAlias": "desktop",
   "branch": "demo-good",
   "pullNumber": 99,
-  "modelRouting": { "preferredModel": "meta/muse-glimmer-30b", "attempts": 1, "fallbackUsed": false },
+  "modelRouting": {
+    "preferredModel": "meta/muse-glimmer-30b",
+    "attempts": 1,
+    "fallbackUsed": false
+  },
   "retryCount": 1,
   "stallRounds": 0
 }

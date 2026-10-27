@@ -727,6 +727,25 @@ test("a rejected err reply decodes as remoteProtocol and maps its code", async (
   }
 });
 
+test("an unmapped err code maps to daemon-error", async () => {
+  const fake = createFakeDaemon(["laptop-a"], "moc-worker");
+  try {
+    const client = await fake.connector.client("laptop-a");
+    fake.failNext("laptop-a", "session.inspect", { errCode: "Weird Code", apply: false });
+    let caught: unknown;
+    try {
+      await client.call("session.inspect", "fake-9");
+    } catch (error) {
+      caught = error;
+    }
+    const mapped = portErrorOf(caught, "laptop-a");
+    expect(mapped).toBeInstanceOf(PortRejectedError);
+    expect((mapped as PortRejectedError).code).toBe("daemon-error");
+  } finally {
+    await fake.connector.close();
+  }
+});
+
 test("a local err reply decodes as protocol and maps its code", async () => {
   // A local client (no remote host) decodes an err reply with kind
   // protocol. The class comes from the remote client's constructor, so the

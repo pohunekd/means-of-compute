@@ -1,0 +1,10 @@
+[
+  {
+    "status": 200,
+    "delayMs": 1500,
+    "body": {
+      "choices": [{ "message": { "content": "{\"findings\": []}" } }],
+      "usage": { "prompt_tokens": 130, "completion_tokens": 40 }
+    }
+  }
+]

@@ -9,6 +9,7 @@ import { mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startLoopback } from "../../src/providers/loopback.js";
+import { createServer } from "node:net";
 import { runAudit, auditExitCode } from "../../src/auditor/audit.js";
 import { writeVerdict, VerdictConflictError } from "../../src/auditor/store.js";
 import type { AuditInput } from "../../src/auditor/audit-types.js";
@@ -272,6 +273,41 @@ test("200 with a non-JSON body exits 4 with null tokens and requests 1", async (
   }
 });
 
+// A raw TCP stub for H-1: it answers HTTP 200 with a Content-Length the
+// body never fills, then resets the socket. fetch resolves the 200, and
+// the body read fails, so the billed call must reach the ledger.
+async function startResetStub(): Promise<{ port: number; stop: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((socket) => {
+      let seen = Buffer.alloc(0);
+      let answered = false;
+      socket.on("data", (chunk: Buffer) => {
+        seen = Buffer.concat([seen, chunk]);
+        if (!answered && seen.includes("\r\n\r\n")) {
+          answered = true;
+          socket.write(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{\"choices\":",
+            () => {
+              socket.destroy();
+            },
+          );
+        }
+      });
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("reset stub has no port"));
+        return;
+      }
+      resolve({ port: address.port, stop: () => new Promise<void>((done) => {
+        server.close(() => done());
+      }) });
+    });
+  });
+}
+
 test("closed connection exits 4 with no ledger entry", async () => {
   const run = await runErrorCase("auditor-closed-", null);
   try {
@@ -279,6 +315,107 @@ test("closed connection exits 4 with no ledger entry", async () => {
     expect(run.ledger).toBe("");
   } finally {
     run.cleanup();
+  }
+});
+
+test("200 with a reset body exits 4 with one billed entry (mutation: every TypeError unreached)", async () => {
+  const setup = await setupLibraryCase("auditor-resetbody-");
+  const restoreEnv = applyTestEnv();
+  const stub = await startResetStub();
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  const cleanup = (): void => {
+    clearLoopbackEnv();
+    restoreEnv();
+    setup.cleanupFiles();
+  };
+  try {
+    const config = await loadAuditorConfig();
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item: demoItem("demo-good") as unknown as AuditInput["item"],
+          repoDir: setup.repoDir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir: setup.verdictDir },
+          git: createReadOnlyGit(setup.repoDir),
+          budget: admittingGate(process.cwd()),
+          call: setup.counting,
+          ledgerPath: setup.ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(4);
+    expect(setup.requestCount()).toBe(1);
+    const ledger = await Bun.file(setup.ledgerPath).text();
+    expect(ledger).toContain('"kind":"audit"');
+    expect(ledger).toContain('"inputTokens":null');
+    expect(ledger).toContain('"outputTokens":null');
+    expect(ledger).toContain('"requests":1');
+  } finally {
+    await stub.stop();
+    cleanup();
+  }
+});
+
+test("a timed-out call exits 4 with one billed entry (mutation: 504, true becomes 504, false)", async () => {
+  const setup = await setupLibraryCase("auditor-timeout-");
+  const restoreEnv = applyTestEnv();
+  // The recording answers after the override below aborts the call.
+  process.env.PROVIDER_META_API_TIMEOUT_MS = "100";
+  const server = await startLoopback("tests/auditor/recordings/timeout.json");
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  const cleanup = (): void => {
+    void server.stop();
+    clearLoopbackEnv();
+    delete process.env.PROVIDER_META_API_TIMEOUT_MS;
+    restoreEnv();
+    setup.cleanupFiles();
+  };
+  try {
+    const config = await loadAuditorConfig();
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item: demoItem("demo-good") as unknown as AuditInput["item"],
+          repoDir: setup.repoDir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir: setup.verdictDir },
+          git: createReadOnlyGit(setup.repoDir),
+          budget: admittingGate(process.cwd()),
+          call: setup.counting,
+          ledgerPath: setup.ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(4);
+    expect(setup.requestCount()).toBe(1);
+    const ledger = await Bun.file(setup.ledgerPath).text();
+    expect(ledger).toContain('"kind":"audit"');
+    expect(ledger).toContain('"inputTokens":null');
+    expect(ledger).toContain('"outputTokens":null');
+    expect(ledger).toContain('"requests":1');
+  } finally {
+    cleanup();
   }
 });
 

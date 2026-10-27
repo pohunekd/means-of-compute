@@ -78,33 +78,34 @@ host, 2 on any input or config error.
 All model traffic from worker sessions flows through the metering proxy
 (`src/meter/`). The proxy holds the provider keys: the host environment
 carries only a short-lived caller token (`moc1.` + base64url grant id +
-HMAC) minted by `openGrant` for one request id. The caller token travels in
-the `Authorization` header; the proxy verifies it before anything else,
-checks the caller address against the host map, confirms the grant is bound
-to the session and not past its TTL, and only then forwards the call with
-the key taken from the configured environment variable. Provider keys never
-appear in the usage log, the factory log, or error responses. See
-[meter.md](meter.md) for the proxy, the config keys, the env vars, the
-usage-log format, and the operator secret command.
+HMAC) from `meter.tokenFor(requestId)` — deterministic, and `openGrant`
+mints nothing. Provider keys never appear in the usage log, the factory
+log, or error responses. See [meter.md](meter.md) for the proxy, the
+config keys, the env vars, the usage-log format, and the operator secret
+command.
 
-Before forwarding, the proxy overwrites the request body with the grant's
-provider, model, and (for streams) `stream_options.include_usage`, and
-rejects a caller-supplied `model`. Usage is recorded twice: a `call-start`
-record guards the concurrency limit per session, and a `call-end` record
-carries the outcome, the billed flag, and the input/output token counts
-(`null` when the upstream never sent usage). The proxy passes failures
-through without retry or failover: non-2xx upstream statuses return
-unchanged and unbilled, timeouts map to 504 (first-byte timeouts billed,
-connection failures unbilled), and no budget check runs inside the proxy.
-A caller disconnect still records the observed usage with `clientGone`.
+Call authorization runs in the order A1 to A5: the bearer's MAC, the
+grant exists, the grant is not closed, an unbound grant is admitted only
+within `unboundGrantTtlMs` of its last open, and the source address is in
+the host's list.
 
-When the session ends, `settle` closes the grant (refusing later calls with
-a guarded `grant-close` record), drains in-flight calls up to
-`drainTimeoutMs` and then aborts them (`closed-abort`, unbilled), and joins
-the ended call records into one `PortUsage` per billed provider and model.
-The join reads only the records `appendUnguarded` replayed from the usage
-log, so `settle` is idempotent across restarts. See
-[config/meter.json](../config/meter.json) for the timeouts and limits.
+Only `model` is rewritten, to the grant's descriptor model. The caller
+must send `model: sessionModelId`, and anything else gets 400
+`model-mismatch`.
+
+Error mapping: a connection failure gives 502, not billed; a missing
+first byte gives 504, billed with null counts; idle and total timeouts
+and broken or aborted streams after the headers error the caller's
+stream, billed; non-2xx statuses pass through, not billed.
+
+Drain abort: `closed-abort` is billed — with the seen counts, else null.
+
+Join: one `PortUsage`, with one token per (provider, model), over the
+replayed-plus-appended index. A `call-start` without an end counts as one
+request with null counts.
+
+`settle` closes the grant, waits up to `drainTimeoutMs`, aborts the
+rest, awaits every end, then joins.
 
 The component list and the rules behind these boundaries are in
 [.agents/instructions/project.md](../.agents/instructions/project.md).

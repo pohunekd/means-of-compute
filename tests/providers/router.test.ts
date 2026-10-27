@@ -189,8 +189,7 @@ test("router rejects an unknown route id (mutation: predicate always true)", asy
 });
 
 test("router rejects a duplicate route id on a warm cache (mutation: unvalidated route read)", async () => {
-  const { makeTempConfig, removeTempConfig, runWarmCallCheck } =
-    await import("./temp-config.js");
+  const { makeTempConfig, removeTempConfig, runWarmCallCheck } = await import("./temp-config.js");
   const dir = await makeTempConfig();
   try {
     const result = await runWarmCallCheck(dir, { providers: ["nvidia-build", "nvidia-build"] });

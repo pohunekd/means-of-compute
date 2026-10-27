@@ -49,8 +49,11 @@ test("config: descriptor with timeoutMs 600001 throws (mutation: drop maximum)",
 });
 
 test("config: timeout override 600001 throws (mutation: larger literal)", async () => {
-  const { makeTempConfig: make, removeTempConfig: remove, runLoadCheck: load } =
-    await import("./temp-config.js");
+  const {
+    makeTempConfig: make,
+    removeTempConfig: remove,
+    runLoadCheck: load,
+  } = await import("./temp-config.js");
   const { setChildEnv } = await import("./temp-config.js");
   const dir = await make();
   try {

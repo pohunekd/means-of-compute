@@ -56,9 +56,7 @@ async function childEnv(cwd: string): Promise<Record<string, string>> {
   env["LOCAL_MODEL_BASE_URL"] = "http://localhost:1148/v1";
   // Pin every descriptor base URL to a closed loopback port, so a regression
   // in a child can never reach a third-party endpoint.
-  for (const id of JSON.parse(
-    await Bun.file(join(cwd, "provider-ids.json")).text(),
-  ) as string[]) {
+  for (const id of JSON.parse(await Bun.file(join(cwd, "provider-ids.json")).text()) as string[]) {
     env[`PROVIDER_${id.toUpperCase().replace(/-/g, "_")}_BASE_URL`] = "http://127.0.0.1:9";
   }
   for (const [key, value] of Object.entries(extraChildEnv)) {

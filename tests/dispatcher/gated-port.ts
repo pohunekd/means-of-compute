@@ -21,7 +21,7 @@ export interface PendingCall {
   readonly method: GatedMethod;
   release(after?: () => Promise<unknown>): Promise<unknown>;
   fail(error: unknown): void;
-  releaseThenFail(error: unknown): Promise<never>;
+  releaseThenFail(error: unknown): Promise<unknown>;
 }
 
 interface ParkedCall {
@@ -66,11 +66,11 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
       fail(error: unknown): void {
         parked.reject(error);
       },
-      async releaseThenFail(error: unknown): Promise<never> {
+      async releaseThenFail(error: unknown): Promise<unknown> {
         const target = inner[method] as (...args: PortArgs) => Promise<unknown>;
-        await target(...parked.args);
+        const result = await target(...parked.args);
         parked.reject(error);
-        throw error;
+        return result;
       },
     };
   }

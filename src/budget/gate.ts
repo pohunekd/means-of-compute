@@ -90,8 +90,6 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
           stdout: "pipe",
           stderr: "pipe",
           stdin: "ignore",
-          timeout: options.timeoutMs,
-          killSignal: "SIGKILL",
         });
       } catch (error: unknown) {
         throw new BudgetGateError(
@@ -99,31 +97,72 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
           { cause: error },
         );
       }
-      const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
-      const stderrPromise = new Response(proc.stderr as ReadableStream).text();
-      const code = await proc.exited;
-      if (proc.signalCode !== null) {
-        throw new BudgetGateError(`budget gate: timed out after ${String(options.timeoutMs)} ms`);
-      }
-      const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-      const commandText = JSON.stringify(options.command);
-      if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
-        const line = findLine(stdout, /^admitted: /);
-        if (line !== undefined) {
-          return { admit: true, line };
+      const startedAt = Date.now();
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        proc.kill("SIGKILL");
+      }, options.timeoutMs);
+      try {
+        const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
+        const stderrPromise = new Response(proc.stderr as ReadableStream).text();
+        const code = await proc.exited;
+        clearTimeout(timer);
+        if (proc.signalCode !== null) {
+          if (timedOut) {
+            throw new BudgetGateError(
+              `budget gate: timed out after ${String(options.timeoutMs)} ms`,
+            );
+          }
+          const snippet = await stderrPromise.then(
+            (stderr) => stderr.slice(0, MAX_STDERR_SNIPPET),
+            () => "",
+          );
+          throw new BudgetGateError(
+            `budget gate: killed by signal ${String(proc.signalCode)}: ${snippet}`,
+          );
         }
-      }
-      if (code === 3) {
-        const reason = REFUSED_PATTERN.exec(stdout)?.[1];
-        const line = findLine(stdout, /^refused: /);
-        if (reason !== undefined && line !== undefined) {
-          return { admit: false, reason, line };
+        if (timedOut) {
+          throw new BudgetGateError(
+            `budget gate: timed out after ${String(options.timeoutMs)} ms`,
+          );
         }
+        const remaining = options.timeoutMs - (Date.now() - startedAt);
+        const reads = Promise.all([stdoutPromise, stderrPromise]);
+        const bounded =
+          remaining > 0
+            ? await Promise.race([
+                reads.then((done) => ({ done })),
+                Bun.sleep(remaining).then(() => ({ done: null })),
+              ])
+            : { done: null };
+        if (bounded.done === null) {
+          throw new BudgetGateError(
+            `budget gate: output not closed within ${String(options.timeoutMs)} ms`,
+          );
+        }
+        const [stdout, stderr] = bounded.done;
+        const commandText = JSON.stringify(options.command);
+        if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
+          const line = findLine(stdout, /^admitted: /);
+          if (line !== undefined) {
+            return { admit: true, line };
+          }
+        }
+        if (code === 3) {
+          const reason = REFUSED_PATTERN.exec(stdout)?.[1];
+          const line = findLine(stdout, /^refused: /);
+          if (reason !== undefined && line !== undefined) {
+            return { admit: false, reason, line };
+          }
+        }
+        const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
+        throw new BudgetGateError(
+          `budget gate command ${commandText} failed with rc ${String(code)}: ${snippet}`,
+        );
+      } finally {
+        clearTimeout(timer);
       }
-      const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
-      throw new BudgetGateError(
-        `budget gate command ${commandText} failed with rc ${String(code)}: ${snippet}`,
-      );
     },
   };
 }

@@ -148,3 +148,36 @@ test("gate timeout throws naming the timeout without waiting for pipes", async (
   expect(error).toBeInstanceOf(BudgetGateError);
   expect((error as Error).message).toContain("timed out after 300 ms");
 });
+
+test("gate names the signal when the child dies on its own", async () => {
+  const gate = createCliBudgetGate({
+    command: ["sh", "-c", "kill -9 $$"],
+    timeoutMs: 60000,
+    cwd: process.cwd(),
+  });
+  let error: unknown;
+  try {
+    await gate.admit();
+  } catch (thrown: unknown) {
+    error = thrown;
+  }
+  expect(error).toBeInstanceOf(BudgetGateError);
+  expect((error as Error).message).toContain("killed by signal SIGKILL");
+  expect((error as Error).message).not.toContain("timed out");
+});
+
+test("gate refuses output held open past the deadline", async () => {
+  const gate = createCliBudgetGate({
+    command: ["sh", "-c", "(sleep 6 &); echo 'admitted: x'"],
+    timeoutMs: 300,
+    cwd: process.cwd(),
+  });
+  let error: unknown;
+  try {
+    await gate.admit();
+  } catch (thrown: unknown) {
+    error = thrown;
+  }
+  expect(error).toBeInstanceOf(BudgetGateError);
+  expect((error as Error).message).toContain("output not closed within 300 ms");
+});

@@ -52,7 +52,15 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
         resp.status,
       );
     }
-    const data = await resp.json();
+    let data: unknown;
+    try {
+      data = JSON.parse(await resp.text()) as unknown;
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        throw new ProviderError(`Provider ${provider.id} returned a non-JSON body`, 502);
+      }
+      throw error;
+    }
     const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
       ?.message?.content;
     if (typeof content !== "string") {

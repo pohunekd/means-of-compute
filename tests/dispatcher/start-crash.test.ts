@@ -150,7 +150,7 @@ test("K0: an unwritable registry stops start before port.start", async () => {
 });
 
 test("K1: a crash before port.start settles on replay", async () => {
-  await withHarness(async ({ control, waits, gate, dispatcher, config, ledgerPath }) => {
+  await withHarness(async ({ control, waits, gate, dispatcher, config, ledgerPath, registryPath }) => {
     const first = dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-a") as never,
@@ -158,9 +158,9 @@ test("K1: a crash before port.start settles on replay", async () => {
       "Do the work.",
     );
     const parked = await waits.next("start");
-    // The port call runs, then the hold fails: the caller sees the
-    // injected error while the session stays live in the port.
-    const released = parked.releaseThenFail(new Error("injected"));
+    // The crash happens before port.start reaches the port: the caller
+    // sees the injected error while no session exists in the port yet.
+    parked.fail(new Error("injected"));
     let failure: unknown;
     try {
       await first;
@@ -168,7 +168,7 @@ test("K1: a crash before port.start settles on replay", async () => {
       failure = error;
     }
     expect(String(failure)).toContain("injected");
-    await released;
+    expect(control.sessions()).toHaveLength(0);
     // A fresh dispatcher on the same files and memory control: the gate
     // now refuses, but the provisional hit settles without a gate call.
     // The refusal above would stop a fresh placement, but the
@@ -196,6 +196,12 @@ test("K1: a crash before port.start settles on replay", async () => {
     expect(gate.calls()).toBe(1);
     expect(control.sessions()).toHaveLength(1);
     expect(outcome.request.requestId).toBe("item-a:0");
+    // The replay itself created the session through port.start and
+    // settled it onto the provisional entry.
+    expect(control.sessions()[0]?.handle.sessionId).toBe(outcome.handle.sessionId);
+    const entries = await readRegistry(registryPath);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.sessionId).toBe(outcome.handle.sessionId);
   });
 });
 
@@ -235,6 +241,7 @@ test("K2: a crash after port.start keeps one session", async () => {
     expect(entries[0]?.sessionId).toBe(outcome.handle.sessionId);
     expect(entries[0]?.startedAt).toBe(provisionalStartedAt);
     expect(waits.calls("start")).toBe(2);
+    expect(control.sessions()).toHaveLength(1);
     control.complete(outcome.handle.sessionId, { state: "finished", usage: null, detail: "done" });
     const finished = dispatcher.watch(outcome.request.requestId);
     const parkedWatch = await waits.next("wait");
@@ -246,6 +253,79 @@ test("K2: a crash after port.start keeps one session", async () => {
     expect(contents.pending).toHaveLength(1);
     expect(contents.pending[0]?.entryId).toBe(`item-a:${outcome.handle.sessionId}`);
   });
+});
+
+test("K2b: a failed settle write keeps the provisional entry and one session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-settle-fail-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  const registryPath = join(dir, "registry.json");
+  try {
+    const control = createMemoryPort();
+    const starts = gatePort(control.port, new Set(["start"]));
+    const gate = createSwitchGate();
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const dispatcher = createDispatcher({
+      port: starts.port,
+      budget: gate.gate,
+      config,
+      ledgerPath,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const first = dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    const parked = await starts.next("start");
+    // The settle write fails: the registry directory is read-only while
+    // the dispatcher settles the started session. The mode is restored
+    // only after the start settles, so the failure is EACCES, not a
+    // race with the cleanup below.
+    await chmod(dir, 0o500);
+    const settledFirst = first.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await parked.release();
+    const failure = await settledFirst;
+    await chmod(dir, 0o700);
+    expect(failure).toBeDefined();
+    // The provisional entry is still present and the port holds one live
+    // session; no entry was removed after the failed settle.
+    const kept = await readRegistry(registryPath);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.sessionId).toBeNull();
+    expect(control.sessions()).toHaveLength(1);
+    expect(starts.calls("start")).toBe(1);
+    // A replayed start settles that same session.
+    const second = dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    const parkedSecond = await starts.next("start");
+    await parkedSecond.release();
+    const outcome = await second;
+    startedOf(outcome);
+    expect(outcome.handle.sessionId).toBe(control.sessions()[0]?.handle.sessionId);
+    const settled = await readRegistry(registryPath);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.sessionId).toBe(outcome.handle.sessionId);
+  } finally {
+    await chmod(dir, 0o700).catch(() => undefined);
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("K4: an unreachable host at start ends lost after the threshold", async () => {

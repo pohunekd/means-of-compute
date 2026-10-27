@@ -269,12 +269,21 @@ test("unreachable: two misses recover, the third is lost", async () => {
         return Promise.reject(new PortUnreachableError("host unreachable"));
       },
     };
+    // The start (insert and settle reads) sees 10:00:00 and every later
+    // read sees 10:00:30: a finishLost that reset lastSeenAt to the
+    // observation time would stamp 10:00:30 with seconds 30 instead of 0.
+    const clock2 = { reads: 0 };
     const dispatcher2 = createDispatcher({
       port: alwaysLost,
       budget: GATE,
       ledgerPath: join(dir, "ledger2.jsonl"),
       config: { ...config, registryPath: join(dir, "registry2.json") },
-      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      now: () => {
+        clock2.reads += 1;
+        return clock2.reads <= 2
+          ? new Date("2026-10-27T10:00:00.000Z")
+          : new Date("2026-10-27T10:00:30.000Z");
+      },
       sleep: () => Promise.resolve(),
       log: () => undefined,
     });

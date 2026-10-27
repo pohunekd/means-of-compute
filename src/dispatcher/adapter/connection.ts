@@ -76,7 +76,7 @@ export function createHostConnector(
   }
 
   function unreachableFor(alias: string): PortUnreachableError {
-    return new PortUnreachableError(`${String(alias)}: host_unreachable`);
+    return new PortUnreachableError(`${alias}: host_unreachable`);
   }
 
   return {

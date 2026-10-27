@@ -4,7 +4,6 @@
 import { expect, test } from "bun:test";
 import { createFakeDaemon } from "../../../src/dispatcher/adapter/fake-daemon.js";
 import { MOC_METADATA } from "../../../src/dispatcher/adapter/map.js";
-import { PortRejectedError } from "../../../src/dispatcher/port.js";
 
 const START_PARAMS = {
   agent: "moc-worker",
@@ -21,12 +20,6 @@ const START_PARAMS = {
     [MOC_METADATA.start]: "pending",
   },
 };
-
-async function newSessionId(): Promise<never> {
-  throw new Error("unused");
-}
-
-void newSessionId;
 
 test("set_metadata null deletes the key and keeps the rest", async () => {
   const fake = createFakeDaemon(["laptop-a"], "moc-worker");

@@ -1,13 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
 
 import { lstatSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export function configPath(...parts: string[]): string {
-  return join(repoRoot, "config", ...parts);
-}
+import { join } from "node:path";
 
 export type ProbeConfig = {
   idleMinutes: number;
@@ -39,8 +33,8 @@ export function readJson<T>(path: string): T {
   }
 }
 
-export function loadConfig(path?: string): ProbeConfig {
-  const raw = readJson<Record<string, unknown>>(path ?? configPath("probe.json"));
+export function loadConfig(path: string): ProbeConfig {
+  const raw = readJson<Record<string, unknown>>(path);
   const num = (key: string, min: number, max = Number.POSITIVE_INFINITY): number => {
     const v = raw[key];
     if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
@@ -112,11 +106,40 @@ export function assertSysfsRoot(root: unknown, label: string): void {
   }
 }
 
-export function loadHostAlias(hostnameVal: string): string {
-  const hostsRaw = readJson<HostMap>(configPath("hosts.json"));
+export function loadHostAlias(configDir: string, hostnameVal: string): string {
+  const hostsRaw = readJson<HostMap>(join(configDir, "hosts.json"));
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
   if (typeof alias !== "string") {
     throw new Error(`host ${hostnameVal} not in config/hosts.json`);
   }
   return alias;
+}
+
+const hostAliasPattern = /^[a-z][a-z0-9-]{0,31}$/;
+
+export function loadHostFile(path: string): string {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf-8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    throw new Error(`host file ${path}: ${code}`, { cause: e });
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text) as unknown;
+  } catch (e) {
+    throw new Error(`host file ${path}: invalid hostAlias`, { cause: e });
+  }
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    Array.isArray(raw) ||
+    Object.keys(raw).length !== 1 ||
+    typeof (raw as Record<string, unknown>)["hostAlias"] !== "string" ||
+    !hostAliasPattern.test((raw as Record<string, unknown>)["hostAlias"] as string)
+  ) {
+    throw new Error(`host file ${path}: invalid hostAlias`);
+  }
+  return (raw as { hostAlias: string }).hostAlias;
 }

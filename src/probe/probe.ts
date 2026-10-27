@@ -1,7 +1,8 @@
-import { hostname as osHostname, cpus } from "node:os";
+import { cpus } from "node:os";
+import { join } from "node:path";
 import { contractErrors, isHostCapacity } from "../../contracts/v1/validate.js";
 import type { HostCapacity } from "../../contracts/v1/types.js";
-import { configPath, loadConfig, loadHostAlias } from "./config.js";
+import { loadConfig } from "./config.js";
 import { deriveIdle, insideWindow } from "./idle-rule.js";
 import { loadFacts, type Facts } from "./facts.js";
 import {
@@ -63,20 +64,22 @@ async function queryLocalModels(
 }
 
 export async function runProbe(options: {
-  factsPath?: string;
-  scenario?: string;
+  readonly configDir: string;
+  readonly resolveHostAlias: () => string;
+  readonly factsPath?: string;
+  readonly scenario?: string;
 }): Promise<HostCapacity> {
-  const { factsPath, scenario } = options;
+  const { configDir, resolveHostAlias, factsPath, scenario } = options;
   let facts: Facts = {};
   if (factsPath) {
     facts = loadFacts(factsPath);
   } else if (scenario) {
-    facts = loadFacts(configPath("scenarios", `${scenario}.json`));
+    facts = loadFacts(join(configDir, "scenarios", `${scenario}.json`));
   }
 
-  const cfg = loadConfig();
+  const cfg = loadConfig(join(configDir, "probe.json"));
   const sysfsRoot = facts.sysfsRoot ?? cfg.sysfsRoot;
-  const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
+  const hostAlias = facts.hostAlias ?? resolveHostAlias();
   const now = new Date();
   const timestamp = facts.timestamp ?? now.toISOString();
   const evalAt = new Date(timestamp);

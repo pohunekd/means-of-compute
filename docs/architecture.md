@@ -38,23 +38,25 @@ against a `WorkItem`'s DoD. The CLI takes the item only from
 only at the locations the model cites. Every git call goes through an
 allowlist; `--output`, `--ext-diff` and `--textconv` are refused before
 any process starts. The author models come from the configured ledger
-(`config/ledger.json`). The auditor is the first configured auditor model
+(`config/ledger.json`) with `--authors ledger`, or from `--author-model`
+with `--authors flags`. The auditor is the first configured auditor model
 that is not an author. An empty author set, or no eligible auditor,
 refuses with exit 3. The budget gate runs before the model call; a refusal
 is exit 3. It makes exactly one model call through `callProviderOnce`,
-with no retry and no fallback. Every call that got an HTTP response, and
-every call that timed out after the response began, appends one
-`kind: "audit"` pending entry to the configured ledger before the reply is
-parsed. Its tokens are `null` when the provider gave no usage. A call that
-never got a response appends nothing. The reply is validated (schema,
+with no retry and no fallback. It appends one `kind: "audit"` pending
+entry to the configured ledger before the reply is parsed, for a 200
+response (tokens from the provider's usage, or `null` when absent or
+unreadable) and for a timeout (`null` tokens). A connection failure
+before any response, and a non-200 status, append nothing. The reply is
+validated (schema,
 cited file and line); an empty, invalid or out-of-tree reply is exit 4.
 Counts are recomputed from the findings. The verdict is stored once at
 `<verdictDir>/<item id>/<sha>.json` by temp file plus `link(2)`. An
 existing verdict refuses with exit 3, unless `--post` is given: then the
 stored verdict is posted with no model call, no budget gate and no ledger
 entry, if it belongs to the same PR or has none. `--post` posts the
-marker comment with `gh pr comment` and checks that the newest comment's
-first line equals the marker. A post failure is exit 4. Exit codes:
+marker comment with `gh pr comment`, then checks that some comment on
+that PR has the marker as its first line. A post failure is exit 4. Exit codes:
 0 done; 2 input, config, unknown revision or data error; 3 refusal
 (verdict exists, empty diff, no eligible auditor, budget); 4 model call,
 reply or post failure.

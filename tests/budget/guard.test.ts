@@ -282,6 +282,18 @@ test("ledger: a dangling symlink exits 2 naming the path", async () => {
   }
 });
 
+test("ledger: a dangling parent symlink exits 2 naming the path", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
+  try {
+    const parent = join(dir, "data");
+    await symlink(join(dir, "no-such-volume"), parent);
+    const ledgerPath = join(parent, "ledger.jsonl");
+    await expectLedgerError(ledgerPath, `Budget ledger ${ledgerPath}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ledger: invalid line names the line number", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
   try {

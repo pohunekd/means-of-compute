@@ -1,10 +1,10 @@
 // Ledger reader for the budget guard. The ledger stores one UsageRecord per
-// finished task as JSON lines; the guard only reads it. A missing file means
-// zero spend. A present line that fails validation is an error naming the
-// line number and is never skipped.
-import { lstat, readFile, stat } from "node:fs/promises";
+// finished task as JSON lines; the guard only reads it. A missing file
+// with an existing parent directory means zero spend. A present line that
+// fails validation is an error naming the line number and is never skipped.
 import { contractErrors, isUsageRecord } from "../../contracts/v1/validate.js";
 import type { UsageRecord } from "../../contracts/v1/types.js";
+import { readInputText, statInputPath } from "./fs.js";
 
 function parseLine(ledgerPath: string, lineNumber: number, text: string): UsageRecord {
   let raw: unknown;
@@ -23,38 +23,11 @@ function parseLine(ledgerPath: string, lineNumber: number, text: string): UsageR
 }
 
 export async function readUsageLedger(ledgerPath: string): Promise<UsageRecord[]> {
-  try {
-    await lstat(ledgerPath);
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
-    throw new Error(
-      `Budget ledger ${ledgerPath}: cannot stat path (${String((error as NodeJS.ErrnoException).code)})`,
-      { cause: error },
-    );
+  const label = "Budget ledger";
+  if ((await statInputPath(label, ledgerPath)) === "absent") {
+    return [];
   }
-  let isRegularFile: boolean;
-  try {
-    isRegularFile = (await stat(ledgerPath)).isFile();
-  } catch (error: unknown) {
-    throw new Error(
-      `Budget ledger ${ledgerPath}: cannot stat path (${String((error as NodeJS.ErrnoException).code)})`,
-      { cause: error },
-    );
-  }
-  if (!isRegularFile) {
-    throw new Error(`Budget ledger ${ledgerPath}: not a regular file`);
-  }
-  let text: string;
-  try {
-    text = await readFile(ledgerPath, "utf8");
-  } catch (error: unknown) {
-    throw new Error(
-      `Budget ledger ${ledgerPath}: cannot read file (${String((error as NodeJS.ErrnoException).code)})`,
-      { cause: error },
-    );
-  }
+  const text = await readInputText(label, ledgerPath);
   if (text.trim() === "") {
     return [];
   }

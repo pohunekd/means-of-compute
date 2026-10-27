@@ -33,8 +33,10 @@ type Facts = Partial<{
   // Simulates a host where the login query ran and found no local session
   // of class user (remote sessions excluded): idle when on AC, battery above
   // threshold, inside the window. A failed query is userActivityError instead
-  // (never idle). The manager hint failure fallback is simulated with the
-  // managerHintFailed fact, which uses /proc/uptime instead of the hint.
+  // (never idle). Combine with an explicit secondsSinceInput fact for a
+  // deterministic logged-out value (otherwise the live readers run); the
+  // manager hint failure fallback is simulated with the managerHintFailed
+  // fact, which uses /proc/uptime instead of the hint.
   noLocalUserSession: boolean;
   // Fixture override for every sysfs path (power_supply, drm): a scenario
   // may point it at a committed fixture tree under tests/fixtures/sysfs,
@@ -608,14 +610,21 @@ async function main(): Promise<void> {
   let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
   const managerHintFailed = facts.managerHintFailed === true;
+  if (managerHintFailed && !loggedOut) {
+    throw new Error("managerHintFailed needs noLocalUserSession");
+  }
   let powerUnknown = false;
   let powerCause = "";
 
   // Facts override the live readers member by member: a member left
   // undefined falls back to the live reader, including inside the grouped
   // gpu and localModels objects. An explicitly set member (even false or an
-  // empty list) always wins over the reader. A live value needed on an
-  // unsupported platform fails fast.
+  // empty list) always wins over the reader; that includes an explicit
+  // secondsSinceInput fact next to the logged-out facts. managerHintFailed
+  // is valid only together with noLocalUserSession (otherwise the probe
+  // exits 1); together they force the manager-hint/uptime path instead of
+  // the live session reader. A live value needed on an unsupported
+  // platform fails fast.
   function platformOrThrow(): "linux" | "darwin" {
     if (platform === "linux" || platform === "darwin") return platform;
     throw new Error("unsupported platform");
@@ -623,9 +632,7 @@ async function main(): Promise<void> {
 
   if (userActivityUnknown) {
     secondsSinceInput = 0;
-  } else if (loggedOut && facts.secondsSinceInput !== undefined && !managerHintFailed) {
-    secondsSinceInput = 0;
-  } else if (facts.secondsSinceInput === undefined || (loggedOut && managerHintFailed)) {
+  } else if (facts.secondsSinceInput === undefined) {
     try {
       if (platformOrThrow() === "linux") {
         const secs = managerHintFailed ? Number.NaN : await linuxSecondsSinceInput();

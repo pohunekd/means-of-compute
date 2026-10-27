@@ -54,8 +54,10 @@ test("atomic write failure after the temp write removes the temp file", async ()
     rename: (from: string, to: string): Promise<void> => failingRename(from, to),
   }));
   try {
-    const specifier = "../../src/fs/write.js?rename-fail";
-    const mocked = (await import(specifier)) as { writeFileAtomic: typeof writeFileAtomic };
+    const mocked = (await import(
+      // @ts-expect-error: query suffix forces a fresh module registry entry
+      "../../src/fs/write.js?rename-fail"
+    )) as { writeFileAtomic: typeof writeFileAtomic };
     let message = "";
     try {
       await mocked.writeFileAtomic("Test state", failingPath, "new\n");

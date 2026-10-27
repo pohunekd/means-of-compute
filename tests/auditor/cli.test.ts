@@ -210,7 +210,7 @@ async function runCliWithGh(
   }
 }
 
-test("D1: clean branch gets a clean verdict bound to the head SHA", async () => {
+test("D1: clean branch gets a clean verdict bound to the head SHA (mutation: bind the marker to the ref name)", async () => {
   const repo = await makeTempRepo();
   const tree = await makeCliTree();
   try {

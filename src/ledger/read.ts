@@ -5,6 +5,7 @@
 import { contractErrors, isUsageRecord } from "../../contracts/v1/validate.js";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
+import { LedgerDataError } from "./errors.js";
 import { isPendingUsage, pendingErrors } from "./validate.js";
 import type { LedgerContents, PendingUsage, SpendEntry } from "./types.js";
 import { AUDITOR_USAGE_SOURCE } from "./types.js";
@@ -23,7 +24,7 @@ function parseRecord(
   text: string,
 ): UsageRecord {
   if (!isUsageRecord(raw)) {
-    throw new Error(
+    throw new LedgerDataError(
       `Budget ledger ${ledgerPath} line ${String(lineNumber)}: invalid UsageRecord ${JSON.stringify(contractErrors("usage-record", raw))} in ${text}`,
     );
   }
@@ -38,7 +39,7 @@ function parsePendingEntry(
 ): PendingUsage {
   const record = raw as Record<string, unknown>;
   if (!isPendingUsage(record.pending)) {
-    throw new Error(
+    throw new LedgerDataError(
       `Budget ledger ${ledgerPath} line ${String(lineNumber)}: invalid pending entry ${JSON.stringify(pendingErrors(record.pending))} in ${text}`,
     );
   }
@@ -50,7 +51,9 @@ function parseLine(ledgerPath: string, lineNumber: number, text: string): Parsed
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`Budget ledger ${ledgerPath} line ${String(lineNumber)}: not valid JSON`);
+    throw new LedgerDataError(
+      `Budget ledger ${ledgerPath} line ${String(lineNumber)}: not valid JSON`,
+    );
   }
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
     const keys = Object.keys(raw);
@@ -70,7 +73,7 @@ export async function readLedger(label: string, ledgerPath: string): Promise<Led
     return { records: [], pending: [] };
   }
   if (!text.endsWith("\n")) {
-    throw new Error(`Budget ledger ${ledgerPath}: last line is not terminated`);
+    throw new LedgerDataError(`Budget ledger ${ledgerPath}: last line is not terminated`);
   }
   const lines = text.split("\n");
   lines.pop();
@@ -82,13 +85,15 @@ export async function readLedger(label: string, ledgerPath: string): Promise<Led
     const line = lines[index] as string;
     const lineNumber = index + 1;
     if (line === "") {
-      throw new Error(`Budget ledger ${ledgerPath} line ${String(lineNumber)}: empty line`);
+      throw new LedgerDataError(
+        `Budget ledger ${ledgerPath} line ${String(lineNumber)}: empty line`,
+      );
     }
     const parsed = parseLine(ledgerPath, lineNumber, line);
     if (parsed.record !== null) {
       const first = recordLines.get(parsed.record.workItemId);
       if (first !== undefined) {
-        throw new Error(
+        throw new LedgerDataError(
           `Budget ledger ${ledgerPath}: duplicate record workItemId ${parsed.record.workItemId} on lines ${String(first)} and ${String(lineNumber)}`,
         );
       }
@@ -99,7 +104,7 @@ export async function readLedger(label: string, ledgerPath: string): Promise<Led
     const entry = parsed.pending as PendingUsage;
     const first = pendingLines.get(entry.entryId);
     if (first !== undefined) {
-      throw new Error(
+      throw new LedgerDataError(
         `Budget ledger ${ledgerPath}: duplicate pending entryId ${entry.entryId} on lines ${String(first)} and ${String(lineNumber)}`,
       );
     }

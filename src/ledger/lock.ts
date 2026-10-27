@@ -4,7 +4,7 @@
 // once and retried once; a live owner exits 2. There is no waiting loop:
 // the loop runner retries at its next tick.
 import { open, readFile, unlink } from "node:fs/promises";
-import { LedgerDataError } from "./store.js";
+import { LedgerDataError } from "./errors.js";
 
 const chains = new Map<string, Promise<unknown>>();
 

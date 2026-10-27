@@ -5,6 +5,7 @@ import type { UsageRecord } from "../../contracts/v1/types.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { withLedgerLock } from "./lock.js";
 import { readLedger } from "./read.js";
+import { LedgerDataError, LedgerRefusal } from "./errors.js";
 import { isPendingUsage, pendingErrors } from "./validate.js";
 import type {
   FinalizeInput,
@@ -13,21 +14,8 @@ import type {
   PendingUsage,
   WriteOutcome,
 } from "./types.js";
-export class LedgerRefusal extends Error {
-  readonly reason: string;
-  constructor(reason: string) {
-    super(reason);
-    this.name = "LedgerRefusal";
-    this.reason = reason;
-  }
-}
 
-export class LedgerDataError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "LedgerDataError";
-  }
-}
+export { LedgerDataError, LedgerRefusal } from "./errors.js";
 
 const WORK_ITEM_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 

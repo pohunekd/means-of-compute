@@ -2,7 +2,9 @@ export interface LoopbackResponse {
   status: number;
   body?: unknown;
   rawBody?: string;
+  delayMs?: number;
   sseChunks?: readonly string[];
+  chunkDelayMs?: number;
   holdBeforeHeaders?: boolean;
   holdAfterChunks?: number;
 }
@@ -87,6 +89,9 @@ export async function startLoopback(recordingsPath: string): Promise<LoopbackCon
       if (!resp) {
         return new Response(JSON.stringify({ error: "no response" }), { status: 500 });
       }
+      if (resp.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, resp.delayMs));
+      }
       if (resp.holdBeforeHeaders === true) {
         await reachHold(req.signal);
       }
@@ -103,6 +108,7 @@ export async function startLoopback(recordingsPath: string): Promise<LoopbackCon
         });
       }
       const chunks = resp.sseChunks;
+      const gap = resp.chunkDelayMs ?? 0;
       const holdAfter = resp.holdAfterChunks ?? chunks.length;
       const head = chunks.slice(0, holdAfter);
       const tail = chunks.slice(holdAfter);
@@ -115,6 +121,9 @@ export async function startLoopback(recordingsPath: string): Promise<LoopbackCon
       const stream = new ReadableStream({
         async start(controller) {
           for (const chunk of head) {
+            if (gap > 0) {
+              await new Promise((resolve) => setTimeout(resolve, gap));
+            }
             controller.enqueue(new TextEncoder().encode(chunk));
           }
           if (tail.length > 0) {
@@ -123,6 +132,9 @@ export async function startLoopback(recordingsPath: string): Promise<LoopbackCon
             }
             await reachHold(req.signal);
             for (const chunk of tail) {
+              if (gap > 0) {
+                await new Promise((resolve) => setTimeout(resolve, gap));
+              }
               controller.enqueue(new TextEncoder().encode(chunk));
             }
           }

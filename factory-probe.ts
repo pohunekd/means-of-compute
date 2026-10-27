@@ -691,6 +691,9 @@ async function main(): Promise<void> {
 
   let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
+  if (facts.noLocalUserSession === false) {
+    throw new Error("noLocalUserSession must be true or absent");
+  }
   let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
   if (loggedOut && facts.secondsSinceInput === undefined) {
@@ -704,7 +707,9 @@ async function main(): Promise<void> {
   // gpu and localModels objects. An explicitly set member (even false or an
   // empty list) always wins over the reader; that includes an explicit
   // secondsSinceInput fact next to the logged-out facts. A live value
-  // needed on an unsupported platform fails fast.
+  // needed on an unsupported platform fails fast. Two exceptions: an
+  // explicit noLocalUserSession may only be true (false exits 1), and an
+  // unreadable power supply clears acPower only when the fact is absent.
   function platformOrThrow(): "linux" | "darwin" {
     if (platform === "linux" || platform === "darwin") return platform;
     throw new Error("unsupported platform");
@@ -765,7 +770,7 @@ async function main(): Promise<void> {
     } catch (e) {
       powerUnknown = true;
       powerCause = e instanceof Error ? e.message : String(e);
-      acPower = false;
+      if (facts.acPower === undefined) acPower = false;
     }
   }
 

@@ -3,8 +3,9 @@
 // schema is also the only place the timeout cap is written.
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
+import { PROVIDER_SCHEMA_PATH } from "./paths.js";
 
-const SCHEMA_PATH = "config/providers/schema.json";
+const SCHEMA_PATH = PROVIDER_SCHEMA_PATH;
 const schema = (await Bun.file(SCHEMA_PATH).json()) as {
   properties?: { timeoutMs?: { maximum?: unknown } };
 };

@@ -61,15 +61,21 @@ describe("host-state package config", () => {
     const path = await mutatePackage((pkg) => {
       pkg["extra"] = true;
     });
-    expect(() => loadHostStateConfig(path)).toThrow(/^config host-state\.json: invalid package$/);
+    expect(() => loadHostStateConfig(path)).toThrow(
+      "config host-state.json: invalid package.extra",
+    );
   });
 
-  test("missing package id throws", async () => {
-    const path = await mutatePackage((pkg) => {
-      delete pkg["id"];
+  for (const key of ["id", "version", "sourceDigest", "targets"] as const) {
+    test(`missing package ${key} throws`, async () => {
+      const path = await mutatePackage((pkg) => {
+        delete pkg[key];
+      });
+      expect(() => loadHostStateConfig(path)).toThrow(
+        `config host-state.json: invalid package.${key}`,
+      );
     });
-    expect(() => loadHostStateConfig(path)).toThrow(/^config host-state\.json: invalid package$/);
-  });
+  }
 
   test("bad id throws", async () => {
     const path = await mutatePackage((pkg) => {

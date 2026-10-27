@@ -7,6 +7,7 @@
     "contracts:check": "bun run scripts/contracts-check.ts",
     "providers:check": "bun run scripts/providers-check.ts",
     "gates": "bun run scripts/gates.ts",
+    "audit": "bun run src/auditor/cli.ts",
     "budget:check": "bun run src/budget/check.ts",
     "place": "bun run src/placement/cli.ts",
     "fmt": "prettier --write .",

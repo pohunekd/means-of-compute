@@ -138,7 +138,9 @@ test("an idle host on AC at the battery floor is never chosen (mutation: drop ex
   expect(decision.chosenHostAlias).toBe("desktop");
   const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
   expect(candidate?.excluded).toBe(true);
-  expect(candidate?.reason).toBe("excluded: battery at 50 percent, at or below the 50 percent floor");
+  expect(candidate?.reason).toBe(
+    "excluded: battery at 50 percent, at or below the 50 percent floor",
+  );
 });
 
 test("an idle host above the battery floor is scored (mutation: use < instead of <=)", () => {

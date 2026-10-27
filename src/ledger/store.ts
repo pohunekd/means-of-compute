@@ -292,9 +292,7 @@ export function applyFinalize(
       return { next: contents, result: "unchanged" };
     }
     if (!isUsageRecord(next)) {
-      throw new LedgerDataError(
-        `ledger ${ledgerPath}: updated record is not a valid UsageRecord`,
-      );
+      throw new LedgerDataError(`ledger ${ledgerPath}: updated record is not a valid UsageRecord`);
     }
     return {
       next: {
@@ -325,7 +323,10 @@ export function applyFinalize(
     record === null
       ? [...contents.records, next]
       : contents.records.map((item) => (item.workItemId === input.workItemId ? next : item));
-  return { next: { records, pending: keptPending }, result: record === null ? "appended" : "updated" };
+  return {
+    next: { records, pending: keptPending },
+    result: record === null ? "appended" : "updated",
+  };
 }
 
 export interface RecordCompletionResult {
@@ -350,8 +351,7 @@ export async function recordCompletion(
     const finalized = applyFinalize(next, ledgerPath, input);
     next = finalized.next;
     const changed =
-      outcomes.some((outcome) => outcome !== "unchanged") ||
-      finalized.result !== "unchanged";
+      outcomes.some((outcome) => outcome !== "unchanged") || finalized.result !== "unchanged";
     if (changed) {
       await writeFileAtomic("Budget ledger", ledgerPath, serialize(next));
     }

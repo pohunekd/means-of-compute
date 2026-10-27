@@ -313,7 +313,10 @@ test("record with a valid then invalid pending entry exits 2 and writes nothing"
     await Bun.write(
       completion,
       JSON.stringify({
-        pending: [raw.pending[0], { ...(raw.pending[0] as Record<string, unknown>), session: null }],
+        pending: [
+          raw.pending[0],
+          { ...(raw.pending[0] as Record<string, unknown>), session: null },
+        ],
         finalize: raw.finalize,
       }),
     );

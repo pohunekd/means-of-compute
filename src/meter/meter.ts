@@ -65,6 +65,14 @@ export interface MeterLogEvent {
   readonly count?: number;
 }
 
+export interface LiveCall {
+  readonly callId: string;
+  readonly ended: Promise<void>;
+  requestAbort(reason: "closed-abort"): void;
+  attachAborter(abort: (reason: "closed-abort") => void): void;
+  finish(): void;
+}
+
 export interface MeterDeps {
   readonly config: MeterConfig;
   readonly env: MeterEnv;
@@ -82,6 +90,7 @@ export interface Meter {
   bindGrant(requestId: string, sessionId: string): Promise<void>;
   settle(sessionId: string, state: TerminalState): Promise<PortUsage | null>;
   close(): Promise<void>;
+  liveCount(requestId: string): number;
 }
 
 export type { SessionRef };
@@ -99,9 +108,50 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   const { config, env, providers, now, log, timers, logIo } = deps;
   const index = await replayUsageLog(config.usageLogPath, "repair", log);
   const appender = await openUsageAppender(config.usageLogPath, index, log, logIo);
-  const inFlight = new Map<string, number>();
-  const drainControllers = new Map<string, AbortController>();
+  // Live calls join inside their call-start chain step and leave when their
+  // call-end append settles; finish() is the only way out, idempotent.
+  const live = new Map<string, Map<string, LiveCall>>();
+  let closing = false;
   const settleMemos = new Map<string, Promise<PortUsage | null>>();
+
+  function reserveCall(requestId: string, callId: string): LiveCall {
+    let byCall = live.get(requestId);
+    if (byCall === undefined) {
+      byCall = new Map();
+      live.set(requestId, byCall);
+    }
+    let resolveEnded!: () => void;
+    const ended = new Promise<void>((resolve) => {
+      resolveEnded = resolve;
+    });
+    let finished = false;
+    let abortRequested = false;
+    let aborter: ((reason: "closed-abort") => void) | null = null;
+    const call: LiveCall = {
+      callId,
+      ended,
+      requestAbort(): void {
+        abortRequested = true;
+        aborter?.("closed-abort");
+      },
+      attachAborter(abort: (reason: "closed-abort") => void): void {
+        if (abortRequested) {
+          abort("closed-abort");
+        }
+        aborter = abort;
+      },
+      finish(): void {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        live.get(requestId)?.delete(callId);
+        resolveEnded();
+      },
+    };
+    byCall.set(callId, call);
+    return call;
+  }
 
   const buildState = (): ProxyState => ({
     config,
@@ -110,24 +160,11 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     providers,
     timers,
     appender: () => appender,
-    maxInFlight: (requestId: string) => inFlight.get(requestId) ?? 0,
+    liveCount: (requestId: string) => live.get(requestId)?.size ?? 0,
+    reserveCall: (requestId: string, callId: string) => reserveCall(requestId, callId),
+    closing: () => closing,
     now,
     log,
-    trackCall: (requestId: string) => {
-      inFlight.set(requestId, (inFlight.get(requestId) ?? 0) + 1);
-      if (!drainControllers.has(requestId)) {
-        drainControllers.set(requestId, new AbortController());
-      }
-      return () => {
-        const left = (inFlight.get(requestId) ?? 1) - 1;
-        if (left <= 0) {
-          inFlight.delete(requestId);
-        } else {
-          inFlight.set(requestId, left);
-        }
-      };
-    },
-    drainSignal: (requestId: string) => drainControllers.get(requestId)?.signal ?? null,
   });
 
   let server: MeterServer;
@@ -135,7 +172,8 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     server = serveMeter(config, env.listen, buildState, index, log);
   } catch (error: unknown) {
     await appender.close().catch(() => {});
-    const code = error instanceof Error ? error.message : String(error);
+    const raw = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    const code = typeof raw === "string" && /^E[A-Z]+$/.test(raw) ? raw : "bind-failed";
     throw new MeterConfigError(`meter listener ${config.listenAlias}: ${code}`);
   }
 
@@ -171,31 +209,49 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     if (!env.hostAddresses.has(spec.hostAlias)) {
       throw new MeterGrantError("unknown-host", `meter: unknown host "${spec.hostAlias}"`);
     }
-    const existing = index.grants.get(spec.requestId);
-    if (existing !== undefined) {
-      if (existing.closed) {
-        throw new MeterGrantError("grant-closed", "meter: grant is closed");
-      }
-      const first = existing.open;
-      if (
-        first.workItemId !== spec.workItemId ||
-        first.hostAlias !== spec.hostAlias ||
-        first.providerId !== spec.providerId ||
-        first.model !== spec.model
-      ) {
-        throw new MeterGrantError("request-conflict", "meter: grant conflicts with the open grant");
-      }
-    }
-    await appender.appendUnguarded({
-      kind: "grant-open",
-      at: now().toISOString(),
-      requestId: spec.requestId,
-      workItemId: spec.workItemId,
-      hostAlias: spec.hostAlias,
-      providerId: spec.providerId,
-      model: spec.model,
-    });
+    // F5: the open-vs-reopen decision happens inside the chain step, not
+    // here — a pre-check would race with a concurrent opener.
+    const openVerdict = await appender.appendGuarded(
+      {
+        kind: "grant-open",
+        at: now().toISOString(),
+        requestId: spec.requestId,
+        workItemId: spec.workItemId,
+        hostAlias: spec.hostAlias,
+        providerId: spec.providerId,
+        model: spec.model,
+      },
+      (guarded) => {
+        const live = guarded.grants.get(spec.requestId);
+        if (live !== undefined) {
+          if (live.closed) {
+            return "grant-closed";
+          }
+          const first = live.open;
+          if (
+            first.workItemId !== spec.workItemId ||
+            first.hostAlias !== spec.hostAlias ||
+            first.providerId !== spec.providerId ||
+            first.model !== spec.model
+          ) {
+            return "request-conflict";
+          }
+        }
+        return null;
+      },
+    );
+    // F5: a byte-identical reopen settles nothing and logs grant-opened
+    // again; a conflicting reopen throws request-conflict.
     checkFailed(appender);
+    if (openVerdict === "request-conflict") {
+      throw new MeterGrantError(
+        "request-conflict",
+        `meter: request conflict for "${spec.workItemId}"`,
+      );
+    }
+    if (openVerdict === "grant-closed") {
+      throw new MeterGrantError("grant-closed", "meter: grant is closed");
+    }
     log({
       level: "info",
       event: "grant-opened",
@@ -208,27 +264,43 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
 
   async function bindGrant(requestId: string, sessionId: string): Promise<void> {
     checkFailed(appender);
-    const grant = index.grants.get(requestId);
-    if (grant === undefined) {
-      throw new MeterGrantError("unknown-request", "meter: unknown grant");
-    }
-    if (grant.sessionId === sessionId) {
+    // F3: the bind decision happens inside the chain step, not here — a
+    // pre-check would race with a concurrent binder.
+    const bindVerdict = await appender.appendGuarded(
+      {
+        kind: "grant-bind",
+        at: now().toISOString(),
+        requestId,
+        sessionId,
+      },
+      (guarded) => {
+        const live = guarded.grants.get(requestId);
+        if (live === undefined) {
+          return "unknown-request";
+        }
+        if (live.sessionId === sessionId) {
+          return "already-bound";
+        }
+        if (live.sessionId !== null) {
+          return "session-conflict";
+        }
+        const other = guarded.requestBySession.get(sessionId);
+        if (other !== undefined && other !== requestId) {
+          return "session-conflict";
+        }
+        return null;
+      },
+    );
+    checkFailed(appender);
+    if (bindVerdict === "already-bound") {
       return;
     }
-    if (grant.sessionId !== null) {
+    if (bindVerdict === "unknown-request") {
+      throw new MeterGrantError("unknown-request", "meter: unknown grant");
+    }
+    if (bindVerdict === "session-conflict") {
       throw new MeterGrantError("session-conflict", "meter: grant already bound");
     }
-    const other = index.requestBySession.get(sessionId);
-    if (other !== undefined && other !== requestId) {
-      throw new MeterGrantError("session-conflict", "meter: session already bound");
-    }
-    await appender.appendUnguarded({
-      kind: "grant-bind",
-      at: now().toISOString(),
-      requestId,
-      sessionId,
-    });
-    checkFailed(appender);
     log({ level: "info", event: "grant-bound", requestId });
   }
 
@@ -253,42 +325,40 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     if (grant === undefined) {
       return null;
     }
-    if (!grant.closed) {
-      await appender.appendUnguarded({
+    const closeVerdict = await appender.appendGuarded(
+      {
         kind: "grant-close",
         at: now().toISOString(),
         requestId,
         state,
+      },
+      (guarded) => (guarded.grants.get(requestId)?.closed === true ? "already-closed" : null),
+    );
+    if (closeVerdict === "meter-unavailable") {
+      throw new MeterUnavailableError("meter: usage log failed");
+    }
+    // already-closed continues with no record.
+    // F6: after the grant-close is queued, settle waits up to
+    // drainTimeoutMs (manual timers) for the racing live calls, aborts
+    // every call that is still live, and only then joins usage.
+    const racing = [...(live.get(requestId)?.values() ?? [])];
+    if (racing.length > 0) {
+      let cancelDrain!: () => void;
+      const drainTimer = new Promise<void>((resolve) => {
+        cancelDrain = timers.after(config.drainTimeoutMs, resolve);
       });
-      checkFailed(appender);
+      await Promise.race([Promise.all(racing.map((c) => c.ended)), drainTimer]);
+      cancelDrain();
     }
-    const deadline = now().getTime() + config.drainTimeoutMs;
-    for (;;) {
-      if ((inFlight.get(requestId) ?? 0) === 0) {
-        break;
-      }
-      if (now().getTime() >= deadline) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    const remaining = [...(live.get(requestId)?.values() ?? [])];
+    for (const call of remaining) {
+      call.requestAbort("closed-abort");
     }
-    const remaining = inFlight.get(requestId) ?? 0;
-    if (remaining > 0) {
-      const controller = drainControllers.get(requestId);
-      controller?.abort();
-      log({ level: "info", event: "drain-abort", requestId, count: remaining });
-      const abortDeadline = now().getTime() + config.drainTimeoutMs;
-      for (;;) {
-        if ((inFlight.get(requestId) ?? 0) === 0) {
-          break;
-        }
-        if (now().getTime() >= abortDeadline) {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+    if (remaining.length > 0) {
+      log({ level: "info", event: "drain-abort", requestId, count: remaining.length });
     }
-    drainControllers.delete(requestId);
+    await Promise.all(racing.map((c) => c.ended));
+    checkFailed(appender);
     let billed = 0;
     for (const callId of index.startOrder) {
       const start = index.starts.get(callId);
@@ -305,25 +375,26 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   }
 
   async function close(): Promise<void> {
-    // Design 2.7: stop the server, abort every in-flight upstream call,
-    // await each call-end append, then close the append handle.
+    // Design 5.7: flag the close, stop the server, drain the append chain,
+    // abort every live call, await every end, then close the handle.
+    closing = true;
     server.stop(true);
-    for (const controller of drainControllers.values()) {
-      controller.abort();
-    }
-    for (;;) {
-      let busy = false;
-      for (const count of inFlight.values()) {
-        if (count > 0) {
-          busy = true;
-        }
+    await appender.idle();
+    const calls: LiveCall[] = [];
+    for (const byCall of live.values()) {
+      for (const call of byCall.values()) {
+        calls.push(call);
       }
-      if (!busy) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
     }
+    for (const call of calls) {
+      call.requestAbort("closed-abort");
+    }
+    await Promise.all(calls.map((c) => c.ended));
     await appender.close();
+  }
+
+  function readLiveCount(requestId: string): number {
+    return live.get(requestId)?.size ?? 0;
   }
 
   return {
@@ -335,6 +406,7 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     bindGrant,
     settle,
     close,
+    liveCount: readLiveCount,
   };
 }
 

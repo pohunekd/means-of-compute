@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openUsageAppender, replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
+import { createFaultyIo } from "./faulty-io.js";
 import type { MeterLogEvent } from "../../src/meter/meter.js";
 import type { UsageLogRecord } from "../../src/meter/usage-log.js";
 
@@ -191,34 +192,42 @@ test(
     await writeLog(path, [openGrant()]);
     const events: MeterLogEvent[] = [];
     const index = await replayUsageLog(path, "repair", () => {});
-    const appender = await openUsageAppender(path, index, (e) => events.push(e), systemUsageLogIo);
-    // Force the append to fail by closing the handle first; the write then
-    // rejects and the failure latch must engage. The in-memory index must
-    // not contain the failed record: applyRecord runs only after the fsync.
-    await appender.close();
+    const io = createFaultyIo(systemUsageLogIo, { failDatasync: true });
+    const appender = await openUsageAppender(path, index, (e) => events.push(e), io);
+    // The write lands but the datasync fails: the latch engages, verdict is
+    // meter-unavailable, and the in-memory index never applies the record —
+    // commitRecord runs only after the datasync.
     const verdict = await appender.appendGuarded(start(), () => null);
     expect(verdict).toBe("meter-unavailable");
     expect(appender.failed).toBe(true);
     expect(index.starts.has("call-1")).toBe(false);
+    const torn = await Bun.file(path).text();
+    expect(torn.endsWith("\n")).toBe(true);
+    // The bytes did reach the file (only the sync failed), so a later
+    // replay recovers the record even though this process never applied it.
     const replayed = await replayUsageLog(path, "read-only", () => {});
-    expect(replayed.starts.has("call-1")).toBe(false);
+    expect(replayed.starts.has("call-1")).toBe(true);
     expect(events.some((e) => e.event === "usage-log-failed")).toBe(true);
+    await appender.close();
   }),
 );
 
 test("write-ahead: the fsync precedes the in-memory apply in source order", async () => {
   // A failing fsync must not leave an applied-but-undurable record behind.
-  // The order is structural, so assert it structurally: the single appender
-  // write path runs the write, then a datasync, before the in-memory apply.
+  // The order is structural, so assert it structurally: the S6 split runs
+  // checkRecord (validate) before the write, then write, then datasync,
+  // then commitRecord (apply) — all inside the append step.
   const source = await Bun.file("src/meter/usage-log.ts").text();
-  const marker = "async function runAppend(record: UsageLogRecord)";
+  const marker = "async function runAppend<F extends string>(";
   const at = source.indexOf(marker);
   expect(at).toBeGreaterThanOrEqual(0);
   const body = source.slice(at);
+  const checkAt = body.indexOf("checkRecord(record, indexView(mutable), path, 0);");
   const writeAt = body.indexOf("await handle.write(");
   const syncAt = body.indexOf("await handle.datasync();");
-  const applyAt = body.indexOf("applyRecord(mutable, record, path, 0);");
-  expect(writeAt).toBeGreaterThanOrEqual(0);
+  const commitAt = body.indexOf("commitRecord(mutable, record);");
+  expect(checkAt).toBeGreaterThanOrEqual(0);
+  expect(writeAt).toBeGreaterThan(checkAt);
   expect(syncAt).toBeGreaterThan(writeAt);
-  expect(applyAt).toBeGreaterThan(syncAt);
+  expect(commitAt).toBeGreaterThan(syncAt);
 });

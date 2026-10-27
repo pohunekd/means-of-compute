@@ -99,12 +99,12 @@ export class MeterLogError extends Error {
 export type GuardFailure = "grant-closed" | "session-concurrency" | "meter-unavailable";
 
 export interface UsageAppender {
-  appendGuarded(
+  appendGuarded<F extends string>(
     record: UsageLogRecord,
-    guard: (index: UsageIndex) => GuardFailure | null,
-  ): Promise<GuardFailure | null>;
-  appendUnguarded(record: UsageLogRecord): Promise<void>;
+    guard: (index: UsageIndex) => F | null,
+  ): Promise<F | "meter-unavailable" | null>;
   readonly failed: boolean;
+  idle(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -157,13 +157,100 @@ function checkAt(path: string, line: number, at: string): void {
   }
 }
 
-function applyRecord(
-  mutable: MutableIndex,
+// checkRecord runs every 4.3 predicate and mutates nothing; commitRecord
+// applies the record to the index. Replay calls both; the append chain
+// calls checkRecord before the write and commitRecord after the datasync,
+// so a record can never become durable that replay would reject.
+function checkRecord(
   record: UsageLogRecord,
+  seen: {
+    readonly grantOf: (requestId: string) => GrantState | undefined;
+    readonly startOf: (callId: string) => CallStartRecord | undefined;
+    readonly endOf: (callId: string) => CallEndRecord | undefined;
+    readonly sessionGrantOf: (sessionId: string) => string | undefined;
+    readonly hasStart: (callId: string) => boolean;
+    readonly hasEnd: (callId: string) => boolean;
+  },
   path: string,
   line: number,
 ): void {
   checkAt(path, line, record.at);
+  switch (record.kind) {
+    case "grant-open": {
+      const existing = seen.grantOf(record.requestId);
+      if (existing !== undefined) {
+        const first = existing.open;
+        if (
+          first.workItemId !== record.workItemId ||
+          first.hostAlias !== record.hostAlias ||
+          first.providerId !== record.providerId ||
+          first.model !== record.model
+        ) {
+          fail(path, line, "grant-open conflicts with an earlier grant-open");
+        }
+      }
+      break;
+    }
+    case "grant-bind": {
+      const grant = seen.grantOf(record.requestId);
+      if (grant === undefined) {
+        fail(path, line, "grant-bind without an earlier grant-open");
+      }
+      if (grant.sessionId === record.sessionId) {
+        fail(path, line, "duplicate grant-bind");
+      }
+      if (grant.sessionId !== null) {
+        fail(path, line, "grant already bound to another session");
+      }
+      const other = seen.sessionGrantOf(record.sessionId);
+      if (other !== undefined && other !== record.requestId) {
+        fail(path, line, "session already bound to another grant");
+      }
+      break;
+    }
+    case "grant-close": {
+      const grant = seen.grantOf(record.requestId);
+      if (grant === undefined) {
+        fail(path, line, "grant-close without an earlier grant-open");
+      }
+      if (grant.closed) {
+        fail(path, line, "duplicate grant-close");
+      }
+      break;
+    }
+    case "call-start": {
+      const grant = seen.grantOf(record.requestId);
+      if (grant === undefined) {
+        fail(path, line, "call-start without an earlier grant-open");
+      }
+      if (grant.closed) {
+        fail(path, line, "call-start after grant-close");
+      }
+      if (seen.hasStart(record.callId)) {
+        fail(path, line, "duplicate callId");
+      }
+      if (record.providerId !== grant.open.providerId || record.model !== grant.open.model) {
+        fail(path, line, "call-start provider or model differs from the grant");
+      }
+      break;
+    }
+    case "call-end": {
+      const start = seen.startOf(record.callId);
+      if (start === undefined || start.requestId !== record.requestId) {
+        fail(path, line, "call-end without a matching call-start");
+      }
+      if (seen.hasEnd(record.callId)) {
+        fail(path, line, "duplicate call-end");
+      }
+      if (billedForOutcome(record.outcome) !== record.billed) {
+        fail(path, line, "call-end billed flag does not match its outcome");
+      }
+      break;
+    }
+  }
+}
+
+function commitRecord(mutable: MutableIndex, record: UsageLogRecord): void {
   switch (record.kind) {
     case "grant-open": {
       const existing = mutable.grants.get(record.requestId);
@@ -175,84 +262,50 @@ function applyRecord(
           closed: false,
         });
       } else {
-        const first = existing.open;
-        if (
-          first.workItemId !== record.workItemId ||
-          first.hostAlias !== record.hostAlias ||
-          first.providerId !== record.providerId ||
-          first.model !== record.model
-        ) {
-          fail(path, line, "grant-open conflicts with an earlier grant-open");
-        }
         existing.lastOpenAt = record.at;
       }
       break;
     }
     case "grant-bind": {
-      const grant = mutable.grants.get(record.requestId);
-      if (grant === undefined) {
-        fail(path, line, "grant-bind without an earlier grant-open");
-      }
-      if (grant.sessionId === record.sessionId) {
-        fail(path, line, "duplicate grant-bind");
-      }
-      if (grant.sessionId !== null) {
-        fail(path, line, "grant already bound to another session");
-      }
-      const other = mutable.requestBySession.get(record.sessionId);
-      if (other !== undefined && other !== record.requestId) {
-        fail(path, line, "session already bound to another grant");
-      }
+      const grant = mutable.grants.get(record.requestId) as GrantState;
       grant.sessionId = record.sessionId;
       mutable.requestBySession.set(record.sessionId, record.requestId);
       break;
     }
     case "grant-close": {
-      const grant = mutable.grants.get(record.requestId);
-      if (grant === undefined) {
-        fail(path, line, "grant-close without an earlier grant-open");
-      }
-      if (grant.closed) {
-        fail(path, line, "duplicate grant-close");
-      }
+      const grant = mutable.grants.get(record.requestId) as GrantState;
       grant.closed = true;
       break;
     }
     case "call-start": {
-      const grant = mutable.grants.get(record.requestId);
-      if (grant === undefined) {
-        fail(path, line, "call-start without an earlier grant-open");
-      }
-      if (grant.closed) {
-        fail(path, line, "call-start after grant-close");
-      }
-      if (mutable.starts.has(record.callId)) {
-        fail(path, line, "duplicate callId");
-      }
-      if (record.providerId !== grant.open.providerId || record.model !== grant.open.model) {
-        fail(path, line, "call-start provider or model differs from the grant");
-      }
       mutable.starts.set(record.callId, record);
       mutable.startOrder.push(record.callId);
       break;
     }
     case "call-end": {
-      const start = mutable.starts.get(record.callId);
-      if (start === undefined || start.requestId !== record.requestId) {
-        fail(path, line, "call-end without a matching call-start");
-      }
-      if (mutable.ends.has(record.callId)) {
-        fail(path, line, "duplicate call-end");
-      }
-      if (billedForOutcome(record.outcome) !== record.billed) {
-        fail(path, line, "call-end billed flag does not match its outcome");
-      }
       mutable.ends.set(record.callId, record);
       break;
     }
   }
 }
 
+function indexView(mutable: MutableIndex): {
+  readonly grantOf: (requestId: string) => GrantState | undefined;
+  readonly startOf: (callId: string) => CallStartRecord | undefined;
+  readonly endOf: (callId: string) => CallEndRecord | undefined;
+  readonly sessionGrantOf: (sessionId: string) => string | undefined;
+  readonly hasStart: (callId: string) => boolean;
+  readonly hasEnd: (callId: string) => boolean;
+} {
+  return {
+    grantOf: (requestId) => mutable.grants.get(requestId),
+    startOf: (callId) => mutable.starts.get(callId),
+    endOf: (callId) => mutable.ends.get(callId),
+    sessionGrantOf: (sessionId) => mutable.requestBySession.get(sessionId),
+    hasStart: (callId) => mutable.starts.has(callId),
+    hasEnd: (callId) => mutable.ends.has(callId),
+  };
+}
 function readTornTail(text: string): { readonly body: string; readonly dropped: number } {
   if (text === "" || text.endsWith("\n")) {
     return { body: text, dropped: 0 };
@@ -340,7 +393,9 @@ export async function replayUsageLog(
     if (!validateRecord(parsed)) {
       fail(path, lineNo, "line does not match the usage-log schema");
     }
-    applyRecord(mutable, parsed as UsageLogRecord, path, lineNo);
+    const record = parsed as UsageLogRecord;
+    checkRecord(record, indexView(mutable), path, lineNo);
+    commitRecord(mutable, record);
   }
   return toUsageIndex(mutable);
 }
@@ -370,61 +425,74 @@ export async function openUsageAppender(
     log({ level: "error", event: "usage-log-failed", outcome: detail });
   }
 
-  async function runAppend(record: UsageLogRecord): Promise<void> {
-    await handle.write(`${JSON.stringify(record)}\n`);
-    await handle.datasync();
-    applyRecord(mutable, record, path, 0);
-  }
-
-  function writeLine(record: UsageLogRecord): Promise<void> {
-    const step = chain.then(async () => {
-      if (failed) {
-        throw new MeterLogError(`Meter usage log ${path}: writer failed`);
+  // Step order of section 5.1: the latch check, then the guard, then
+  // checkRecord (no write, no latch on failure), then write, datasync
+  // and commitRecord. A rejection means the record failed validation and
+  // is logged as usage-log-rejected; only write/datasync failures latch
+  // and report meter-unavailable without throwing.
+  async function runAppend<F extends string>(
+    record: UsageLogRecord,
+    guard: (index: UsageIndex) => F | null,
+    requestId: string | undefined,
+  ): Promise<F | "meter-unavailable" | null> {
+    if (failed) {
+      return "meter-unavailable";
+    }
+    const verdict = guard(index);
+    if (verdict !== null) {
+      return verdict;
+    }
+    try {
+      checkRecord(record, indexView(mutable), path, 0);
+    } catch (error: unknown) {
+      if (error instanceof MeterLogError) {
+        log({ level: "error", event: "usage-log-rejected", requestId });
       }
-      try {
-        await runAppend(record);
-      } catch (error: unknown) {
-        failLatch(error);
-        throw new MeterLogError(`Meter usage log ${path}: append failed`);
-      }
-    });
-    // A caller awaiting one step must not observe another step's rejection.
-    chain = step.catch(() => {});
-    return step;
+      throw error;
+    }
+    try {
+      await handle.write(`${JSON.stringify(record)}\n`);
+      await handle.datasync();
+    } catch (error: unknown) {
+      failLatch(error);
+      return "meter-unavailable";
+    }
+    commitRecord(mutable, record);
+    return null;
   }
 
   return {
-    async appendGuarded(
+    async appendGuarded<F extends string>(
       record: UsageLogRecord,
-      guard: (index: UsageIndex) => GuardFailure | null,
-    ): Promise<GuardFailure | null> {
-      let verdict: GuardFailure | null = null;
+      guard: (index: UsageIndex) => F | null,
+    ): Promise<F | "meter-unavailable" | null> {
+      const requestId = "requestId" in record ? record.requestId : undefined;
+      let outcome: F | "meter-unavailable" | null = null;
+      let rejected: unknown = null;
       const step = chain.then(async () => {
-        if (failed) {
-          verdict = "meter-unavailable";
-          return;
-        }
-        verdict = guard(index);
-        if (verdict !== null) {
-          return;
-        }
         try {
-          await runAppend(record);
+          outcome = await runAppend(record, guard, requestId);
         } catch (error: unknown) {
-          failLatch(error);
-          verdict = "meter-unavailable";
-          throw new MeterLogError(`Meter usage log ${path}: append failed`);
+          // Validation rejections reject the step; the chain stays alive.
+          rejected = error;
         }
       });
+      // A caller awaiting one step must not observe another step's rejection.
       chain = step.catch(() => {});
-      await step.catch(() => {});
-      return verdict;
-    },
-    async appendUnguarded(record: UsageLogRecord): Promise<void> {
-      await writeLine(record);
+      await step;
+      if (rejected instanceof Error) {
+        throw rejected;
+      }
+      if (rejected !== null) {
+        throw new MeterLogError(`Meter usage log ${path}: append failed`);
+      }
+      return outcome;
     },
     get failed(): boolean {
       return failed;
+    },
+    async idle(): Promise<void> {
+      await chain;
     },
     async close(): Promise<void> {
       await chain;

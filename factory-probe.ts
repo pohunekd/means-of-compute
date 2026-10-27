@@ -24,6 +24,10 @@ type Facts = Partial<{
   // Simulates a failed user-activity reader: the probe reports activity as
   // unknown (never idle) with this cause instead of reading live input state.
   userActivityError: string;
+  // Simulates a host where the login query ran and found no graphical
+  // session of any user: idle when on AC, battery above threshold, inside
+  // the window. A failed query is userActivityError instead (never idle).
+  noGraphicalSession: boolean;
   acPower: boolean;
   batteryPercent: number | null;
   cpuCores: number;
@@ -254,6 +258,8 @@ async function showSessionProps(
   for (const name of names) args.push("-p", name);
   const showProc = Bun.spawn(["loginctl", ...args], { stdout: "pipe" });
   const out = await new Response(showProc.stdout).text();
+  await showProc.exited;
+  if (showProc.exitCode !== 0) throw new Error(`loginctl show-session ${id} failed`);
   const props = new Map<string, string>();
   for (const line of out.split("\n")) {
     const eq = line.indexOf("=");
@@ -263,24 +269,25 @@ async function showSessionProps(
 }
 
 async function linuxSecondsSinceInput(): Promise<number> {
-  const whoamiProc = Bun.spawn(["whoami"], { stdout: "pipe" });
-  const user = (await new Response(whoamiProc.stdout).text()).trim();
   const listProc = Bun.spawn(["loginctl", "list-sessions", "--no-legend"], { stdout: "pipe" });
   const listOut = await new Response(listProc.stdout).text();
-  const ownSessionIds: string[] = [];
+  await listProc.exited;
+  if (listProc.exitCode !== 0) throw new Error("loginctl list-sessions failed");
+  const sessionIds: string[] = [];
   for (const line of listOut.split("\n")) {
     const parts = line.trim().split(/\s+/);
     const id = parts[0];
-    if (parts.length >= 3 && parts[2] === user && id) {
-      ownSessionIds.push(id);
+    if (parts.length >= 2 && id) {
+      sessionIds.push(id);
     }
   }
-  if (ownSessionIds.length === 0) throw new Error("no session for user");
-  // Prefer the active graphical session: Active=yes on a seat with an X11 or
-  // Wayland type. A session without a seat (manager, ssh) must never decide
-  // idleness for a user who is active on the graphical session.
+  if (sessionIds.length === 0) return Number.NaN;
+  // Prefer the active graphical session of any user: Active=yes on a seat
+  // with an X11 or Wayland type. A session without a seat (manager, ssh)
+  // must never decide idleness for a user who is active on the graphical
+  // session. NaN means the query ran and found no graphical session.
   const graphicalSessionIds: string[] = [];
-  for (const id of ownSessionIds) {
+  for (const id of sessionIds) {
     const props = await showSessionProps(id, ["Active", "Type", "Seat", "Remote"]);
     const seat = props.get("Seat") ?? "";
     const sessionType = props.get("Type") ?? "";
@@ -293,7 +300,7 @@ async function linuxSecondsSinceInput(): Promise<number> {
       graphicalSessionIds.push(id);
     }
   }
-  if (graphicalSessionIds.length === 0) throw new Error("no active graphical session for user");
+  if (graphicalSessionIds.length === 0) return Number.NaN;
   // Any graphical session with recent input means the user is active; only
   // when all of them are idle does the most recent idle timestamp decide.
   let minSecs: number | null = null;
@@ -320,14 +327,35 @@ async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number 
   return { acPower: ac, batteryPercent };
 }
 
+async function macosConsoleOwner(): Promise<string> {
+  const proc = Bun.spawn(["stat", "-f", "%Su", "/dev/console"], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const out = (await new Response(proc.stdout).text()).trim();
+  await proc.exited;
+  if (proc.exitCode !== 0 || !out) throw new Error("console owner query failed");
+  return out;
+}
+
 async function macosSecondsSinceInput(): Promise<number> {
   const proc = Bun.spawn(["ioreg", "-c", "IOHIDSystem"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) throw new Error("ioreg HIDIdleTime failed");
   const m = /"HIDIdleTime"\s+=\s+(\d+)/.exec(out);
   if (!m || !m[1]) throw new Error("HIDIdleTime missing");
   const ns = BigInt(m[1]);
   const secs = Number(ns / 1000000000n);
   return secs;
+}
+
+async function macosHidIdle(): Promise<number> {
+  try {
+    return await macosSecondsSinceInput();
+  } catch (e) {
+    throw new Error(`activity unknown after logout: ${String(e)}`, { cause: e });
+  }
 }
 
 async function macosCpu(): Promise<{ cores: number; load1m: number }> {
@@ -403,6 +431,7 @@ function deriveIdle(
   userActivityCause = "",
   powerUnknown = false,
   powerCause = "",
+  loggedOut = false,
 ): { idle: boolean; reason: string } {
   if (userActivityUnknown) {
     return { idle: false, reason: `user activity unknown: ${userActivityCause || "unavailable"}` };
@@ -411,8 +440,6 @@ function deriveIdle(
     return { idle: false, reason: `power unknown: ${powerCause || "unavailable"}` };
   }
   const idleMinutesSec = idleMinutes * 60;
-  const inputOk = secondsSinceInput >= idleMinutesSec || !insideWindow;
-  const powerOk = acPower;
   const batteryOk = batteryPercent === null || batteryPercent >= batteryThreshold;
 
   if (!batteryOk) {
@@ -421,9 +448,17 @@ function deriveIdle(
       reason: `battery at ${String(batteryPercent)} percent, below the ${String(batteryThreshold)} percent floor`,
     };
   }
-  if (!powerOk) {
+  if (!acPower) {
     return { idle: false, reason: "not on AC power" };
   }
+  if (loggedOut) {
+    if (!insideWindow) {
+      return { idle: false, reason: "no user logged in, outside working hours" };
+    }
+    return { idle: true, reason: "no user logged in, on AC power" };
+  }
+  const inputOk = secondsSinceInput >= idleMinutesSec || !insideWindow;
+
   if (!inputOk) {
     return { idle: false, reason: `user input ${String(secondsSinceInput)} seconds ago` };
   }
@@ -485,6 +520,8 @@ async function main(): Promise<void> {
 
   let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
+  let loggedOut = facts.noGraphicalSession === true;
+  let loggedOutSecs: number | null = null;
   let powerUnknown = false;
   let powerCause = "";
 
@@ -499,12 +536,29 @@ async function main(): Promise<void> {
 
   if (userActivityUnknown) {
     secondsSinceInput = 0;
+  } else if (loggedOut) {
+    secondsSinceInput = 0;
   } else if (facts.secondsSinceInput === undefined) {
     try {
-      secondsSinceInput =
-        platformOrThrow() === "linux"
-          ? await linuxSecondsSinceInput()
-          : await macosSecondsSinceInput();
+      if (platformOrThrow() === "linux") {
+        const secs = await linuxSecondsSinceInput();
+        if (Number.isNaN(secs)) {
+          loggedOut = true;
+          const uptime = readFileIfExists("/proc/uptime")?.split(/\s+/)[0];
+          const upSecs = uptime ? Math.floor(Number(uptime)) : NaN;
+          loggedOutSecs = Number.isFinite(upSecs) ? upSecs : null;
+        } else {
+          secondsSinceInput = secs;
+        }
+      } else {
+        const owner = await macosConsoleOwner();
+        if (owner === "root") {
+          loggedOut = true;
+        } else {
+          secondsSinceInput = await macosSecondsSinceInput();
+        }
+      }
+      if (loggedOut) secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
     } catch (e) {
       userActivityUnknown = true;
       userActivityCause = String(e);
@@ -564,6 +618,7 @@ async function main(): Promise<void> {
     userActivityCause,
     powerUnknown,
     powerCause,
+    loggedOut,
   );
 
   const output = {

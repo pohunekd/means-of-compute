@@ -1,5 +1,6 @@
-import { getProviders, providerDescriptorExists, ROUTE_PATH } from "./config.js";
+import { getProviders, providerDescriptorExists } from "./config.js";
 import { loadProviderRoute } from "./route.js";
+import { PROVIDER_ROUTE_PATH } from "./paths.js";
 import type { ProviderDescriptor } from "./types.js";
 
 export interface ModelCallResult {
@@ -241,7 +242,7 @@ export async function callProviderOnce(
 
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
   const providers = await getProviders();
-  const route = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
+  const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
   let lastReason: string | undefined;
   let lastError: unknown;
   for (const id of route) {

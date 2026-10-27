@@ -19,6 +19,15 @@ import { readVerdicts, VerdictConflictError, writeVerdict } from "./store.js";
 import { ProviderCallError, ProviderError } from "../providers/router.js";
 import { BudgetGateError } from "../budget/gate.js";
 
+export class AuditPostError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    // No "audit:" prefix here: the CLI catch adds it once, so a post
+    // failure reads as one prefix, not two.
+    super(message, options);
+    this.name = "AuditPostError";
+  }
+}
+
 export type AuditOutcome =
   | {
       readonly kind: "verdict";
@@ -40,6 +49,9 @@ function toExitCode(error: unknown): 2 | 3 | 4 {
     return 3;
   }
   if (error instanceof AuditModelError) {
+    return 4;
+  }
+  if (error instanceof AuditPostError) {
     return 4;
   }
   if (error instanceof ProviderError) {

@@ -17,10 +17,12 @@ import { createCliBudgetGate, loadBudgetGateConfig } from "../budget/gate.js";
 import { callProviderOnce } from "../providers/router.js";
 import { InputPathError, readInputText, requireInputDir, statInputPath } from "../fs/input.js";
 import { requireWritableTarget, writeFileAtomic } from "../fs/write.js";
-import { auditExitCode, runAudit } from "./audit.js";
+import { AuditPostError, auditExitCode, runAudit } from "./audit.js";
 import type { AuditInput } from "./audit-types.js";
 import { loadAuditorConfig } from "./config.js";
 import { createReadOnlyGit, GitReadError } from "./git.js";
+import { readVerdicts } from "./store.js";
+import { renderComment } from "./verdict.js";
 
 const AUDITOR_CONFIG_PATH = "config/auditor.json";
 const BUDGET_CONFIG_PATH = "config/budget-gate.json";
@@ -230,7 +232,9 @@ async function postComment(repo: string, pull: number, comment: string): Promise
       proc.exited,
     ]);
     if (rc !== 0) {
-      throw new Error(`audit: gh pr comment failed (rc ${String(rc)}): ${stderr.slice(0, 500)}`);
+      throw new AuditPostError(
+        `gh pr comment failed (rc ${String(rc)}): ${stderr.slice(0, 500)}`,
+      );
     }
     const verify = Bun.spawn(
       ["gh", "api", `repos/${repo}/issues/${String(pull)}/comments`, "--paginate"],
@@ -241,13 +245,13 @@ async function postComment(repo: string, pull: number, comment: string): Promise
       verify.exited,
     ]);
     if (verifyRc !== 0) {
-      throw new Error(`audit: gh api comments failed (rc ${String(verifyRc)})`);
+      throw new AuditPostError(`gh api comments failed (rc ${String(verifyRc)})`);
     }
     let comments: unknown;
     try {
       comments = JSON.parse(body) as unknown;
     } catch {
-      throw new Error("audit: posted comment not found");
+      throw new AuditPostError("posted comment not found");
     }
     const bodies = Array.isArray(comments) ? comments : [];
     const found = bodies.some(
@@ -258,7 +262,7 @@ async function postComment(repo: string, pull: number, comment: string): Promise
         ((entry as { body: string }).body.split("\n")[0] as string) === markerLine,
     );
     if (!found) {
-      throw new Error("audit: posted comment not found");
+      throw new AuditPostError("posted comment not found");
     }
   } finally {
     try {
@@ -295,6 +299,25 @@ async function run(): Promise<number> {
     const { ledgerPath } = await loadLedgerConfig();
     await requireWritableTarget("Audit ledger", ledgerPath);
     const config = await loadAuditorConfig(AUDITOR_CONFIG_PATH);
+    const git = createReadOnlyGit(options.repoDir);
+    // A retry after a failed post must not refuse: when --post is given
+    // and a verdict for the head already exists, post the stored verdict
+    // with no budget gate, no model call and no ledger write.
+    if (options.post) {
+      const headSha = await git.resolveCommit(options.ref);
+      const stored = await readVerdicts(config.verdictDir, item.id);
+      const match = stored.find((verdict) => verdict.headSha === headSha) ?? null;
+      if (match !== null) {
+        const comment = renderComment(match);
+        if (comment === null || options.pull === null) {
+          console.error("audit: --post requires a pull request");
+          return 2;
+        }
+        await postComment(item.repo, options.pull, comment);
+        console.log(`posted stored verdict ${headSha}`);
+        return 0;
+      }
+    }
     const budgetConfig = await loadBudgetGateConfig(BUDGET_CONFIG_PATH);
     const authors = await resolveAuthors(ledgerPath, options, item);
     const input: AuditInput = {

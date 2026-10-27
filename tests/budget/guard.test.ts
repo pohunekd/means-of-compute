@@ -175,16 +175,16 @@ test("day is the UTC calendar day of finishedAt", () => {
   expect(summary.nvidiaRequestsToday).toBe(28);
 });
 
-test("sub-cent entries accumulate: two 0.0375 records reach a 0.075 cap", () => {
-  const pricing = new Map([["tiny-api", { inputNanoPer1M: 1_500_000_000n, outputNanoPer1M: 0n }]]);
-  const one = (id: string): UsageRecord =>
+test("sub-cent entries accumulate: 160,000,001 + 159,999,999 tokens at 0.0375 refuse", () => {
+  const pricing = new Map([["tiny-api", { inputNanoPer1M: 37_500_000n, outputNanoPer1M: 0n }]]);
+  const sized = (id: string, inputTokens: number): UsageRecord =>
     record({
       workItemId: id,
       tokens: [
         {
           provider: "tiny-api",
           model: "m",
-          inputTokens: 25_000,
+          inputTokens,
           outputTokens: 0,
           requests: 1,
           source: "provider-usage",
@@ -192,19 +192,42 @@ test("sub-cent entries accumulate: two 0.0375 records reach a 0.075 cap", () => 
       ],
     });
   const summary = summarizeSpend(
-    [one("w-m9-a"), one("w-m9-b")],
+    [sized("w-m11-a", 160_000_001), sized("w-m11-b", 159_999_999)],
     pricing,
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTodayNanoTimes1M).toBe(75_000_000_000_000n);
-  const decision = decideAdmission(
-    summary,
-    { ...CONFIG, dayCapNanoUsd: 75_000_000n, totalCapNanoUsd: 75_000_000n },
-    { route: ["tiny-api"] },
-  );
+  expect(summary.spentTodayNanoTimes1M).toBe(12_000_000_000_000_000n);
+  const decision = decideAdmission(summary, CONFIG, { route: ["tiny-api"] });
   expect(decision.admit).toBe(false);
   expect(decision.reason).toBe("daily cap reached");
+});
+
+test("boundary below: one token less than exactly 12.00 USD admits", () => {
+  const pricing = new Map([["tiny-api", { inputNanoPer1M: 37_500_000n, outputNanoPer1M: 0n }]]);
+  const sized = (id: string, inputTokens: number): UsageRecord =>
+    record({
+      workItemId: id,
+      tokens: [
+        {
+          provider: "tiny-api",
+          model: "m",
+          inputTokens,
+          outputTokens: 0,
+          requests: 1,
+          source: "provider-usage",
+        },
+      ],
+    });
+  const summary = summarizeSpend(
+    [sized("w-m11-c", 160_000_000), sized("w-m11-d", 159_999_999)],
+    pricing,
+    "nvidia-build",
+    new Date("2026-10-26T12:00:00.000Z"),
+  );
+  const decision = decideAdmission(summary, CONFIG, { route: ["tiny-api"] });
+  expect(decision.admit).toBe(true);
+  expect(decision.reason).toBe("within budget");
 });
 
 test("D1: spend below both caps admits", () => {

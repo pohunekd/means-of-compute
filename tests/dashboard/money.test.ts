@@ -19,6 +19,9 @@ describe("dashboard money rounding", () => {
 
   test("inexact-in-float scaled units format exactly (mutation: float division in formatUsd)", () => {
     expect(formatUsd(9_007_199_254_740_993n)).toBe("$0.0025");
+    // Just below a rounding half-boundary above 2^53: exact bigint math
+    // gives $0.0025 while float division rounds up to $0.0026.
+    expect(formatUsd(9_179_999_999_999_999n)).toBe("$0.0025");
   });
 
   test("tiny value rounds to zero without a sign", () => {

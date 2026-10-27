@@ -50,11 +50,13 @@ export async function loadPricing(
   dir: string = DEFAULT_PRICING_DIR,
 ): Promise<ReadonlyMap<string, ProviderPricing>> {
   const pricing = new Map<string, ProviderPricing>();
+  const owners = new Map<string, string>();
   const glob = new Bun.Glob(`${dir}/*.json`);
   const files: string[] = [];
   for await (const file of glob.scan({ cwd: "." })) {
     files.push(file);
   }
+  files.sort();
   if (files.length === 0) {
     throw new Error(`Budget pricing ${dir}: no provider descriptors found`);
   }
@@ -75,6 +77,13 @@ export async function loadPricing(
     if (typeof raw.id !== "string") {
       throw new Error(`Budget pricing ${file}: missing provider id`);
     }
+    const owner = owners.get(raw.id);
+    if (owner !== undefined) {
+      throw new Error(
+        `Budget pricing ${file}: duplicate provider id "${raw.id}" (also in ${owner})`,
+      );
+    }
+    owners.set(raw.id, file);
     pricing.set(raw.id, readPricing(raw.pricing, file));
   }
   return pricing;

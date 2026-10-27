@@ -443,6 +443,27 @@ test("pricing reads Meta prices from config descriptors", async () => {
   expect(pricing.get("nvidia-build")?.inputPer1M).toBe(0);
 });
 
+test("pricing: duplicate provider id names both files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    const first = { id: "dup-api", pricing: { inputPer1M: 1, outputPer1M: 2 } };
+    const second = { id: "dup-api", pricing: { inputPer1M: 9, outputPer1M: 9 } };
+    await Bun.write(join(dir, "b-second.json"), JSON.stringify(second));
+    await Bun.write(join(dir, "a-first.json"), JSON.stringify(first));
+    let message = "";
+    try {
+      await loadPricing(dir);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('duplicate provider id "dup-api"');
+    expect(message).toContain("a-first.json");
+    expect(message).toContain("b-second.json");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 interface SpawnResult {
   readonly code: number;
   readonly stdout: string;

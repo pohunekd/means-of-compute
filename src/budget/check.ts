@@ -8,7 +8,7 @@
 // function; the override never writes escalation state or the escalation
 // log, it only prints `would escalate: <event key>` on stderr.
 import { loadBudgetConfig } from "./config.js";
-import { readInputText, statInputPath } from "./fs.js";
+import { readInputText, statInputPath } from "../fs/input.js";
 import { TOKENS_PER_1M } from "./cost.js";
 import { readUsageLedger } from "./ledger.js";
 import { decimalToNanoUsd } from "./money.js";

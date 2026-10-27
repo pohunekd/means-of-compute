@@ -1,0 +1,5 @@
+{
+  "batteryFloorPercent": 50,
+  "minInputIdleSeconds": 900,
+  "weights": { "cpu": 0.4, "gpu": 0.2, "memory": 0.4 }
+}

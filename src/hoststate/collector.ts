@@ -151,6 +151,9 @@ export function observe(
   const guardMs = collector.pluginTimeoutMs + 2 * collector.transportMarginMs;
   const atMs = now.getTime();
   const stampMs = Date.parse(parsed.value.timestamp);
+  if (!Number.isFinite(stampMs)) {
+    return unavailable(hostAlias, observedAt, "contract-invalid", "timestamp unparseable");
+  }
   if (atMs - stampMs > guardMs + collector.maxClockSkewMs) {
     return unavailable(hostAlias, observedAt, "stale", `age ${String(atMs - stampMs)} ms`);
   }
@@ -222,46 +225,51 @@ async function collectOne(
 ): Promise<HostObservation> {
   const startedAtMs = deps.now().getTime();
   const controller = new AbortController();
-  const timeout = deps.sleep(guardMs, controller.signal).then(() => "guard" as const);
-  timeout.catch(() => {});
-  const reply = deps.port.read(hostAlias, deps.config.package.id, limits).then(
-    (value) => ({ kind: "reply" as const, value }),
-    (error: unknown) => ({ kind: "thrown" as const, error }),
-  );
-  reply.catch(() => {});
-  const winner = await Promise.race([reply, timeout]);
-  controller.abort();
-  if (winner === "guard") {
-    const observation = unavailable(
-      hostAlias,
-      deps.now().toISOString(),
-      "request-timeout",
-      `no reply within ${String(guardMs)} ms`,
-    );
-    logObservation(deps, hostAlias, observation, startedAtMs, null);
-    return observation;
-  }
-  if (winner.kind === "thrown") {
-    if (winner.error instanceof HostStateError) {
-      const detail =
-        winner.error.code === null
-          ? winner.error.failure
-          : `${winner.error.failure} (${winner.error.code})`;
+  try {
+    const timeout = deps.sleep(guardMs, controller.signal).then(() => "guard" as const);
+    timeout.catch(() => {});
+    const reply = Promise.resolve()
+      .then(() => deps.port.read(hostAlias, deps.config.package.id, limits))
+      .then(
+        (value) => ({ kind: "reply" as const, value }),
+        (error: unknown) => ({ kind: "thrown" as const, error }),
+      );
+    reply.catch(() => {});
+    const winner = await Promise.race([reply, timeout]);
+    if (winner === "guard") {
       const observation = unavailable(
         hostAlias,
         deps.now().toISOString(),
-        winner.error.failure,
-        detail,
+        "request-timeout",
+        `no reply within ${String(guardMs)} ms`,
       );
       logObservation(deps, hostAlias, observation, startedAtMs, null);
       return observation;
     }
-    throw winner.error;
+    if (winner.kind === "thrown") {
+      if (winner.error instanceof HostStateError) {
+        const detail =
+          winner.error.code === null
+            ? winner.error.failure
+            : `${winner.error.failure} (${winner.error.code})`;
+        const observation = unavailable(
+          hostAlias,
+          deps.now().toISOString(),
+          winner.error.failure,
+          detail,
+        );
+        logObservation(deps, hostAlias, observation, startedAtMs, null);
+        return observation;
+      }
+      throw winner.error;
+    }
+    const observation = observe(hostAlias, winner.value, deps.config, deps.now());
+    const stamped: HostObservation = { ...observation, observedAt: deps.now().toISOString() };
+    logObservation(deps, hostAlias, stamped, startedAtMs, winner.value.stdout);
+    return stamped;
+  } finally {
+    controller.abort();
   }
-  const observation = observe(hostAlias, winner.value, deps.config, deps.now());
-  const stamped: HostObservation = { ...observation, observedAt: deps.now().toISOString() };
-  logObservation(deps, hostAlias, stamped, startedAtMs, winner.value.stdout);
-  return stamped;
 }
 
 export function createCollector(deps: CollectorDeps): HostStateCollector {

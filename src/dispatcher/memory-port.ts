@@ -162,12 +162,13 @@ export function createMemoryPort(): MemoryPortControl {
 
   function waitNow(ref: SessionRef, cursor: string | null): WaitResult {
     const session = findSession(ref);
-    checkReachable(session.handle.hostAlias);
-    // The current state is returned immediately; timeoutMs is ignored.
+    // A stored terminal result wins over reachability: the adapter caches
+    // terminal results, so a sleeping host cannot hide them.
     const terminal = terminalOf(session);
     if (terminal !== null) {
       return terminal;
     }
+    checkReachable(session.handle.hostAlias);
     // The cursor advances only while the session is non-terminal.
     session.cursor = cursor;
     if (session.state !== "starting" && session.state !== "running") {
@@ -203,11 +204,12 @@ export function createMemoryPort(): MemoryPortControl {
 
   function cancelNow(ref: SessionRef, reason: CancelReason): WaitResult {
     const session = findSession(ref);
-    checkReachable(session.handle.hostAlias);
+    // A stored terminal result wins over reachability (see waitNow).
     const terminal = terminalOf(session);
     if (terminal !== null) {
       return terminal;
     }
+    checkReachable(session.handle.hostAlias);
     settle(session, "cancelled", null, `cancelled ${reason}`);
     const result = terminalOf(session);
     if (result === null) {

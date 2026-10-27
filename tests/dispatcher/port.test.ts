@@ -58,6 +58,20 @@ test("P3/P4: waits with different cursors and cancel stay deep-equal", async () 
   await control.port.close();
 });
 
+test("terminal result wins over unreachable host in wait and cancel", async () => {
+  const control = createMemoryPort();
+  const handle = await control.port.start(request());
+  control.complete(handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
+  control.setUnreachable("laptop-a", true);
+  const ref = { sessionId: handle.sessionId, hostAlias: handle.hostAlias };
+  const waited = await control.port.wait(ref, 1000, null);
+  const cancelled = await control.port.cancel(ref, "stall");
+  expect(waited).toEqual(cancelled);
+  expect(waited.state).toBe("finished");
+  control.setUnreachable("laptop-a", false);
+  await control.port.close();
+});
+
 test("D2: diff of a finished session returns the pushed change untruncated", async () => {
   const control = createMemoryPort();
   const handle = await control.port.start(request());

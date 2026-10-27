@@ -37,12 +37,32 @@ export async function startLoopback(
   let gate: Promise<void> = Promise.resolve();
   let openGate: () => void = () => {};
   const waiters: Array<() => void> = [];
-  const reachHold = async (): Promise<void> => {
+  const reachHold = async (signal?: AbortSignal): Promise<void> => {
     held += 1;
     for (const wake of waiters.splice(0)) {
       wake();
     }
-    await gate;
+    if (signal?.aborted === true) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
+    if (signal === undefined) {
+      await gate;
+      return;
+    }
+    // The gate models stalled upstream bytes: aborting the caller side
+    // rejects the hold like a fetch read rejects on abort.
+    await Promise.race([
+      gate,
+      new Promise<never>((_, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
+    ]);
   };
   const nextGate = (): void => {
     gate = new Promise<void>((resolve) => {
@@ -70,7 +90,7 @@ export async function startLoopback(
         return new Response(JSON.stringify({ error: "no response" }), { status: 500 });
       }
       if (resp.holdBeforeHeaders === true) {
-        await reachHold();
+        await reachHold(req.signal);
       }
       if (resp.sseChunks === undefined) {
         if (resp.rawBody !== undefined) {
@@ -103,7 +123,7 @@ export async function startLoopback(
             if (head.length === 0) {
               controller.enqueue(new TextEncoder().encode("\n"));
             }
-            await reachHold();
+            await reachHold(req.signal);
             for (const chunk of tail) {
               controller.enqueue(new TextEncoder().encode(chunk));
             }

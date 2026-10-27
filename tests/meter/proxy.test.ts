@@ -598,8 +598,11 @@ test("call-end is durable before the caller stream errors", async () => {
 });
 
 test("a caller error frees the session slot first", async () => {
+  // Latch-pair entry 0 holds after its first usage chunk like
+  // stream-hold-after-first entry 0; entry 1 is stream-ok-like, so the
+  // second post has a hold-free response to return 200 on.
   await withMeter(
-    "tests/meter/recordings/stream-hold-after-first.json",
+    "tests/meter/recordings/latch-pair.json",
     async ({ meter, tokenFor, loopback, timers, waitForEvent }) => {
       const { requestId } = await openBoundGrant(meter);
       const token = tokenFor(requestId);

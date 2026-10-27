@@ -7,13 +7,5 @@
       "data: [DONE]\n\n"
     ],
     "holdAfterChunks": 1
-  },
-  {
-    "status": 200,
-    "sseChunks": [
-      "data: {\"id\": \"chatcmpl-2\", \"choices\": [{\"delta\": {\"content\": \"ok\"}}]}\n\n",
-      "data: {\"usage\": {\"prompt_tokens\": 9, \"completion_tokens\": 4}}\n\n",
-      "data: [DONE]\n\n"
-    ]
   }
 ]

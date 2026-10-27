@@ -83,7 +83,11 @@ export interface MeterDeps {
   readonly logIo: UsageLogIo;
 }
 
-export interface Meter {
+export interface MeterLiveView {
+  readonly liveCount: (requestId: string) => number;
+}
+
+export interface Meter extends MeterLiveView {
   readonly port: number;
   tokenFor(requestId: string): string;
   openGrant(spec: GrantSpec): Promise<void>;
@@ -334,6 +338,10 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       return null;
     }
     const known = requestId;
+    // Settling takes the failing fast path when the log already failed:
+    // the close could never have gone durable, so awaiting live ends
+    // that will resolve meter-unavailable is not useful work.
+    checkFailed(appender);
     let memo = settleMemos.get(known);
     if (memo === undefined) {
       memo = settleGrant(known, state);
@@ -370,12 +378,19 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     // drainTimeoutMs (manual timers) for the racing live calls, aborts
     // every call that is still live, and only then joins usage.
     const racing = [...(live.get(requestId)?.values() ?? [])];
+    // F3: the timer arms before the race snapshot resolves, so a call
+    // that ends between the verdict and the await still lets the race
+    // win instead of stalling on an abort nobody needs.
+    let cancelDrain!: () => void;
+    const drainTimer = new Promise<void>((resolve) => {
+      cancelDrain = timers.after(config.drainTimeoutMs, resolve);
+    });
     if (racing.length > 0) {
-      let cancelDrain!: () => void;
-      const drainTimer = new Promise<void>((resolve) => {
-        cancelDrain = timers.after(config.drainTimeoutMs, resolve);
-      });
       await Promise.race([Promise.all(racing.map((c) => c.ended)), drainTimer]);
+      cancelDrain();
+    } else {
+      // No live calls: never wait on the drain budget; the join follows
+      // the durable close at once.
       cancelDrain();
     }
     const remaining = [...(live.get(requestId)?.values() ?? [])];

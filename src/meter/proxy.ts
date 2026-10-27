@@ -325,27 +325,25 @@ export async function handleMeterRequest(
       holder.reserved?.finish();
     }
   }
-  // The LiveCall passes into forwardCall, which owns its finish(). The
-  // handler catch also finishes it; finish is idempotent (L8).
+  // The LiveCall passes into forwardCall, which owns its finish(): the
+  // outermost finally in forwardCall runs after the pump's call-end
+  // append settles (L8). The handler catch also finishes it for throws
+  // before the response; finish is idempotent.
   const call = holder.reserved;
   if (call === null) {
     throw new Error("meter: call-start step reserved nothing");
   }
   try {
-    try {
-      return await forwardCall(
-        state,
-        descriptor,
-        auth.requestId,
-        call,
-        auth.grant.hostAlias,
-        bodyText,
-        fields,
-        stream,
-      );
-    } finally {
-      call.finish();
-    }
+    return await forwardCall(
+      state,
+      descriptor,
+      auth.requestId,
+      call,
+      auth.grant.hostAlias,
+      bodyText,
+      fields,
+      stream,
+    );
   } catch (error: unknown) {
     call.finish();
     throw error;

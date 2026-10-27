@@ -486,8 +486,13 @@ async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number 
   if (proc.exitCode !== 0) throw new Error(`pmset failed: exit ${String(proc.exitCode)}`);
   if (!/drawing from/.test(out)) throw new Error("pmset failed: no drawing from line");
   const ac = /AC Power/.test(out);
-  const m = /(\d+)%/.exec(out);
-  const batteryPercent = m ? Number(m[1]) : null;
+  const batteryLine = out.split("\n").find((line) => line.includes("InternalBattery"));
+  let batteryPercent: number | null = null;
+  if (batteryLine !== undefined) {
+    const m = /(\d{1,3})%/.exec(batteryLine);
+    if (!m || !m[1]) throw new Error(`pmset battery unparsable: ${batteryLine}`);
+    batteryPercent = Number(m[1]);
+  }
   return { acPower: ac, batteryPercent };
 }
 

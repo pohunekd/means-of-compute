@@ -420,9 +420,7 @@ async function makeCliSandbox(): Promise<CliSandbox> {
     dir,
     run,
     writeEntry: async (entry: UsageRecord): Promise<void> => {
-      const handle = Bun.file(join(dir, "ledger.jsonl")).writer();
-      handle.write(`${JSON.stringify(entry)}\n`);
-      await handle.end();
+      await Bun.write(join(dir, "ledger.jsonl"), `${JSON.stringify(entry)}\n`);
     },
   };
 }

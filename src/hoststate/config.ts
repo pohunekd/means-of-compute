@@ -1,4 +1,5 @@
-import { readJson } from "../probe/config.js";
+import { dirname, join } from "node:path";
+import { loadConfig, readJson } from "../probe/config.js";
 
 export const hostStateTargets = [
   "bun-linux-x64",
@@ -16,8 +17,17 @@ export type HostStatePackage = {
   readonly targets: readonly HostStateTarget[];
 };
 
+export type HostStateCollector = {
+  readonly acceptedVersions: readonly string[];
+  readonly pluginTimeoutMs: number;
+  readonly transportMarginMs: number;
+  readonly maxOutputBytes: number;
+  readonly maxClockSkewMs: number;
+};
+
 export type HostStateConfig = {
   readonly package: HostStatePackage;
+  readonly collector: HostStateCollector;
 };
 
 const packageIdPattern = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
@@ -28,29 +38,40 @@ function fail(key: string): never {
   throw new Error(`config host-state.json: invalid ${key}`);
 }
 
+function integerInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+
 export function loadHostStateConfig(path: string): HostStateConfig {
   const raw = readJson<unknown>(path);
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     fail("package");
   }
   const root = raw as Record<string, unknown>;
-  const rootKeys = Object.keys(root);
-  if (rootKeys.length !== 1 || rootKeys[0] !== "package") {
+  if (!("package" in root)) {
     fail("package");
+  }
+  if (!("collector" in root)) {
+    fail("collector");
+  }
+  for (const key of Object.keys(root)) {
+    if (key !== "package" && key !== "collector") {
+      fail("package");
+    }
   }
   const pkg = root["package"];
   if (typeof pkg !== "object" || pkg === null || Array.isArray(pkg)) {
     fail("package");
   }
   const fields = pkg as Record<string, unknown>;
-  const expectedKeys = ["id", "version", "sourceDigest", "targets"];
-  for (const key of expectedKeys) {
+  const expectedPackageKeys = ["id", "version", "sourceDigest", "targets"];
+  for (const key of expectedPackageKeys) {
     if (!(key in fields)) {
       fail(`package.${key}`);
     }
   }
   for (const key of Object.keys(fields)) {
-    if (!expectedKeys.includes(key)) {
+    if (!expectedPackageKeys.includes(key)) {
       fail(`package.${key}`);
     }
   }
@@ -78,12 +99,71 @@ export function loadHostStateConfig(path: string): HostStateConfig {
   ) {
     fail("package.targets");
   }
+  const collectorRaw = root["collector"];
+  if (typeof collectorRaw !== "object" || collectorRaw === null || Array.isArray(collectorRaw)) {
+    fail("collector");
+  }
+  const collectorFields = collectorRaw as Record<string, unknown>;
+  const expectedCollectorKeys = [
+    "acceptedVersions",
+    "pluginTimeoutMs",
+    "transportMarginMs",
+    "maxOutputBytes",
+    "maxClockSkewMs",
+  ];
+  for (const key of expectedCollectorKeys) {
+    if (!(key in collectorFields)) {
+      fail(`collector.${key}`);
+    }
+  }
+  for (const key of Object.keys(collectorFields)) {
+    if (!expectedCollectorKeys.includes(key)) {
+      fail(`collector.${key}`);
+    }
+  }
+  const acceptedVersions = collectorFields["acceptedVersions"];
+  if (
+    !Array.isArray(acceptedVersions) ||
+    acceptedVersions.length === 0 ||
+    new Set(acceptedVersions).size !== acceptedVersions.length ||
+    !acceptedVersions.every((v): v is string => typeof v === "string" && versionPattern.test(v)) ||
+    !acceptedVersions.includes(version)
+  ) {
+    fail("collector.acceptedVersions");
+  }
+  const pluginTimeoutMs = collectorFields["pluginTimeoutMs"];
+  if (!integerInRange(pluginTimeoutMs, 1000, 60000)) {
+    fail("collector.pluginTimeoutMs");
+  }
+  const probeConfig = loadConfig(join(dirname(path), "probe.json"));
+  if (pluginTimeoutMs <= probeConfig.localModelsTimeoutMs) {
+    fail("collector.pluginTimeoutMs");
+  }
+  const transportMarginMs = collectorFields["transportMarginMs"];
+  if (!integerInRange(transportMarginMs, 500, 30000)) {
+    fail("collector.transportMarginMs");
+  }
+  const maxOutputBytes = collectorFields["maxOutputBytes"];
+  if (!integerInRange(maxOutputBytes, 1024, 1048576)) {
+    fail("collector.maxOutputBytes");
+  }
+  const maxClockSkewMs = collectorFields["maxClockSkewMs"];
+  if (!integerInRange(maxClockSkewMs, 0, 600000)) {
+    fail("collector.maxClockSkewMs");
+  }
   return {
     package: {
       id,
       version,
       sourceDigest,
       targets: [...targets] as readonly HostStateTarget[],
+    },
+    collector: {
+      acceptedVersions: [...acceptedVersions] as readonly string[],
+      pluginTimeoutMs,
+      transportMarginMs,
+      maxOutputBytes,
+      maxClockSkewMs,
     },
   };
 }

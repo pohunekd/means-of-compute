@@ -4,5 +4,12 @@
     "version": "0.1.0",
     "sourceDigest": "sha256:a9c7c16f92ce0fa4c5a4f0db8cf52399d9c91942b7925d743872ca33ea617d1e",
     "targets": ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"]
+  },
+  "collector": {
+    "acceptedVersions": ["0.1.0"],
+    "pluginTimeoutMs": 10000,
+    "transportMarginMs": 2000,
+    "maxOutputBytes": 16384,
+    "maxClockSkewMs": 120000
   }
 }

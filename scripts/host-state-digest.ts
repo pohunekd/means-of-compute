@@ -1,11 +1,23 @@
-// Computes the host-state plugin source digest and compares it with
-// config/host-state.json. Usage: bun run plugin:digest (from the repo root).
+// Computes the host-state plugin source digest and compares it with the
+// committed config. Usage: bun run plugin:digest [--config <path>]
+// (from the repo root; the default is config/host-state.json).
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { loadHostStateConfig } from "../src/hoststate/config.js";
 
 const root = process.cwd();
+
+let configPath = join(root, "config", "host-state.json");
+const configFlag = Bun.argv.indexOf("--config");
+if (configFlag !== -1) {
+  const value = Bun.argv[configFlag + 1];
+  if (value === undefined) {
+    console.error("plugin:digest: missing value for --config");
+    process.exit(2);
+  }
+  configPath = isAbsolute(value) ? value : join(root, value);
+}
 
 async function digestInputs(): Promise<string[]> {
   const result = await Bun.build({
@@ -39,7 +51,7 @@ console.log(computed);
 
 let expected: string;
 try {
-  expected = loadHostStateConfig(join(root, "config", "host-state.json")).package.sourceDigest;
+  expected = loadHostStateConfig(configPath).package.sourceDigest;
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(2);

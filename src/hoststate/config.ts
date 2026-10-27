@@ -43,10 +43,16 @@ export function loadHostStateConfig(path: string): HostStateConfig {
     fail("package");
   }
   const fields = pkg as Record<string, unknown>;
-  const keys = Object.keys(fields).sort();
-  const expected = ["id", "sourceDigest", "targets", "version"];
-  if (keys.length !== expected.length || !expected.every((k, i) => keys[i] === k)) {
-    fail("package");
+  const expectedKeys = ["id", "version", "sourceDigest", "targets"];
+  for (const key of expectedKeys) {
+    if (!(key in fields)) {
+      fail(`package.${key}`);
+    }
+  }
+  for (const key of Object.keys(fields)) {
+    if (!expectedKeys.includes(key)) {
+      fail(`package.${key}`);
+    }
   }
   const id = fields["id"];
   if (typeof id !== "string" || !packageIdPattern.test(id)) {

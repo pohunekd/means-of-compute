@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { HostCapacity, WorkItem } from "../../contracts/v1/types.js";
 import type { HostStateConfig } from "../../src/hoststate/config.js";
-import type { HostObservation } from "../../src/hoststate/collector.js";
+import type { HostObservation, UnavailableCause } from "../../src/hoststate/collector.js";
 import type { PlacementConfig } from "../../src/placement/config.js";
 import { placeObserved } from "../../src/placement/observed.js";
 
@@ -75,28 +75,36 @@ function reported(hostAlias: string): HostObservation {
   };
 }
 
-function unavailable(hostAlias: string): HostObservation {
+function unavailable(hostAlias: string, cause: UnavailableCause = "host-unreachable"): HostObservation {
   return {
     kind: "unavailable",
     hostAlias,
     observedAt: "2026-10-26T10:00:01.000Z",
-    cause: "host-unreachable",
-    detail: "host-unreachable",
+    cause,
+    detail: cause,
   };
 }
 
 describe("observed placement", () => {
-  test("mixed observations choose the reported host and list the outage (mutation: drop unavailable candidates)", () => {
+  test("mixed observations keep reported order first, then unavailable in input order (mutation: unshift)", () => {
     const decision = placeObserved(
       item(),
-      [reported("laptop-a"), unavailable("laptop-b")],
+      [reported("laptop-a"), unavailable("laptop-b"), unavailable("desktop")],
       [],
       PLACEMENT,
     );
     expect(decision.chosenHostAlias).toBe("laptop-a");
-    const entry = decision.candidates.find((candidate) => candidate.hostAlias === "laptop-b");
-    expect(entry).toEqual({
+    expect(decision.candidates).toHaveLength(3);
+    expect(decision.candidates[0]?.hostAlias).toBe("laptop-a");
+    expect(decision.candidates[0]?.excluded).toBe(false);
+    expect(decision.candidates[1]).toEqual({
       hostAlias: "laptop-b",
+      score: 0,
+      reason: "excluded: host state unavailable (host-unreachable)",
+      excluded: true,
+    });
+    expect(decision.candidates[2]).toEqual({
+      hostAlias: "desktop",
       score: 0,
       reason: "excluded: host state unavailable (host-unreachable)",
       excluded: true,

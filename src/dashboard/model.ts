@@ -245,25 +245,27 @@ function pendingFor(inputs: DashboardInputs, id: string): readonly PendingUsage[
   return inputs.ledger.value.pending.filter((entry) => entry.workItemId === id);
 }
 
-function activityOf(inputs: DashboardInputs, id: string): string | null {
+function activityOf(inputs: DashboardInputs, id: string): number | null {
   if (!inputs.ledger.ok) {
     return null;
   }
-  let latest: string | null = null;
+  let latest: number | null = null;
   for (const record of inputs.ledger.value.records) {
     if (record.workItemId !== id) {
       continue;
     }
-    if (latest === null || record.finishedAt > latest) {
-      latest = record.finishedAt;
+    const at = Date.parse(record.finishedAt);
+    if (latest === null || at > latest) {
+      latest = at;
     }
   }
   for (const entry of inputs.ledger.value.pending) {
     if (entry.workItemId !== id) {
       continue;
     }
-    if (latest === null || entry.finishedAt > latest) {
-      latest = entry.finishedAt;
+    const at = Date.parse(entry.finishedAt);
+    if (latest === null || at > latest) {
+      latest = at;
     }
   }
   return latest;
@@ -363,7 +365,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
         ? inputs.ledger.ok
           ? noDataCell("no timestamp")
           : failureCell(inputs.ledger.failure)
-        : textCell(activity);
+        : textCell(new Date(activity).toISOString());
     return [textCell(id), status, host, branch, model, verdicts, lastActivity];
   });
   return {

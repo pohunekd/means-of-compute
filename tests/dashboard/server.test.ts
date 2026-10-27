@@ -279,6 +279,59 @@ describe("dashboard http (mutation: Host allowlist removed or checked after rout
     await response.text();
   });
 
+  test("421 request log records the real pathname (mutation: fixed / path)", async () => {
+    const logged: DashboardLogEvent[] = [];
+    const { port } = await startTestServer(logged);
+    const response = await fetch(`http://127.0.0.1:${String(port)}/nope?x=1`, {
+      headers: { host: `evil.example:${String(port)}` },
+    });
+    expect(response.status).toBe(421);
+    await response.text();
+    expect(logged.find((event) => event.event === "request")?.path).toBe("/nope");
+  });
+
+  test("input-error logs at error level (mutation: warn level)", async () => {
+    const logged: DashboardLogEvent[] = [];
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const server = await startDashboard({
+      config: {
+        listenEnv: "MOC_DASHBOARD_LISTEN",
+        listenAlias: "dashboard",
+        logPath: "logs/dashboard.jsonl",
+        maxRequestBytes: 1024,
+        idleTimeoutSec: 10,
+        workRowLimit: 50,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+      },
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: {
+        budget,
+        route,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      sources: {
+        ledgerPath: "tests/fixtures/dashboard/ledger-invalid.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: null,
+        registryPath: "",
+      },
+      now: () => new Date("2026-10-27T12:00:00.000Z"),
+      log: (event) => {
+        logged.push(event);
+      },
+    });
+    servers.push(server);
+    const response = await fetch(`http://127.0.0.1:${String(server.port)}/`, {
+      headers: { host: `127.0.0.1:${String(server.port)}` },
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(logged.find((event) => event.event === "input-error")?.level).toBe("error");
+  });
+
   test("query string is ignored and the page stays 200", async () => {
     const logged: DashboardLogEvent[] = [];
     const { port } = await startTestServer(logged);

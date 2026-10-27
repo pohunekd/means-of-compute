@@ -119,7 +119,13 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         // a request without a Host header gets 421, never a 500.
         const boundPort = server.port ?? deps.listen.port;
         if (!allowlist(deps.listen.host, boundPort).has(rawHost)) {
-          return respond(textResponse(421, "misdirected request\n"), "/");
+          let pathname: string;
+          try {
+            pathname = new URL(req.url).pathname;
+          } catch {
+            pathname = "/";
+          }
+          return respond(textResponse(421, "misdirected request\n"), pathname);
         }
         const url = new URL(req.url);
         if (req.method !== "GET") {
@@ -131,7 +137,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         try {
           const inputs = await gatherInputs(deps.sources, deps.fixed, deps.now(), (entry) => {
             deps.log({
-              level: "warn",
+              level: "error",
               event: "input-error",
               input: entry.input,
               code: entry.code,
@@ -164,7 +170,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
   return {
     port: boundPort,
     stop: async (): Promise<void> => {
-      await server.stop();
+      await server.stop(true);
       deps.log({ level: "info", event: "stopped" });
     },
   };

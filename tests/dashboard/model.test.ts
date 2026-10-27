@@ -726,6 +726,38 @@ describe("dashboard per-record rounding (mutation: round each record before summ
   });
 });
 
+describe("dashboard last activity (mutation: string max; raw finishedAt)", () => {
+  test("fractional pending timestamp wins and prints normalized ISO", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-activity-");
+    try {
+      const line =
+        `{"schemaVersion":"v1","workItemId":"w-time","finishedAt":"2026-10-27T09:00:00Z",` +
+        `"tokens":[{"provider":"meta-api","model":"muse-spark-1.3-contributor",` +
+        `"inputTokens":1000,"outputTokens":0,"requests":1,"source":"meter-proxy"}],` +
+        `"sessionSeconds":[{"hostAlias":"laptop-a","seconds":60,"source":"dispatcher-clock"}],` +
+        `"attempts":[{"model":"muse-spark-1.3-contributor","result":"success"}],` +
+        `"retries":0,"humanInterventions":0,"result":"success"}\n` +
+        `{"pending":{"entryId":"w-time:0","kind":"session","workItemId":"w-time",` +
+        `"finishedAt":"2026-10-27T09:00:00.500Z","startModel":"muse-spark-1.3-contributor",` +
+        `"tokens":[{"provider":"meta-api","model":"muse-spark-1.3-contributor",` +
+        `"inputTokens":1000,"outputTokens":0,"requests":1,"source":"meter-proxy"}],` +
+        `"session":{"hostAlias":"laptop-a","seconds":60,"source":"dispatcher-clock","result":"success"}}}\n`;
+      await writeFile(`${dir}/ledger.jsonl`, line, "utf8");
+      await mkdir(`${dir}/verdicts`, { recursive: true });
+      const model = buildDashboard(await loadInputs(`${dir}/ledger.jsonl`, `${dir}/verdicts`));
+      const work = model.panels[1] as (typeof model.panels)[number];
+      const table = work.tables[0] as (typeof work.tables)[number];
+      const row = table.rows.find((cells) => (cells[0] as { text?: string }).text === "w-time");
+      if (row === undefined) {
+        throw new Error("missing w-time row");
+      }
+      expect((row[6] as { text?: string }).text).toBe("2026-10-27T09:00:00.500Z");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("dashboard failures (mutation: message text in the page, or missing log path)", () => {
   test("ledger-invalid page carries the code only, never the message", async () => {
     const model = buildDashboard(await loadInputs(INVALID));

@@ -31,6 +31,23 @@ README.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
 
+## Dashboard
+
+The factory process runs a second `Bun.serve` listener for the
+operator dashboard: a loopback-only HTTP page rendered server-side from a
+pure model. Inputs are the ledger file, the verdict store, config prices
+and caps, the baseline config, and host observations from a
+`HostStateCollector` round of this request (`null` in PR 1, so Fleet state
+stays no-data). No probe, meter, placement, registry, or host-map module
+runs behind the page; nothing under `src/dashboard/` reads `hosts.json` or
+`process.env`. The model is pure (no clock, no I/O) and the renderer
+emits static HTML: no client JavaScript, no auto-refresh, no external
+resource, no inline style (one hashed `<style>` block under a
+`default-src 'none'` CSP), every dynamic string escaped and every host
+cell a checked alias. See [dashboard.md](dashboard.md) for the listener,
+loopback rule, config keys, baselines, panel rules, money arithmetic, and
+the failure table.
+
 ## Auditor
 
 `runAudit` in `src/auditor/audit.ts` is a read-only check of one revision

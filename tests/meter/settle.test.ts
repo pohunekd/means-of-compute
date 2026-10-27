@@ -99,9 +99,7 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
         outputTokens: 3,
       });
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}",
-      ) as {
+      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
         outcome: string;
         billed: boolean;
         inputTokens: number;

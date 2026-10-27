@@ -1,44 +1,18 @@
 // K2b: a failed settle write keeps the provisional entry and one session.
-// The settle write fails through an injected registry write failure, so a
+// The settle write fails once through a spy on the registry module, so a
 // regression that drops the provisional entry after a failed settle is
 // observable: the entry stays, the port holds one live session, and a
 // replayed start settles that same session.
 // Deterministic: memory port, in-process switch gate, temp ledger and registry.
-import { expect, mock, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// Static import runs before the mock below, so this namespace keeps the
-// original functions while later importers see the mocked module.
-// Imported before the mock below, and copied by value: these stay the
-// original functions while later importers see the mocked module.
-const registryActual = await import("../../src/dispatcher/registry.js");
-const realReplaceRegistryEntry: (
-  path: string,
-  entry: import("../../src/dispatcher/registry.js").RegistryEntry,
-) => Promise<void> = registryActual.replaceRegistryEntry.bind(registryActual);
-let armed = true;
-void mock.module("../../src/dispatcher/registry.js", () => ({
-  ...registryActual,
-  replaceRegistryEntry: async (
-    path: string,
-    entry: import("../../src/dispatcher/registry.js").RegistryEntry,
-  ): Promise<void> => {
-    // Fail only the first settled write (the only write carrying a
-    // session id in this test): the provisional insert and the
-    // replayed settle both pass through.
-    if (armed && entry.sessionId !== null) {
-      armed = false;
-      throw new Error("injected settle failure");
-    }
-    return realReplaceRegistryEntry(path, entry);
-  },
-}));
-
-const { createDispatcher } = await import("../../src/dispatcher/dispatcher.js");
-const { createMemoryPort } = await import("../../src/dispatcher/memory-port.js");
-const { readRegistry } = await import("../../src/dispatcher/registry.js");
-const { createSwitchGate, gatePort } = await import("./gated-port.js");
+import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
+import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
+import { readRegistry } from "../../src/dispatcher/registry.js";
+import * as registryModule from "../../src/dispatcher/registry.js";
+import { createSwitchGate, gatePort } from "./gated-port.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import type { ModelSelection } from "../../src/dispatcher/port.js";
 import type { StartOutcome } from "../../src/dispatcher/dispatcher.js";
@@ -84,7 +58,17 @@ function startedOf(
   }
 }
 
-test("K2b: a failed settle write keeps the provisional entry and one session", async () => {
+interface SettleHarness {
+  readonly dir: string;
+  readonly ledgerPath: string;
+  readonly registryPath: string;
+  readonly control: ReturnType<typeof createMemoryPort>;
+  readonly starts: ReturnType<typeof gatePort>;
+  readonly gate: ReturnType<typeof createSwitchGate>;
+  readonly dispatcher: ReturnType<typeof createDispatcher>;
+}
+
+async function withHarness(body: (h: SettleHarness) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-settle-fail-"));
   try {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -109,6 +93,14 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
       sleep: () => Promise.resolve(),
       log: () => undefined,
     });
+    await body({ dir, ledgerPath, registryPath, control, starts, gate, dispatcher });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("K2b: a failed settle write keeps the provisional entry and one session", async () => {
+  await withHarness(async ({ control, dispatcher, registryPath, starts }) => {
     const first = dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-a") as never,
@@ -116,12 +108,19 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
       "Do the work.",
     );
     const parked = await starts.next("start");
-    await parked.release();
+    // The spy is armed after the provisional insert, so only the settle
+    // write fails; every later write (a wrongful removal included) passes.
+    const settleWrite = spyOn(registryModule, "replaceRegistryEntry").mockImplementationOnce(() =>
+      Promise.reject(new Error("injected settle failure")),
+    );
     let failure: unknown;
     try {
+      await parked.release();
       await first;
     } catch (error) {
       failure = error;
+    } finally {
+      settleWrite.mockRestore();
     }
     expect(String(failure)).toContain("injected settle failure");
     // The provisional entry is still present and the port holds one live
@@ -150,7 +149,5 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
     const settled = await readRegistry(registryPath);
     expect(settled).toHaveLength(1);
     expect(settled[0]?.sessionId).toBe(outcome.handle.sessionId);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  });
 });

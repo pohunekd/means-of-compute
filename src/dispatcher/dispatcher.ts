@@ -82,8 +82,12 @@ export class DispatchStateError extends Error {
   }
 }
 
+export type WatchResult = Omit<Extract<WaitResult, { state: TerminalState }>, "sessionId"> & {
+  readonly sessionId: string | null;
+};
+
 export interface FinishOutcome {
-  readonly result: Extract<WaitResult, { state: TerminalState }>;
+  readonly result: WatchResult;
   readonly attempt: "success" | "failure" | "stalled" | "lost";
   readonly ledger: WriteOutcome;
 }
@@ -212,14 +216,14 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): Pendi
   };
 }
 
-function terminalResultOf(entry: RegistryEntry): Extract<WaitResult, { state: TerminalState }> {
+function terminalResultOf(entry: RegistryEntry): WatchResult {
   const terminal = entry.terminal;
   if (terminal === null) {
     throw new Error(`dispatcher: entry ${entry.requestId} has no terminal state`);
   }
-  // A request that ends lost while still provisional has no session id:
-  // report null instead of the request id. Ledger entryId logic
-  // (pendingEntryOf) still falls back to the request id and is unchanged.
+  // A request that ends lost while still provisional has no session id, so
+  // the result reports null. `pendingEntryOf` uses the request id for its
+  // `entryId`.
   return {
     state: terminal.state,
     sessionId: entry.sessionId,

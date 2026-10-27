@@ -816,7 +816,13 @@ async function makeCliSandbox(): Promise<CliSandbox> {
       nvidiaProviderId: "nvidia-build",
     }),
   );
-  for (const name of ["meta-api.json", "nvidia-build.json", "local.json", "route.json"]) {
+  for (const name of [
+    "meta-api.json",
+    "nvidia-build.json",
+    "local.json",
+    "route.json",
+    "schema.json",
+  ]) {
     const source = Bun.file(join(repoRoot, "config", "providers", name));
     await Bun.write(join(providersDir, name), await source.text());
   }
@@ -883,6 +889,37 @@ test("CLI: override refusal writes no state and prints would-escalate", async ()
     expect(result.stderr).toContain("would escalate: day:");
     expect(await Bun.file(join(sandbox.dir, "state.json")).exists()).toBe(false);
     expect(await Bun.file(join(sandbox.dir, "escalations.log")).exists()).toBe(false);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: missing schema exits 2 naming the file", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    rmSync(join(sandbox.dir, "config", "providers", "schema.json"));
+    const result = await sandbox.run(["--spend", "3.20"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("config/providers/schema.json");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: invalid schema exits 2 naming the file", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const schema = (await Bun.file(
+      join(sandbox.dir, "config", "providers", "schema.json"),
+    ).json()) as { properties: { pricing: { type: string } } };
+    schema.properties.pricing.type = "objekt";
+    await Bun.write(
+      join(sandbox.dir, "config", "providers", "schema.json"),
+      JSON.stringify(schema),
+    );
+    const result = await sandbox.run(["--spend", "3.20"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("config/providers/schema.json");
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

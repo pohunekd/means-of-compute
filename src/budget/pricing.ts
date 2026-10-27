@@ -13,9 +13,9 @@
 // with more digits than a double holds is outside the rule and not detected.
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
+import type { ValidateFunction } from "ajv/dist/2020";
 import { readInputText, statInputPath } from "./fs.js";
 import { NANO_PER_USD, priceToNanoUsd } from "./money.js";
-import providerSchema from "../../config/providers/schema.json" with { type: "json" };
 
 export interface NanoPricing {
   readonly inputNanoPer1M: bigint;
@@ -23,9 +23,36 @@ export interface NanoPricing {
   readonly cachedInputNanoPer1M?: bigint;
 }
 
-const ajv = new Ajv({ strict: true });
-addFormats(ajv);
-const validateDescriptor = ajv.compile(providerSchema);
+export const SCHEMA_PATH = "config/providers/schema.json";
+
+let cachedValidator: ValidateFunction | null = null;
+
+async function loadValidator(): Promise<ValidateFunction> {
+  if (cachedValidator !== null) {
+    return cachedValidator;
+  }
+  const label = "Budget pricing";
+  if ((await statInputPath(label, SCHEMA_PATH)) === "absent") {
+    throw new Error(`${label} ${SCHEMA_PATH}: file is missing`);
+  }
+  const text = await readInputText(label, SCHEMA_PATH);
+  let schema: unknown;
+  try {
+    schema = JSON.parse(text) as unknown;
+  } catch (error: unknown) {
+    throw new Error(`${label} ${SCHEMA_PATH}: not valid JSON`, { cause: error });
+  }
+  const ajv = new Ajv({ strict: true });
+  addFormats(ajv);
+  let validate: ValidateFunction;
+  try {
+    validate = ajv.compile(schema as Parameters<Ajv["compile"]>[0]);
+  } catch (error: unknown) {
+    throw new Error(`${label} ${SCHEMA_PATH}: invalid schema`, { cause: error });
+  }
+  cachedValidator = validate;
+  return validate;
+}
 
 interface ValidatedPricing {
   readonly inputPer1M: number;
@@ -63,6 +90,7 @@ export async function loadDescriptor(dir: string, id: string): Promise<NanoPrici
   if (raw.id !== id) {
     throw new Error(`${label} ${file}: id "${String(raw.id)}" does not match file name`);
   }
+  const validateDescriptor = await loadValidator();
   if (!validateDescriptor(parsed)) {
     throw new Error(
       `${label} ${file}: invalid descriptor ${JSON.stringify(validateDescriptor.errors)}`,

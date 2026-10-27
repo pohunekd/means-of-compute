@@ -15,6 +15,7 @@ type ProbeConfig = {
   batteryThreshold: number;
   localModelsBaseUrl: string;
   localModelsTimeoutMs: number;
+  sysfsRoot: string;
   policy: {
     allowedWindowStart: string;
     allowedWindowEnd: string;
@@ -35,6 +36,10 @@ type Facts = Partial<{
   // (never idle). The manager hint failure fallback is simulated with the
   // managerHintFailed fact, which uses /proc/uptime instead of the hint.
   noLocalUserSession: boolean;
+  // Fixture override for every sysfs path (power_supply, drm): a scenario
+  // may point it at a committed fixture tree under tests/fixtures/sysfs,
+  // resolved against the repository root.
+  sysfsRoot: string;
   managerHintFailed: boolean;
   acPower: boolean;
   batteryPercent: number | null;
@@ -121,8 +126,8 @@ function readRequired(path: string, what: string): string {
   return value;
 }
 
-function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
-  const base = "/sys/class/power_supply";
+function linuxPower(sysfsRoot: string): { acPower: boolean; batteryPercent: number | null } {
+  const base = `${sysfsRoot}/class/power_supply`;
   let acPower = false;
   let batteryPercent: number | null = null;
   let hasMains = false;
@@ -168,12 +173,12 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
   return { acPower, batteryPercent };
 }
 
-async function linuxGpu(): Promise<{
+async function linuxGpu(sysfsRoot: string): Promise<{
   present: boolean;
   name: string | null;
   freeMb: number | null;
 }> {
-  const base = "/sys/class/drm";
+  const base = `${sysfsRoot}/class/drm`;
   try {
     let entries: string[];
     try {
@@ -573,6 +578,7 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
+  const sysfsRoot = facts.sysfsRoot ? join(repoRoot, facts.sysfsRoot) : cfg.sysfsRoot;
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();
   const timestamp = facts.timestamp ?? now.toISOString();
@@ -664,7 +670,7 @@ async function main(): Promise<void> {
 
   if (facts.acPower === undefined || facts.batteryPercent === undefined) {
     try {
-      const p = platformOrThrow() === "linux" ? linuxPower() : await macosPower();
+      const p = platformOrThrow() === "linux" ? linuxPower(sysfsRoot) : await macosPower();
       if (facts.acPower === undefined) acPower = p.acPower;
       if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
     } catch (e) {
@@ -691,7 +697,7 @@ async function main(): Promise<void> {
     facts.gpuName === undefined ||
     facts.gpuFreeMb === undefined
   ) {
-    const gpu = platformOrThrow() === "linux" ? await linuxGpu() : await macosGpu();
+    const gpu = platformOrThrow() === "linux" ? await linuxGpu(sysfsRoot) : await macosGpu();
     if (facts.gpuPresent === undefined) gpuPresent = gpu.present;
     if (facts.gpuName === undefined) gpuName = gpu.name;
     if (facts.gpuFreeMb === undefined) gpuFreeMb = gpu.freeMb;

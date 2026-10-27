@@ -21,6 +21,16 @@ class ProviderError extends Error {
   }
 }
 
+export class ProvidersExhaustedError extends Error {
+  readonly lastReason: string;
+  constructor(lastReason: string, lastError: unknown) {
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    super(`All providers failed (last: ${lastReason}: ${detail})`, { cause: lastError });
+    this.lastReason = lastReason;
+    this.name = "ProvidersExhaustedError";
+  }
+}
+
 async function callProvider(provider: ProviderDescriptor, request: ModelRequest): Promise<string> {
   const base = provider.baseUrl.replace(/\/$/, "");
   const url = `${base}/chat/completions`;
@@ -82,6 +92,7 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
   const providers = await getProviders();
   const route = await loadRoute();
   let lastReason: string | undefined;
+  let lastError: unknown;
   for (const id of route) {
     const provider = providers[id];
     if (!provider) {
@@ -109,9 +120,7 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
           throw e;
         }
       } else if (e instanceof Error) {
-        if (e.message === "timeout") {
-          lastReason = "timeout";
-        } else if (e.name === "AbortError") {
+        if (e.name === "AbortError") {
           lastReason = "timeout";
         } else if (e instanceof TypeError) {
           lastReason = "connection";
@@ -121,8 +130,9 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       } else {
         throw e;
       }
+      lastError = e;
       // continue to next provider
     }
   }
-  throw new Error("All providers failed");
+  throw new ProvidersExhaustedError(lastReason ?? "unknown", lastError);
 }

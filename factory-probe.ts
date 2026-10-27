@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostname as osHostname, cpus, totalmem, freemem } from "node:os";
@@ -54,11 +54,17 @@ type Facts = Partial<{
 }>;
 
 function readJson<T>(path: string): T {
-  if (!existsSync(path)) throw new Error(`file not found: ${path}`);
+  let raw: string;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as T;
-  } catch {
-    throw new Error(`parse error in ${path}`);
+    raw = readFileSync(path, "utf-8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    throw new Error(`${path}: ${code}`, { cause: e });
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (e) {
+    throw new Error(`${path}: parse error`, { cause: e });
   }
 }
 
@@ -93,26 +99,30 @@ function insideWindow(now: Date, start: string, end: string): boolean {
 
 function readFileIfExists(p: string): string | null {
   try {
-    if (existsSync(p)) return readFileSync(p, "utf-8").trim();
+    lstatSync(p);
   } catch (e) {
-    // A missing file means the attribute does not exist; any other read
-    // error is reported so callers can fail with the cause.
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    // Only a missing file means the attribute does not exist; any other
+    // stat error is reported so callers can fail with the cause.
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(`${p}: ${(e as NodeJS.ErrnoException).code ?? "unknown"}`, { cause: e });
+    }
+    return null;
   }
-  return null;
+  try {
+    return readFileSync(p, "utf-8").trim();
+  } catch (e) {
+    throw new Error(`${p}: ${(e as NodeJS.ErrnoException).code ?? "unknown"}`, { cause: e });
+  }
 }
 
 function readRequired(path: string, what: string): string {
   const value = readFileIfExists(path);
-  if (value === null || value === "") throw new Error(`power unknown: cannot read ${what}`);
+  if (value === null || value === "") throw new Error(`cannot read ${what}`);
   return value;
 }
 
 function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
   const base = "/sys/class/power_supply";
-  if (!existsSync(base)) {
-    return { acPower: true, batteryPercent: null };
-  }
   let acPower = false;
   let batteryPercent: number | null = null;
   let hasMains = false;
@@ -120,8 +130,13 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
   let entries: string[];
   try {
     entries = readdirSync(base);
-  } catch {
-    throw new Error("power unknown: cannot read power_supply");
+  } catch (e) {
+    // A missing power_supply class directory is the desktop default; any
+    // other error means power unknown.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      return { acPower: true, batteryPercent: null };
+    }
+    throw new Error(`${base}: ${(e as NodeJS.ErrnoException).code ?? "unknown"}`, { cause: e });
   }
   for (const entry of entries) {
     const type = readRequired(`${base}/${entry}/type`, `type of ${entry}`);
@@ -552,12 +567,9 @@ async function main(): Promise<void> {
 
   let facts: Facts = {};
   if (factsPath) {
-    if (!existsSync(factsPath)) throw new Error(`facts file not found: ${factsPath}`);
     facts = readJson<Facts>(factsPath);
   } else if (scenario) {
-    const mapped = configPath("scenarios", `${scenario}.json`);
-    if (!existsSync(mapped)) throw new Error(`scenario not found: ${scenario}`);
-    facts = readJson<Facts>(mapped);
+    facts = readJson<Facts>(configPath("scenarios", `${scenario}.json`));
   }
 
   const cfg = loadConfig();

@@ -1,12 +1,21 @@
 // Usage-log tests: one failing case per replay predicate of section 4.3,
 // the torn-tail repair, and the write-ahead latch.
 import { expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openUsageAppender, replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
+import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
+import type { MeterConfig } from "../../src/meter/config.js";
+import { startMeter, type MeterLogEvent } from "../../src/meter/meter.js";
+import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
+import {
+  openUsageAppender,
+  replayUsageLog,
+  systemUsageLogIo,
+} from "../../src/meter/usage-log.js";
 import { createFaultyIo } from "./faulty-io.js";
-import type { MeterLogEvent } from "../../src/meter/meter.js";
+import { createManualTimers } from "./manual-timers.js";
 import type { UsageLogRecord } from "../../src/meter/usage-log.js";
 
 function at(no: number): string {
@@ -287,6 +296,84 @@ test(
       message = (error as Error).message;
     }
     expect(message).toContain(":3:");
+  }),
+);
+
+test(
+  "bindGrant with an empty session id is refused and the log still replays",
+  withDir(async (dir) => {
+    const path = join(dir, "usage.jsonl");
+    // Replay accepts the empty file, then a grant-open commits. The
+    // schema check in checkRecord refuses the empty-session grant-bind
+    // on the rejection path: usage-log-rejected, no latch, no write.
+    const events: MeterLogEvent[] = [];
+    const log = (e: MeterLogEvent): void => {
+      events.push(e);
+    };
+    resetProvidersCache();
+    process.env.META_API_KEY = "test-meta-key";
+    process.env.NVIDIA_API_KEY = "test-nvidia-key";
+    process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:1";
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:1";
+    try {
+      const base = await loadMeterConfig();
+      const config: MeterConfig = { ...base, usageLogPath: path };
+      await Bun.write(join(dir, "hosts.json"), JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
+      const env = await resolveMeterEnv(config, {
+        MOC_METER_LISTEN: "127.0.0.1:0",
+        MOC_METER_SECRET: randomBytes(32).toString("base64"),
+        MOC_METER_HOST_ADDRESSES_FILE: join(dir, "hosts.json"),
+      });
+      const meter = await startMeter({
+        config,
+        env,
+        providers: await getProviders(),
+        timers: createManualTimers(),
+        logIo: systemUsageLogIo,
+        now: () => new Date(),
+        log,
+      });
+      try {
+        await meter.openGrant({
+          requestId: "w1-demo:0",
+          workItemId: "w1-demo",
+          hostAlias: "laptop-a",
+          providerId: "meta-api",
+          model: "muse-spark-1.3-contributor",
+        });
+        // M1a: the schema check in checkRecord refuses the empty
+        // session id on the rejection path — usage-log-rejected, no
+        // latch, no write — and the meter stays usable.
+        let message = "";
+        try {
+          await meter.bindGrant("w1-demo:0", "");
+        } catch (error: unknown) {
+          message = (error as Error).message;
+        }
+        expect(message).toContain("meter: usage log rejected a record");
+        expect(events.some((e) => e.event === "usage-log-rejected" && e.level === "error")).toBe(true);
+        await meter.bindGrant("w1-demo:0", "sess-1");
+      } finally {
+        await meter.close();
+      }
+      // A startMeter on the same log directory then succeeds.
+      const meter2 = await startMeter({
+        config,
+        env,
+        providers: await getProviders(),
+        timers: createManualTimers(),
+        logIo: systemUsageLogIo,
+        now: () => new Date(),
+        log,
+      });
+      await meter2.close();
+    } finally {
+      resetProvidersCache();
+      delete process.env.META_API_KEY;
+      delete process.env.NVIDIA_API_KEY;
+      delete process.env.PROVIDER_META_API_BASE_URL;
+      delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    }
   }),
 );
 

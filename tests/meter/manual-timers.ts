@@ -33,6 +33,9 @@ export function createManualTimers(): ManualTimers {
   }
 
   return {
+    elapsedMs(): number {
+      return clock;
+    },
     after(ms: number, fire: () => void) {
       const entry: Pending = {
         scheduledAt: clock,

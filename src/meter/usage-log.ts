@@ -158,8 +158,13 @@ function checkAt(path: string, line: number, at: string): void {
 // checkRecord runs every 4.3 predicate and mutates nothing; commitRecord
 // applies the record to the index. Replay calls both; the append chain
 // calls checkRecord before the write and commitRecord after the datasync,
-// so a record can never become durable that replay would reject.
+// so a record can never become durable that replay would reject. The
+// schema check runs first: it is the same validateRecord replay runs, so
+// the append chain refuses a record that replay would reject.
 function checkRecord(index: UsageIndex, record: UsageLogRecord, path: string, line: number): void {
+  if (!validateRecord(record)) {
+    fail(path, line, "record does not match the usage-log schema");
+  }
   checkAt(path, line, record.at);
   switch (record.kind) {
     case "grant-open": {

@@ -414,7 +414,7 @@ async function forwardCall(
   call.attachAborter(() => {
     abortWith("closed-abort");
   });
-  const t0 = Date.now();
+  const m0 = state.timers.elapsedMs();
   // L1: the first-byte timer is cancelled at the headers, the idle timer
   // is armed at the headers and re-armed after each chunk, and the total
   // timer is armed once at t0 and cancelled only after the pump ends.
@@ -534,7 +534,7 @@ async function forwardCall(
   } catch (error: unknown) {
     cancelFirstByte();
     cancelPumpTimers();
-    const ms = Date.now() - t0;
+    const ms = Math.round(state.timers.elapsedMs() - m0);
     // The early paths use the F4 order: finishEnd, then finish, then the
     // error answer.
     if (abortState.reason !== null) {
@@ -684,7 +684,7 @@ async function forwardCall(
           inputTokens,
           outputTokens,
           clientGone,
-          ms: Date.now() - t0,
+          ms: Math.round(state.timers.elapsedMs() - m0),
           bytesOut,
         });
         call.finish();

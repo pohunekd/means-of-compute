@@ -311,6 +311,26 @@ test("first-byte timeout is billed with null counts", async () => {
   );
 });
 
+test("call-end ms comes from the monotonic clock", async () => {
+  await withMeter(
+    "tests/meter/recordings/stream-hold-after-first.json",
+    async ({ meter, tokenFor, logPath, loopback, timers, waitForEvent }) => {
+      const { requestId } = await openBoundGrant(meter);
+      const pending = post(meter, tokenFor(requestId), chatBody());
+      await loopback.waitHeld(1);
+      // M1b: the only clock the meter reads is the injected one.
+      timers.advance(250);
+      loopback.release();
+      const resp = await pending;
+      expect(resp.status).toBe(200);
+      await resp.text();
+      await waitForEvent((e) => e.event === "call-finished");
+      const end = readEnd(await readLogLines(logPath));
+      expect(end["ms"]).toBe(250);
+    },
+  );
+});
+
 test("stream 200 without usage is billed with null counts", async () => {
   await withMeter(
     "tests/meter/recordings/stream-no-usage.json",

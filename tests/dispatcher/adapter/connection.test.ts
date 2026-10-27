@@ -182,8 +182,9 @@ test("a drop between two opens leaves the second open intact", async () => {
     }
     await connector.drop("laptop-a");
     const second = connector.client("laptop-a");
-    secondGate();
-    const secondClient = await second;
+    while (calls < 2) {
+      await Bun.sleep(1);
+    }
     firstGate();
     let firstCaught: unknown;
     try {
@@ -193,6 +194,12 @@ test("a drop between two opens leaves the second open intact", async () => {
     }
     expect(firstCaught).toBeInstanceOf(PortUnreachableError);
     expect((firstCaught as PortUnreachableError).message).toBe("laptop-a: host_unreachable");
+    // A settled after B started: a third caller must still share B's
+    // pending entry instead of starting a third connect.
+    const third = connector.client("laptop-a");
+    secondGate();
+    const secondClient = await second;
+    expect(await third).toBe(secondClient);
     expect(secondClient).toBeDefined();
     expect(secondClient).not.toBe(firstClientObject);
     expect(calls).toBe(2);

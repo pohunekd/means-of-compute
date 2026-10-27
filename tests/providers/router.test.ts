@@ -321,7 +321,7 @@ test("callProviderOnce on a refused connection throws ProviderCallError that did
   expect(failure.usage).toBeNull();
 });
 
-test("callProviderOnce on a non-200 keeps the router error text (no billed call)", async () => {
+test("callProviderOnce on a non-200 throws ProviderCallError that did not reach billing (L-3)", async () => {
   const { primaryServer, fallbackServer } = await withProviders(
     "tests/providers/recordings/primary-429.json",
     "tests/providers/recordings/fallback-200.json",
@@ -336,9 +336,13 @@ test("callProviderOnce on a non-200 keeps the router error text (no billed call)
   void primaryServer.stop();
   void fallbackServer.stop();
   cleanupEnv();
-  expect(caught).toBeInstanceOf(ProviderError);
-  expect(caught).not.toBeInstanceOf(ProviderCallError);
-  expect((caught as ProviderError).message).toBe("Provider nvidia-build responded 429");
+  expect(caught).toBeInstanceOf(ProviderCallError);
+  const failure = caught as ProviderCallError;
+  expect(failure).toBeInstanceOf(ProviderError);
+  expect(failure.message).toBe("Provider nvidia-build responded 429");
+  expect(failure.status).toBe(429);
+  expect(failure.reachedProvider).toBe(false);
+  expect(failure.usage).toBeNull();
 });
 
 test("callProviderOnce rejects an unknown provider id", async () => {

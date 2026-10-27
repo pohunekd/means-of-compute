@@ -88,7 +88,9 @@ async function callProvider(
   }
   const controller = new AbortController();
   const timeoutMs = provider.timeoutMs;
-  const state = { timedOut: false };
+  // Reached means fetch resolved: any failure from here on may be
+  // billed server-side, even when the body never arrives.
+  const state = { timedOut: false, responded: false };
   const timeoutId = setTimeout(() => {
     state.timedOut = true;
     controller.abort();
@@ -103,10 +105,15 @@ async function callProvider(
       }),
       signal: controller.signal,
     });
+    // The provider answered: everything below reads the body of a
+    // call that can already be billed.
+    state.responded = true;
     if (!resp.ok) {
-      throw new ProviderError(
+      throw new ProviderCallError(
         `Provider ${provider.id} responded ${String(resp.status)}`,
         resp.status,
+        false,
+        null,
       );
     }
     let data: unknown;
@@ -150,6 +157,11 @@ async function callProvider(
       outputTokens: usageCount(usage?.completion_tokens),
     };
   } catch (error: unknown) {
+    if (error instanceof ProviderCallError) {
+      // Already classified above (non-200, non-JSON, invalid content):
+      // a classified failure is never re-wrapped.
+      throw error;
+    }
     if (isAbortError(error)) {
       // The request was sent before the abort, so the call may be billed:
       // a late reply still counts server-side. Usage is unknown.
@@ -161,12 +173,26 @@ async function callProvider(
       throw error;
     }
     if (error instanceof TypeError) {
-      // A connection failure happens before any response, so nothing
-      // was billed: the call never reached the provider.
+      // A TypeError before fetch resolved is a connection failure:
+      // the call never reached the provider. The same error after
+      // the response began means the provider may still bill it.
       throw new ProviderCallError(
         `Provider ${provider.id} connection failed: ${error.message}`,
         503,
-        false,
+        state.responded,
+        null,
+        { cause: error },
+      );
+    }
+    if (state.responded) {
+      // Any other error while reading the body of an answered call
+      // is billed the same way: reached, with unknown usage.
+      throw new ProviderCallError(
+        `Provider ${provider.id} failed reading the response: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        502,
+        true,
         null,
         { cause: error },
       );
@@ -219,12 +245,14 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       return { providerId: provider.id, model: provider.model, content };
     } catch (e: unknown) {
       if (e instanceof ProviderCallError) {
-        // Single-call failures carry their own reason: a timed-out call
-        // fails over as a timeout, a call that never reached the provider
-        // as a connection failure, anything else by status.
+        // Single-call failures carry their own reason. Status wins
+        // over reachability: a 429 is a rate limit and a 5xx a server
+        // error even when the response already rules out billing.
+        // Only an unreached 503 is a connection failure; any other
+        // unclassified status throws instead of failing over.
         if (e.status === 504) {
           lastReason = "timeout";
-        } else if (!e.reachedProvider) {
+        } else if (!e.reachedProvider && e.status === 503) {
           lastReason = "connection";
         } else if (e.status === 429) {
           lastReason = "rate_limit";

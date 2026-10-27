@@ -94,10 +94,18 @@ function insideWindow(now: Date, start: string, end: string): boolean {
 function readFileIfExists(p: string): string | null {
   try {
     if (existsSync(p)) return readFileSync(p, "utf-8").trim();
-  } catch {
-    // ignore
+  } catch (e) {
+    // A missing file means the attribute does not exist; any other read
+    // error is reported so callers can fail with the cause.
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
   return null;
+}
+
+function readRequired(path: string, what: string): string {
+  const value = readFileIfExists(path);
+  if (value === null || value === "") throw new Error(`power unknown: cannot read ${what}`);
+  return value;
 }
 
 function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
@@ -116,23 +124,21 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
     throw new Error("power unknown: cannot read power_supply");
   }
   for (const entry of entries) {
-    const typePath = `${base}/${entry}/type`;
-    const type = readFileIfExists(typePath);
-    if (!type) continue;
+    const type = readRequired(`${base}/${entry}/type`, `type of ${entry}`);
     if (type === "Mains") {
-      const scope = readFileIfExists(`${base}/${entry}/scope`);
+      const scope = readFileIfExists(`${base}/${entry}/scope`) ?? "System";
       if (scope === "Device") continue;
       hasMains = true;
-      const online = readFileIfExists(`${base}/${entry}/online`);
+      const online = readRequired(`${base}/${entry}/online`, `online of ${entry}`);
       if (online === "1") acPower = true;
     }
     if (type === "Battery") {
-      const scope = readFileIfExists(`${base}/${entry}/scope`);
+      const scope = readFileIfExists(`${base}/${entry}/scope`) ?? "System";
       if (scope === "Device") continue;
       hasBattery = true;
-      const cap = readFileIfExists(`${base}/${entry}/capacity`);
-      const n = cap ? Number(cap) : NaN;
-      if (cap === null || cap === "" || !Number.isFinite(n)) {
+      const cap = readRequired(`${base}/${entry}/capacity`, `capacity of ${entry}`);
+      const n = Number(cap);
+      if (!Number.isFinite(n)) {
         throw new Error(`power unknown: cannot read capacity of ${entry}`);
       }
       batteryPercent = batteryPercent === null ? n : Math.min(batteryPercent, n);

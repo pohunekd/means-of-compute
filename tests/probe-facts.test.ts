@@ -63,7 +63,7 @@ function baseFacts(extra: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-async function expectFactsError(result: RunResult, key: string): Promise<void> {
+function expectFactsError(result: RunResult, key: string): void {
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toBe("");
   const lines = result.stderr.split("\n");
@@ -77,32 +77,32 @@ describe.skipIf(process.platform !== "linux")("facts validation", () => {
   test("string noLocalUserSession exits 1 naming the key (mutation: drop the schema check)", async () => {
     for (const bad of ["true", "yes", 1]) {
       await withFacts(baseFacts({ noLocalUserSession: bad }), async (p) => {
-        await expectFactsError(await runProbe(p), "noLocalUserSession");
+        expectFactsError(await runProbe(p), "noLocalUserSession");
       });
     }
   });
 
   test("unknown key exits 1 naming it (mutation: additionalProperties: true)", async () => {
     await withFacts(baseFacts({ idleOverride: true }), async (p) => {
-      await expectFactsError(await runProbe(p), "idleOverride");
+      expectFactsError(await runProbe(p), "idleOverride");
     });
   });
 
   test("batteryPercent 101 exits 1 (mutation: drop maximum)", async () => {
     await withFacts(baseFacts({ batteryPercent: 101 }), async (p) => {
-      await expectFactsError(await runProbe(p), "batteryPercent");
+      expectFactsError(await runProbe(p), "batteryPercent");
     });
   });
 
   test("secondsSinceInput -1 exits 1 (mutation: drop minimum)", async () => {
     await withFacts(baseFacts({ secondsSinceInput: -1 }), async (p) => {
-      await expectFactsError(await runProbe(p), "secondsSinceInput");
+      expectFactsError(await runProbe(p), "secondsSinceInput");
     });
   });
 
   test("impossible timestamp exits 1 (mutation: drop the code date check)", async () => {
     await withFacts(baseFacts({ timestamp: "2026-13-01T00:00:00.000Z" }), async (p) => {
-      await expectFactsError(await runProbe(p), "timestamp");
+      expectFactsError(await runProbe(p), "timestamp");
     });
   });
 
@@ -110,7 +110,7 @@ describe.skipIf(process.platform !== "linux")("facts validation", () => {
     // No hostAlias: the check in validateFactsValue runs before loadConfig
     // and the host map, so their errors cannot mask the facts line.
     await withFacts({ noLocalUserSession: true }, async (p) => {
-      await expectFactsError(await runProbe(p), "secondsSinceInput");
+      expectFactsError(await runProbe(p), "secondsSinceInput");
     });
   });
 

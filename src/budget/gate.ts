@@ -99,13 +99,11 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
           { cause: error },
         );
       }
-      const stdoutPromise = new Response(proc.stdout).text();
-      const stderrPromise = new Response(proc.stderr).text();
+      const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
+      const stderrPromise = new Response(proc.stderr as ReadableStream).text();
       const code = await proc.exited;
       if (proc.signalCode !== null) {
-        throw new BudgetGateError(
-          `budget gate: timed out after ${String(options.timeoutMs)} ms`,
-        );
+        throw new BudgetGateError(`budget gate: timed out after ${String(options.timeoutMs)} ms`);
       }
       const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
       const commandText = JSON.stringify(options.command);

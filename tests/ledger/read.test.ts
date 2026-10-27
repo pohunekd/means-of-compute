@@ -234,4 +234,3 @@ test("loadLedgerConfig reads the ledger path and rejects extras", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-

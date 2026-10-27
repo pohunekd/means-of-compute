@@ -31,7 +31,8 @@ function checkFinalizeInput(input: FinalizeInput): void {
   if (!isRecordId(input.workItemId)) {
     throw new LedgerDataError(`ledger: invalid workItemId ${JSON.stringify(input.workItemId)}`);
   }
-  if (input.result !== "success" && input.result !== "blocked") {
+  const result: unknown = input.result;
+  if (result !== "success" && result !== "blocked") {
     throw new LedgerDataError(`ledger: invalid result ${JSON.stringify(input.result)}`);
   }
   if (!isNonNegativeInteger(input.retries)) {

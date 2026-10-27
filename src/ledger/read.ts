@@ -58,9 +58,7 @@ function parseLine(
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw new LedgerDataError(
-      `${label} ${ledgerPath} line ${String(lineNumber)}: not valid JSON`,
-    );
+    throw new LedgerDataError(`${label} ${ledgerPath} line ${String(lineNumber)}: not valid JSON`);
   }
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
     const keys = Object.keys(raw);
@@ -92,9 +90,7 @@ export async function readLedger(label: string, ledgerPath: string): Promise<Led
     const line = lines[index] as string;
     const lineNumber = index + 1;
     if (line === "") {
-      throw new LedgerDataError(
-        `${label} ${ledgerPath} line ${String(lineNumber)}: empty line`,
-      );
+      throw new LedgerDataError(`${label} ${ledgerPath} line ${String(lineNumber)}: empty line`);
     }
     const parsed = parseLine(label, ledgerPath, lineNumber, line);
     if (parsed.record !== null) {

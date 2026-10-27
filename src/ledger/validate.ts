@@ -26,7 +26,10 @@ export function pendingReason(value: unknown): string {
     return predicate;
   }
   const entry = value as { finishedAt?: unknown };
-  if (typeof entry.finishedAt !== "string" || new Date(entry.finishedAt).toISOString() !== entry.finishedAt) {
+  if (
+    typeof entry.finishedAt !== "string" ||
+    new Date(entry.finishedAt).toISOString() !== entry.finishedAt
+  ) {
     return `finishedAt is not canonical: ${JSON.stringify(entry.finishedAt)}`;
   }
   return "invalid pending entry";

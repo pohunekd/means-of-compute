@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Meter usage log record",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/grantOpen" },
+    { "$ref": "#/$defs/grantBind" },
+    { "$ref": "#/$defs/grantClose" },
+    { "$ref": "#/$defs/callStart" },
+    { "$ref": "#/$defs/callEnd" }
+  ],
+  "$defs": {
+    "at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" },
+    "requestId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}:(0|[1-9][0-9]*)$" },
+    "callId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "providerId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "tokens": { "type": ["integer", "null"], "minimum": 0 },
+    "grantOpen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "at", "requestId", "workItemId", "hostAlias", "providerId", "model"],
+      "properties": {
+        "kind": { "const": "grant-open" },
+        "at": { "$ref": "#/$defs/at" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+        "providerId": { "$ref": "#/$defs/providerId" },
+        "model": { "$ref": "#/$defs/model" }
+      }
+    },
+    "grantBind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "at", "requestId", "sessionId"],
+      "properties": {
+        "kind": { "const": "grant-bind" },
+        "at": { "$ref": "#/$defs/at" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "grantClose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "at", "requestId", "state"],
+      "properties": {
+        "kind": { "const": "grant-close" },
+        "at": { "$ref": "#/$defs/at" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "state": { "enum": ["finished", "failed", "lost", "cancelled"] }
+      }
+    },
+    "callStart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "at", "callId", "requestId", "providerId", "model", "stream"],
+      "properties": {
+        "kind": { "const": "call-start" },
+        "at": { "$ref": "#/$defs/at" },
+        "callId": { "$ref": "#/$defs/callId" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "providerId": { "$ref": "#/$defs/providerId" },
+        "model": { "$ref": "#/$defs/model" },
+        "stream": { "type": "boolean" }
+      }
+    },
+    "callEnd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "at",
+        "callId",
+        "requestId",
+        "outcome",
+        "billed",
+        "status",
+        "inputTokens",
+        "outputTokens",
+        "clientGone",
+        "ms",
+        "bytesIn",
+        "bytesOut"
+      ],
+      "properties": {
+        "kind": { "const": "call-end" },
+        "at": { "$ref": "#/$defs/at" },
+        "callId": { "$ref": "#/$defs/callId" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "outcome": {
+          "enum": [
+            "ok",
+            "no-usage",
+            "first-byte-timeout",
+            "idle-timeout",
+            "total-timeout",
+            "upstream-broken",
+            "upstream-error",
+            "upstream-status",
+            "upstream-unreachable",
+            "closed-abort"
+          ]
+        },
+        "billed": { "type": "boolean" },
+        "status": { "type": ["integer", "null"] },
+        "inputTokens": { "$ref": "#/$defs/tokens" },
+        "outputTokens": { "$ref": "#/$defs/tokens" },
+        "clientGone": { "type": "boolean" },
+        "ms": { "type": "integer", "minimum": 0 },
+        "bytesIn": { "type": "integer", "minimum": 0 },
+        "bytesOut": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

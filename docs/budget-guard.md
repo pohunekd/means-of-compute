@@ -59,8 +59,11 @@ bun run budget:check --spend 12.00 --day-cap 12 --total-cap 140  # refuse (exit 
 ```
 
 Exits 0 on admit, 3 on refuse, 2 on a config or data error. `MOC_BUDGET_NOW`
-is test-only: when set, it must be an ISO-8601 UTC timestamp and pins the
-evaluation time the CLI uses for "today"; an invalid value exits 2. The
+is test-only: when set, it must match
+`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$` and parse to a
+valid date, and pins the evaluation time the CLI uses for "today"; the
+CLI then prints `evaluation time pinned by MOC_BUDGET_NOW: <ts>` on
+stderr. An invalid value exits 2. The
 `--spend` / `--day-cap` / `--total-cap` flags are a test override that
 injects totals into the same decision function; `--day-cap` or `--total-cap`
 without `--spend` exits 2, and the override path never writes escalation

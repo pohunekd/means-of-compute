@@ -646,9 +646,41 @@ test("CLI: override refusal writes no state and prints would-escalate", async ()
 test("CLI: invalid MOC_BUDGET_NOW exits 2", async () => {
   const sandbox = await makeCliSandbox();
   try {
-    const result = await sandbox.run([], { MOC_BUDGET_NOW: "not-a-date" });
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain("MOC_BUDGET_NOW");
+    for (const value of ["not-a-date", "2026-10-26T12:00:00.0000Z", "2026-13-40T99:99:99Z"]) {
+      const result = await sandbox.run([], { MOC_BUDGET_NOW: value });
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("MOC_BUDGET_NOW");
+    }
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: pinned time prints a stderr line and pins today", async () => {
+  const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
+  try {
+    await sandbox.writeEntry(
+      record({
+        workItemId: "w1-pinned",
+        finishedAt: `${day}T12:00:00.000Z`,
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 40_000_000,
+            outputTokens: 40_000_000,
+            requests: 20,
+            source: "provider-usage",
+          },
+        ],
+      }),
+    );
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00Z` };
+    const result = await sandbox.run([], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: daily cap reached");
+    expect(result.stderr).toContain(`evaluation time pinned by MOC_BUDGET_NOW: ${day}T23:00:00Z`);
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

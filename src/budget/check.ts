@@ -67,6 +67,8 @@ interface EvaluationClock {
   readonly now: Date;
 }
 
+const PINNED_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
 // Single evaluation-time reader for the CLI. MOC_BUDGET_NOW is test-only:
 // a fixed ISO-8601 UTC timestamp used to pin "today" in CLI tests. An
 // invalid value exits 2; when unset, the CLI uses the clock.
@@ -76,7 +78,7 @@ export function readEvaluationTime(env: NodeJS.ProcessEnv = process.env): Date {
     return new Date();
   }
   const at = Date.parse(raw);
-  if (Number.isNaN(at) || !/Z$/.test(raw) || new Date(at).toISOString() !== raw) {
+  if (!PINNED_TIME_PATTERN.test(raw) || Number.isNaN(at)) {
     throw new Error("budget:check: MOC_BUDGET_NOW must be an ISO-8601 UTC timestamp");
   }
   return new Date(at);
@@ -89,6 +91,11 @@ async function run(): Promise<number> {
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;
+  }
+  if (process.env.MOC_BUDGET_NOW !== undefined) {
+    process.stderr.write(
+      `evaluation time pinned by MOC_BUDGET_NOW: ${process.env.MOC_BUDGET_NOW}\n`,
+    );
   }
   let parsed: CliArgs;
   try {

@@ -23,7 +23,7 @@ const VALID = {
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 };
 
-async function withTempDir(body: (dir: string) => Promise<void>): Promise<void> {
+async function withTempDir(body: (dir: string) => Promise<unknown>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "moc-adapter-config-"));
   try {
     await body(dir);
@@ -57,7 +57,7 @@ test("the checked-in adapter config loads", async () => {
 });
 
 const BAD_CASES: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
-  ["missing key", { ...VALID, cols: undefined } as unknown as Record<string, unknown>, "cols"],
+  ["missing key", { ...VALID, cols: undefined }, "cols"],
   ["extra key", { ...VALID, extra: 1 }, "extra"],
   ["inputAckTimeoutMs 8001", { ...VALID, inputAckTimeoutMs: 8001 }, "inputAckTimeoutMs"],
   ["cancelWaitTimeoutMs 0", { ...VALID, cancelWaitTimeoutMs: 0 }, "cancelWaitTimeoutMs"],
@@ -67,35 +67,49 @@ const BAD_CASES: ReadonlyArray<readonly [string, Record<string, unknown>, string
 for (const [name, value, key] of BAD_CASES) {
   test(`adapter config ${name} throws naming the key`, async () => {
     await withTempDir(async (dir) => {
-      if (!("cols" in value) && name === "missing key") {
-        const { cols: _removed, ...rest } = VALID;
-        const path = await writeConfig(dir, rest);
-        await expect(loadPohunekAdapterConfig(path)).rejects.toThrow("cols");
-        return;
-      }
       const path = await writeConfig(dir, value);
-      await expect(loadPohunekAdapterConfig(path)).rejects.toThrow(key);
+      let message = "";
+      try {
+        await loadPohunekAdapterConfig(path);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain(key);
     });
   });
 }
 
 test("checkDispatcherWaitTimeout accepts the turn ceiling and rejects above it", () => {
-  expect(() => checkDispatcherWaitTimeout(86400000)).not.toThrow();
-  expect(() => checkDispatcherWaitTimeout(86400001)).toThrow("waitTimeoutMs");
+  checkDispatcherWaitTimeout(86400000);
+  let message = "";
+  try {
+    checkDispatcherWaitTimeout(86400001);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  expect(message).toContain("waitTimeoutMs");
 });
 
 test("routes load fails when the env variable is unset", async () => {
-  await expect(loadHostRoutes("MOC_TEST_ROUTES_UNSET_XYZ", {})).rejects.toThrow(
-    "MOC_TEST_ROUTES_UNSET_XYZ",
-  );
+  let message = "";
+  try {
+    await loadHostRoutes("MOC_TEST_ROUTES_UNSET_XYZ", {});
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  expect(message).toContain("MOC_TEST_ROUTES_UNSET_XYZ");
 });
 
 test("routes load names a bad alias", async () => {
   await withTempDir(async (dir) => {
     const path = await writeRoutes(dir, { "Bad Alias!": "some-route" });
-    await expect(
-      loadHostRoutes("MOC_TEST_ROUTES_FILE", { MOC_TEST_ROUTES_FILE: path }),
-    ).rejects.toThrow("Bad Alias!");
+    let message = "";
+    try {
+      await loadHostRoutes("MOC_TEST_ROUTES_FILE", { MOC_TEST_ROUTES_FILE: path });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("Bad Alias!");
   });
 });
 

@@ -118,8 +118,6 @@ export function checkDispatcherWaitTimeout(waitTimeoutMs: number): void {
     throw new Error(`"waitTimeoutMs" must be an integer in 1..${String(MAX_SESSION_WAIT_TURN_MS)}`);
   }
   if (waitTimeoutMs > MAX_SESSION_WAIT_TURN_MS) {
-    throw new Error(
-      `"waitTimeoutMs" must be an integer in 1..${String(MAX_SESSION_WAIT_TURN_MS)}`,
-    );
+    throw new Error(`"waitTimeoutMs" must be an integer in 1..${String(MAX_SESSION_WAIT_TURN_MS)}`);
   }
 }

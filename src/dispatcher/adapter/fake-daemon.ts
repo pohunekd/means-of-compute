@@ -107,8 +107,13 @@ class FakeChannel implements ControlChannel {
   private readonly queue: string[] = [];
   private readonly wakeups: (() => void)[] = [];
   private closed = false;
+  private readonly iterable: AsyncIterable<string>;
 
-  constructor(private readonly handle: (line: string) => Promise<string | ClientError>) {}
+  constructor(private readonly handle: (line: string) => Promise<string | ClientError>) {
+    this.iterable = {
+      [Symbol.asyncIterator]: (): AsyncIterator<string> => this.drain(),
+    };
+  }
 
   async send(line: string): Promise<void> {
     const outcome = await this.handle(line);
@@ -119,12 +124,7 @@ class FakeChannel implements ControlChannel {
   }
 
   get lines(): AsyncIterable<string> {
-    const self = this;
-    return {
-      [Symbol.asyncIterator](): AsyncIterator<string> {
-        return self.drain();
-      },
-    };
+    return this.iterable;
   }
 
   async close(): Promise<void> {
@@ -132,6 +132,7 @@ class FakeChannel implements ControlChannel {
     for (const wake of this.wakeups.splice(0)) {
       wake();
     }
+    await Promise.resolve();
   }
 
   private enqueue(line: string): void {
@@ -253,10 +254,11 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
     state: AliasState,
     sessionIds: readonly unknown[],
   ): SessionWaitTurnResult["progress"] {
-    return (sessionIds as string[]).map((sessionId) => {
-      const info = state.sessions.get(String(sessionId));
+    return sessionIds.map((sessionId) => {
+      const id = typeof sessionId === "string" ? sessionId : "";
+      const info = state.sessions.get(id);
       return {
-        session_id: String(sessionId),
+        session_id: id,
         state: info?.state ?? "running",
         output_advanced: false,
       };
@@ -268,6 +270,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
     alias: string,
     request: WireRequest,
   ): Promise<string | ClientError> {
+    await Promise.resolve();
     const params = request.params as Record<string, unknown>;
     switch (request.method) {
       case "daemon.health": {
@@ -337,15 +340,18 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
           return errLine(request.id, "session_not_found");
         }
         const patch = params["metadata"] as Record<string, string | null>;
-        const metadata = { ...(info.metadata ?? {}) };
-        for (const [key, value] of Object.entries(patch)) {
-          if (value === null) {
-            delete metadata[key];
-          } else {
-            metadata[key] = value;
+        const nextMetadata: Record<string, string> = {};
+        for (const [keptKey, keptValue] of Object.entries(info.metadata ?? {})) {
+          if (keptKey !== target || patch[keptKey] !== null) {
+            nextMetadata[keptKey] = keptValue;
           }
         }
-        const updated: SessionInfo = { ...info, metadata };
+        for (const [key, value] of Object.entries(patch)) {
+          if (value !== null) {
+            nextMetadata[key] = value;
+          }
+        }
+        const updated: SessionInfo = { ...info, metadata: nextMetadata };
         state.sessions.set(target, updated);
         return okLine(request.id, { session: updated });
       }
@@ -535,9 +541,17 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
       const arrived = new Promise<{ release(): void }>((resolve) => {
         const list = state.pauses.get(method) ?? [];
         list.push({
-          notified: () => resolve({ release: () => release() }),
+          notified: () => {
+            resolve({
+              release: () => {
+                release();
+              },
+            });
+          },
           wait,
-          release: () => release(),
+          release: () => {
+            release();
+          },
         });
         state.pauses.set(method, list);
       });

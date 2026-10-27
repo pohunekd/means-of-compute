@@ -1,1 +1,10 @@
-{ "agentProfile": "moc-worker", "project": "means-of-compute", "cols": 200, "rows": 50, "inputAckTimeoutMs": 8000, "connectTimeoutMs": 5000, "cancelWaitTimeoutMs": 30000, "hostRoutesFileEnv": "MOC_HOST_ROUTES_FILE" }
+{
+  "agentProfile": "moc-worker",
+  "project": "means-of-compute",
+  "cols": 200,
+  "rows": 50,
+  "inputAckTimeoutMs": 8000,
+  "connectTimeoutMs": 5000,
+  "cancelWaitTimeoutMs": 30000,
+  "hostRoutesFileEnv": "MOC_HOST_ROUTES_FILE"
+}

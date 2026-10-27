@@ -93,19 +93,19 @@ export function hostPreflightFailure(
   caps: HostCapabilities,
   cfg: PohunekAdapterConfig,
 ): PreflightName | null {
-  if (caps.worktree_supported !== true) {
+  if (!caps.worktree_supported) {
     return "worktree_supported";
   }
-  if (caps.git_available !== true) {
+  if (!caps.git_available) {
     return "git_available";
   }
-  if (caps.session_wait_turn_supported !== true) {
+  if (!caps.session_wait_turn_supported) {
     return "session_wait_turn_supported";
   }
-  if (caps.session_new_branch_source_supported !== true) {
+  if (!caps.session_new_branch_source_supported) {
     return "session_new_branch_source_supported";
   }
-  if (caps.session_new_input_ack_supported !== true) {
+  if (!caps.session_new_input_ack_supported) {
     return "session_new_input_ack_supported";
   }
   if (!caps.supported_agents.includes(cfg.agentProfile)) {
@@ -134,7 +134,8 @@ export function lookupDecision(bound: readonly SessionInfo[], digest: string): L
   if (match === undefined) {
     return { kind: "create" };
   }
-  if (match.metadata?.[MOC_METADATA.requestDigest] !== digest) {
+  const requestDigest = match.metadata?.[MOC_METADATA.requestDigest];
+  if (requestDigest === undefined || requestDigest !== digest) {
     return { kind: "reject", code: "request-conflict" };
   }
   if (match.metadata?.[MOC_METADATA.start] === "accepted") {

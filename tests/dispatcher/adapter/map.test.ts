@@ -24,9 +24,6 @@ import {
   type StartRequest,
 } from "../../../src/dispatcher/port.js";
 
-type WaitArg = Parameters<typeof waitDecision>[1];
-type InfoArg = Parameters<typeof waitDecision>[2];
-type InspectInfo = Extract<InfoArg, { state: string }>;
 type LocalClient = Awaited<ReturnType<FakeDaemon["connector"]["client"]>>;
 
 interface MiniChannel {
@@ -53,6 +50,7 @@ function localErrTransport(code: string): {
   const channel: MiniChannel = {
     async send(line: string): Promise<void> {
       const request = JSON.parse(line) as { id: string; method: string };
+      await Promise.resolve();
       if (request.method === "daemon.health") {
         push(
           JSON.stringify({
@@ -251,7 +249,7 @@ function capabilities(
     session_new_branch_source_supported: true,
     session_new_input_ack_supported: true,
     ...overrides,
-  } as Parameters<typeof hostPreflightFailure>[0];
+  };
 }
 
 test("healthy capabilities pass the preflight", () => {
@@ -297,7 +295,7 @@ function session(
       [MOC_METADATA.start]: "accepted",
     },
     ...overrides,
-  } as Parameters<typeof lookupDecision>[0][number];
+  };
 }
 
 test("lookup with no binding creates", () => {
@@ -352,7 +350,7 @@ function newResult(
     prompt_delivered: true,
     warnings: [],
     ...overrides,
-  } as Parameters<typeof acceptanceFailure>[1];
+  };
 }
 
 test("acceptance passes on the happy path", () => {
@@ -420,20 +418,20 @@ test("acceptance ignores resume-only checks for a fresh start", () => {
   expect(acceptanceFailure(request(), newResult({ worktree_source: undefined }))).toBeNull();
 });
 
-function waitReply(overrides: Record<string, unknown> = {}): WaitArg {
+function waitReply(overrides: Record<string, unknown> = {}): Parameters<typeof waitDecision>[1] {
   return {
     reason: "timeout",
     cursor: "cursor-1",
     progress: [],
     ...overrides,
-  } as WaitArg;
+  };
 }
 
-function runningInfo(overrides: Record<string, unknown> = {}): InfoArg {
+function runningInfo(overrides: Record<string, unknown> = {}): Parameters<typeof waitDecision>[2] {
   return {
     ...session({ state: "running", metadata: {} }),
     ...overrides,
-  } as unknown as InfoArg;
+  };
 }
 
 test("R1 keeps a marked outcome and stops a live session", () => {
@@ -494,9 +492,7 @@ test("R3 maps a missing exit code to failed without a code", () => {
 });
 
 test("R4 maps a failed session", () => {
-  expect(
-    waitDecision("fake-1", waitReply(), runningInfo({ state: "failed" }) as InspectInfo),
-  ).toEqual({
+  expect(waitDecision("fake-1", waitReply(), runningInfo({ state: "failed" }))).toEqual({
     kind: "terminal",
     state: "failed",
     detail: "session failed",
@@ -506,9 +502,7 @@ test("R4 maps a failed session", () => {
 });
 
 test("R5 maps a stopped session", () => {
-  expect(
-    waitDecision("fake-1", waitReply(), runningInfo({ state: "stopped" }) as InspectInfo),
-  ).toEqual({
+  expect(waitDecision("fake-1", waitReply(), runningInfo({ state: "stopped" }))).toEqual({
     kind: "terminal",
     state: "cancelled",
     detail: "session stopped",
@@ -517,7 +511,7 @@ test("R5 maps a stopped session", () => {
   });
 });
 
-function turnEvent(kind: string): WaitArg {
+function turnEvent(kind: string): Parameters<typeof waitDecision>[1] {
   return waitReply({
     reason: "event",
     event: { session_id: "fake-1", kind, at: "2026-10-27T00:00:00Z" },

@@ -10,7 +10,9 @@ const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 function checkRoutesFile(
   filePath: string,
   value: unknown,
-): { readonly routes: Record<string, string>; readonly aliases: readonly string[] } | { readonly error: string } {
+):
+  | { readonly routes: Record<string, string>; readonly aliases: readonly string[] }
+  | { readonly error: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { error: `Host routes ${filePath}: must be a JSON object` };
   }

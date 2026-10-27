@@ -2,8 +2,13 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-parameters */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { hostname as osHostname, cpus, totalmem, freemem } from "node:os";
 import { contractErrors, isHostCapacity } from "./contracts/v1/validate.js";
+
+const repoRoot = dirname(fileURLToPath(import.meta.url));
+const configPath = (...parts: string[]): string => join(repoRoot, "config", ...parts);
 
 type ProbeConfig = {
   idleMinutes: number;
@@ -55,11 +60,11 @@ function readJson<T>(path: string): T {
 }
 
 function loadConfig(): ProbeConfig {
-  return readJson<ProbeConfig>("config/probe.json");
+  return readJson<ProbeConfig>(configPath("probe.json"));
 }
 
 function loadHostAlias(hostnameVal: string): string {
-  const hostsRaw = readJson<HostMap>("config/hosts.json");
+  const hostsRaw = readJson<HostMap>(configPath("hosts.json"));
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
   if (typeof alias !== "string") {
     throw new Error(`host ${hostnameVal} not in config/hosts.json`);
@@ -533,7 +538,7 @@ async function main(): Promise<void> {
     if (!existsSync(factsPath)) throw new Error(`facts file not found: ${factsPath}`);
     facts = readJson<Facts>(factsPath);
   } else if (scenario) {
-    const mapped = `config/scenarios/${scenario}.json`;
+    const mapped = configPath("scenarios", `${scenario}.json`);
     if (!existsSync(mapped)) throw new Error(`scenario not found: ${scenario}`);
     facts = readJson<Facts>(mapped);
   }

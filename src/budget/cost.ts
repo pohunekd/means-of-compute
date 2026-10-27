@@ -73,6 +73,15 @@ export function summarizeSpend(
   let nvidiaRequestsToday = 0;
   const unknownWorkItemIds: string[] = [];
   for (const record of records) {
+    // Request counts are data, not cost: they are tallied before pricing
+    // so a spend-unknown record still reports its NVIDIA requests.
+    if (utcDayOfRecord(record) === today) {
+      for (const entry of record.tokens) {
+        if (entry.provider === nvidiaProviderId) {
+          nvidiaRequestsToday += entry.requests;
+        }
+      }
+    }
     let cost: number;
     try {
       cost = costOfRecord(record, pricing);
@@ -86,11 +95,6 @@ export function summarizeSpend(
     spentTotalUsd += cost;
     if (utcDayOfRecord(record) === today) {
       spentTodayUsd += cost;
-      for (const entry of record.tokens) {
-        if (entry.provider === nvidiaProviderId) {
-          nvidiaRequestsToday += entry.requests;
-        }
-      }
     }
   }
   return { spentTodayUsd, spentTotalUsd, nvidiaRequestsToday, unknownWorkItemIds };

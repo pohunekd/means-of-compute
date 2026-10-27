@@ -89,7 +89,15 @@ test("cost reports spend unknown on null tokens from a priced provider", () => {
         model: "muse-spark-1.3-contributor",
         inputTokens: null,
         outputTokens: 5,
-        requests: 1,
+        requests: 7,
+        source: "provider-usage",
+      },
+      {
+        provider: "nvidia-build",
+        model: "meta/muse-glimmer-30b",
+        inputTokens: 10,
+        outputTokens: 10,
+        requests: 3,
         source: "provider-usage",
       },
     ],
@@ -101,6 +109,8 @@ test("cost reports spend unknown on null tokens from a priced provider", () => {
     new Date("2026-10-26T23:00:00.000Z"),
   );
   expect(summary.unknownWorkItemIds).toEqual(["w2-nulls"]);
+  // Request counts are tallied before pricing, so the report stays accurate.
+  expect(summary.nvidiaRequestsToday).toBe(3);
   const decision = decideAdmission(summary, CONFIG, { route: ["nvidia-build"] });
   expect(decision.admit).toBe(false);
   expect(decision.reason).toBe("spend unknown");

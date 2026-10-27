@@ -93,8 +93,8 @@ async function callProvider(
   }
   const controller = new AbortController();
   const timeoutMs = provider.timeoutMs;
-  // Reached means fetch resolved: any failure from here on may be
-  // billed server-side, even when the body never arrives.
+  // A 200 whose body fails and any timeout may be billed. A connection
+  // failure before a response and a non-200 status are never billed.
   const state = { timedOut: false, responded: false };
   const timeoutId = setTimeout(() => {
     state.timedOut = true;
@@ -110,8 +110,8 @@ async function callProvider(
       }),
       signal: controller.signal,
     });
-    // The provider answered: everything below reads the body of a
-    // call that can already be billed.
+    // A 200 answer may be billed from this point on, so failures below
+    // append a ledger entry; the non-200 throw above never does.
     state.responded = true;
     if (!resp.ok) {
       throw new ProviderCallError(
@@ -263,7 +263,7 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
     } catch (e: unknown) {
       if (e instanceof ProviderCallError) {
         // Single-call failures carry their own kind. An http failure
-        // maps from the status exactly as on main: 429 is a rate
+        // maps from the status: 429 is a rate
         // limit and a 5xx a server error. Status numbers are never
         // used as sentinels for connection or timeout.
         if (e.kind === "connection") {
@@ -271,7 +271,9 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
         } else if (e.kind === "timeout") {
           lastReason = "timeout";
         } else if (e.kind === "body") {
-          lastReason = "server_error";
+          // A body read that failed with a TypeError (a reset or an
+          // early close mid-body) is a network drop, not a server error.
+          lastReason = e.cause instanceof TypeError ? "connection" : "server_error";
         } else if (e.status === 429) {
           lastReason = "rate_limit";
         } else if (e.status >= 500 && e.status < 600) {

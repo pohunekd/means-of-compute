@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { createServer } from "node:net";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
 import {
@@ -157,6 +158,92 @@ test("router fails over on a non-JSON 200 (mutation: parse with resp.json() agai
   expect(result.failoverReason).toBe("server_error");
   expect(result.content).toBe("fallback response");
 });
+
+test("router maps a reset 200 body to connection (mutation: every body failure is server_error)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const stub = await startPartialBodyStub("reset");
+  const fallbackServer = await startLoopback("tests/providers/recordings/fallback-200.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(fallbackServer.port)}`;
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  await stub.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("connection");
+  expect(result.content).toBe("fallback response");
+});
+
+test("router maps a closed 200 body to connection", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const stub = await startPartialBodyStub("close");
+  const fallbackServer = await startLoopback("tests/providers/recordings/fallback-200.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(fallbackServer.port)}`;
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  await stub.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("connection");
+  expect(result.content).toBe("fallback response");
+});
+
+// A raw TCP stub for R4-1: it answers HTTP 200 with a Content-Length the
+// body never fills, then resets or closes the socket. fetch resolves the
+// 200, and the body read fails with a TypeError, so the failover must be
+// labelled a connection drop rather than a server error.
+async function startPartialBodyStub(
+  mode: "reset" | "close",
+): Promise<{ port: number; stop: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((socket) => {
+      let seen = Buffer.alloc(0);
+      let answered = false;
+      socket.on("data", (chunk: Buffer) => {
+        seen = Buffer.concat([seen, chunk]);
+        if (!answered && seen.includes("\r\n\r\n")) {
+          answered = true;
+          socket.write(
+            'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{"choices":',
+            () => {
+              if (mode === "reset") {
+                socket.destroy();
+              } else {
+                socket.end();
+              }
+            },
+          );
+        }
+      });
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("partial-body stub has no port"));
+        return;
+      }
+      resolve({
+        port: address.port,
+        stop: () =>
+          new Promise<void>((done) => {
+            server.close(() => {
+              done();
+            });
+          }),
+      });
+    });
+  });
+}
 
 test("router throws ProvidersExhaustedError naming the last reason (mutation: plain Error)", async () => {
   const { primaryServer, fallbackServer } = await withProviders(

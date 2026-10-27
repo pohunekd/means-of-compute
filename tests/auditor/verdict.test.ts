@@ -302,7 +302,9 @@ async function startResetStub(): Promise<{ port: number; stop: () => Promise<voi
         return;
       }
       resolve({ port: address.port, stop: () => new Promise<void>((done) => {
-        server.close(() => done());
+        server.close(() => {
+          done();
+        });
       }) });
     });
   });

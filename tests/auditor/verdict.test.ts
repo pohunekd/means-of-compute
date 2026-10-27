@@ -286,7 +286,7 @@ async function startResetStub(): Promise<{ port: number; stop: () => Promise<voi
         if (!answered && seen.includes("\r\n\r\n")) {
           answered = true;
           socket.write(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{\"choices\":",
+            'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{"choices":',
             () => {
               socket.destroy();
             },
@@ -301,11 +301,15 @@ async function startResetStub(): Promise<{ port: number; stop: () => Promise<voi
         reject(new Error("reset stub has no port"));
         return;
       }
-      resolve({ port: address.port, stop: () => new Promise<void>((done) => {
-        server.close(() => {
-          done();
-        });
-      }) });
+      resolve({
+        port: address.port,
+        stop: () =>
+          new Promise<void>((done) => {
+            server.close(() => {
+              done();
+            });
+          }),
+      });
     });
   });
 }

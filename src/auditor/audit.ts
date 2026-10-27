@@ -109,9 +109,7 @@ async function recordAuditUsage(
 
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
   if (!isWorkItem(input.item)) {
-    throw new Error(
-      `invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`,
-    );
+    throw new Error(`invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`);
   }
   if (
     input.pullNumber !== null &&

@@ -57,6 +57,42 @@ test("null input tokens propagate as null through finalize", async () => {
     expect(contents.records).toHaveLength(1);
     expect(contents.records[0]?.tokens[0]?.inputTokens).toBeNull();
     expect(contents.records[0]?.tokens[0]?.requests).toBe(2);
+    await appendPending(
+      ledgerPath,
+      sessionEntry({
+        entryId: "e2-session",
+        finishedAt: "2026-10-26T11:40:00.000Z",
+        startModel: "muse-spark-1.3-contributor",
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 100,
+            outputTokens: 500,
+            requests: 3,
+            source: "provider-usage",
+          },
+        ],
+        session: {
+          hostAlias: "desktop",
+          seconds: 60,
+          source: "dispatcher-clock",
+          result: "failure",
+        },
+      }),
+    );
+    expect(
+      await finalizeUsage(ledgerPath, {
+        workItemId: "w1-demo",
+        result: "success",
+        retries: 1,
+        humanInterventions: 0,
+      }),
+    ).toBe("updated");
+    const updated = await readLedger("Budget ledger", ledgerPath);
+    expect(updated.records).toHaveLength(1);
+    expect(updated.records[0]?.tokens[0]?.inputTokens).toBeNull();
+    expect(updated.records[0]?.tokens[0]?.requests).toBe(5);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

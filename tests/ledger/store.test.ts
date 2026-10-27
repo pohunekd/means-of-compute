@@ -119,6 +119,30 @@ test("append with an invalid date throws LedgerDataError", async () => {
   }
 });
 
+test("append after finalize writes the record line before the pending line", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    await appendPending(ledgerPath, sessionEntry());
+    await finalizeUsage(ledgerPath, {
+      workItemId: "w1-demo",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+    });
+    await appendPending(
+      ledgerPath,
+      sessionEntry({ entryId: "e2-session", workItemId: "w2-other" }),
+    );
+    const lines = (await Bun.file(ledgerPath).text()).trim().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0] as string)).not.toHaveProperty("pending");
+    expect(JSON.parse(lines[1] as string)).toHaveProperty("pending");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("finalize with no pending and no record refuses and writes nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
   const ledgerPath = join(dir, "ledger.jsonl");

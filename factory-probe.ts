@@ -32,11 +32,11 @@ type Facts = Partial<{
   userActivityError: string;
   // Simulates a host where the login query ran and found no local session
   // of class user (remote sessions excluded): idle when on AC, battery above
-  // threshold, inside the window. A failed query is userActivityError instead
-  // (never idle). Combine with an explicit secondsSinceInput fact for a
-  // deterministic logged-out value (otherwise the live readers run); the
-  // manager hint failure fallback is simulated with the managerHintFailed
-  // fact, which uses /proc/uptime instead of the hint.
+  // threshold, inside the window. Requires an explicit secondsSinceInput
+  // fact (combine the two in every scenario); without it the probe exits 1.
+  // A failed query is userActivityError instead (never idle). The manager
+  // hint failure fallback is simulated with the managerHintFailed fact,
+  // which uses /proc/uptime instead of the hint.
   noLocalUserSession: boolean;
   // Fixture override for every sysfs path (power_supply, drm): a scenario
   // may point it at a committed fixture tree, as an absolute path.
@@ -674,6 +674,9 @@ async function main(): Promise<void> {
   const managerHintFailed = facts.managerHintFailed === true;
   if (managerHintFailed && !loggedOut) {
     throw new Error("managerHintFailed needs noLocalUserSession");
+  }
+  if (loggedOut && facts.secondsSinceInput === undefined) {
+    throw new Error("noLocalUserSession needs secondsSinceInput");
   }
   let powerUnknown = false;
   let powerCause = "";

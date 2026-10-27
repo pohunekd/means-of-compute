@@ -482,6 +482,22 @@ test("CLI: cap flag without --spend exits 2", async () => {
   }
 });
 
+test("CLI: empty --spend value exits 2", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    for (const args of [
+      ["--spend", ""],
+      ["--spend", "  "],
+    ]) {
+      const result = await sandbox.run(args);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("needs a non-negative decimal number");
+    }
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI: override refusal writes no state and prints would-escalate", async () => {
   const sandbox = await makeCliSandbox();
   try {

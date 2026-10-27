@@ -41,20 +41,18 @@ async function loadRoute(routePath = "config/providers/route.json"): Promise<str
   return (raw as { providers: string[] }).providers;
 }
 
+const NUMBER_PATTERN = /^[0-9]+(\.[0-9]+)?$/;
+
 function parseOptionalNumber(args: string[], flag: string): number | null {
   const index = args.indexOf(flag);
   if (index === -1) {
     return null;
   }
   const raw = args[index + 1];
-  if (raw === undefined) {
-    throw new Error(`budget:check: ${flag} needs a value`);
+  if (raw === undefined || !NUMBER_PATTERN.test(raw)) {
+    throw new Error(`budget:check: ${flag} needs a non-negative decimal number`);
   }
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`budget:check: ${flag} needs a non-negative number`);
-  }
-  return value;
+  return Number(raw);
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {

@@ -94,38 +94,68 @@ test("router does not fail over on 401", async () => {
   if (!threw) throw new Error("Expected error on 401");
 });
 
-test("router fails over on timeout", async () => {
-  const { primaryServer, fallbackServer } = await withProviders(
-    "tests/providers/recordings/primary-delay.json",
-    "tests/providers/recordings/fallback-200.json",
-    { PROVIDER_NVIDIA_BUILD_TIMEOUT_MS: "10" },
-  );
-  const { callWithFallback } = await import("../../src/providers/router.js");
-  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
-  void primaryServer.stop();
-  void fallbackServer.stop();
-  cleanupEnv();
-  if (result.providerId !== "meta-api") throw new Error("Expected fallback to meta-api");
-  if (result.failoverReason !== "timeout") throw new Error("Expected failover reason timeout");
-  if (result.content !== "fallback response") throw new Error("Unexpected content");
-});
-
-test("router fails over on connection error", async () => {
+test("router fails over on timeout against a server that never answers (mutation: timeout maps to server_error)", async () => {
   resetProvidersCache();
   process.env.NVIDIA_API_KEY = "test";
   process.env.META_API_KEY = "test";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
-  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:9";
+  const primaryStub = await startSilentStub();
   const fallbackServer = await startLoopback("tests/providers/recordings/fallback-200.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(primaryStub.port)}`;
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(fallbackServer.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_TIMEOUT_MS = "10";
+  const { callWithFallback } = await import("../../src/providers/router.js");
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  await primaryStub.stop();
+  void fallbackServer.stop();
+  cleanupEnv();
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("timeout");
+  expect(result.content).toBe("fallback response");
+});
+
+test("callProviderOnce on a timeout throws ProviderCallError that reached the provider (mutation: rethrow the raw AbortError)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const stub = await startSilentStub();
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_TIMEOUT_MS = "10";
+  const { callProviderOnce, ProviderCallError } = await import("../../src/providers/router.js");
+  let caught: unknown;
+  try {
+    await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
+  } catch (e) {
+    caught = e;
+  }
+  await stub.stop();
+  cleanupEnv();
+  expect(caught).toBeInstanceOf(ProviderCallError);
+  const failure = caught as ProviderCallError;
+  expect(failure.kind).toBe("timeout");
+  expect(failure.status).toBe(504);
+  expect(failure.reachedProvider).toBe(true);
+  expect(failure.usage).toBeNull();
+});
+
+test("router fails over on a connection reset before any response (mutation: connection maps to server_error)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const primaryStub = await startResetStub();
+  const fallbackServer = await startLoopback("tests/providers/recordings/fallback-200.json");
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(primaryStub.port)}`;
   process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(fallbackServer.port)}`;
   const { callWithFallback } = await import("../../src/providers/router.js");
   const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  await primaryStub.stop();
   void fallbackServer.stop();
   cleanupEnv();
-  if (result.providerId !== "meta-api") throw new Error("Expected fallback to meta-api");
-  if (result.failoverReason !== "connection")
-    throw new Error("Expected failover reason connection");
-  if (result.content !== "fallback response") throw new Error("Unexpected content");
+  expect(result.providerId).toBe("meta-api");
+  expect(result.failoverReason).toBe("connection");
+  expect(result.content).toBe("fallback response");
 });
 
 test("router fails over on invalid content", async () => {
@@ -243,6 +273,54 @@ async function startPartialBodyStub(
       });
     });
   });
+}
+
+// Destroys the socket immediately to simulate a connection reset.
+async function startResetStub(): Promise<{ port: number; stop: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((socket) => {
+      socket.destroy();
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("reset stub has no port"));
+        return;
+      }
+      resolve({
+        port: address.port,
+        stop: () =>
+          new Promise<void>((done) => {
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
+
+// Waits indefinitely for a gate promise before responding.
+async function startSilentStub(): Promise<{ port: number; stop: () => Promise<void> }> {
+  let resolveGate: () => void;
+  const gate = new Promise<void>((res) => {
+    resolveGate = res;
+  });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch() {
+      await gate;
+      return new Response("late");
+    },
+  });
+  const port = server.port;
+  return {
+    port,
+    stop: async () => {
+      resolveGate();
+      await server.stop(true);
+    },
+  };
 }
 
 test("router throws ProvidersExhaustedError naming the last reason (mutation: plain Error)", async () => {
@@ -433,22 +511,26 @@ test("callProviderOnce on a non-JSON 200 throws ProviderCallError with null usag
   expect(failure.usage).toBeNull();
 });
 
-test("callProviderOnce on a refused connection throws ProviderCallError that did not reach the provider", async () => {
+test("callProviderOnce on a connection reset throws ProviderCallError that did not reach the provider (mutation: reachedProvider true)", async () => {
   resetProvidersCache();
   process.env.NVIDIA_API_KEY = "test";
   process.env.META_API_KEY = "test";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
-  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:9";
-  const { callProviderOnce } = await import("../../src/providers/router.js");
+  const stub = await startResetStub();
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
+  const { callProviderOnce, ProviderCallError } = await import("../../src/providers/router.js");
   let caught: unknown;
   try {
     await callProviderOnce("nvidia-build", { messages: [{ role: "user", content: "hi" }] });
   } catch (error: unknown) {
     caught = error;
   }
+  await stub.stop();
   cleanupEnv();
   expect(caught).toBeInstanceOf(ProviderCallError);
   const failure = caught as ProviderCallError;
+  expect(failure.kind).toBe("connection");
+  expect(failure.status).toBe(503);
   expect(failure.reachedProvider).toBe(false);
   expect(failure.usage).toBeNull();
 });

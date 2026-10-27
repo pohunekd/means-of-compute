@@ -55,12 +55,7 @@ function requiredInteger(
   max: number,
 ): number {
   const value = record[field];
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value < min ||
-    value > max
-  ) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
     throw new Error(`Dispatcher config ${path}: invalid required key "${field}"`);
   }
   return value;

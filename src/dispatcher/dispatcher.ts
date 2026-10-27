@@ -4,11 +4,7 @@
 // adapter. The budget gate is called only in start; watch, diff and cancel
 // never call it.
 import { isPlacementDecision, isWorkItem } from "../../contracts/v1/validate.js";
-import type {
-  PlacementDecision,
-  TokenUsage,
-  WorkItem,
-} from "../../contracts/v1/types.js";
+import type { PlacementDecision, TokenUsage, WorkItem } from "../../contracts/v1/types.js";
 import type { BudgetGate } from "../budget/gate.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
@@ -28,7 +24,7 @@ import type {
 } from "./port.js";
 import { PortRejectedError, PortUnreachableError } from "./port.js";
 import { readRegistry, writeRegistry } from "./registry.js";
-import type { RegistryEntry } from "./registry.js";
+import type { RegistryEntry, RegistryTerminal } from "./registry.js";
 
 export interface DispatcherDeps {
   readonly port: DispatcherPort;
@@ -103,17 +99,17 @@ function isValidPortToken(token: TokenUsage): boolean {
   }
   if (
     token.inputTokens !== null &&
-    (!Number.isInteger(token.inputTokens) || (token.inputTokens as number) < 0)
+    (!Number.isInteger(token.inputTokens) || token.inputTokens < 0)
   ) {
     return false;
   }
   if (
     token.outputTokens !== null &&
-    (!Number.isInteger(token.outputTokens) || (token.outputTokens as number) < 0)
+    (!Number.isInteger(token.outputTokens) || token.outputTokens < 0)
   ) {
     return false;
   }
-  if (!Number.isInteger(token.requests) || (token.requests as number) < 0) {
+  if (!Number.isInteger(token.requests) || token.requests < 0) {
     return false;
   }
   return true;
@@ -137,15 +133,10 @@ function isTerminalResult(
   );
 }
 
-function pendingEntryOf(entry: RegistryEntry, terminal: RegistryEntry["terminal"] & object): PendingUsage {
-  const stored = terminal as {
-    readonly state: TerminalState;
-    readonly observedAt: string;
-    readonly seconds: number;
-    readonly usage: PortUsage | null;
-    readonly usageValid: boolean;
-  };
+function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): PendingUsage {
+  const stored = terminal;
   const useReported = stored.usage !== null && stored.usageValid;
+  const reported = stored.usage;
   return {
     entryId: `${entry.workItemId}:${entry.sessionId}`,
     kind: "session",
@@ -153,7 +144,7 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryEntry["terminal"
     finishedAt: stored.observedAt,
     startModel: entry.model.model,
     tokens: useReported
-      ? (stored.usage as PortUsage).tokens.map((token) => ({
+      ? (reported === null ? [] : reported.tokens).map((token) => ({
           provider: token.provider,
           model: token.model,
           inputTokens: token.inputTokens,
@@ -319,7 +310,9 @@ export function createDispatcher(deps: DispatcherDeps): {
     };
   }
 
-  async function loadEntry(requestId: string): Promise<{ entries: RegistryEntry[]; entry: RegistryEntry }> {
+  async function loadEntry(
+    requestId: string,
+  ): Promise<{ entries: RegistryEntry[]; entry: RegistryEntry }> {
     const found = (await readRegistry(deps.config.registryPath)).slice();
     const entry = found.find((candidate) => candidate.requestId === requestId);
     if (entry === undefined) {
@@ -327,7 +320,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         `dispatcher precondition known-request: unknown requestId "${requestId}"`,
       );
     }
-    return { entries: found as RegistryEntry[], entry };
+    return { entries: found, entry };
   }
 
   async function persistTerminalAndAppend(
@@ -343,9 +336,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     },
   ): Promise<FinishOutcome> {
     if (terminal.seconds < 0) {
-      throw new DispatchClockError(
-        `dispatcher clock: negative seconds for ${entry.requestId}`,
-      );
+      throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
     }
     if (terminal.usage !== null && !terminal.usageValid) {
       deps.log({
@@ -377,9 +368,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     };
     await writeRegistry(
       deps.config.registryPath,
-      entries.map((candidate) =>
-        candidate.requestId === entry.requestId ? appended : candidate,
-      ),
+      entries.map((candidate) => (candidate.requestId === entry.requestId ? appended : candidate)),
     );
     const result = terminalResultOf(appended);
     deps.log({
@@ -403,7 +392,11 @@ export function createDispatcher(deps: DispatcherDeps): {
     }
     if (terminal.ledgerAppended) {
       const result = terminalResultOf(entry);
-      return { result, attempt: attemptOf(terminal.state, entry.cancelReason), ledger: "unchanged" };
+      return {
+        result,
+        attempt: attemptOf(terminal.state, entry.cancelReason),
+        ledger: "unchanged",
+      };
     }
     const pending = pendingEntryOf(entry, terminal);
     const ledger = await appendPending(deps.ledgerPath, pending);
@@ -413,9 +406,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     };
     await writeRegistry(
       deps.config.registryPath,
-      entries.map((candidate) =>
-        candidate.requestId === entry.requestId ? appended : candidate,
-      ),
+      entries.map((candidate) => (candidate.requestId === entry.requestId ? appended : candidate)),
     );
     const result = terminalResultOf(appended);
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
@@ -427,9 +418,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     result: Extract<WaitResult, { state: TerminalState }>,
   ): Promise<FinishOutcome> {
     const observedAt = deps.now().toISOString();
-    const seconds = Math.floor(
-      (Date.parse(observedAt) - Date.parse(entry.startedAt)) / 1000,
-    );
+    const seconds = Math.floor((Date.parse(observedAt) - Date.parse(entry.startedAt)) / 1000);
     return persistTerminalAndAppend(entries, entry, {
       state: result.state,
       observedAt,

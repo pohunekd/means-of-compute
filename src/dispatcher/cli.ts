@@ -11,10 +11,7 @@ import {
   isWorkItem,
   type SchemaName,
 } from "../../contracts/v1/validate.js";
-import type {
-  PlacementDecision,
-  WorkItem,
-} from "../../contracts/v1/types.js";
+import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { loadDispatcherConfig } from "./config.js";
 import type { ModelSelection } from "./port.js";

@@ -5,13 +5,7 @@
 import Ajv from "ajv/dist/2020";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
-import type {
-  CancelReason,
-  ModelSelection,
-  PortState,
-  PortUsage,
-  TerminalState,
-} from "./port.js";
+import type { CancelReason, ModelSelection, PortState, PortUsage, TerminalState } from "./port.js";
 import registrySchema from "./registry.schema.json" with { type: "json" };
 
 const ajv = new Ajv({ strict: true });
@@ -60,10 +54,10 @@ function isRegistryEntry(value: unknown): value is RegistryEntry {
     return false;
   }
   const entry = value as Record<string, unknown>;
-  if (typeof entry["requestId"] !== "string" || (entry["requestId"] as string).length === 0) {
+  if (typeof entry["requestId"] !== "string" || entry["requestId"].length === 0) {
     return false;
   }
-  if (typeof entry["sessionId"] !== "string" || (entry["sessionId"] as string).length === 0) {
+  if (typeof entry["sessionId"] !== "string" || entry["sessionId"].length === 0) {
     return false;
   }
   const terminal = entry["terminal"] as { state?: unknown } | null;

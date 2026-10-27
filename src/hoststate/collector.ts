@@ -78,46 +78,13 @@ function firstErrorDetail(errors: unknown): string {
 }
 
 function parseSingleDocument(stdout: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
-  let value: unknown;
+  // JSON.parse accepts exactly one document: trailing content such as
+  // "{}\n{}" throws, which is the multi-document case the design names.
   try {
-    value = JSON.parse(stdout) as unknown;
+    return { ok: true, value: JSON.parse(stdout) as unknown };
   } catch {
     return { ok: false };
   }
-  const text = stdout.trim();
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let documents = 0;
-  for (const ch of text) {
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === "{" || ch === "[") {
-      depth += 1;
-    } else if (ch === "}" || ch === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        documents += 1;
-      }
-      if (depth < 0) {
-        return { ok: false };
-      }
-    }
-  }
-  if (documents !== 1 || depth !== 0) {
-    return { ok: false };
-  }
-  return { ok: true, value };
 }
 
 function unavailable(
@@ -254,16 +221,16 @@ async function collectOne(
   const startedAtMs = deps.now().getTime();
   const controller = new AbortController();
   const timeout = deps.sleep(guardMs, controller.signal).then(() => "guard" as const);
+  timeout.catch(() => {});
   const reply = deps.port
     .read(hostAlias, deps.config.package.id, limits)
     .then(
       (value) => ({ kind: "reply" as const, value }),
       (error: unknown) => ({ kind: "thrown" as const, error }),
     );
+  reply.catch(() => {});
   const winner = await Promise.race([reply, timeout]);
   controller.abort();
-  await reply.catch(() => {});
-  await timeout.catch(() => {});
   if (winner === "guard") {
     const observation = unavailable(
       hostAlias,

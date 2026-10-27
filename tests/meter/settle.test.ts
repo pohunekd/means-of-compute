@@ -31,6 +31,17 @@ function chatBody(): Record<string, unknown> {
   };
 }
 
+interface CallEndRow {
+  outcome: string;
+  billed: boolean;
+  status: number;
+}
+
+function readEnd(lines: readonly string[]): CallEndRow {
+  const line = lines.find((line: string) => line.includes('"kind":"call-end"'));
+  return JSON.parse(line ?? "{}") as CallEndRow;
+}
+
 async function post(
   meter: { readonly port: number },
   token: string,
@@ -88,7 +99,9 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
         outputTokens: 3,
       });
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
+      const end = JSON.parse(
+        lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}",
+      ) as {
         outcome: string;
         billed: boolean;
         inputTokens: number;
@@ -115,8 +128,8 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
 test("a non-2xx body that stalls is aborted at drain and not billed", async () => {
   await withMeter(
     "tests/meter/recordings/status-500-hold.json",
-    async ({ meter, tokenFor, logPath, loopback, timers, waitForEvent }) => {
-      const { requestId, token, sessionId } = await openBoundGrant(meter);
+    async ({ meter, logPath, loopback, timers, waitForEvent }) => {
+      const { token, sessionId } = await openBoundGrant(meter);
       const resp = await post(meter, token, chatBody());
       expect(resp.status).toBe(500);
       // The whole body stalls behind the gate: nothing reaches the
@@ -141,15 +154,11 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
           source: "meter-proxy",
         },
       ]);
-      const lines = await readLogLines(logPath);
-      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
-        outcome: string;
-        billed: boolean;
-        status: number;
-      };
-      expect(end.outcome).toBe("upstream-status");
-      expect(end.billed).toBe(false);
-      expect(end.status).toBe(500);
+      const lines8500 = await readLogLines(logPath);
+      const end8500 = readEnd(lines8500);
+      expect(end8500.outcome).toBe("upstream-status");
+      expect(end8500.billed).toBe(false);
+      expect(end8500.status).toBe(500);
       await waitForEvent((e) => e.event === "call-finished");
       await meter.close();
     },
@@ -160,8 +169,8 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
 test("close aborts a held call without release", async () => {
   await withMeter(
     "tests/meter/recordings/status-500-hold.json",
-    async ({ meter, tokenFor, logPath, loopback, waitForEvent }) => {
-      const { requestId, token } = await openBoundGrant(meter);
+    async ({ meter, logPath, loopback, waitForEvent }) => {
+      const { token } = await openBoundGrant(meter);
       const resp = await post(meter, token, chatBody());
       expect(resp.status).toBe(500);
       // The body stalls behind the gate and the hold is never
@@ -170,12 +179,9 @@ test("close aborts a held call without release", async () => {
       await meter.close();
       await waitForEvent((e) => e.event === "call-finished");
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
-        outcome: string;
-        billed: boolean;
-      };
+      const end = readEnd(lines);
       expect(end.billed).toBe(false);
-      expect(requestId.length).toBeGreaterThan(0);
+      expect(token.length).toBeGreaterThan(0);
     },
   );
 });
@@ -200,13 +206,10 @@ test("drain with drainTimeoutMs 0 still awaits the end", async () => {
         inputTokens: 7,
         outputTokens: 3,
       });
-      const lines = await readLogLines(logPath);
-      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
-        outcome: string;
-        billed: boolean;
-      };
-      expect(end.outcome).toBe("closed-abort");
-      expect(end.billed).toBe(true);
+      const linesZero = await readLogLines(logPath);
+      const endZero = readEnd(linesZero);
+      expect(endZero.outcome).toBe("closed-abort");
+      expect(endZero.billed).toBe(true);
       const replayed = await replayUsageLog(logPath, "read-only", () => {});
       if (usage === null) {
         throw new Error("settle returned null");
@@ -283,7 +286,7 @@ test("a settled grant returns its memo after a later latch", async () => {
   });
   await withMeter(
     "tests/meter/recordings/stream-ok.json",
-    async ({ meter, events, logPath }) => {
+    async ({ meter, events }) => {
       const { token, sessionId } = await openBoundGrant(meter);
       // Settle A while the IO is healthy: the memo is durable.
       const resp = await post(meter, token, chatBody());

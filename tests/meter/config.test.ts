@@ -239,7 +239,7 @@ test("every 2.1 integer key refused at min-1 and max+1", async () => {
     for (const value of [min - 1, max + 1]) {
       let message = "";
       try {
-        await configFromObject(baseConfig({ [key]: value } as Partial<MeterConfig>));
+        await configFromObject(baseConfig({ [key]: value }));
       } catch (error: unknown) {
         message = (error as Error).message;
       }

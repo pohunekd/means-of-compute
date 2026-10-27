@@ -160,7 +160,7 @@ for (const row of [
   test(row.name, async () => {
     await withMeter(
       "tests/meter/recordings/stream-ok.json",
-      async ({ meter, tokenFor, events, logPath, loopback }) => {
+      async ({ meter, tokenFor, events, loopback }) => {
         const { requestId } = await openBoundGrant(meter);
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -175,10 +175,7 @@ for (const row of [
             : {
                 method: row.method,
                 headers,
-                body:
-                  row.body === undefined && "raw" in row && row.raw !== undefined
-                    ? row.raw
-                    : JSON.stringify(row.body),
+                body: row.body === undefined && "raw" in row ? row.raw : JSON.stringify(row.body),
               };
         const resp = await fetch(meterUrl(meter, row.path ?? "/v1/chat/completions"), init);
         expect(resp.status).toBe(row.status);

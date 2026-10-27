@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
 import {
@@ -6,6 +6,32 @@ import {
   ProviderError,
   ProvidersExhaustedError,
 } from "../../src/providers/router.js";
+
+// Every test sets placeholder keys and loopback URLs; restore the
+// pre-file values after each test so nothing leaks into later files
+// in the same process (L3).
+const ENV_KEYS = [
+  "NVIDIA_API_KEY",
+  "META_API_KEY",
+  "LOCAL_MODEL_BASE_URL",
+  "PROVIDER_NVIDIA_BUILD_BASE_URL",
+  "PROVIDER_META_API_BASE_URL",
+  "PROVIDER_NVIDIA_BUILD_TIMEOUT_MS",
+] as const;
+const savedEnv = new Map<string, string | undefined>();
+for (const key of ENV_KEYS) {
+  savedEnv.set(key, process.env[key]);
+}
+afterEach(() => {
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  resetProvidersCache();
+});
 
 async function withProviders(
   primaryPath: string,

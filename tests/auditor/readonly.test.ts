@@ -10,8 +10,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stat } from "node:fs/promises";
 import { startLoopback } from "../../src/providers/loopback.js";
-import { resetProvidersCache } from "../../src/providers/config.js";
-import { createCliBudgetGate } from "../../src/budget/gate.js";
 import { runAudit, auditExitCode } from "../../src/auditor/audit.js";
 import type { AuditInput } from "../../src/auditor/audit-types.js";
 import { loadAuditorConfig } from "../../src/auditor/config.js";
@@ -23,12 +21,7 @@ import {
 } from "../../src/auditor/git.js";
 import { callProviderOnce } from "../../src/providers/router.js";
 import { demoItem, makeTempRepo, removeTempRepo } from "./temp-repo.js";
-
-const ENV = {
-  NVIDIA_API_KEY: "test",
-  META_API_KEY: "test",
-  LOCAL_MODEL_BASE_URL: "http://localhost:1234/v1",
-};
+import { admittingGate, applyTestEnv } from "./test-env.js";
 
 async function git(dir: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(["git", ...args], {
@@ -140,17 +133,13 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
       },
     ]),
   );
-  for (const [key, value] of Object.entries(ENV)) {
-    process.env[key] = value;
-  }
-  resetProvidersCache();
+  const restoreEnv = applyTestEnv();
   const statusBefore = await git(repo.dir, ["status", "--porcelain"]);
   const before = await readState(repo.dir);
   const mtimeBefore = await indexMtimeMs(repo.dir);
   const server = await startLoopback(recording);
   process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
-  process.env.PROVIDER_WONDER_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   try {
     const config = await loadAuditorConfig();
     const input: AuditInput = {
@@ -166,11 +155,7 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
       await runAudit(input, {
         config: { ...config, verdictDir },
         git: createReadOnlyGit(repo.dir),
-        budget: createCliBudgetGate({
-          command: ["bun", "src/budget/check.ts"],
-          timeoutMs: 30000,
-          cwd: process.cwd(),
-        }),
+        budget: admittingGate(process.cwd()),
         call: callProviderOnce,
         ledgerPath,
         now: () => new Date("2026-10-27T10:00:00.000Z"),
@@ -188,8 +173,7 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
     void server.stop();
     delete process.env.PROVIDER_META_API_BASE_URL;
     delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
-    delete process.env.PROVIDER_WONDER_BASE_URL;
-    resetProvidersCache();
+    restoreEnv();
     removeTempRepo(repo.dir);
     rmSync(workdir, { recursive: true, force: true });
   }

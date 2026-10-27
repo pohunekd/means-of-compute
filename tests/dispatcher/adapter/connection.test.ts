@@ -60,39 +60,35 @@ function openGate(): { gate: Promise<void>; release(): void } {
   };
 }
 
-test("close during an open in flight rejects with connector-closed", async () => {
+test("a rejected connect removes its own pending entry", async () => {
   await runtimeEnv(async (env) => {
-    const controls = openGate();
-    const started = { current: false };
+    let calls = 0;
+    const failing = (() => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.reject(new Error("dial refused"));
+      }
+      const client: FakeClient = {
+        close: () => Promise.resolve(),
+      };
+      return Promise.resolve(client);
+    }) as unknown as ConnectHostFn;
     const connector = createHostConnector(
       routes(),
-      {
-        connectTimeoutMs: 5000,
-        connectHost: gatedClient(
-          () => {},
-          () => {
-            started.current = true;
-          },
-          controls.gate,
-        ),
-      },
+      { connectTimeoutMs: 5000, connectHost: failing },
       env,
     );
-    const opening = connector.client("laptop-a");
-    while (!started.current) {
-      await Bun.sleep(1);
-    }
-    const closed = connector.close();
-    controls.release();
-    await closed;
-    let caught: unknown;
+    let first: unknown;
     try {
-      await opening;
+      await connector.client("laptop-a");
     } catch (error) {
-      caught = error;
+      first = error;
     }
-    expect(caught).toBeInstanceOf(PortRejectedError);
-    expect((caught as PortRejectedError).code).toBe("connector-closed");
+    expect(first).toBeDefined();
+    const second = await connector.client("laptop-a");
+    expect(second).toBeDefined();
+    expect(calls).toBe(2);
+    await connector.close();
   });
 });
 
@@ -135,41 +131,70 @@ test("the in-flight client is closed when close wins the race", async () => {
   });
 });
 
-test("drop during an open in flight rejects with host-unreachable", async () => {
+test("a drop between two opens leaves the second open intact", async () => {
   await runtimeEnv(async (env) => {
-    const controls = openGate();
-    const started = { current: false };
+    // A is dropped before it resolves; B starts after the drop and must
+    // reuse the pending entry instead of starting a third connect.
+    let calls = 0;
+    const firstClosed = { current: false };
+    const secondClosed = { current: false };
+    let firstGate!: () => void;
+    let secondGate!: () => void;
+    const firstWait = new Promise<void>((resolve) => {
+      firstGate = resolve;
+    });
+    const secondWait = new Promise<void>((resolve) => {
+      secondGate = resolve;
+    });
+    const both = (async () => {
+      calls += 1;
+      if (calls === 1) {
+        await firstWait;
+        const client: FakeClient = {
+          close: () => {
+            firstClosed.current = true;
+            return Promise.resolve();
+          },
+        };
+        return client;
+      }
+      await secondWait;
+      const client: FakeClient = {
+        close: () => {
+          secondClosed.current = true;
+          return Promise.resolve();
+        },
+      };
+      return client;
+    }) as unknown as ConnectHostFn;
     const connector = createHostConnector(
       routes(),
-      {
-        connectTimeoutMs: 5000,
-        connectHost: gatedClient(
-          () => {},
-          () => {
-            started.current = true;
-          },
-          controls.gate,
-        ),
-      },
+      { connectTimeoutMs: 5000, connectHost: both },
       env,
     );
-    const opening = connector.client("laptop-a");
-    while (!started.current) {
+    const first = connector.client("laptop-a");
+    while (calls === 0) {
       await Bun.sleep(1);
     }
-    const dropped = connector.drop("laptop-a");
-    controls.release();
-    await dropped;
-    let caught: unknown;
+    await connector.drop("laptop-a");
+    const second = connector.client("laptop-a");
+    secondGate();
+    const secondClient = await second;
+    firstGate();
+    let firstCaught: unknown;
     try {
-      await opening;
+      await first;
     } catch (error) {
-      caught = error;
+      firstCaught = error;
     }
-    expect(caught).toBeInstanceOf(PortUnreachableError);
-    expect((caught as PortUnreachableError).message).toBe("laptop-a: host_unreachable");
-    const client = await connector.client("laptop-a");
-    expect(client).toBeDefined();
+    expect(firstCaught).toBeInstanceOf(PortUnreachableError);
+    expect((firstCaught as PortUnreachableError).message).toBe("laptop-a: host_unreachable");
+    expect(secondClient).toBeDefined();
+    expect(calls).toBe(2);
+    // B's own resolution must have cached its client.
+    expect(await connector.client("laptop-a")).toBe(secondClient);
     await connector.close();
+    expect(firstClosed.current).toBe(true);
+    expect(secondClosed.current).toBe(true);
   });
 });

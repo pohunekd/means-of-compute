@@ -50,11 +50,16 @@ export function createHostConnector(
     generations.set(alias, generationOf(alias) + 1);
   }
 
+  // Each open owns its promise p. client() records pending.set(alias, p)
+  // and awaits it in try/finally; the finally removes the entry only when
+  // it still holds p, so a later open started after a drop keeps its own
+  // entry when the earlier open settles. open() caches its client only
+  // when the connector is still open and the alias generation is
+  // unchanged; a rejected connect caches nothing.
   async function open(alias: string, route: string, generation: number): Promise<Client> {
     const client = await connect(route, socket, {
       connectTimeoutMs: opts.connectTimeoutMs,
     });
-    pending.delete(alias);
     if (closed) {
       await closeClient(client);
       throw new PortRejectedError("connector-closed");
@@ -102,7 +107,13 @@ export function createHostConnector(
       }
       const opened = open(alias, route, generationOf(alias));
       pending.set(alias, opened);
-      return opened;
+      try {
+        return await opened;
+      } finally {
+        if (pending.get(alias) === opened) {
+          pending.delete(alias);
+        }
+      }
     },
 
     async drop(alias: string): Promise<void> {

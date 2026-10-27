@@ -12,7 +12,9 @@ async function runProbe(factsPath: string): Promise<RunResult> {
   const proc = Bun.spawn(["bun", probe, "--facts", factsPath], {
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env },
+    // The window is evaluated in host local time; pin the zone so the
+    // tests hold on machines in any time zone.
+    env: { ...process.env, TZ: "UTC" },
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

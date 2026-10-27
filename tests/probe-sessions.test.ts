@@ -15,6 +15,9 @@ async function runProbe(fixture: string, factsPath: string): Promise<RunResult> 
     stderr: "pipe",
     env: {
       ...process.env,
+      // The window is evaluated in host local time; pin the zone so the
+      // tests hold on machines in any time zone.
+      TZ: "UTC",
       PATH: `${doubleBin}:${process.env["PATH"] ?? ""}`,
       MOC_LOGINCTL_FIXTURE: join(repoRoot, "tests/fixtures/loginctl", fixture),
     },

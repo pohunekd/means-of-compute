@@ -29,7 +29,8 @@ export function applyTestEnv(): () => void {
   };
 }
 
-// Prints what the real check prints for admit (rc 0).
+// Prints what the real check prints for admit (rc 0):
+// "admitted: <reason> (today $0.00, total $0.00, nvidia requests today 0)".
 export function admittingGate(cwd: string): BudgetGate {
   return createCliBudgetGate({
     command: [
@@ -42,7 +43,8 @@ export function admittingGate(cwd: string): BudgetGate {
   });
 }
 
-// Prints what the real check prints for refuse (rc 3).
+// Prints what the real check prints for refuse (rc 3):
+// "refused: <reason> (today $0.00, total $0.00, nvidia requests today 0)".
 export function refusingGate(cwd: string): BudgetGate {
   return createCliBudgetGate({
     command: [

@@ -145,3 +145,18 @@ test("config: missing schema rejects getProviders, not the import (mutation: loa
     removeTempConfig(dir);
   }
 });
+
+test("config: schema null fails the load naming the file (mutation: drop the root object check)", async () => {
+  const { join } = await import("node:path");
+  const dir = await makeTempConfig();
+  try {
+    const schemaPath = join(dir, "config", "providers", "schema.json");
+    await Bun.write(schemaPath, "null");
+    const result = await runLoadCheck(dir);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("config/providers/schema.json");
+    expect(result.output).toContain("timeoutMs.maximum");
+  } finally {
+    removeTempConfig(dir);
+  }
+});

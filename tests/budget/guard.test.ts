@@ -915,6 +915,18 @@ test("CLI: missing schema exits 2 naming the file", async () => {
   }
 });
 
+test("CLI: schema null exits 2 naming the file", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    await Bun.write(join(sandbox.dir, "config", "providers", "schema.json"), "null");
+    const result = await sandbox.run(["--spend", "3.20"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("config/providers/schema.json");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI: invalid schema exits 2 naming the file", async () => {
   const sandbox = await makeCliSandbox();
   try {

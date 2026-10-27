@@ -4,10 +4,13 @@
 import { expect, test } from "bun:test";
 import type { HostCapacity, WorkItem } from "../../contracts/v1/types.js";
 import { isPlacementDecision } from "../../contracts/v1/validate.js";
-import type { PlacementWeights } from "../../src/placement/config.js";
+import type { PlacementConfig } from "../../src/placement/config.js";
 import { place } from "../../src/placement/place.js";
 
-const WEIGHTS: PlacementWeights = { cpu: 0.4, memory: 0.4, gpu: 0.2 };
+const CONFIG: PlacementConfig = {
+  weights: { cpu: 0.4, memory: 0.4, gpu: 0.2 },
+  batteryFloorPercent: 50,
+};
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
@@ -72,7 +75,7 @@ function host(overrides: HostOverrides = {}): HostCapacity {
   };
 }
 
-test("an active-user host with the most free capacity is never chosen (mutation: drop exclusion 1)", () => {
+test("an idle:false host with the most free capacity is never chosen (mutation: drop exclusion 1)", () => {
   const hosts = [
     host({ hostAlias: "desktop" }),
     host({
@@ -86,19 +89,20 @@ test("an active-user host with the most free capacity is never chosen (mutation:
       gpuPresent: true,
     }),
   ];
-  const decision = place(item(), hosts, [], WEIGHTS);
+  const decision = place(item(), hosts, [], CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBe("desktop");
   expect(decision.candidates.find((entry) => entry.hostAlias === "laptop-a")?.excluded).toBe(true);
 });
 
-test("a low-battery host with the most capacity is never chosen (mutation: drop exclusion 1)", () => {
+test("an idle host off AC power with the most capacity is never chosen (mutation: drop exclusion 2)", () => {
   const hosts = [
     host({ hostAlias: "desktop" }),
     host({
-      hostAlias: "laptop-b",
-      idle: false,
-      idleReason: "battery at 34 percent, below the 50 percent floor",
+      hostAlias: "laptop-a",
+      idle: true,
+      acPower: false,
+      batteryPercent: 34,
       cores: 32,
       load1m: 0.1,
       totalMb: 131072,
@@ -106,10 +110,64 @@ test("a low-battery host with the most capacity is never chosen (mutation: drop 
       gpuPresent: true,
     }),
   ];
-  const decision = place(item(), hosts, [], WEIGHTS);
+  const decision = place(item(), hosts, [], CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBe("desktop");
-  expect(decision.candidates.find((entry) => entry.hostAlias === "laptop-b")?.excluded).toBe(true);
+  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
+  expect(candidate?.excluded).toBe(true);
+  expect(candidate?.reason).toBe("excluded: not on AC power");
+});
+
+test("an idle host on AC at the battery floor is never chosen (mutation: drop exclusion 3)", () => {
+  const hosts = [
+    host({ hostAlias: "desktop" }),
+    host({
+      hostAlias: "laptop-a",
+      idle: true,
+      acPower: true,
+      batteryPercent: 50,
+      cores: 32,
+      load1m: 0.1,
+      totalMb: 131072,
+      freeMb: 120000,
+      gpuPresent: true,
+    }),
+  ];
+  const decision = place(item(), hosts, [], CONFIG);
+  expect(isPlacementDecision(decision)).toBe(true);
+  expect(decision.chosenHostAlias).toBe("desktop");
+  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
+  expect(candidate?.excluded).toBe(true);
+  expect(candidate?.reason).toBe("excluded: battery at 50 percent, at or below the 50 percent floor");
+});
+
+test("an idle host above the battery floor is scored (mutation: use < instead of <=)", () => {
+  const hosts = [
+    host({
+      hostAlias: "desktop",
+      acPower: true,
+      batteryPercent: 51,
+      cores: 8,
+      load1m: 4.0,
+      totalMb: 32768,
+      freeMb: 4000,
+    }),
+    host({
+      hostAlias: "laptop-a",
+      acPower: true,
+      batteryPercent: 51,
+      cores: 8,
+      load1m: 0.1,
+      totalMb: 32768,
+      freeMb: 30000,
+    }),
+  ];
+  const decision = place(item(), hosts, [], CONFIG);
+  expect(isPlacementDecision(decision)).toBe(true);
+  expect(decision.chosenHostAlias).toBe("laptop-a");
+  const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-a");
+  expect(candidate?.excluded).toBe(false);
+  expect(candidate?.reason).toContain("battery 51%");
 });
 
 test("insideWindow:false with idle:true is excluded (mutation: drop exclusion 2)", () => {
@@ -117,7 +175,7 @@ test("insideWindow:false with idle:true is excluded (mutation: drop exclusion 2)
     host({ hostAlias: "desktop", idle: true, insideWindow: false }),
     host({ hostAlias: "laptop-a" }),
   ];
-  const decision = place(item(), hosts, [], WEIGHTS);
+  const decision = place(item(), hosts, [], CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBe("laptop-a");
   const candidate = decision.candidates.find((entry) => entry.hostAlias === "desktop");
@@ -131,7 +189,7 @@ test("2 of 2 agents running on the best host excludes it (mutation: use > instea
     item({ id: "w1-running", status: "running", assignedHostAlias: "desktop" }),
     item({ id: "w2-running", status: "running", assignedHostAlias: "desktop" }),
   ];
-  const decision = place(item(), hosts, running, WEIGHTS);
+  const decision = place(item(), hosts, running, CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBe("laptop-a");
   const candidate = decision.candidates.find((entry) => entry.hostAlias === "desktop");
@@ -154,12 +212,12 @@ test("equal score: lower load wins, then alias order (mutation: remove one tie-b
     totalMb: 10000,
     freeMb: 6000,
   });
-  const byLoad = place(item(), [lowLoad, highLoad], [], WEIGHTS);
+  const byLoad = place(item(), [lowLoad, highLoad], [], CONFIG);
   expect(byLoad.candidates[0]?.score).toBe(byLoad.candidates[1]?.score);
   expect(byLoad.chosenHostAlias).toBe("laptop-b");
   const twinA = host({ hostAlias: "laptop-b", cores: 8, load1m: 0.8 });
   const twinB = host({ hostAlias: "laptop-a", cores: 8, load1m: 0.8 });
-  const byAlias = place(item(), [twinA, twinB], [], WEIGHTS);
+  const byAlias = place(item(), [twinA, twinB], [], CONFIG);
   expect(byAlias.candidates[0]?.score).toBe(byAlias.candidates[1]?.score);
   expect(byAlias.chosenHostAlias).toBe("laptop-a");
 });
@@ -173,7 +231,7 @@ test("all hosts excluded gives null, and the CLI exits 3 (mutation: return the f
       idleReason: "battery at 20 percent, below the 50 percent floor",
     }),
   ];
-  const decision = place(item(), hosts, [], WEIGHTS);
+  const decision = place(item(), hosts, [], CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBeNull();
   expect(decision.reason).toBe("no eligible host: 2 of 2 excluded");
@@ -185,7 +243,7 @@ test("a running item with status review on a host does not count (mutation: coun
     host({ hostAlias: "laptop-a" }),
   ];
   const running = [item({ id: "w1-review", status: "review", assignedHostAlias: "desktop" })];
-  const decision = place(item(), hosts, running, WEIGHTS);
+  const decision = place(item(), hosts, running, CONFIG);
   expect(isPlacementDecision(decision)).toBe(true);
   expect(decision.chosenHostAlias).toBe("desktop");
 });

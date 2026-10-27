@@ -13,7 +13,7 @@ import {
 } from "../../contracts/v1/validate.js";
 import type { HostCapacity, WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
-import { loadPlacementWeights } from "./config.js";
+import { loadPlacementConfig } from "./config.js";
 import { place } from "./place.js";
 
 function flagValue(args: string[], flag: string): string | null {
@@ -28,14 +28,34 @@ function flagValue(args: string[], flag: string): string | null {
   return raw;
 }
 
+interface ContractIssue {
+  readonly instancePath?: unknown;
+  readonly message?: unknown;
+  readonly params?: unknown;
+}
+
 function contractPointer(schemaName: SchemaName, value: unknown): string {
-  const errors = contractErrors(schemaName, value) as readonly { instancePath?: unknown }[] | null;
+  const errors = contractErrors(schemaName, value) as readonly ContractIssue[] | null;
   const first = errors?.[0];
   const pointer =
     typeof first?.instancePath === "string" && first.instancePath.length > 0
       ? first.instancePath
       : "/";
-  return pointer;
+  const params =
+    typeof first?.params === "object" && first.params !== null
+      ? (first.params as Record<string, unknown>)
+      : null;
+  const missing = params?.["missingProperty"];
+  const additional = params?.["additionalProperty"];
+  const detail =
+    typeof missing === "string"
+      ? `missing property "${missing}"`
+      : typeof additional === "string"
+        ? `unexpected property "${additional}"`
+        : typeof first?.message === "string"
+          ? first.message
+          : null;
+  return detail === null ? pointer : `${pointer}: ${detail}`;
 }
 
 async function readJsonFile(label: string, path: string): Promise<unknown> {
@@ -84,6 +104,11 @@ function readHosts(label: string, path: string, value: unknown): HostCapacity[] 
       );
     }
     seen.add(entry.hostAlias);
+    if (entry.memory.freeMb > entry.memory.totalMb) {
+      throw new Error(
+        `${label} ${path}: invalid host capacity at index ${String(index)} (freeMb exceeds totalMb)`,
+      );
+    }
     hosts.push(entry);
   }
   return hosts;
@@ -123,7 +148,7 @@ async function run(): Promise<number> {
     return 2;
   }
   try {
-    const weights = await loadPlacementWeights();
+    const config = await loadPlacementConfig();
     const item = readWorkItem("Work item", itemPath, await readJsonFile("Work item", itemPath));
     const hosts = readHosts("Hosts", hostsPath, await readJsonFile("Hosts", hostsPath));
     const running = readRunning(
@@ -131,7 +156,7 @@ async function run(): Promise<number> {
       runningPath,
       await readJsonFile("Running work", runningPath),
     );
-    const decision = place(item, hosts, running, weights);
+    const decision = place(item, hosts, running, config);
     if (!isPlacementDecision(decision)) {
       throw new Error("place: produced decision fails the PlacementDecision contract");
     }

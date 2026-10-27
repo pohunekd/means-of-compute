@@ -1,6 +1,6 @@
 // Pure placement: score hosts against capacity and policy and return one
-// PlacementDecision. No clock, no I/O; the probe already decided idleness and
-// the policy window, placement only reads those facts.
+// PlacementDecision. No clock, no I/O; battery, AC, and window exclusions
+// repeat the probe rule on purpose, so placement never trusts idle alone.
 import { isPlacementDecision } from "../../contracts/v1/validate.js";
 import type {
   HostCapacity,
@@ -8,7 +8,7 @@ import type {
   PlacementDecision,
   WorkItem,
 } from "../../contracts/v1/types.js";
-import type { PlacementWeights } from "./config.js";
+import type { PlacementConfig } from "./config.js";
 
 interface CandidateBuild {
   readonly candidate: PlacementCandidate;
@@ -19,9 +19,9 @@ export function place(
   item: WorkItem,
   hosts: readonly HostCapacity[],
   running: readonly WorkItem[],
-  weights: PlacementWeights,
+  config: PlacementConfig,
 ): PlacementDecision {
-  const built: CandidateBuild[] = hosts.map((host) => buildCandidate(host, running, weights));
+  const built: CandidateBuild[] = hosts.map((host) => buildCandidate(host, running, config));
   const candidates: PlacementCandidate[] = built.map((entry) => entry.candidate);
   const eligible = built.filter((entry) => !entry.candidate.excluded);
   if (eligible.length === 0) {
@@ -75,7 +75,7 @@ function isBetter(challenger: CandidateBuild, incumbent: CandidateBuild): boolea
 function buildCandidate(
   host: HostCapacity,
   running: readonly WorkItem[],
-  weights: PlacementWeights,
+  config: PlacementConfig,
 ): CandidateBuild {
   const loadRatio = host.cpu.load1m / host.cpu.cores;
   if (!host.idle) {
@@ -85,6 +85,28 @@ function buildCandidate(
         hostAlias: host.hostAlias,
         score: 0,
         reason: `excluded: not idle (${host.idleReason})`,
+        excluded: true,
+      },
+    };
+  }
+  if (!host.acPower) {
+    return {
+      loadRatio,
+      candidate: {
+        hostAlias: host.hostAlias,
+        score: 0,
+        reason: "excluded: not on AC power",
+        excluded: true,
+      },
+    };
+  }
+  if (host.batteryPercent !== null && host.batteryPercent <= config.batteryFloorPercent) {
+    return {
+      loadRatio,
+      candidate: {
+        hostAlias: host.hostAlias,
+        score: 0,
+        reason: `excluded: battery at ${String(host.batteryPercent)} percent, at or below the ${String(config.batteryFloorPercent)} percent floor`,
         excluded: true,
       },
     };
@@ -115,8 +137,13 @@ function buildCandidate(
   const cpuFree = Math.max(0, 1 - loadRatio);
   const memFree = host.memory.freeMb / host.memory.totalMb;
   const gpuFree = host.gpu.present ? 1 : 0;
-  const score = round4(weights.cpu * cpuFree + weights.memory * memFree + weights.gpu * gpuFree);
-  const powerText = host.batteryPercent === null ? "idle, no battery" : "idle, on AC power";
+  const score = round4(
+    config.weights.cpu * cpuFree + config.weights.memory * memFree + config.weights.gpu * gpuFree,
+  );
+  const powerText =
+    host.batteryPercent === null
+      ? "idle, on AC power, no battery"
+      : `idle, on AC power, battery ${String(host.batteryPercent)}%`;
   const cpuPercent = Math.round(cpuFree * 100);
   const memPercent = Math.round(memFree * 100);
   const gpuText = host.gpu.present ? ", GPU" : "";

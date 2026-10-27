@@ -56,13 +56,13 @@ function idleHost(hostAlias: string): Record<string, unknown> {
 }
 
 async function makeSandbox(
-  weightsBody = '{"weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}',
+  configBody = '{"batteryFloorPercent": 50, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}',
 ): Promise<{
   dir: string;
   run: (args: readonly string[]) => Promise<SpawnResult>;
 }> {
   const dir = mkdtempSync(join(tmpdir(), "moc-place-"));
-  await Bun.write(join(dir, "config", "placement.json"), weightsBody);
+  await Bun.write(join(dir, "config", "placement.json"), configBody);
   await Bun.write(join(dir, "item.json"), JSON.stringify(ITEM));
   await Bun.write(join(dir, "hosts.json"), JSON.stringify([idleHost("desktop")]));
   await Bun.write(join(dir, "running.json"), JSON.stringify([]));
@@ -111,7 +111,9 @@ test("all hosts excluded: CLI exits 3 with a null decision (mutation: return the
 });
 
 test("weights summing to 0.9: CLI exits 2 (mutation: drop the sum check)", async () => {
-  const sandbox = await makeSandbox('{"weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}');
+  const sandbox = await makeSandbox(
+    '{"batteryFloorPercent": 50, "weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}',
+  );
   try {
     const result = await sandbox.run([
       "--item",
@@ -123,6 +125,51 @@ test("weights summing to 0.9: CLI exits 2 (mutation: drop the sum check)", async
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("sum to 1");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("freeMb above totalMb: CLI exits 2 naming the index (mutation: drop the bound check)", async () => {
+  const sandbox = await makeSandbox();
+  try {
+    await Bun.write(
+      join(sandbox.dir, "hosts.json"),
+      JSON.stringify([
+        idleHost("desktop"),
+        { ...idleHost("laptop-a"), memory: { totalMb: 32768, freeMb: 99999 } },
+      ]),
+    );
+    const result = await sandbox.run([
+      "--item",
+      join(sandbox.dir, "item.json"),
+      "--hosts",
+      join(sandbox.dir, "hosts.json"),
+      "--running",
+      join(sandbox.dir, "running.json"),
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("index 1");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("extra top-level config key: CLI exits 2 (mutation: drop the top-level key check)", async () => {
+  const sandbox = await makeSandbox(
+    '{"batteryFloorPercent": 50, "weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}, "extra": true}',
+  );
+  try {
+    const result = await sandbox.run([
+      "--item",
+      join(sandbox.dir, "item.json"),
+      "--hosts",
+      join(sandbox.dir, "hosts.json"),
+      "--running",
+      join(sandbox.dir, "running.json"),
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('unexpected key "extra"');
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

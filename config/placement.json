@@ -1,1 +1,1 @@
-{ "weights": { "cpu": 0.4, "gpu": 0.2, "memory": 0.4 } }
+{ "batteryFloorPercent": 50, "weights": { "cpu": 0.4, "gpu": 0.2, "memory": 0.4 } }

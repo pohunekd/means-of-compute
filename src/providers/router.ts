@@ -27,20 +27,25 @@ export interface ProviderUsage {
   readonly outputTokens: number | null;
 }
 
+export type ProviderFailureKind = "http" | "connection" | "timeout" | "body";
+
 export class ProviderCallError extends ProviderError {
   readonly reachedProvider: boolean;
   readonly usage: ProviderUsage | null;
+  readonly kind: ProviderFailureKind;
   constructor(
     message: string,
     status: number,
     reachedProvider: boolean,
     usage: ProviderUsage | null,
+    kind: ProviderFailureKind,
     options?: ErrorOptions,
   ) {
     super(message, status);
     this.name = "ProviderCallError";
     this.reachedProvider = reachedProvider;
     this.usage = usage;
+    this.kind = kind;
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -114,6 +119,7 @@ async function callProvider(
         resp.status,
         false,
         null,
+        "http",
       );
     }
     let data: unknown;
@@ -128,6 +134,7 @@ async function callProvider(
           502,
           true,
           null,
+          "body",
           { cause: error },
         );
       }
@@ -148,6 +155,7 @@ async function callProvider(
           inputTokens: usageCount(usage?.prompt_tokens),
           outputTokens: usageCount(usage?.completion_tokens),
         },
+        "body",
         { cause: data },
       );
     }
@@ -166,7 +174,7 @@ async function callProvider(
       // The request was sent before the abort, so the call may be billed:
       // a late reply still counts server-side. Usage is unknown.
       if (state.timedOut) {
-        throw new ProviderCallError(`Provider ${provider.id} timed out`, 504, true, null, {
+        throw new ProviderCallError(`Provider ${provider.id} timed out`, 504, true, null, "timeout", {
           cause: error,
         });
       }
@@ -181,6 +189,7 @@ async function callProvider(
         503,
         state.responded,
         null,
+        state.responded ? "body" : "connection",
         { cause: error },
       );
     }
@@ -194,6 +203,7 @@ async function callProvider(
         502,
         true,
         null,
+        "body",
         { cause: error },
       );
     }
@@ -245,15 +255,16 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       return { providerId: provider.id, model: provider.model, content };
     } catch (e: unknown) {
       if (e instanceof ProviderCallError) {
-        // Single-call failures carry their own reason. Status wins
-        // over reachability: a 429 is a rate limit and a 5xx a server
-        // error even when the response already rules out billing.
-        // Only an unreached 503 is a connection failure; any other
-        // unclassified status throws instead of failing over.
-        if (e.status === 504) {
-          lastReason = "timeout";
-        } else if (!e.reachedProvider && e.status === 503) {
+        // Single-call failures carry their own kind. An http failure
+        // maps from the status exactly as on main: 429 is a rate
+        // limit and a 5xx a server error. Status numbers are never
+        // used as sentinels for connection or timeout.
+        if (e.kind === "connection") {
           lastReason = "connection";
+        } else if (e.kind === "timeout") {
+          lastReason = "timeout";
+        } else if (e.kind === "body") {
+          lastReason = "server_error";
         } else if (e.status === 429) {
           lastReason = "rate_limit";
         } else if (e.status >= 500 && e.status < 600) {

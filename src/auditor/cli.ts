@@ -117,13 +117,7 @@ function parseOptions(args: string[]): CliOptions {
       throw new Error(`audit: ${name} is required`);
     }
   }
-  if (
-    repoDir === null ||
-    ref === null ||
-    base === null ||
-    itemPath === null ||
-    authors === null
-  ) {
+  if (repoDir === null || ref === null || base === null || itemPath === null || authors === null) {
     throw new Error("audit: required flags are missing");
   }
   if (authors !== "ledger" && authors !== "flags") {
@@ -232,9 +226,7 @@ async function postComment(repo: string, pull: number, comment: string): Promise
       proc.exited,
     ]);
     if (rc !== 0) {
-      throw new AuditPostError(
-        `gh pr comment failed (rc ${String(rc)}): ${stderr.slice(0, 500)}`,
-      );
+      throw new AuditPostError(`gh pr comment failed (rc ${String(rc)}): ${stderr.slice(0, 500)}`);
     }
     const verify = Bun.spawn(
       ["gh", "api", `repos/${repo}/issues/${String(pull)}/comments`, "--paginate"],

@@ -242,7 +242,10 @@ test("bad location exits 4 with no verdict (mutation: drop the invalid finding)"
 });
 
 test("200 with null content exits 4 and keeps the billed tokens (mutation: append only on success)", async () => {
-  const run = await runErrorCase("auditor-nullcontent-", "tests/auditor/recordings/null-content.json");
+  const run = await runErrorCase(
+    "auditor-nullcontent-",
+    "tests/auditor/recordings/null-content.json",
+  );
   try {
     expect(run.code).toBe(4);
     expect(run.requests).toBe(1);

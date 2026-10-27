@@ -184,10 +184,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
   } catch (error: unknown) {
     // A call that reached the provider may be billed even though it
     // failed, so it reaches the ledger before the error maps to 4.
-    if (
-      error instanceof ProviderCallError &&
-      error.reachedProvider
-    ) {
+    if (error instanceof ProviderCallError && error.reachedProvider) {
       await recordAuditUsage(deps.ledgerPath, input.item.id, auditor, error.usage, deps.now);
     }
     if (

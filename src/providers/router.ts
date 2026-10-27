@@ -137,7 +137,10 @@ async function callProvider(
         `Provider ${provider.id} returned invalid content`,
         502,
         true,
-        { inputTokens: usageCount(usage?.prompt_tokens), outputTokens: usageCount(usage?.completion_tokens) },
+        {
+          inputTokens: usageCount(usage?.prompt_tokens),
+          outputTokens: usageCount(usage?.completion_tokens),
+        },
         { cause: data },
       );
     }
@@ -151,13 +154,9 @@ async function callProvider(
       // The request was sent before the abort, so the call may be billed:
       // a late reply still counts server-side. Usage is unknown.
       if (state.timedOut) {
-        throw new ProviderCallError(
-          `Provider ${provider.id} timed out`,
-          504,
-          true,
-          null,
-          { cause: error },
-        );
+        throw new ProviderCallError(`Provider ${provider.id} timed out`, 504, true, null, {
+          cause: error,
+        });
       }
       throw error;
     }

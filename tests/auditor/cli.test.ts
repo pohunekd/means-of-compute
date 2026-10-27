@@ -55,7 +55,10 @@ async function makeCliTree(): Promise<CliTree> {
         maxFieldChars: 2000,
       }),
     );
-    await Bun.write(join(dir, "config", "ledger.json"), JSON.stringify({ ledgerPath: join(dir, "ledger.jsonl") }));
+    await Bun.write(
+      join(dir, "config", "ledger.json"),
+      JSON.stringify({ ledgerPath: join(dir, "ledger.jsonl") }),
+    );
     await Bun.write(join(dir, "ledger.jsonl"), "");
     // The stub prints what the real check prints for admit (rc 0).
     await Bun.write(
@@ -215,10 +218,13 @@ test("D1: clean branch gets a clean verdict bound to the head SHA (mutation: bin
   const tree = await makeCliTree();
   try {
     await writeItem(tree, "demo-good");
-    const run = await runCliWithLoopback(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
-      "--pull",
-      "99",
-    ]);
+    const run = await runCliWithLoopback(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "99"],
+    );
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);
     const lines = run.stdout.trim().split("\n");
@@ -237,10 +243,13 @@ test("D2: defect branch gets a high finding with path:line evidence", async () =
   const tree = await makeCliTree();
   try {
     await writeItem(tree, "demo-bad");
-    const run = await runCliWithLoopback(tree, repo, "demo-bad", "tests/auditor/recordings/defect.json", [
-      "--pull",
-      "99",
-    ]);
+    const run = await runCliWithLoopback(
+      tree,
+      repo,
+      "demo-bad",
+      "tests/auditor/recordings/defect.json",
+      ["--pull", "99"],
+    );
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);
     const lines = run.stdout.trim().split("\n");
@@ -282,12 +291,13 @@ test("M5: --post re-posts a stored verdict with no model call and no new ledger 
     await writeItem(tree, "demo-good");
     const head = (await Bun.$`git -C ${repo.dir} rev-parse demo-good`.text()).trim();
     await installFakeGh(tree, "fail");
-    const first = await runCliWithGh(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
-      "--pull",
-      "99",
-      "--post",
-      "yes",
-    ]);
+    const first = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "99", "--post", "yes"],
+    );
     expect(first.code).toBe(4);
     const stored = JSON.parse(
       await readFile(join(tree.dir, "verdicts", "w9-demo", `${head}.json`), "utf8"),

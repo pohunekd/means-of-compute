@@ -30,6 +30,49 @@ test("P1: the same request twice gives one session and the same id", async () =>
   await control.port.close();
 });
 
+test("P1c: a rejected start leaves no binding", async () => {
+  const control = createMemoryPort();
+  control.pushCommit("main", "m1");
+  control.pushCommit("moc/x", "b1");
+  // A non-resume start moves the local tip of moc/x to m1, so a resume
+  // start then sees a diverged branch and rejects before binding.
+  const setup = await control.port.start(
+    request({ requestId: "setup:0", workItemId: "setup", branch: "moc/x" }),
+  );
+  expect(setup.sessionId.length).toBeGreaterThan(0);
+  let rejected: unknown;
+  try {
+    await control.port.start(
+      request({ requestId: "x:1", workItemId: "x", branch: "moc/x", resume: true }),
+    );
+  } catch (error) {
+    rejected = error;
+  }
+  expect(rejected).toBeInstanceOf(PortRejectedError);
+  expect((rejected as PortRejectedError).code).toBe("branch-diverged");
+  const retry = await control.port.start(request({ requestId: "x:1", workItemId: "x" }));
+  expect(retry.requestId).toBe("x:1");
+  await control.port.close();
+});
+
+test("P7: handles echo the request and carry a worktree", async () => {
+  const control = createMemoryPort();
+  const plain = request();
+  const fresh = await control.port.start(plain);
+  expect(fresh.requestId).toBe(plain.requestId);
+  expect(fresh.hostAlias).toBe(plain.hostAlias);
+  expect(fresh.branch).toBe(plain.branch);
+  expect(fresh.sessionId.length).toBeGreaterThan(0);
+  expect(fresh.worktree.length).toBeGreaterThan(0);
+  const resume = request({ requestId: "demo-item:1", workItemId: "demo-item", resume: true });
+  const resumed = await control.port.start(resume);
+  expect(resumed.requestId).toBe("demo-item:1");
+  expect(resumed.hostAlias).toBe(resume.hostAlias);
+  expect(resumed.branch).toBe(resume.branch);
+  expect(resumed.worktree.length).toBeGreaterThan(0);
+  await control.port.close();
+});
+
 test("P1: a changed host with the same requestId gives request-conflict", async () => {
   const control = createMemoryPort();
   await control.port.start(request());

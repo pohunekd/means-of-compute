@@ -1,0 +1,8 @@
+{
+  "baseBranch": "main",
+  "branchPrefix": "moc/",
+  "waitTimeoutMs": 60000,
+  "lostAfterUnreachable": 3,
+  "unreachableBackoffMs": 5000,
+  "registryPath": "logs/dispatcher-sessions.json"
+}

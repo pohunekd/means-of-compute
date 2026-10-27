@@ -11,6 +11,7 @@
     "budget:check": "bun run src/budget/check.ts",
     "ledger:record": "bun run src/ledger/cli.ts record",
     "ledger:query": "bun run src/ledger/cli.ts query",
+    "dispatch:start": "bun run src/dispatcher/cli.ts start",
     "place": "bun run src/placement/cli.ts",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",

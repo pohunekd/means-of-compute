@@ -21,6 +21,8 @@ README.
    window, on AC power, its battery is above the configured threshold (or it has
    none), and either nobody is logged in or the last input is at least
    `idleMinutes` ago. Anything unreadable makes the host not idle with the cause.
+   The probe ships to hosts as a compiled plugin package; see
+   [host-state.md](host-state.md).
 3. The **dispatcher** starts a session on the chosen host through `DispatcherPort`,
    watches it, and reschedules the item when the host leaves or the session is lost.
 4. The **auditor** checks the resulting branch against the item's DoD and posts a

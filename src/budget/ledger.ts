@@ -4,7 +4,7 @@
 // fails validation is an error naming the line number and is never skipped.
 import { contractErrors, isUsageRecord } from "../../contracts/v1/validate.js";
 import type { UsageRecord } from "../../contracts/v1/types.js";
-import { readInputText, statInputPath } from "./fs.js";
+import { readInputText, statInputPath } from "../fs/input.js";
 
 function parseLine(ledgerPath: string, lineNumber: number, text: string): UsageRecord {
   let raw: unknown;

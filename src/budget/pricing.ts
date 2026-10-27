@@ -14,7 +14,7 @@
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ValidateFunction } from "ajv/dist/2020";
-import { readInputText, statInputPath } from "./fs.js";
+import { readInputText, statInputPath } from "../fs/input.js";
 import { NANO_PER_USD, priceToNanoUsd } from "./money.js";
 
 export interface NanoPricing {

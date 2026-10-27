@@ -1,10 +1,9 @@
-// Shared input-path rules for the budget guard. Every file the guard reads
+// Shared input-path rules for reading input files. Every file a tool reads
 // is checked with lstat then stat: ENOENT means "absent" only when the
 // parent path resolves to a directory; a missing or dangling parent, or a
 // parent that is not a directory, is an error naming the path and the error
 // code. A present path must be a regular file, otherwise the read is an
-// error. Callers decide what "absent" means: the ledger reads it as zero
-// spend, the state as empty, every other input exits 2.
+// error. Callers decide what "absent" means.
 import { lstat, readFile, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 

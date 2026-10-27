@@ -1,7 +1,7 @@
 // Typed loader for config/budget.json. Every field is required: the guard must
 // fail at startup with a clear error instead of silently using a default cap.
 // A missing or unreadable file exits 2; the config may never be absent.
-import { readInputText, statInputPath } from "./fs.js";
+import { readInputText, statInputPath } from "../fs/input.js";
 import { priceToNanoUsd } from "./money.js";
 export interface BudgetConfig {
   readonly ledgerPath: string;

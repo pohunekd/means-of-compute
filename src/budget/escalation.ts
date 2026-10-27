@@ -10,7 +10,7 @@
 import { access, appendFile, constants } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
-import { readInputText, requireInputDir, statInputPath } from "./fs.js";
+import { readInputText, requireInputDir, statInputPath } from "../fs/input.js";
 import type { BudgetDecision } from "./decision.js";
 
 export type CapKind = "day" | "total" | "nvidia-daily" | "spend-unknown";

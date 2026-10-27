@@ -69,7 +69,7 @@ const validConfig = {
 
 async function withConfig(
   mutate: (cfg: Record<string, unknown>) => void,
-  fn: (configPath: string) => Promise<void>,
+  fn: (configPath: string) => void,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "probe-config-"));
   try {
@@ -77,7 +77,7 @@ async function withConfig(
     mutate(cfg);
     const configPath = join(dir, "probe.json");
     await Bun.write(configPath, JSON.stringify(cfg));
-    await fn(configPath);
+    fn(configPath);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -89,7 +89,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         delete cfg["sysfsRoot"];
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
       },
     );
@@ -100,7 +100,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         cfg["sysfsRoot"] = "tests/fixtures/sysfs/type-unreadable";
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
       },
     );
@@ -111,7 +111,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         cfg["sysfsRoot"] = "/no-such-sysfs-root";
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
       },
     );
@@ -122,7 +122,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         cfg["sysfsRoot"] = tmpdir();
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
       },
     );
@@ -133,7 +133,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         (cfg["policy"] as Record<string, unknown>)["allowedWindowStart"] = "80:00";
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid policy.allowedWindowStart");
       },
     );
@@ -144,7 +144,7 @@ describe("loadConfig validation", () => {
       (cfg) => {
         cfg["batteryThreshold"] = 150;
       },
-      async (p) => {
+      (p) => {
         expect(() => loadConfig(p)).toThrow("config probe.json: invalid batteryThreshold");
       },
     );

@@ -106,8 +106,10 @@ The completion file holds `{"pending": PendingUsage[] (minItems 1),
 `workItemId` must equal the finalize `workItemId`, and the pending
 `entryId`s must be unique; either violation exits 2. Record is one locked
 atomic write: it applies each entry in order, then finalizes, and writes
-at most once. Any error or refusal writes nothing, so exit 2 and exit 3
-both leave the ledger bytes unchanged. On success it prints
+at most once. Any validation error or refusal writes nothing. An I/O error
+after the rename (directory fsync, lock release) exits 2 with the new
+contents already in place; check the ledger before retrying, because a
+retry of a recorded completion is refused (exit 3). On success it prints
 `recorded <workItemId> (<outcome>)` and exits 0.
 
 Query prints `JSON.stringify(result, null, 2)` for `--by`, a comma list that

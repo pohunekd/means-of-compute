@@ -44,14 +44,16 @@ test("P1: a changed host with the same requestId gives request-conflict", async 
   await control.port.close();
 });
 
-test("P3/P4: after finished, cancel returns the same finished result", async () => {
+test("P3/P4: waits with different cursors and cancel stay deep-equal", async () => {
   const control = createMemoryPort();
   const handle = await control.port.start(request());
   control.complete(handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
   const ref = { sessionId: handle.sessionId, hostAlias: handle.hostAlias };
-  const waited = await control.port.wait(ref, 1000, null);
+  const first = await control.port.wait(ref, 1000, null);
+  const second = await control.port.wait(ref, 1000, "cursor-7");
   const cancelled = await control.port.cancel(ref, "stall");
-  expect(cancelled).toEqual(waited);
+  expect(second).toEqual(first);
+  expect(cancelled).toEqual(first);
   expect(cancelled.state).toBe("finished");
   await control.port.close();
 });

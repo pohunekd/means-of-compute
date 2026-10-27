@@ -33,28 +33,17 @@ interface MemorySession {
   request: StartRequest;
   state: PortState;
   cursor: string | null;
-  terminalUsage: PortUsage | null;
-  terminalDetail: string | null;
+  // Frozen at settle time; wait and cancel return a deep copy of it.
+  terminal: Extract<WaitResult, { state: TerminalState }> | null;
 }
 
 function terminalOf(session: MemorySession): Extract<WaitResult, { state: TerminalState }> | null {
-  if (
-    session.state !== "finished" &&
-    session.state !== "failed" &&
-    session.state !== "lost" &&
-    session.state !== "cancelled"
-  ) {
+  const stored = session.terminal;
+  if (stored === null) {
     return null;
   }
-  const usage =
-    session.terminalUsage === null ? null : { tokens: [...session.terminalUsage.tokens] };
-  return {
-    state: session.state,
-    sessionId: session.handle.sessionId,
-    cursor: session.cursor,
-    usage,
-    detail: session.terminalDetail ?? "",
-  };
+  const usage = stored.usage === null ? null : { tokens: [...stored.usage.tokens] };
+  return { ...stored, usage };
 }
 
 function toBranch(baseRef: string): string {
@@ -93,9 +82,16 @@ export function createMemoryPort(): MemoryPortControl {
     usage: PortUsage | null,
     detail: string,
   ): void {
+    // The terminal result is frozen here; later waits and cancels return a
+    // deep copy of it, so a changed cursor can never alter it (P3).
     session.state = state;
-    session.terminalUsage = usage;
-    session.terminalDetail = detail;
+    session.terminal = {
+      state,
+      sessionId: session.handle.sessionId,
+      cursor: session.cursor,
+      usage,
+      detail,
+    };
   }
 
   function start(request: StartRequest): Promise<SessionHandle> {
@@ -151,8 +147,7 @@ export function createMemoryPort(): MemoryPortControl {
       request,
       state: "starting",
       cursor: null,
-      terminalUsage: null,
-      terminalDetail: null,
+      terminal: null,
     });
     sessionByRequest.set(request.requestId, sessionId);
     if (baseCommit !== null) {
@@ -168,12 +163,13 @@ export function createMemoryPort(): MemoryPortControl {
   function waitNow(ref: SessionRef, cursor: string | null): WaitResult {
     const session = findSession(ref);
     checkReachable(session.handle.hostAlias);
-    session.cursor = cursor;
     // The current state is returned immediately; timeoutMs is ignored.
     const terminal = terminalOf(session);
     if (terminal !== null) {
       return terminal;
     }
+    // The cursor advances only while the session is non-terminal.
+    session.cursor = cursor;
     if (session.state !== "starting" && session.state !== "running") {
       throw new PortRejectedError("session-not-found", `unknown session ${ref.sessionId}`);
     }

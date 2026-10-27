@@ -13,9 +13,12 @@ import { join } from "node:path";
 // Imported before the mock below, and copied by value: these stay the
 // original functions while later importers see the mocked module.
 const registryActual = await import("../../src/dispatcher/registry.js");
-const realReplaceRegistryEntry = registryActual.replaceRegistryEntry;
+const realReplaceRegistryEntry: (
+  path: string,
+  entry: import("../../src/dispatcher/registry.js").RegistryEntry,
+) => Promise<void> = registryActual.replaceRegistryEntry.bind(registryActual);
 let armed = true;
-mock.module("../../src/dispatcher/registry.js", () => ({
+void mock.module("../../src/dispatcher/registry.js", () => ({
   ...registryActual,
   replaceRegistryEntry: async (
     path: string,
@@ -139,7 +142,9 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
     await parkedSecond.release();
     const outcome = await second;
     startedOf(outcome);
-    expect(outcome.handle.sessionId).toBe(control.sessions()[0]?.handle.sessionId);
+    const live = control.sessions()[0];
+    expect(live).toBeDefined();
+    expect(outcome.handle.sessionId).toBe(live?.handle.sessionId);
     const settled = await readRegistry(registryPath);
     expect(settled).toHaveLength(1);
     expect(settled[0]?.sessionId).toBe(outcome.handle.sessionId);

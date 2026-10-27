@@ -257,7 +257,9 @@ test("K2: a crash after port.start keeps one session", async () => {
     expect(control.sessions()).toHaveLength(1);
     // The replay returns the same session the first call created in the
     // port (P1): no second session, no new registry entry.
-    expect(outcome.handle.sessionId).toBe(control.sessions()[0]?.handle.sessionId);
+    const live = control.sessions()[0];
+    expect(live).toBeDefined();
+    expect(outcome.handle.sessionId).toBe(live?.handle.sessionId);
     control.complete(outcome.handle.sessionId, { state: "finished", usage: null, detail: "done" });
     const finished = dispatcher.watch(outcome.request.requestId);
     const parkedWatch = await waits.next("wait");
@@ -315,10 +317,8 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
     }
     // A lost-at-start outcome has no session id: the terminal result
     // reports null and the terminal event omits the sessionId key.
-    if (typeof lost !== "object" || lost === null || !("requestId" in lost)) {
-      throw new Error("expected the third start to return lost");
-    }
-    const lostResult = await plain.watch((lost as { requestId: string }).requestId);
+    const lostRequestId = (lost as { requestId: string }).requestId;
+    const lostResult = await plain.watch(lostRequestId);
     expect(lostResult.result.state).toBe("lost");
     expect(lostResult.result.sessionId).toBeNull();
     const terminalEvents = events.filter((event) => event["event"] === "terminal");

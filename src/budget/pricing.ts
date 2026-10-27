@@ -6,12 +6,15 @@
 // non-regular path exits 2. The descriptor id must equal the file name
 // stem. Free providers must state explicit zero prices.
 //
-// Prices are parsed as decimal strings from the JSON source text into
-// integer nano-USD per 1M tokens (at most 9 decimals). The JSON parser
-// would lose the decimal text (0.10 becomes the binary float 0.1), so a
-// small tokenizer reads the raw value instead; the descriptors stay plain
-// JSON numbers and the schema is unchanged.
+// The value used is the JSON number as parsed: each descriptor is validated
+// against config/providers/schema.json (pricing required, non-array object)
+// and each validated price number goes through Number.prototype.toString().
+// A result with e/E or more than 9 decimals is rejected, so a source text
+// with more digits than a double holds is outside the rule and not detected.
+import Ajv from "ajv/dist/2020";
+import addFormats from "ajv-formats";
 import { readInputText, statInputPath } from "./fs.js";
+import providerSchema from "../../config/providers/schema.json" with { type: "json" };
 
 export interface NanoPricing {
   readonly inputNanoPer1M: bigint;
@@ -19,15 +22,30 @@ export interface NanoPricing {
   readonly cachedInputNanoPer1M?: bigint;
 }
 
-interface RawDescriptor {
-  readonly id?: unknown;
-  readonly pricing?: unknown;
-}
-
 export const NANO_PER_USD = 1_000_000_000n;
 const MAX_DECIMALS = 9;
 
-export function parseDecimalToNanoUsd(raw: string, what: string, file: string): bigint {
+const ajv = new Ajv({ strict: true });
+addFormats(ajv);
+const validateDescriptor = ajv.compile(providerSchema);
+
+interface ValidatedPricing {
+  readonly inputPer1M: number;
+  readonly outputPer1M: number;
+  readonly cachedInputPer1M?: number;
+}
+
+interface ValidatedDescriptor {
+  readonly id: string;
+  readonly pricing: ValidatedPricing;
+}
+
+/** Decimal string of a validated price to integer nano-USD per 1M tokens. */
+export function priceToNanoUsd(value: number, what: string, file: string): bigint {
+  const raw = value.toString();
+  if (raw.includes("e") || raw.includes("E")) {
+    throw new Error(`Budget pricing ${file}: invalid ${what} "${raw}"`);
+  }
   const match = /^(\d+)(?:\.(\d{1,9}))?$/.exec(raw);
   if (match === null) {
     throw new Error(`Budget pricing ${file}: invalid ${what} "${raw}"`);
@@ -35,66 +53,6 @@ export function parseDecimalToNanoUsd(raw: string, what: string, file: string): 
   const whole = BigInt(match[1] as string);
   const frac = (match[2] ?? "").padEnd(MAX_DECIMALS, "0");
   return whole * NANO_PER_USD + BigInt(frac);
-}
-
-export function rawDecimalForKey(text: string, key: string, file: string): string | null {
-  const matches: string[] = [];
-  const pattern = new RegExp(`"${key}"\\s*:\\s*(-?[^,\\s}\\]]+)`);
-  let rest = text;
-  for (;;) {
-    const match = pattern.exec(rest);
-    if (match === null || match[1] === undefined || typeof match.index !== "number") {
-      break;
-    }
-    matches.push(match[1]);
-    rest = rest.slice(match.index + match[0].length);
-  }
-  if (matches.length === 0) {
-    return null;
-  }
-  const first = matches[0] as string;
-  if (matches.some((candidate) => candidate !== first)) {
-    throw new Error(`Budget pricing ${file}: conflicting values for "${key}"`);
-  }
-  return first;
-}
-
-function requiredPrice(text: string, key: string, file: string): bigint {
-  const raw = rawDecimalForKey(text, key, file);
-  if (raw === null) {
-    throw new Error(`Budget pricing ${file}: invalid ${key} "missing"`);
-  }
-  return parseDecimalToNanoUsd(raw, key, file);
-}
-
-function optionalPrice(text: string, key: string, file: string): bigint | undefined {
-  const raw = rawDecimalForKey(text, key, file);
-  if (raw === null) {
-    return undefined;
-  }
-  return parseDecimalToNanoUsd(raw, key, file);
-}
-
-function readPricing(text: string, file: string): NanoPricing {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new Error(`Budget pricing ${file}: not valid JSON`, { cause: error });
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("pricing" in parsed) ||
-    typeof parsed.pricing !== "object"
-  ) {
-    throw new Error(`Budget pricing ${file}: missing pricing block`);
-  }
-  return {
-    inputNanoPer1M: requiredPrice(text, "inputPer1M", file),
-    outputNanoPer1M: requiredPrice(text, "outputPer1M", file),
-    cachedInputNanoPer1M: optionalPrice(text, "cachedInputPer1M", file),
-  };
 }
 
 export async function loadDescriptor(dir: string, id: string): Promise<NanoPricing> {
@@ -116,11 +74,31 @@ export async function loadDescriptor(dir: string, id: string): Promise<NanoPrici
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error(`${label} ${file}: missing provider id`);
   }
-  const raw = parsed as RawDescriptor;
+  const raw = parsed as { id?: unknown };
   if (raw.id !== id) {
     throw new Error(`${label} ${file}: id "${String(raw.id)}" does not match file name`);
   }
-  return readPricing(text, file);
+  if (!validateDescriptor(parsed)) {
+    throw new Error(
+      `${label} ${file}: invalid descriptor ${JSON.stringify(validateDescriptor.errors)}`,
+    );
+  }
+  const descriptor = parsed as unknown as ValidatedDescriptor;
+  const pricing: NanoPricing = {
+    inputNanoPer1M: priceToNanoUsd(descriptor.pricing.inputPer1M, "inputPer1M", file),
+    outputNanoPer1M: priceToNanoUsd(descriptor.pricing.outputPer1M, "outputPer1M", file),
+  };
+  if (descriptor.pricing.cachedInputPer1M !== undefined) {
+    return {
+      ...pricing,
+      cachedInputNanoPer1M: priceToNanoUsd(
+        descriptor.pricing.cachedInputPer1M,
+        "cachedInputPer1M",
+        file,
+      ),
+    };
+  }
+  return pricing;
 }
 
 export async function loadPricingForIds(

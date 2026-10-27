@@ -19,12 +19,13 @@ coordinator's daily digest channel.
   needed ids are every route id, `nvidiaProviderId` and every ledger provider.
   Other files in the directory are ignored, so a stale copy has no effect.
   The descriptor `id` must equal the file name stem; a missing, dangling or
-  non-regular path exits 2. A descriptor without a `pricing` block is a load
-  error naming the file; "free" must be stated with explicit zero prices.
-  Prices are read from the JSON source text with a small tokenizer into
-  integer nano-USD per 1M tokens (at most 9 decimals; the JSON parser would
-  lose the decimal text), so the descriptors stay plain JSON numbers and
-  the schema is unchanged. The guard prices all input tokens at `inputPer1M`
+  non-regular path exits 2. A descriptor is validated at runtime against
+  `config/providers/schema.json` (Ajv 2020, `pricing` required): an invalid
+descriptor exits 2 with the validation errors and the file name. The value
+used is the JSON number as parsed: each validated price number goes through
+`Number.prototype.toString()`, which rejects `e`/`E` and more than
+9 decimals. A source text with more digits than a double holds is outside
+the rule and is not detected. The guard prices all input tokens at `inputPer1M`
   and output tokens at `outputPer1M` per 1M tokens. All sums and cap
   comparisons use BigInt nano-USD; a float appears only for display. Cached pricing is not applied because
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper

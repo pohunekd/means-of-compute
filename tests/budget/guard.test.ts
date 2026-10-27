@@ -569,8 +569,20 @@ test("pricing reads Meta prices by id", async () => {
 test("pricing: stale same-id copy next to the descriptor has no effect", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
   try {
-    const live = { id: "live-api", pricing: { inputPer1M: 1, outputPer1M: 2 } };
-    const stale = { id: "live-api", pricing: { inputPer1M: 0, outputPer1M: 0 } };
+    const live = {
+      id: "live-api",
+      name: "Live",
+      baseUrl: "https://live.example",
+      model: "m",
+      pricing: { inputPer1M: 1, outputPer1M: 2 },
+    };
+    const stale = {
+      id: "live-api",
+      name: "Stale",
+      baseUrl: "https://stale.example",
+      model: "m",
+      pricing: { inputPer1M: 0, outputPer1M: 0 },
+    };
     await Bun.write(join(dir, "live-api.json"), JSON.stringify(live));
     await Bun.write(join(dir, "live-api.stale.json"), JSON.stringify(stale));
     const pricing = await loadDescriptor(dir, "live-api");
@@ -585,7 +597,13 @@ test("pricing: symlink to a shared descriptor is read", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
   const shared = mkdtempSync(join(tmpdir(), "budget-shared-"));
   try {
-    const live = { id: "linked-api", pricing: { inputPer1M: 3, outputPer1M: 4 } };
+    const live = {
+      id: "linked-api",
+      name: "Linked",
+      baseUrl: "https://linked.example",
+      model: "m",
+      pricing: { inputPer1M: 3, outputPer1M: 4 },
+    };
     await Bun.write(join(shared, "shared.json"), JSON.stringify(live));
     symlinkSync(join(shared, "shared.json"), join(dir, "linked-api.json"));
     const pricing = await loadDescriptor(dir, "linked-api");
@@ -594,6 +612,82 @@ test("pricing: symlink to a shared descriptor is read", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(shared, { recursive: true, force: true });
+  }
+});
+
+test("pricing: null or array pricing block exits 2", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    const base = {
+      id: "null-api",
+      name: "Null",
+      baseUrl: "https://null.example",
+      model: "m",
+    };
+    await Bun.write(join(dir, "null-api.json"), JSON.stringify({ ...base, pricing: null }));
+    await Bun.write(
+      join(dir, "arr-api.json"),
+      JSON.stringify({ ...base, id: "arr-api", pricing: [] }),
+    );
+    for (const id of ["null-api", "arr-api"]) {
+      let message = "";
+      try {
+        await loadDescriptor(dir, id);
+      } catch (error: unknown) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain("Budget pricing");
+      expect(message).toContain(`${id}.json`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pricing: price key outside pricing does not fill a missing price", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    const descriptor = {
+      id: "outer-api",
+      name: "Outer",
+      baseUrl: "https://outer.example",
+      model: "m",
+      pricing: { outputPer1M: 0.2 },
+      legacy: { inputPer1M: 0 },
+    };
+    await Bun.write(join(dir, "outer-api.json"), JSON.stringify(descriptor));
+    let message = "";
+    try {
+      await loadDescriptor(dir, "outer-api");
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("outer-api.json");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pricing: 1e-7 price exits 2", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-pricing-"));
+  try {
+    const descriptor = {
+      id: "tiny-api",
+      name: "Tiny",
+      baseUrl: "https://tiny.example",
+      model: "m",
+      pricing: { inputPer1M: 1e-7, outputPer1M: 0 },
+    };
+    await Bun.write(join(dir, "tiny-api.json"), JSON.stringify(descriptor));
+    let message = "";
+    try {
+      await loadDescriptor(dir, "tiny-api");
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("tiny-api.json");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -619,6 +713,9 @@ test("pricing: descriptor id must match the file name", async () => {
   try {
     const mismatched = {
       id: "other-api",
+      name: "Other",
+      baseUrl: "https://other.example",
+      model: "m",
       pricing: { inputPer1M: 1, outputPer1M: 2 },
     };
     await Bun.write(join(dir, "claimed-api.json"), JSON.stringify(mismatched));

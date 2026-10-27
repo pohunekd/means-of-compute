@@ -162,10 +162,23 @@ describe("dashboard escaping (mutation: string interpolation without escapeHtml)
   });
 });
 
-describe("dashboard unavailable causes (mutation: raw cause in a cell)", () => {
-  test("every cause renders its CAUSE_LABELS text, never host- or the raw cause", async () => {
+describe("dashboard unavailable causes (mutation: wrong cause label in model.ts)", () => {
+  test("every cause renders its design 5.1 label, never host- or the raw cause", async () => {
     const { HOST_STATE_FAILURES } = await import("../../src/hoststate/port.js");
-    const extra: readonly (readonly [UnavailableCause, string])[] = [
+    const { COLLECTOR_ONLY_CAUSES } = await import("../../src/hoststate/collector.js");
+    // Expected values copied from design 5.1 CAUSE_LABELS, never from model.ts.
+    const expected: readonly (readonly [UnavailableCause, string])[] = [
+      ["host-unreachable", "unreachable"],
+      ["request-timeout", "request timed out"],
+      ["daemon-unsupported", "daemon too old"],
+      ["daemon-rejected", "daemon rejected the request"],
+      ["plugin-missing", "plugin not installed"],
+      ["plugin-disabled", "plugin disabled"],
+      ["plugin-busy", "plugin busy"],
+      ["plugin-failed", "plugin failed"],
+      ["plugin-timeout", "plugin timed out"],
+      ["output-too-large", "output too large"],
+      ["output-invalid", "output not UTF-8"],
       ["package-mismatch", "other plugin package"],
       ["version-not-accepted", "plugin version not accepted"],
       ["not-json", "output not JSON"],
@@ -174,10 +187,13 @@ describe("dashboard unavailable causes (mutation: raw cause in a cell)", () => {
       ["stale", "report too old"],
       ["future-timestamp", "report from the future"],
     ];
-    const causes: readonly UnavailableCause[] = [
-      ...HOST_STATE_FAILURES,
-      ...extra.map(([cause]) => cause),
-    ];
+    // The table key set must equal every cause the source exports, so a
+    // newly added cause fails here until it gains its design label.
+    expect(new Set([...HOST_STATE_FAILURES, ...COLLECTOR_ONLY_CAUSES]).size).toBe(18);
+    expect(new Set(expected.map(([cause]) => cause))).toEqual(
+      new Set([...HOST_STATE_FAILURES, ...COLLECTOR_ONLY_CAUSES]),
+    );
+    const causes: readonly UnavailableCause[] = expected.map(([cause]) => cause);
     expect(new Set(causes).size).toBe(18);
     const budget = await loadBudgetConfig();
     const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
@@ -210,14 +226,13 @@ describe("dashboard unavailable causes (mutation: raw cause in a cell)", () => {
       () => {},
     );
     const page = renderDashboard(buildDashboard(inputs));
-    for (const [, label] of extra) {
+    for (const [cause, label] of expected) {
       expect(page).toContain(`unavailable: ${label}`);
+      if (cause !== label) {
+        expect(page).not.toContain(cause);
+      }
     }
-    expect(page).toContain("unavailable: unreachable");
     expect(page.toLowerCase()).not.toContain("host-");
-    for (const cause of causes) {
-      expect(page).not.toContain(cause);
-    }
   });
 });
 

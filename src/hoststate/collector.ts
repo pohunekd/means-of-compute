@@ -308,3 +308,16 @@ export function createCollector(deps: CollectorDeps): HostStateCollector {
 }
 
 export type { HostStateFailure };
+
+// Collector-only unavailable causes: every UnavailableCause that is not a
+// HostStateFailure from port.ts. The dashboard test pins this list against
+// the design 5.1 table, so a new cause fails the test until it gains a label.
+export const COLLECTOR_ONLY_CAUSES: readonly UnavailableCause[] = [
+  "package-mismatch",
+  "version-not-accepted",
+  "not-json",
+  "contract-invalid",
+  "alias-mismatch",
+  "stale",
+  "future-timestamp",
+];

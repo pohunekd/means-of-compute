@@ -4,6 +4,7 @@
 // real contract validation.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { chmod, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
@@ -231,6 +232,51 @@ test("ledger: missing file means zero spend", async () => {
   try {
     const records = await readUsageLedger(join(dir, "no-such-ledger.jsonl"));
     expect(records).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function expectLedgerError(path: string, fragment: string): Promise<void> {
+  let message = "";
+  try {
+    await readUsageLedger(path);
+  } catch (error: unknown) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  expect(message).toContain(fragment);
+}
+
+test("ledger: a directory exits 2 naming the path", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
+  try {
+    await expectLedgerError(dir, `Budget ledger ${dir}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ledger: an unreadable parent directory exits 2 naming the error code", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "budget-ledger-"));
+  const locked = join(parent, "locked");
+  await mkdir(locked, { mode: 0o700 });
+  const ledgerPath = join(locked, "ledger.jsonl");
+  await Bun.write(ledgerPath, "");
+  await chmod(locked, 0o000);
+  try {
+    await expectLedgerError(ledgerPath, "EACCES");
+  } finally {
+    await chmod(locked, 0o700);
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("ledger: a dangling symlink exits 2 naming the path", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
+  try {
+    const link = join(dir, "ledger.jsonl");
+    await symlink(join(dir, "no-such-target.jsonl"), link);
+    await expectLedgerError(link, `Budget ledger ${link}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

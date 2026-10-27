@@ -601,6 +601,9 @@ function deriveIdle(
   const idleMinutesSec = idleMinutes * 60;
   const batteryOk = batteryPercent === null || batteryPercent > batteryThreshold;
 
+  if (!insideWindow) {
+    return { idle: false, reason: "outside the policy window" };
+  }
   if (!batteryOk) {
     return {
       idle: false,
@@ -611,18 +614,10 @@ function deriveIdle(
     return { idle: false, reason: "not on AC power" };
   }
   if (loggedOut) {
-    if (!insideWindow) {
-      return { idle: false, reason: "no user logged in, outside working hours" };
-    }
     return { idle: true, reason: "no user logged in, on AC power" };
   }
-  const inputOk = secondsSinceInput >= idleMinutesSec || !insideWindow;
-
-  if (!inputOk) {
+  if (secondsSinceInput < idleMinutesSec) {
     return { idle: false, reason: `user input ${String(secondsSinceInput)} seconds ago` };
-  }
-  if (!insideWindow) {
-    return { idle: true, reason: "outside working hours, on AC power" };
   }
   const mins = Math.round(secondsSinceInput / 60);
   return { idle: true, reason: `no user input for ${String(mins)} minutes, on AC power` };

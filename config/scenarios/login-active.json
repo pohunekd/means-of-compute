@@ -11,5 +11,8 @@
   "gpuFreeMb": null,
   "localModelsReachable": false,
   "localModels": [],
-  "hostAlias": "desktop"
+  "hostAlias": "desktop",
+  "policyAllowedWindowStart": "00:00",
+  "policyAllowedWindowEnd": "00:00",
+  "timestamp": "2026-10-27T12:00:00.000Z"
 }

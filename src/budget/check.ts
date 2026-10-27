@@ -157,8 +157,8 @@ async function run(): Promise<number> {
       await loadPricingForIds("config/providers", [...route, config.nvidiaProviderId]);
       decision = decideAdmission(
         {
-          spentTodayUsd: overrideTotal,
-          spentTotalUsd: overrideTotal,
+          spentTodayNanoUsd: BigInt(Math.round(overrideTotal * 1_000_000_000)),
+          spentTotalNanoUsd: BigInt(Math.round(overrideTotal * 1_000_000_000)),
           nvidiaRequestsToday: 0,
           unknownWorkItemIds: [],
         },

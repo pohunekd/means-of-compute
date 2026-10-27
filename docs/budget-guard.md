@@ -20,8 +20,13 @@ coordinator's daily digest channel.
   Other files in the directory are ignored, so a stale copy has no effect.
   The descriptor `id` must equal the file name stem; a missing, dangling or
   non-regular path exits 2. A descriptor without a `pricing` block is a load
-  error naming the file; "free" must be stated with explicit zero prices. The guard prices all input tokens at `inputPer1M` and output tokens
-  at `outputPer1M` per 1M tokens. Cached pricing is not applied because
+  error naming the file; "free" must be stated with explicit zero prices.
+  Prices are read from the JSON source text with a small tokenizer into
+  integer nano-USD per 1M tokens (at most 9 decimals; the JSON parser would
+  lose the decimal text), so the descriptors stay plain JSON numbers and
+  the schema is unchanged. The guard prices all input tokens at `inputPer1M`
+  and output tokens at `outputPer1M` per 1M tokens. All sums and cap
+  comparisons use BigInt nano-USD; a float appears only for display. Cached pricing is not applied because
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
   bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
   unmetered NVIDIA Build (0) come from those descriptors, never from

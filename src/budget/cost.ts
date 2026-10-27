@@ -1,13 +1,15 @@
-// Spend math for the budget guard. Cost comes only from the configured
-// provider prices. A record with null token counts on a priced provider is
-// "no data": it is reported in unknownWorkItemIds and refuses the session
-// instead of silently counting zero.
+// Spend math for the budget guard. Money is exact: cost is summed as
+// integer nano-USD per 1M tokens in BigInt, and the guard compares those
+// integers against the cap. A float appears only for display. A record with
+// null token counts on a priced provider is "no data": it is reported in
+// unknownWorkItemIds and refuses the session instead of silently counting
+// zero.
 import type { UsageRecord } from "../../contracts/v1/types.js";
-import type { ProviderPricing } from "../providers/types.js";
+import type { NanoPricing } from "./pricing.js";
 
 export interface SpendSummary {
-  readonly spentTodayUsd: number;
-  readonly spentTotalUsd: number;
+  readonly spentTodayNanoUsd: bigint;
+  readonly spentTotalNanoUsd: bigint;
   readonly nvidiaRequestsToday: number;
   readonly unknownWorkItemIds: readonly string[];
 }
@@ -21,10 +23,14 @@ export class SpendUnknownError extends Error {
   }
 }
 
-const PER_1M = 1_000_000;
+const TOKENS_PER_1M = 1_000_000n;
 
-function isPriced(pricing: ProviderPricing): boolean {
-  return pricing.inputPer1M > 0 || pricing.outputPer1M > 0 || (pricing.cachedInputPer1M ?? 0) > 0;
+export function isPriced(pricing: NanoPricing): boolean {
+  return (
+    pricing.inputNanoPer1M > 0n ||
+    pricing.outputNanoPer1M > 0n ||
+    (pricing.cachedInputNanoPer1M ?? 0n) > 0n
+  );
 }
 
 export function utcCalendarDay(date: Date): string {
@@ -37,9 +43,9 @@ function utcDayOfRecord(record: UsageRecord): string {
 
 export function costOfRecord(
   record: UsageRecord,
-  pricing: ReadonlyMap<string, ProviderPricing>,
-): number {
-  let cost = 0;
+  pricing: ReadonlyMap<string, NanoPricing>,
+): bigint {
+  let cost = 0n;
   for (const entry of record.tokens) {
     const providerPricing = pricing.get(entry.provider);
     if (providerPricing === undefined) {
@@ -54,22 +60,22 @@ export function costOfRecord(
       throw new SpendUnknownError(record.workItemId);
     }
     cost +=
-      (entry.inputTokens * providerPricing.inputPer1M +
-        entry.outputTokens * providerPricing.outputPer1M) /
-      PER_1M;
+      (BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
+        BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M) /
+      TOKENS_PER_1M;
   }
   return cost;
 }
 
 export function summarizeSpend(
   records: readonly UsageRecord[],
-  pricing: ReadonlyMap<string, ProviderPricing>,
+  pricing: ReadonlyMap<string, NanoPricing>,
   nvidiaProviderId: string,
   now: Date,
 ): SpendSummary {
   const today = utcCalendarDay(now);
-  let spentTodayUsd = 0;
-  let spentTotalUsd = 0;
+  let spentTodayNanoUsd = 0n;
+  let spentTotalNanoUsd = 0n;
   let nvidiaRequestsToday = 0;
   const unknownWorkItemIds: string[] = [];
   for (const record of records) {
@@ -82,7 +88,7 @@ export function summarizeSpend(
         }
       }
     }
-    let cost: number;
+    let cost: bigint;
     try {
       cost = costOfRecord(record, pricing);
     } catch (error: unknown) {
@@ -92,10 +98,15 @@ export function summarizeSpend(
       }
       throw error;
     }
-    spentTotalUsd += cost;
+    spentTotalNanoUsd += cost;
     if (utcDayOfRecord(record) === today) {
-      spentTodayUsd += cost;
+      spentTodayNanoUsd += cost;
     }
   }
-  return { spentTodayUsd, spentTotalUsd, nvidiaRequestsToday, unknownWorkItemIds };
+  return { spentTodayNanoUsd, spentTotalNanoUsd, nvidiaRequestsToday, unknownWorkItemIds };
+}
+
+/** Float dollars for display only; decisions never use this value. */
+export function nanoUsdToDisplayDollars(nanoUsd: bigint): number {
+  return Number(nanoUsd) / 1_000_000_000;
 }

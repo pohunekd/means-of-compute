@@ -10,14 +10,22 @@ import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { readUsageLedger } from "../../src/budget/ledger.js";
 import { costOfRecord, summarizeSpend } from "../../src/budget/cost.js";
-import { decideAdmission } from "../../src/budget/decision.js";
+import type { BudgetDecision } from "../../src/budget/decision.js";
+import { capUsdToNanoUsd, decideAdmission } from "../../src/budget/decision.js";
 import type { BudgetConfig } from "../../src/budget/config.js";
 import { maybeEscalate } from "../../src/budget/escalation.js";
 import { loadDescriptor } from "../../src/budget/pricing.js";
 
 const PRICING = new Map([
-  ["meta-api", { inputPer1M: 0.1, cachedInputPer1M: 0.002, outputPer1M: 0.2 }],
-  ["nvidia-build", { inputPer1M: 0, outputPer1M: 0 }],
+  [
+    "meta-api",
+    {
+      inputNanoPer1M: 100_000_000n,
+      cachedInputNanoPer1M: 2_000_000n,
+      outputNanoPer1M: 200_000_000n,
+    },
+  ],
+  ["nvidia-build", { inputNanoPer1M: 0n, outputNanoPer1M: 0n }],
 ]);
 
 const CONFIG: BudgetConfig = {
@@ -63,7 +71,7 @@ function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
 }
 
 test("cost of a record prices input and output tokens per 1M", () => {
-  expect(costOfRecord(record(), PRICING)).toBeCloseTo(0.3, 10);
+  expect(costOfRecord(record(), PRICING)).toBe(300_000_000n);
 });
 
 test("cost refuses unknown provider instead of guessing zero", () => {
@@ -118,6 +126,38 @@ test("cost reports spend unknown on null tokens from a priced provider", () => {
   expect(decision.reason).toBe("spend unknown");
 });
 
+test("M8: 120 records of 0.10 USD each refuse exactly at the day cap", () => {
+  const records: UsageRecord[] = [];
+  for (let i = 0; i < 120; i += 1) {
+    records.push(
+      record({
+        workItemId: `w-cap-${String(i)}`,
+        finishedAt: "2026-10-26T10:00:00.000Z",
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            requests: 1,
+            source: "provider-usage",
+          },
+        ],
+      }),
+    );
+  }
+  const summary = summarizeSpend(
+    records,
+    PRICING,
+    "nvidia-build",
+    new Date("2026-10-26T12:00:00.000Z"),
+  );
+  expect(summary.spentTodayNanoUsd).toBe(capUsdToNanoUsd(12, "dayCapUsd"));
+  const decision = decideAdmission(summary, CONFIG, { route: ["meta-api", "nvidia-build"] });
+  expect(decision.admit).toBe(false);
+  expect(decision.reason).toBe("daily cap reached");
+});
+
 test("day is the UTC calendar day of finishedAt", () => {
   const records = [
     record({ workItemId: "w1-demo", finishedAt: "2026-10-26T23:30:00.000Z" }),
@@ -130,8 +170,8 @@ test("day is the UTC calendar day of finishedAt", () => {
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTodayUsd).toBeCloseTo(0.6, 10);
-  expect(summary.spentTotalUsd).toBeCloseTo(0.9, 10);
+  expect(summary.spentTodayNanoUsd).toBe(600_000_000n);
+  expect(summary.spentTotalNanoUsd).toBe(900_000_000n);
   expect(summary.nvidiaRequestsToday).toBe(28);
 });
 
@@ -166,7 +206,7 @@ test("D2: spend at the day cap refuses all routes", () => {
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTodayUsd).toBeCloseTo(12, 10);
+  expect(summary.spentTodayNanoUsd).toBe(capUsdToNanoUsd(12, "dayCapUsd"));
   for (const route of [["nvidia-build"], ["meta-api"], []]) {
     const decision = decideAdmission(summary, CONFIG, { route });
     expect(decision.admit).toBe(false);
@@ -181,13 +221,13 @@ test("total cap refuses every new session", () => {
       record({ workItemId: "w2-demo", finishedAt: "2026-10-21T10:00:00.000Z" }),
     ],
     new Map([
-      ["meta-api", { inputPer1M: 100, outputPer1M: 100 }],
-      ["nvidia-build", { inputPer1M: 0, outputPer1M: 0 }],
+      ["meta-api", { inputNanoPer1M: 100_000_000_000n, outputNanoPer1M: 100_000_000_000n }],
+      ["nvidia-build", { inputNanoPer1M: 0n, outputNanoPer1M: 0n }],
     ]),
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTotalUsd).toBeGreaterThanOrEqual(140);
+  expect(summary.spentTotalNanoUsd).toBeGreaterThanOrEqual(capUsdToNanoUsd(140, "totalCapUsd"));
   const decision = decideAdmission(summary, CONFIG, { route: ["meta-api"] });
   expect(decision.admit).toBe(false);
   expect(decision.reason).toBe("total cap reached");
@@ -314,6 +354,15 @@ test("ledger: invalid line names the line number", async () => {
   }
 });
 
+function refusedDecision(
+  reason: string,
+  spentTodayUsd: number,
+  spentTotalUsd: number,
+  nvidiaRequestsToday: number,
+): BudgetDecision {
+  return { admit: false, reason, spentTodayUsd, spentTotalUsd, nvidiaRequestsToday };
+}
+
 test("D3: exactly one escalation per cap event across repeated refusals", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
   try {
@@ -321,13 +370,7 @@ test("D3: exactly one escalation per cap event across repeated refusals", async 
     const logPath = join(dir, "escalations.log");
     const stderr: string[] = [];
     const now = new Date("2026-10-26T12:00:00.000Z");
-    const refused = {
-      admit: false,
-      reason: "daily cap reached",
-      spentTodayUsd: 12,
-      spentTotalUsd: 12,
-      nvidiaRequestsToday: 5,
-    } as const;
+    const refused = refusedDecision("daily cap reached", 12, 12, 5);
     expect(
       await maybeEscalate(refused, {
         statePath,
@@ -378,20 +421,8 @@ test("D3: interleaved cap events escalate total@D, day@D, total@D+1, total@D+1 -
     const push = (line: string): void => {
       stderr.push(line);
     };
-    const totalRefused = {
-      admit: false,
-      reason: "total cap reached",
-      spentTodayUsd: 1,
-      spentTotalUsd: 140,
-      nvidiaRequestsToday: 5,
-    } as const;
-    const dayRefused = {
-      admit: false,
-      reason: "daily cap reached",
-      spentTodayUsd: 12,
-      spentTotalUsd: 152,
-      nvidiaRequestsToday: 5,
-    } as const;
+    const totalRefused = refusedDecision("total cap reached", 1, 140, 5);
+    const dayRefused = refusedDecision("daily cap reached", 12, 152, 5);
     expect(
       await maybeEscalate(totalRefused, {
         statePath,
@@ -443,13 +474,7 @@ test("D3: spend unknown escalates again on the next UTC day", async () => {
     const push = (line: string): void => {
       stderr.push(line);
     };
-    const refused = {
-      admit: false,
-      reason: "spend unknown",
-      spentTodayUsd: 0,
-      spentTotalUsd: 0,
-      nvidiaRequestsToday: 0,
-    } as const;
+    const refused = refusedDecision("spend unknown", 0, 0, 0);
     expect(
       await maybeEscalate(refused, {
         statePath,
@@ -488,13 +513,7 @@ test("D3: a directory as state exits 2 before any log line is written", async ()
     const statePath = join(dir, "state-dir");
     await mkdir(statePath);
     const logPath = join(dir, "escalations.log");
-    const refused = {
-      admit: false,
-      reason: "daily cap reached",
-      spentTodayUsd: 12,
-      spentTotalUsd: 12,
-      nvidiaRequestsToday: 0,
-    } as const;
+    const refused = refusedDecision("daily cap reached", 12, 12, 0);
     let message = "";
     try {
       await maybeEscalate(refused, {
@@ -514,10 +533,10 @@ test("D3: a directory as state exits 2 before any log line is written", async ()
 
 test("pricing reads Meta prices by id", async () => {
   const meta = await loadDescriptor("config/providers", "meta-api");
-  expect(meta.inputPer1M).toBe(0.1);
-  expect(meta.outputPer1M).toBe(0.2);
-  expect(meta.cachedInputPer1M).toBe(0.002);
-  expect((await loadDescriptor("config/providers", "nvidia-build")).inputPer1M).toBe(0);
+  expect(meta.inputNanoPer1M).toBe(100_000_000n);
+  expect(meta.outputNanoPer1M).toBe(200_000_000n);
+  expect(meta.cachedInputNanoPer1M).toBe(2_000_000n);
+  expect((await loadDescriptor("config/providers", "nvidia-build")).inputNanoPer1M).toBe(0n);
 });
 
 test("pricing: stale same-id copy next to the descriptor has no effect", async () => {
@@ -528,8 +547,8 @@ test("pricing: stale same-id copy next to the descriptor has no effect", async (
     await Bun.write(join(dir, "live-api.json"), JSON.stringify(live));
     await Bun.write(join(dir, "live-api.stale.json"), JSON.stringify(stale));
     const pricing = await loadDescriptor(dir, "live-api");
-    expect(pricing.inputPer1M).toBe(1);
-    expect(pricing.outputPer1M).toBe(2);
+    expect(pricing.inputNanoPer1M).toBe(1_000_000_000n);
+    expect(pricing.outputNanoPer1M).toBe(2_000_000_000n);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -543,8 +562,8 @@ test("pricing: symlink to a shared descriptor is read", async () => {
     await Bun.write(join(shared, "shared.json"), JSON.stringify(live));
     symlinkSync(join(shared, "shared.json"), join(dir, "linked-api.json"));
     const pricing = await loadDescriptor(dir, "linked-api");
-    expect(pricing.inputPer1M).toBe(3);
-    expect(pricing.outputPer1M).toBe(4);
+    expect(pricing.inputNanoPer1M).toBe(3_000_000_000n);
+    expect(pricing.outputNanoPer1M).toBe(4_000_000_000n);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(shared, { recursive: true, force: true });

@@ -2,8 +2,11 @@
 // never touches running ones: at or above a USD cap every route is refused,
 // and at or above the NVIDIA daily request limit every route starting at the
 // NVIDIA Build provider is refused. Any doubt (unknown spend) refuses.
+// Spend and caps are integer nano-USD compared as BigInt; floats never
+// decide.
 import type { BudgetConfig } from "./config.js";
-import type { SpendSummary } from "./cost.js";
+import { nanoUsdToDisplayDollars, type SpendSummary } from "./cost.js";
+import { NANO_PER_USD } from "./pricing.js";
 
 export type RefusalReason =
   | "spend unknown"
@@ -27,10 +30,25 @@ function refused(reason: RefusalReason, summary: SpendSummary): BudgetDecision {
   return {
     admit: false,
     reason,
-    spentTodayUsd: summary.spentTodayUsd,
-    spentTotalUsd: summary.spentTotalUsd,
+    spentTodayUsd: nanoUsdToDisplayDollars(summary.spentTodayNanoUsd),
+    spentTotalUsd: nanoUsdToDisplayDollars(summary.spentTotalNanoUsd),
     nvidiaRequestsToday: summary.nvidiaRequestsToday,
   };
+}
+
+/** Parses a configured USD cap into integer nano-USD for an exact comparison. */
+export function capUsdToNanoUsd(capUsd: number, field: string): bigint {
+  if (!Number.isFinite(capUsd) || capUsd < 0) {
+    throw new Error(`Budget config: invalid cap "${field}"`);
+  }
+  const text = capUsd.toString();
+  const match = /^(\d+)(?:\.(\d{1,9}))?$/.exec(text);
+  if (match === null) {
+    throw new Error(`Budget config: invalid cap "${field}"`);
+  }
+  const whole = BigInt(match[1] as string);
+  const frac = (match[2] ?? "").padEnd(9, "0");
+  return whole * NANO_PER_USD + BigInt(frac);
 }
 
 export function decideAdmission(
@@ -41,10 +59,10 @@ export function decideAdmission(
   if (summary.unknownWorkItemIds.length > 0) {
     return refused("spend unknown", summary);
   }
-  if (summary.spentTodayUsd >= config.dayCapUsd) {
+  if (summary.spentTodayNanoUsd >= capUsdToNanoUsd(config.dayCapUsd, "dayCapUsd")) {
     return refused("daily cap reached", summary);
   }
-  if (summary.spentTotalUsd >= config.totalCapUsd) {
+  if (summary.spentTotalNanoUsd >= capUsdToNanoUsd(config.totalCapUsd, "totalCapUsd")) {
     return refused("total cap reached", summary);
   }
   if (
@@ -57,8 +75,8 @@ export function decideAdmission(
   return {
     admit: true,
     reason: "within budget",
-    spentTodayUsd: summary.spentTodayUsd,
-    spentTotalUsd: summary.spentTotalUsd,
+    spentTodayUsd: nanoUsdToDisplayDollars(summary.spentTodayNanoUsd),
+    spentTotalUsd: nanoUsdToDisplayDollars(summary.spentTotalNanoUsd),
     nvidiaRequestsToday: summary.nvidiaRequestsToday,
   };
 }

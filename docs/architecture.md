@@ -49,7 +49,13 @@ comment whose first line is the marker
 `<!-- audit:v1:<repo>#<PR number>@<sha>:auditor=<model>:high=<n>:medium=<n>:low=<n> -->`
 followed by the findings table (`path:line`, defect, failure scenario, fix
 direction) or `No findings.` Model text in the table is neutralized so a
-finding can never emit a second marker line. The CLI
+finding can never emit a second marker line. Every provider call that
+reaches the server is billed and recorded: `callProviderOnce` throws
+`ProviderCallError` carrying `reachedProvider` and `usage`, so a 200 with
+an empty or non-JSON body still appends the billed `kind: "audit"` usage
+entry with the reported tokens (or null tokens when the body has none)
+before the run fails with exit 4, while a refused connection never
+reaches the provider and records nothing. The CLI
 (`bun run audit --repo-dir <dir> --branch <name> --base <ref> --issue <n>`
 reads `<repo-dir>/issues/<n>.json`; `--item <file>` replaces `--issue`)
 exits 0 with the verdict path, the marker, and the body; 3 on a domain

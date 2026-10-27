@@ -49,16 +49,15 @@ test("auth order: no token gives 401 and the loopback sees nothing", async () =>
       });
       expect(resp.status).toBe(401);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("unauthorized");
-      // M08b: nothing upstream, no record. The 401 fired before A1, so the
-      // event carries no requestId.
+      // M08b + L6: nothing upstream, no record; the 401 fired before
+      // A1, so the event carries no requestId.
       expect(loopback.requests().length).toBe(0);
       expect(await readLogLines(logPath)).toEqual([]);
-      const rejected = events.filter((e) => e.event === "request-rejected");
+      const rejected = events.filter((event) => event.event === "request-rejected");
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.code).toBe("unauthorized");
       expect(rejected[0]?.status).toBe(401);
       expect(rejected[0]?.requestId).toBeUndefined();
-      void meter;
     },
   );
 });
@@ -70,11 +69,11 @@ test("auth order: a token for an unknown grant gives 403", async () => {
       const resp = await post(meter, tokenFor("w9-unknown:0"), chatBody());
       expect(resp.status).toBe(403);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("no-grant");
-      // M08b: nothing upstream, no record. A1 held, so the event carries
-      // the requestId.
+      // M08b + L6: nothing upstream, no record; A1 held, so the event
+      // carries the requestId.
       expect(loopback.requests().length).toBe(0);
       expect(await readLogLines(logPath)).toEqual([]);
-      const rejected = events.filter((e) => e.event === "request-rejected");
+      const rejected = events.filter((event) => event.event === "request-rejected");
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.code).toBe("no-grant");
       expect(rejected[0]?.status).toBe(403);
@@ -91,13 +90,16 @@ test("wrong host gives 403", async () => {
       const resp = await post(meter, tokenFor(requestId), chatBody());
       expect(resp.status).toBe(403);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("wrong-host");
+      // L6: nothing upstream; the grant-open record stays. A1 held, so
+      // the event carries the requestId.
       expect(loopback.requests().length).toBe(0);
       expect(await readLogLines(logPath)).toEqual(
         expect.arrayContaining([expect.stringContaining('"kind":"grant-open"')]),
       );
-      const rejected = events.filter((e) => e.event === "request-rejected");
+      const rejected = events.filter((event) => event.event === "request-rejected");
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.code).toBe("wrong-host");
+      expect(rejected[0]?.status).toBe(403);
       expect(rejected[0]?.requestId).toBe(requestId);
     },
     { hosts: { "laptop-a": ["127.0.0.2"] } },
@@ -109,7 +111,7 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
   let now = openedAt;
   await withMeter(
     "tests/meter/recordings/stream-ok.json",
-    async ({ meter, tokenFor }) => {
+    async ({ meter, tokenFor, events, logPath }) => {
       await meter.openGrant({
         requestId: "w1-demo:0",
         workItemId: "w1-demo",
@@ -141,10 +143,26 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
       now = new Date(openedAt.getTime() + 4000);
       const deniedAgain = await post(meter, tokenFor("w1-demo:0"), chatBody());
       expect(deniedAgain.status).toBe(403);
+      expect(((await deniedAgain.json()) as { error: { code: string } }).error.code).toBe(
+        "grant-unbound",
+      );
       await meter.bindGrant("w1-demo:0", "sess-1");
       const allowed = await post(meter, tokenFor("w1-demo:0"), chatBody());
       expect(allowed.status).toBe(200);
       await allowed.text();
+      // M10 kills the from-the-first-open mutation only with the exact
+      // grant-unbound code on both denials and no call-start for them.
+      const unbound = events.filter(
+        (event) => event.event === "request-rejected" && event.code === "grant-unbound",
+      );
+      expect(unbound.length).toBe(2);
+      expect(unbound[0]?.status).toBe(403);
+      expect(unbound[0]?.requestId).toBe("w1-demo:0");
+      expect(unbound[1]?.status).toBe(403);
+      const starts = (await readLogLines(logPath)).filter((line) =>
+        line.includes('"kind":"call-start"'),
+      );
+      expect(starts.length).toBe(2);
     },
     {
       config: { unboundGrantTtlMs: 1000 },
@@ -190,6 +208,7 @@ test("caller model is rejected and the grant model is forwarded", async () => {
         (e) => e.event === "request-rejected" && e.code === "model-mismatch",
       );
       expect(rejected.length).toBe(1);
+      expect(rejected[0]?.status).toBe(400);
       expect(rejected[0]?.requestId).toBe(requestId);
       // M12: a correct call forwards the grant model, not the caller one.
       const good = await post(meter, tokenFor(requestId), chatBody({ stream: false }));
@@ -234,9 +253,11 @@ test("include_usage is forced on streamed calls", async () => {
       const sent = JSON.parse(loopback.requests()[0]?.body ?? "{}") as Record<string, unknown>;
       expect((sent["stream_options"] as Record<string, unknown>)["include_usage"]).toBe(true);
       // L6: call-finished carries the host alias for the billing join.
-      const finished = events.find((e) => e.event === "call-finished");
+      const finished = events.find((event) => event.event === "call-finished");
       expect(finished?.hostAlias).toBe("laptop-a");
       expect(finished?.requestId).toBe(requestId);
+      // L6: even a billed 200 logs no request-rejected.
+      expect(events.some((event) => event.event === "request-rejected")).toBe(false);
     },
   );
 });
@@ -252,7 +273,7 @@ test("no failover and no budget import: 429 passes through unbilled", async () =
   }
   await withMeter(
     "tests/meter/recordings/upstream-429.json",
-    async ({ meter, tokenFor, logPath }) => {
+    async ({ meter, tokenFor, logPath, events, loopback }) => {
       const { requestId } = await openBoundGrant(meter, { providerId: "meta-api" });
       const resp = await post(meter, tokenFor(requestId), chatBody());
       expect(resp.status).toBe(429);
@@ -261,6 +282,9 @@ test("no failover and no budget import: 429 passes through unbilled", async () =
       expect(end["outcome"]).toBe("upstream-status");
       expect(end["billed"]).toBe(false);
       expect(end["inputTokens"]).toBeNull();
+      // M15: no failover means exactly the one recorded attempt.
+      expect(loopback.requests().length).toBe(1);
+      expect(events.some((event) => event.event === "request-rejected")).toBe(false);
     },
   );
 });
@@ -679,15 +703,13 @@ test("provider key missing gives 503", async () => {
     "tests/meter/recordings/json-ok.json",
     async ({ meter, tokenFor, events }) => {
       const { requestId } = await openBoundGrant(meter);
-      // The key check reads process.env at request time, so dropping the
-      // key after the grant was opened exercises provider-key-missing.
       delete process.env.META_API_KEY;
       const resp = await post(meter, tokenFor(requestId), chatBody({ stream: false }));
       expect(resp.status).toBe(503);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
         "provider-key-missing",
       );
-      const rejected = events.filter((e) => e.event === "request-rejected");
+      const rejected = events.filter((event) => event.event === "request-rejected");
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.code).toBe("provider-key-missing");
       expect(rejected[0]?.status).toBe(503);
@@ -695,5 +717,3 @@ test("provider key missing gives 503", async () => {
     },
   );
 });
-
-void MeterGrantError;

@@ -1,11 +1,13 @@
-// Shared validator for provider descriptors. The schema is read on first use and cached, so importing this module reads no file. The schema is the only place the timeout cap is written.
+// Shared validator for provider descriptors. The schema is read on first use
+// and cached, so importing this module reads no file. The schema is the only
+// place the timeout cap is written.
 import { readInputText, statInputPath } from "../fs/input.js";
 import { PROVIDER_SCHEMA_PATH } from "./paths.js";
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 
-const SET_TIMEOUT_MAX_MS = 2_147_483_647;
 // setTimeout's delay is a signed 32-bit integer; Bun and Node run a larger delay after 1 ms.
+const SET_TIMEOUT_MAX_MS = 2_147_483_647;
 
 export interface ProviderSchema {
   readonly maxTimeoutMs: number;

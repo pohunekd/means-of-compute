@@ -88,6 +88,11 @@ function loadConfig(): ProbeConfig {
     if (typeof v !== "string") throw new Error(`config probe.json: invalid ${key}`);
     return v;
   };
+  const nonEmpty = (key: string): string => {
+    const v = str(key);
+    if (v === "") throw new Error(`config probe.json: invalid ${key}`);
+    return v;
+  };
   const policyRaw = raw["policy"];
   if (typeof policyRaw !== "object" || policyRaw === null) {
     throw new Error("config probe.json: invalid policy");
@@ -103,8 +108,9 @@ function loadConfig(): ProbeConfig {
   if (typeof maxAgents !== "number" || !Number.isInteger(maxAgents) || maxAgents < 1) {
     throw new Error("config probe.json: invalid policy.maxConcurrentAgents");
   }
-  const sysfsRoot = str("sysfsRoot");
-  assertSysfsRoot(sysfsRoot, "config probe.json: invalid sysfsRoot");
+  const sysfsRoot = nonEmpty("sysfsRoot");
+  // The sysfs tree only exists on Linux; on other platforms the readers
+  // never use this root, so its existence is checked there.
   return {
     idleMinutes: num("idleMinutes", 1),
     batteryThreshold: num("batteryThreshold", 0),
@@ -641,7 +647,15 @@ async function main(): Promise<void> {
   let sysfsRoot = cfg.sysfsRoot;
   if (facts.sysfsRoot !== undefined) {
     sysfsRoot = facts.sysfsRoot;
-    assertSysfsRoot(sysfsRoot, "facts: invalid sysfsRoot");
+  }
+  // The sysfs tree only exists on Linux; the macOS readers never touch it.
+  if (process.platform === "linux") {
+    assertSysfsRoot(
+      sysfsRoot,
+      facts.sysfsRoot === undefined
+        ? "config probe.json: invalid sysfsRoot"
+        : "facts: invalid sysfsRoot",
+    );
   }
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();

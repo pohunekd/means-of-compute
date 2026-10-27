@@ -265,11 +265,15 @@ export async function handleMeterRequest(
   if (verdict === "meter-unavailable") {
     return errorResponse("meter-unavailable", 503);
   }
+  // The call joins the in-flight set after its call-start resolves and
+  // leaves after its call-end settles (5.4). forwardCall owns the release so
+  // a streamed call stays counted until its end record is durable.
   const release = state.trackCall(grantId);
   try {
-    return await forwardCall(state, descriptor, auth.requestId, callId, bodyText, fields, stream);
-  } finally {
+    return await forwardCall(state, descriptor, auth.requestId, callId, bodyText, fields, stream, release);
+  } catch (error: unknown) {
     release();
+    throw error;
   }
 }
 
@@ -295,6 +299,7 @@ async function forwardCall(
   bodyText: string,
   fields: Record<string, unknown>,
   stream: boolean,
+  release: () => void,
 ): Promise<Response> {
   const timings = callTimings(state);
   const callerBody = JSON.parse(bodyText) as Record<string, unknown>;
@@ -419,10 +424,37 @@ async function forwardCall(
       drain.removeEventListener("abort", onDrain);
     }
     const ms = Date.now() - t0;
-    if (abortReason !== null) {
-      const out = abortReason as CallOutcome;
+    try {
+      if (abortReason !== null) {
+        const out = abortReason as CallOutcome;
+        await finishEnd({
+          outcome: out,
+          billed: true,
+          status: null,
+          inputTokens: null,
+          outputTokens: null,
+          clientGone,
+          ms,
+          bytesOut: 0,
+        });
+        state.log({ level: "error", event: "error", outcome: (error as Error).name });
+        return errorResponse(abortReason === "closed-abort" ? "upstream-error" : "upstream-timeout", 504);
+      }
+      if (error instanceof TypeError) {
+        await finishEnd({
+          outcome: "upstream-unreachable",
+          billed: false,
+          status: null,
+          inputTokens: null,
+          outputTokens: null,
+          clientGone,
+          ms,
+          bytesOut: 0,
+        });
+        return errorResponse("upstream-unreachable", 502);
+      }
       await finishEnd({
-        outcome: out,
+        outcome: "upstream-error",
         billed: true,
         status: null,
         inputTokens: null,
@@ -432,33 +464,10 @@ async function forwardCall(
         bytesOut: 0,
       });
       state.log({ level: "error", event: "error", outcome: (error as Error).name });
-      return errorResponse(abortReason === "closed-abort" ? "upstream-error" : "upstream-timeout", 504);
+      return errorResponse("upstream-error", 502);
+    } finally {
+      release();
     }
-    if (error instanceof TypeError) {
-      await finishEnd({
-        outcome: "upstream-unreachable",
-        billed: false,
-        status: null,
-        inputTokens: null,
-        outputTokens: null,
-        clientGone,
-        ms,
-        bytesOut: 0,
-      });
-      return errorResponse("upstream-unreachable", 502);
-    }
-    await finishEnd({
-      outcome: "upstream-error",
-      billed: true,
-      status: null,
-      inputTokens: null,
-      outputTokens: null,
-      clientGone,
-      ms,
-      bytesOut: 0,
-    });
-    state.log({ level: "error", event: "error", outcome: (error as Error).name });
-    return errorResponse("upstream-error", 502);
   }
   status = upstream.status;
   clearTimers();
@@ -468,16 +477,20 @@ async function forwardCall(
     }
     const body = await upstream.text().catch(() => "");
     bytesOut = new TextEncoder().encode(body).length;
-    await finishEnd({
-      outcome: "upstream-status",
-      billed: false,
-      status,
-      inputTokens: null,
-      outputTokens: null,
-      clientGone,
-      ms: Date.now() - t0,
-      bytesOut,
-    });
+    try {
+      await finishEnd({
+        outcome: "upstream-status",
+        billed: false,
+        status,
+        inputTokens: null,
+        outputTokens: null,
+        clientGone,
+        ms: Date.now() - t0,
+        bytesOut,
+      });
+    } finally {
+      release();
+    }
     const headers = new Headers();
     const upstreamType = upstream.headers.get("content-type");
     if (upstreamType !== null) {
@@ -586,16 +599,20 @@ async function forwardCall(
         if (finalOutcome === "ok" && seen.seen) {
           billed = true;
         }
-        await finishEnd({
-          outcome: finalOutcome,
-          billed,
-          status,
-          inputTokens: counts.inputTokens,
-          outputTokens: counts.outputTokens,
-          clientGone,
-          ms: Date.now() - t0,
-          bytesOut,
-        });
+        try {
+          await finishEnd({
+            outcome: finalOutcome,
+            billed,
+            status,
+            inputTokens: counts.inputTokens,
+            outputTokens: counts.outputTokens,
+            clientGone,
+            ms: Date.now() - t0,
+            bytesOut,
+          });
+        } finally {
+          release();
+        }
         if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
           try {
             controller.error(new Error(outcome ?? "upstream-broken"));

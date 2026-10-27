@@ -1,0 +1,10 @@
+[
+  {
+    "status": 200,
+    "sseChunks": [
+      "data: {\"id\": \"x\", \"choices\": []}\n\n",
+      "data: [DONE]\n\n"
+    ],
+    "chunkDelayMs": 1
+  }
+]

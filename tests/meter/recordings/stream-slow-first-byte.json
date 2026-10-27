@@ -1,0 +1,8 @@
+[
+  {
+    "status": 200,
+    "delayMs": 200,
+    "sseChunks": ["data: {\"usage\": {\"prompt_tokens\": 1, \"completion_tokens\": 1}}\n\n", "data: [DONE]\n\n"],
+    "chunkDelayMs": 1
+  }
+]

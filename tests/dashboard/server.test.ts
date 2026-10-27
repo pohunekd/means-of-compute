@@ -64,7 +64,13 @@ describe("dashboard boundary (mutation: probe/meter import; hosts.json; process.
     for await (const file of dir.scan()) {
       count += 1;
       const text = await Bun.file(file).text();
-      for (const needle of ["../probe/", "../meter/", "../placement/", "hosts.json", "process.env"]) {
+      for (const needle of [
+        "../probe/",
+        "../meter/",
+        "../placement/",
+        "hosts.json",
+        "process.env",
+      ]) {
         expect(`${file}: ${text}`).not.toContain(needle);
       }
     }

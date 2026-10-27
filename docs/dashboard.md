@@ -50,21 +50,21 @@ the path `/` (404, the query string is ignored).
 Every key is required and no extra key is allowed, at the top level and
 inside `baselines`; any failure exits 2 naming the key.
 
-| Key | Rule |
-|---|---|
-| `listenEnv` | matches `^[A-Z][A-Z0-9_]*$`; currently `MOC_DASHBOARD_LISTEN` |
-| `listenAlias` | matches `^[a-z][a-z0-9-]{0,31}$`; currently `dashboard` |
-| `logPath` | non-empty string; must be writable at startup; currently `logs/dashboard.jsonl` |
-| `maxRequestBytes` | integer in `1..65536`; currently `1024` |
-| `idleTimeoutSec` | integer in `1..255`; currently `10` |
-| `workRowLimit` | integer in `1..1000`; currently `50` |
-| `baselines.frontierTokens` | `null`, or an object with exactly `label`, `inputPer1M`, `outputPer1M`, `source`, `asOf` |
-| `baselines.cloudSandboxHour` | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf` |
-| `baselines.ownedHostHour` | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf` |
-| `label` | 1..80 chars, no control characters |
-| `source` | 1..300 chars, no control characters; a URL or a citation the owner can re-check. **Required: a baseline without a source is invalid.** |
-| `asOf` | a valid `YYYY-MM-DD` date |
-| `inputPer1M`, `outputPer1M`, `perHour` | JSON number `>= 0`, at most 9 decimals |
+| Key                                    | Rule                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `listenEnv`                            | matches `^[A-Z][A-Z0-9_]*$`; currently `MOC_DASHBOARD_LISTEN`                                                                          |
+| `listenAlias`                          | matches `^[a-z][a-z0-9-]{0,31}$`; currently `dashboard`                                                                                |
+| `logPath`                              | non-empty string; must be writable at startup; currently `logs/dashboard.jsonl`                                                        |
+| `maxRequestBytes`                      | integer in `1..65536`; currently `1024`                                                                                                |
+| `idleTimeoutSec`                       | integer in `1..255`; currently `10`                                                                                                    |
+| `workRowLimit`                         | integer in `1..1000`; currently `50`                                                                                                   |
+| `baselines.frontierTokens`             | `null`, or an object with exactly `label`, `inputPer1M`, `outputPer1M`, `source`, `asOf`                                               |
+| `baselines.cloudSandboxHour`           | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf`                                                                 |
+| `baselines.ownedHostHour`              | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf`                                                                 |
+| `label`                                | 1..80 chars, no control characters                                                                                                     |
+| `source`                               | 1..300 chars, no control characters; a URL or a citation the owner can re-check. **Required: a baseline without a source is invalid.** |
+| `asOf`                                 | a valid `YYYY-MM-DD` date                                                                                                              |
+| `inputPer1M`, `outputPer1M`, `perHour` | JSON number `>= 0`, at most 9 decimals                                                                                                 |
 
 ## Baselines
 
@@ -81,7 +81,7 @@ Fleet, Work, Usage, Savings, Autonomy, in that order. Token counts and
 integers group digits (`1,200,000`); times are ISO UTC. A ledger failure
 makes every ledger-derived cell `error(<ledger code>)`; the page shows the
 code only, never the message. Figures listed "in order" render in that
-order. The Work table shows ``showing ${shown} of ${total} items``.
+order. The Work table shows `showing ${shown} of ${total} items`.
 
 ### Fleet
 
@@ -139,14 +139,14 @@ latest ISO timestamp, or `no data (no timestamp)`.
 
 `day = utcCalendarDay(now)`. In order:
 
-| Label | Value | Source |
-|---|---|---|
-| `Spent today (UTC <day>)` | exact scaled sum, or no-data by the unknown rule | `ledger records and pending entries finished on <day>, tokens × price; <prices>` |
-| `Day cap` | `config/budget.json dayCapUsd` | `config/budget.json dayCapUsd` |
-| `Spent total` | exact scaled sum, or no-data by the unknown rule | `ledger records and pending entries, tokens × price; <prices>` |
-| `Total cap` | `config/budget.json totalCapUsd` | `config/budget.json totalCapUsd` |
-| `NVIDIA Build requests today (UTC <day>)` | `<n> of <limit>`, or no-data by the unknown rule | `ledger requests of provider <id> finished on <day>; limit config/budget.json nvidiaDailyRequestLimit` |
-| `New sessions` | budget guard decision: `admitted (<reason>)` or `refused (<reason>)` | `budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)` |
+| Label                                     | Value                                                                | Source                                                                                                 |
+| ----------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `Spent today (UTC <day>)`                 | exact scaled sum, or no-data by the unknown rule                     | `ledger records and pending entries finished on <day>, tokens × price; <prices>`                       |
+| `Day cap`                                 | `config/budget.json dayCapUsd`                                       | `config/budget.json dayCapUsd`                                                                         |
+| `Spent total`                             | exact scaled sum, or no-data by the unknown rule                     | `ledger records and pending entries, tokens × price; <prices>`                                         |
+| `Total cap`                               | `config/budget.json totalCapUsd`                                     | `config/budget.json totalCapUsd`                                                                       |
+| `NVIDIA Build requests today (UTC <day>)` | `<n> of <limit>`, or no-data by the unknown rule                     | `ledger requests of provider <id> finished on <day>; limit config/budget.json nvidiaDailyRequestLimit` |
+| `New sessions`                            | budget guard decision: `admitted (<reason>)` or `refused (<reason>)` | `budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)`                  |
 
 The caps need no ledger or prices; the other figures take the ledger or
 pricing failure. With no entries in scope the price part is prefixed with
@@ -168,15 +168,15 @@ plus a `total` row with `Σ seconds / 3600` to 2 decimals. Source:
 
 In order:
 
-| Label | Value | Source |
-|---|---|---|
-| `Frontier-token baseline` | scaled token sums at the frontier prices | `ledger records tokens (input <n>, output <n>); config/dashboard.json baselines.frontierTokens input $<in> per 1M, output $<out> per 1M (<label>; <source>; as of <asOf>)` |
-| `Actual token cost` | scaled token sums at provider prices | `ledger records tokens × price; <prices>` |
-| `Token savings` | baseline minus actual | `frontier-token baseline minus actual token cost above; <frontier>; <prices>` |
-| `Cloud sandbox baseline` | scaled session seconds at the cloud price | `ledger records sessionSeconds (<n> s); config/dashboard.json baselines.cloudSandboxHour $<p> per hour (<label>; <source>; as of <asOf>)` |
-| `Owned compute cost` | scaled session seconds at the owned price | same, with `baselines.ownedHostHour` |
-| `Compute-hour savings` | cloud baseline minus owned cost | `cloud sandbox baseline minus owned compute cost above; <cloud>; <owned>` |
-| `Total savings` | token plus compute-hour savings | `token savings plus compute-hour savings above; <frontier>; <prices>; <cloud>; <owned>` |
+| Label                     | Value                                     | Source                                                                                                                                                                     |
+| ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Frontier-token baseline` | scaled token sums at the frontier prices  | `ledger records tokens (input <n>, output <n>); config/dashboard.json baselines.frontierTokens input $<in> per 1M, output $<out> per 1M (<label>; <source>; as of <asOf>)` |
+| `Actual token cost`       | scaled token sums at provider prices      | `ledger records tokens × price; <prices>`                                                                                                                                  |
+| `Token savings`           | baseline minus actual                     | `frontier-token baseline minus actual token cost above; <frontier>; <prices>`                                                                                              |
+| `Cloud sandbox baseline`  | scaled session seconds at the cloud price | `ledger records sessionSeconds (<n> s); config/dashboard.json baselines.cloudSandboxHour $<p> per hour (<label>; <source>; as of <asOf>)`                                  |
+| `Owned compute cost`      | scaled session seconds at the owned price | same, with `baselines.ownedHostHour`                                                                                                                                       |
+| `Compute-hour savings`    | cloud baseline minus owned cost           | `cloud sandbox baseline minus owned compute cost above; <cloud>; <owned>`                                                                                                  |
+| `Total savings`           | token plus compute-hour savings           | `token savings plus compute-hour savings above; <frontier>; <prices>; <cloud>; <owned>`                                                                                    |
 
 A `null` baseline gives
 `no data (no <key> baseline in config/dashboard.json)`. A null count on any
@@ -215,36 +215,36 @@ Never a partial sum.
 
 ## Failure table
 
-| Input or condition | Behaviour | Page |
-|---|---|---|
-| `config/dashboard.json` missing, invalid, extra key, bad baseline, baseline without `source` | exit 2 naming the key | none |
-| `MOC_DASHBOARD_LISTEN` unset, not `host:port`, not loopback, wildcard, port out of range | exit 2 naming the variable, never the value | none |
-| bind fails (`EADDRINUSE`, …) | exit 2 `dashboard listener <alias>: <code>` | none |
-| `MOC_DASHBOARD_NOW` invalid | exit 2 | none |
-| `logPath` parent missing or not writable | exit 2 | none |
-| `config/budget.json`, route, route or NVIDIA descriptors | exit 2 (existing loader texts) | none |
-| `config/ledger.json`, `config/auditor.json` (no flag given) | exit 2 | none |
-| ledger absent with parent present | empty contents | counts 0, spend `$0.0000` |
-| ledger parent missing, unreadable, or not a file | `error ledger-unreadable`, logged | every ledger cell `error (ledger-unreadable)` |
-| ledger line invalid, duplicate, unterminated | `error ledger-invalid`, logged | every ledger cell `error (ledger-invalid)` |
-| a ledger provider has no descriptor | `error pricing-unavailable`, logged | every money cell except caps and baselines `error (pricing-unavailable)` |
-| null counts on a priced provider | unknown rule above | `no data (spend unknown for …)`; never a partial sum |
-| null counts on any provider (baseline) | baseline rule above | `no data (token counts not reported for …)` |
-| baseline `null` | baseline rule above | `no data (no <key> baseline in config/dashboard.json)` |
-| verdict dir absent | no-data | `no data (no verdict store)` |
-| verdict file unreadable or invalid | `error verdicts-unreadable` for that row, logged | that row only |
-| verdict counts disagree with the findings | that verdict part | `<sha12>: invalid (counts disagree)` |
-| `hostState === null` | no-data | `no data (host state not wired)` |
-| `collect()` rejects with an `Error` | `error fleet-round-failed`, logged | Fleet state, capacity and observed cells |
-| one host unavailable | its observation | `unavailable: <label>` |
-| alias seen only in ledger | no observation | `no data (not in this collector round)` |
-| work items | `null` | `no data (no work item source (#15, #17))` |
-| Host header not allowed or missing | 421 | none |
-| method not `GET` | 405 | none |
-| path not `/` | 404 | none |
-| body over `maxRequestBytes` | Bun 413 | none |
-| a throw in build or render, a bad alias, a non-`Error` throw | 500 `dashboard error`, `render-error` logged | none |
-| log append fails | stderr line, serving continues | unchanged |
+| Input or condition                                                                           | Behaviour                                        | Page                                                                     |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------ |
+| `config/dashboard.json` missing, invalid, extra key, bad baseline, baseline without `source` | exit 2 naming the key                            | none                                                                     |
+| `MOC_DASHBOARD_LISTEN` unset, not `host:port`, not loopback, wildcard, port out of range     | exit 2 naming the variable, never the value      | none                                                                     |
+| bind fails (`EADDRINUSE`, …)                                                                 | exit 2 `dashboard listener <alias>: <code>`      | none                                                                     |
+| `MOC_DASHBOARD_NOW` invalid                                                                  | exit 2                                           | none                                                                     |
+| `logPath` parent missing or not writable                                                     | exit 2                                           | none                                                                     |
+| `config/budget.json`, route, route or NVIDIA descriptors                                     | exit 2 (existing loader texts)                   | none                                                                     |
+| `config/ledger.json`, `config/auditor.json` (no flag given)                                  | exit 2                                           | none                                                                     |
+| ledger absent with parent present                                                            | empty contents                                   | counts 0, spend `$0.0000`                                                |
+| ledger parent missing, unreadable, or not a file                                             | `error ledger-unreadable`, logged                | every ledger cell `error (ledger-unreadable)`                            |
+| ledger line invalid, duplicate, unterminated                                                 | `error ledger-invalid`, logged                   | every ledger cell `error (ledger-invalid)`                               |
+| a ledger provider has no descriptor                                                          | `error pricing-unavailable`, logged              | every money cell except caps and baselines `error (pricing-unavailable)` |
+| null counts on a priced provider                                                             | unknown rule above                               | `no data (spend unknown for …)`; never a partial sum                     |
+| null counts on any provider (baseline)                                                       | baseline rule above                              | `no data (token counts not reported for …)`                              |
+| baseline `null`                                                                              | baseline rule above                              | `no data (no <key> baseline in config/dashboard.json)`                   |
+| verdict dir absent                                                                           | no-data                                          | `no data (no verdict store)`                                             |
+| verdict file unreadable or invalid                                                           | `error verdicts-unreadable` for that row, logged | that row only                                                            |
+| verdict counts disagree with the findings                                                    | that verdict part                                | `<sha12>: invalid (counts disagree)`                                     |
+| `hostState === null`                                                                         | no-data                                          | `no data (host state not wired)`                                         |
+| `collect()` rejects with an `Error`                                                          | `error fleet-round-failed`, logged               | Fleet state, capacity and observed cells                                 |
+| one host unavailable                                                                         | its observation                                  | `unavailable: <label>`                                                   |
+| alias seen only in ledger                                                                    | no observation                                   | `no data (not in this collector round)`                                  |
+| work items                                                                                   | `null`                                           | `no data (no work item source (#15, #17))`                               |
+| Host header not allowed or missing                                                           | 421                                              | none                                                                     |
+| method not `GET`                                                                             | 405                                              | none                                                                     |
+| path not `/`                                                                                 | 404                                              | none                                                                     |
+| body over `maxRequestBytes`                                                                  | Bun 413                                          | none                                                                     |
+| a throw in build or render, a bad alias, a non-`Error` throw                                 | 500 `dashboard error`, `render-error` logged     | none                                                                     |
+| log append fails                                                                             | stderr line, serving continues                   | unchanged                                                                |
 
 ## Privacy
 

@@ -11,10 +11,7 @@ import { isWorkItem } from "../../contracts/v1/validate.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import { gatherInputs, type DashboardInputs } from "../../src/dashboard/inputs.js";
 import { buildDashboard, type Figure } from "../../src/dashboard/model.js";
-import {
-  createCollector,
-  type HostStateCollector,
-} from "../../src/hoststate/collector.js";
+import { createCollector, type HostStateCollector } from "../../src/hoststate/collector.js";
 import { loadHostStateConfig } from "../../src/hoststate/config.js";
 import { createMemoryHostStatePort } from "../../src/hoststate/memory-port.js";
 
@@ -185,14 +182,7 @@ describe("dashboard usage figures 10.2 (mutation: records-only spend; per-record
         "12",
         "auditor-usage, meter-proxy",
       ],
-      [
-        "nvidia-build",
-        "meta/muse-glimmer-30b",
-        "5,500,000",
-        "1,100,000",
-        "58",
-        "meter-proxy",
-      ],
+      ["nvidia-build", "meta/muse-glimmer-30b", "5,500,000", "1,100,000", "58", "meter-proxy"],
     ]);
     expect(providerTable.note ?? "").toContain("1 pending entries");
     const hoursTable = usage.tables[1] as (typeof usage.tables)[number];
@@ -287,11 +277,18 @@ describe("dashboard autonomy and work order 10.2 (mutation: sort by id; invented
   test("workRowLimit 2 reads verdicts only for the shown ids", async () => {
     const seen = new Set<string>();
     const logged: DashboardInputs["verdicts"] = new Map();
-    const inputs = await loadInputs(FIXTURE, VERDICTS, {
-      frontierTokens: null,
-      cloudSandboxHour: null,
-      ownedHostHour: null,
-    }, new Date("2026-10-27T12:00:00.000Z"), null, 2);
+    const inputs = await loadInputs(
+      FIXTURE,
+      VERDICTS,
+      {
+        frontierTokens: null,
+        cloudSandboxHour: null,
+        ownedHostHour: null,
+      },
+      new Date("2026-10-27T12:00:00.000Z"),
+      null,
+      2,
+    );
     expect(inputs.verdicts.has("d4-delta")).toBe(true);
     expect(inputs.verdicts.has("d3-gamma")).toBe(true);
     expect(inputs.verdicts.has("d1-alpha")).toBe(false);
@@ -313,8 +310,8 @@ describe("dashboard work items (mutation: ignore status rule 1)", () => {
     const autonomy = model.panels[4] as (typeof model.panels)[number];
     expect(textOf(autonomy, "Parked tasks")).toBe("1");
     const all = new Set([
-      ...inputs.ledger.ok ? inputs.ledger.value.records.map((record) => record.workItemId) : [],
-      ...inputs.ledger.ok ? inputs.ledger.value.pending.map((entry) => entry.workItemId) : [],
+      ...(inputs.ledger.ok ? inputs.ledger.value.records.map((record) => record.workItemId) : []),
+      ...(inputs.ledger.ok ? inputs.ledger.value.pending.map((entry) => entry.workItemId) : []),
       "w1-contracts",
       "w2-parked-example",
     ]);
@@ -383,8 +380,17 @@ describe("dashboard input failures (mutation: collapse error into no-data; drop 
     }
     // A missing descriptor for a ledger provider fails pricing under the
     // same code gatherInputs reports for an unreadable descriptor file.
-    const priced = { ...inputs, pricing: { ok: false as const, failure: { kind: "error" as const, code: "pricing-unavailable" as const } } };
-    const withoutBaseline: DashboardInputs = { ...priced, baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null } };
+    const priced = {
+      ...inputs,
+      pricing: {
+        ok: false as const,
+        failure: { kind: "error" as const, code: "pricing-unavailable" as const },
+      },
+    };
+    const withoutBaseline: DashboardInputs = {
+      ...priced,
+      baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+    };
     const model = buildDashboard(withoutBaseline);
     const usage = model.panels[2] as (typeof model.panels)[number];
     expect(figureOf(usage, "Spent today (UTC 2026-10-27)").cell).toEqual({
@@ -473,11 +479,17 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
       sleep: () => new Promise<void>(() => {}),
       log: () => {},
     });
-    const inputs = await loadInputs(FIXTURE, VERDICTS, {
-      frontierTokens: null,
-      cloudSandboxHour: null,
-      ownedHostHour: null,
-    }, now, collector);
+    const inputs = await loadInputs(
+      FIXTURE,
+      VERDICTS,
+      {
+        frontierTokens: null,
+        cloudSandboxHour: null,
+        ownedHostHour: null,
+      },
+      now,
+      collector,
+    );
     const model = buildDashboard(inputs);
     const fleet = model.panels[0] as (typeof model.panels)[number];
     const table = fleet.tables[0] as (typeof fleet.tables)[number];
@@ -487,7 +499,7 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
         cells,
       ]),
     );
-    const asText = (row: readonly (typeof fleet.tables)[number]["rows"][number][number]): string => {
+    const asText = (row: (typeof fleet.tables)[number]["rows"][number][number]): string => {
       if (row.kind === "text") {
         return row.text;
       }
@@ -530,11 +542,19 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
     const failing: HostStateCollector = {
       collect: () => Promise.reject(new Error("boom")),
     };
-    const model = buildDashboard(await loadInputs(FIXTURE, VERDICTS, {
-      frontierTokens: null,
-      cloudSandboxHour: null,
-      ownedHostHour: null,
-    }, new Date("2026-10-27T12:00:00.000Z"), failing));
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        new Date("2026-10-27T12:00:00.000Z"),
+        failing,
+      ),
+    );
     const fleet = model.panels[0] as (typeof model.panels)[number];
     const table = fleet.tables[0] as (typeof fleet.tables)[number];
     for (const row of table.rows) {

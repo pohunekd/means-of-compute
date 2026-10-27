@@ -22,7 +22,13 @@ async function makeSandbox(): Promise<string> {
     join(dir, "config", "budget.json"),
     await Bun.file(join(REPO_ROOT, "config", "budget.json")).text(),
   );
-  for (const name of ["local.json", "meta-api.json", "nvidia-build.json", "route.json", "schema.json"]) {
+  for (const name of [
+    "local.json",
+    "meta-api.json",
+    "nvidia-build.json",
+    "route.json",
+    "schema.json",
+  ]) {
     await Bun.write(
       join(dir, "config", "providers", name),
       await Bun.file(join(REPO_ROOT, "config", "providers", name)).text(),
@@ -68,7 +74,10 @@ async function makeSandbox(): Promise<string> {
   return dir;
 }
 
-function serveEnv(dir: string, extra: Record<string, string | undefined>): Record<string, string | undefined> {
+function serveEnv(
+  dir: string,
+  extra: Record<string, string | undefined>,
+): Record<string, string | undefined> {
   return {
     ...process.env,
     MOC_DASHBOARD_LISTEN: "127.0.0.1:0",

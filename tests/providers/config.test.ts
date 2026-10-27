@@ -39,6 +39,30 @@ test("config: descriptor with timeoutMs 0 throws (mutation: skip the validation)
   expect(result.output).toContain("timeoutMs");
 });
 
+test("config: descriptor with timeoutMs 600001 throws (mutation: drop maximum)", async () => {
+  const result = await withDescriptor((descriptor) => {
+    descriptor["timeoutMs"] = 600001;
+  });
+  expect(result.code).toBe(1);
+  expect(result.output).toContain("config/providers/meta-api.json");
+  expect(result.output).toContain("timeoutMs");
+});
+
+test("config: timeout override 600001 throws (mutation: larger literal)", async () => {
+  const { makeTempConfig: make, removeTempConfig: remove, runLoadCheck: load } =
+    await import("./temp-config.js");
+  const { setChildEnv } = await import("./temp-config.js");
+  const dir = await make();
+  try {
+    setChildEnv({ PROVIDER_META_API_TIMEOUT_MS: "600001" });
+    const result = await load(dir);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("PROVIDER_META_API_TIMEOUT_MS");
+  } finally {
+    remove(dir);
+  }
+});
+
 test("config: valid descriptors load", async () => {
   const dir = await makeTempConfig();
   try {

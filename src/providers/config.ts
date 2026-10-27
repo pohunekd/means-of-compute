@@ -1,13 +1,12 @@
 import { readInputText, statInputPath } from "../fs/input.js";
 import { loadProviderRoute } from "./route.js";
-import { providerDescriptorErrors } from "./schema.js";
+import { MAX_TIMEOUT_MS, providerDescriptorErrors } from "./schema.js";
 import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
 
 export const ROUTE_PATH = "config/providers/route.json";
 const DESCRIPTOR_DIR = "config/providers";
-const MAX_TIMEOUT_MS = 600000;
 const TIMEOUT_PATTERN = /^[1-9][0-9]*$/;
 const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
 
@@ -73,7 +72,9 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   const timeoutRaw = process.env[timeoutEnv];
   if (timeoutRaw !== undefined && timeoutRaw !== "") {
     if (!TIMEOUT_PATTERN.test(timeoutRaw) || Number(timeoutRaw) > MAX_TIMEOUT_MS) {
-      throw new Error(`Provider ${id}: ${timeoutEnv} must be an integer in 1..600000`);
+      throw new Error(
+        `Provider ${id}: ${timeoutEnv} must be an integer in 1..${String(MAX_TIMEOUT_MS)}`,
+      );
     }
     timeoutMs = Number(timeoutRaw);
   }

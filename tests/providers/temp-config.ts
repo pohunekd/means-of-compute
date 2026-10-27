@@ -33,6 +33,12 @@ export function removeTempConfig(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
+let extraChildEnv: Record<string, string> = {};
+
+export function setChildEnv(extra: Record<string, string>): void {
+  extraChildEnv = extra;
+}
+
 function childEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -43,6 +49,10 @@ function childEnv(): Record<string, string> {
   env["NVIDIA_API_KEY"] = "test";
   env["META_API_KEY"] = "test";
   env["LOCAL_MODEL_BASE_URL"] = "http://localhost:1148/v1";
+  for (const [key, value] of Object.entries(extraChildEnv)) {
+    env[key] = value;
+  }
+  extraChildEnv = {};
   return env;
 }
 

@@ -427,9 +427,24 @@ test("a stored worktree and base commit survive a replayed start", async () => {
     const registryPath = join(dir, "registry.json");
     const control = createMemoryPort();
     control.pushCommit("moc/demo-item", "sha1");
+    let gateCalls = 0;
+    const countingGate: BudgetGate = {
+      admit() {
+        gateCalls += 1;
+        return Promise.resolve({ admit: true as const, line: "admitted: test" });
+      },
+    };
+    let portStartCalls = 0;
+    const countingPort = {
+      ...control.port,
+      start(request: Parameters<typeof control.port.start>[0]) {
+        portStartCalls += 1;
+        return control.port.start(request);
+      },
+    };
     const dispatcher = createDispatcher({
-      port: control.port,
-      budget: ADMIT_GATE,
+      port: countingPort,
+      budget: countingGate,
       ledgerPath,
       config: { ...CONFIG, registryPath },
       now: () => new Date("2026-10-27T10:00:00.000Z"),
@@ -457,6 +472,10 @@ test("a stored worktree and base commit survive a replayed start", async () => {
     expect(replayed.handle.worktree).toBe(first.handle.worktree);
     expect(replayed.handle.baseCommit).toBe(first.handle.baseCommit);
     expect(replayed.handle.worktree.length).toBeGreaterThan(0);
+    // K3: a settled hit returns the stored session with no gate and
+    // no port call.
+    expect(gateCalls).toBe(1);
+    expect(portStartCalls).toBe(1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

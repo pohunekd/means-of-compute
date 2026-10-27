@@ -1,10 +1,12 @@
 // CLI entry point for the budget guard: bun run budget:check. Exit 0 on
 // admit, 3 on refuse, 2 on a config or data error. Without flags the guard
-// reads config/budget.json, prices from config/providers/ and spend from the
-// configured ledger. The --spend / --day-cap / --total-cap flags are a test
-// override that injects totals into the same decision function; the override
-// never writes escalation state or the escalation log, it only prints
-// `would escalate: <event key>` on stderr.
+// reads config/budget.json, prices from config/providers/, the route from
+// config/providers/route.json and spend from the configured ledger. A
+// descriptor without a pricing block is a load error; --day-cap or
+// --total-cap without --spend exits 2. The --spend / --day-cap / --total-cap
+// flags are a test override that injects totals into the same decision
+// function; the override never writes escalation state or the escalation
+// log, it only prints `would escalate: <event key>` on stderr.
 import { loadBudgetConfig } from "./config.js";
 import { readUsageLedger } from "./ledger.js";
 import type { BudgetDecision } from "./decision.js";

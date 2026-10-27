@@ -13,11 +13,14 @@ coordinator's daily digest channel.
   line that fails `contracts/v1/validate.ts` is an error naming the line
   number and is never skipped.
 - Prices: provider descriptors under `config/providers/` (see
-  `config/providers/schema.json`). The guard multiplies input, cached input
-  and output tokens by `inputPer1M`, `cachedInputPer1M`, `outputPer1M` per 1M
-  tokens. Meta Contributor prices (0.10 input, 0.002 cached input, 0.20 output
-  USD per 1M) and the unmetered NVIDIA Build (0) come from those descriptors,
-  never from literals in code.
+  `config/providers/schema.json`). A descriptor without a `pricing` block is
+  a load error naming the file; "free" must be stated with explicit zero
+  prices. The guard prices all input tokens at `inputPer1M` and output tokens
+  at `outputPer1M` per 1M tokens. Cached pricing is not applied because
+  contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
+  bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
+  unmetered NVIDIA Build (0) come from those descriptors, never from
+  literals in code.
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
   `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
   missing one is a startup error.
@@ -36,9 +39,12 @@ nvidiaRequestsToday }`.
 ## Escalation
 
 One per cap event: the state file under the configured `statePath`
-(gitignored under `logs/`) remembers the last escalated cap kind plus UTC day.
-Each escalation appends one JSON line to `logs/budget-escalations.log` and
-prints one line on stderr. A second refusal for the same event writes nothing.
+(gitignored under `logs/`) remembers the last escalated event key: `day:<UTC
+day>` for the daily cap, `nvidia:<UTC day>` for the NVIDIA daily limit,
+`total` for the total cap (once regardless of the day). The log line is
+appended first, then the state is persisted. Each escalation appends one JSON
+line to `logs/budget-escalations.log` and prints one line on stderr. A second
+refusal for the same event writes nothing.
 
 ## CLI
 
@@ -50,4 +56,6 @@ bun run budget:check --spend 12.00 --day-cap 12 --total-cap 140  # refuse (exit 
 
 Exits 0 on admit, 3 on refuse, 2 on a config or data error. The `--spend` /
 `--day-cap` / `--total-cap` flags are a test override that injects totals into
-the same decision function; they change neither stored config nor the ledger.
+the same decision function; `--day-cap` or `--total-cap` without `--spend`
+exits 2, and the override path never writes escalation state or the log — it
+only prints `would escalate: <event key>` on stderr.

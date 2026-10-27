@@ -19,6 +19,26 @@ interface CliArgs {
   readonly totalCap: number | null;
 }
 
+async function loadRoute(routePath = "config/providers/route.json"): Promise<string[]> {
+  let raw: unknown;
+  try {
+    raw = (await Bun.file(routePath).json()) as unknown;
+  } catch {
+    throw new Error(`Budget route ${routePath}: cannot read file or not valid JSON`);
+  }
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    !Array.isArray((raw as Record<string, unknown>).providers) ||
+    ((raw as Record<string, unknown>).providers as unknown[]).some(
+      (entry: unknown) => typeof entry !== "string",
+    )
+  ) {
+    throw new Error(`Budget route ${routePath}: needs a string array "providers"`);
+  }
+  return (raw as { providers: string[] }).providers;
+}
+
 function parseOptionalNumber(args: string[], flag: string): number | null {
   const index = args.indexOf(flag);
   if (index === -1) {
@@ -64,6 +84,7 @@ async function run(): Promise<number> {
   try {
     const config = await loadBudgetConfig();
     const pricing = await loadPricing();
+    const route = await loadRoute();
     ledgerStatePath = config.statePath;
     ledgerEscalationLogPath = config.escalationLogPath;
     if (parsed.spendTotal !== null || parsed.dayCap !== null || parsed.totalCap !== null) {
@@ -82,12 +103,12 @@ async function run(): Promise<number> {
           unknownWorkItemIds: [],
         },
         effective,
-        { route: [config.nvidiaProviderId] },
+        { route },
       );
     } else {
       const records = await readUsageLedger(config.ledgerPath);
       const summary = summarizeSpend(records, pricing, config.nvidiaProviderId, new Date());
-      decision = decideAdmission(summary, config, { route: [config.nvidiaProviderId] });
+      decision = decideAdmission(summary, config, { route });
     }
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -7,7 +7,6 @@ import { contractErrors, isAuditVerdict } from "../../contracts/v1/validate.js";
 import type { AuditVerdict } from "../../contracts/v1/types.js";
 import { HEX40_PATTERN } from "./git.js";
 import { requireInputDir } from "../fs/input.js";
-import { writeFileAtomic } from "../fs/write.js";
 
 export class VerdictConflictError extends Error {
   constructor(message: string) {
@@ -37,10 +36,11 @@ async function itemDirOf(verdictDir: string, workItemId: string): Promise<string
   return dir;
 }
 
-// The verdict body is written to a random temp name, then hard-linked to
-// the sha target: link(2) fails with EEXIST when another audit already
-// claimed this sha, which closes the race in runAudit step 13. A crash
-// never leaves a half-written verdict file behind.
+// The full verdict JSON is written to a random temp name with mode 0600,
+// then hard-linked to the sha target: link(2) fails with EEXIST when
+// another audit already claimed this sha, which closes the race in
+// runAudit step 13. The target never exists without its content, so a
+// crash leaves only an orphaned temp file, never an empty verdict.
 async function claimVerdictFile(dir: string, name: string, text: string): Promise<string> {
   const target = `${dir}/${name}`;
   const temp = `${dir}/.${name}.${String(process.pid)}.${randomUUID()}.tmp`;
@@ -79,9 +79,7 @@ export async function writeVerdict(verdictDir: string, verdict: AuditVerdict): P
     );
   }
   const dir = await itemDirOf(verdictDir, verdict.workItemId);
-  const path = await claimVerdictFile(dir, `${verdict.headSha}.json`, "");
-  await writeFileAtomic("Verdict store", path, `${JSON.stringify(verdict, null, 2)}\n`);
-  return path;
+  return claimVerdictFile(dir, `${verdict.headSha}.json`, `${JSON.stringify(verdict, null, 2)}\n`);
 }
 
 export async function readVerdicts(

@@ -27,6 +27,8 @@ export interface RegistryEntry {
   readonly sessionId: string;
   readonly hostAlias: string;
   readonly branch: string;
+  readonly worktree: string;
+  readonly baseCommit: string | null;
   readonly model: ModelSelection;
   readonly startedAt: string;
   readonly cursor: string | null;
@@ -120,21 +122,72 @@ export async function readRegistry(path: string): Promise<readonly RegistryEntry
     return [];
   }
   const text = await readInputText("Dispatcher registry", path);
-  if (text === "") {
-    return [];
-  }
   return parseRegistry(text, path);
 }
 
 let writeChain: Promise<void> = Promise.resolve();
 
-export function writeRegistry(path: string, entries: readonly RegistryEntry[]): Promise<void> {
+function checkDocument(path: string, entries: readonly RegistryEntry[]): void {
+  const document = { sessions: [...entries] };
+  if (!validateRegistry(document)) {
+    throw new RegistryDataError(
+      `Dispatcher registry ${path}: invalid registry ${registryReason(document)}`,
+    );
+  }
+  for (const entry of entries) {
+    if (!isRegistryEntry(entry)) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: invalid registry entry ${JSON.stringify(entry)}`,
+      );
+    }
+  }
+  checkUniqueSessions(entries, path);
+}
+
+async function persistDocument(path: string, entries: readonly RegistryEntry[]): Promise<void> {
+  checkDocument(path, entries);
+  await writeFileAtomic(
+    "Dispatcher registry",
+    path,
+    JSON.stringify({ sessions: entries }, null, 2).concat("\n"),
+  );
+}
+
+export function insertRegistryEntry(path: string, entry: RegistryEntry): Promise<void> {
   const task = writeChain.then(async () => {
-    checkUniqueSessions(entries, path);
-    await writeFileAtomic(
-      "Dispatcher registry",
+    const current = await readRegistry(path);
+    if (current.some((candidate) => candidate.requestId === entry.requestId)) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: duplicate requestId "${entry.requestId}"`,
+      );
+    }
+    if (current.some((candidate) => candidate.sessionId === entry.sessionId)) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: duplicate sessionId "${entry.sessionId}"`,
+      );
+    }
+    await persistDocument(path, [...current, entry]);
+  });
+  writeChain = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+export function replaceRegistryEntry(path: string, entry: RegistryEntry): Promise<void> {
+  const task = writeChain.then(async () => {
+    const current = await readRegistry(path);
+    if (!current.some((candidate) => candidate.requestId === entry.requestId)) {
+      throw new RegistryDataError(
+        `Dispatcher registry ${path}: unknown requestId "${entry.requestId}"`,
+      );
+    }
+    await persistDocument(
       path,
-      JSON.stringify({ sessions: entries }, null, 2).concat("\n"),
+      current.map((candidate) =>
+        candidate.requestId === entry.requestId ? entry : candidate,
+      ),
     );
   });
   writeChain = task.then(

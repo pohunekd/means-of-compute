@@ -12,6 +12,18 @@
       "items": { "$ref": "#/$defs/entry" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "terminal": { "properties": { "usageValid": { "const": false } } } }
+      },
+      "then": {
+        "properties": {
+          "terminal": { "properties": { "usage": { "type": "null" } }, "required": ["usage"] }
+        }
+      }
+    }
+  ],
   "$defs": {
     "token": {
       "type": "object",
@@ -59,7 +71,7 @@
           ]
         },
         "usageValid": { "type": "boolean" },
-        "detail": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" },
         "ledgerAppended": { "type": "boolean" }
       }
     },
@@ -72,6 +84,8 @@
         "sessionId",
         "hostAlias",
         "branch",
+        "worktree",
+        "baseCommit",
         "model",
         "startedAt",
         "cursor",
@@ -87,6 +101,8 @@
         "sessionId": { "type": "string", "minLength": 1 },
         "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
         "branch": { "type": "string", "minLength": 1 },
+        "worktree": { "type": "string", "minLength": 1 },
+        "baseCommit": { "type": ["string", "null"], "minLength": 1 },
         "model": {
           "type": "object",
           "additionalProperties": false,

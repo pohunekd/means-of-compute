@@ -9,7 +9,7 @@ import type { BudgetGate } from "../budget/gate.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
 import { appendPending } from "../ledger/store.js";
-import type { PendingUsage, WriteOutcome } from "../ledger/types.js";
+import type { LedgerContents, PendingUsage, WriteOutcome } from "../ledger/types.js";
 import type { DispatcherConfig } from "./config.js";
 import type {
   CancelReason,
@@ -23,7 +23,7 @@ import type {
   WaitResult,
 } from "./port.js";
 import { PortRejectedError, PortUnreachableError } from "./port.js";
-import { readRegistry, writeRegistry } from "./registry.js";
+import { insertRegistryEntry, readRegistry, replaceRegistryEntry } from "./registry.js";
 import type { RegistryEntry, RegistryTerminal } from "./registry.js";
 
 export interface DispatcherDeps {
@@ -270,6 +270,36 @@ function checkStartPreconditions(
   }
 }
 
+export function deriveStartRequest(
+  item: WorkItem,
+  decision: PlacementDecision,
+  model: ModelSelection,
+  brief: string,
+  config: DispatcherConfig,
+  contents: LedgerContents,
+): StartRequest {
+  const branch = item.branch !== null ? item.branch : `${config.branchPrefix}${item.id}`;
+  const resume = item.branch !== null;
+  const baseRef = resume ? `origin/${branch}` : `origin/${config.baseBranch}`;
+  const pendingSessions = contents.pending.filter(
+    (entry) => entry.workItemId === item.id && entry.kind === "session",
+  ).length;
+  const record = contents.records.find((entry) => entry.workItemId === item.id) ?? null;
+  const n = pendingSessions + (record === null ? 0 : record.attempts.length);
+  const hostAlias = decision.chosenHostAlias as string;
+  return {
+    requestId: `${item.id}:${String(n)}`,
+    workItemId: item.id,
+    repo: item.repo,
+    hostAlias,
+    branch,
+    baseRef,
+    resume,
+    model,
+    brief,
+  };
+}
+
 export function createDispatcher(deps: DispatcherDeps): {
   start(
     item: WorkItem,
@@ -281,50 +311,47 @@ export function createDispatcher(deps: DispatcherDeps): {
   diff(requestId: string): Promise<DiffResult>;
   cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome>;
 } {
-  async function deriveRequest(
-    item: WorkItem,
-    decision: PlacementDecision,
-    model: ModelSelection,
-    brief: string,
-  ): Promise<StartRequest> {
-    const branch = item.branch !== null ? item.branch : `${deps.config.branchPrefix}${item.id}`;
-    const resume = item.branch !== null;
-    const baseRef = resume ? `origin/${branch}` : `origin/${deps.config.baseBranch}`;
-    const contents = await readLedger("Dispatcher ledger", deps.ledgerPath);
-    const pendingSessions = contents.pending.filter(
-      (entry) => entry.workItemId === item.id && entry.kind === "session",
-    ).length;
-    const record = contents.records.find((entry) => entry.workItemId === item.id) ?? null;
-    const n = pendingSessions + (record === null ? 0 : record.attempts.length);
-    const hostAlias = decision.chosenHostAlias as string;
-    return {
-      requestId: `${item.id}:${String(n)}`,
-      workItemId: item.id,
-      repo: item.repo,
-      hostAlias,
-      branch,
-      baseRef,
-      resume,
-      model,
-      brief,
-    };
+  // Serializes operations on one request id: two ops on the same
+  // request run one after the other, ops on different requests overlap
+  // and meet only in the serialized registry writes. Reads inside the
+  // lock therefore see the entry snapshot no concurrent op can stale.
+  const requestLocks = new Map<string, Promise<void>>();
+
+  async function withRequestLock<T>(requestId: string, op: () => Promise<T>): Promise<T> {
+    const previous = requestLocks.get(requestId) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const turn = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    requestLocks.set(requestId, previous.then(() => turn));
+    await previous;
+    try {
+      return await op();
+    } finally {
+      release();
+      if (requestLocks.get(requestId) !== undefined) {
+        const chained = requestLocks.get(requestId);
+        void chained?.then(() => {
+          if (requestLocks.get(requestId) === chained) {
+            requestLocks.delete(requestId);
+          }
+        });
+      }
+    }
   }
 
-  async function loadEntry(
-    requestId: string,
-  ): Promise<{ entries: RegistryEntry[]; entry: RegistryEntry }> {
-    const found = (await readRegistry(deps.config.registryPath)).slice();
+  async function loadEntry(requestId: string): Promise<RegistryEntry> {
+    const found = await readRegistry(deps.config.registryPath);
     const entry = found.find((candidate) => candidate.requestId === requestId);
     if (entry === undefined) {
       throw new DispatchPreconditionError(
         `dispatcher precondition known-request: unknown requestId "${requestId}"`,
       );
     }
-    return { entries: found, entry };
+    return entry;
   }
 
   async function persistTerminalAndAppend(
-    entries: RegistryEntry[],
     entry: RegistryEntry,
     terminal: {
       readonly state: TerminalState;
@@ -337,6 +364,11 @@ export function createDispatcher(deps: DispatcherDeps): {
   ): Promise<FinishOutcome> {
     if (terminal.seconds < 0) {
       throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
+    }
+    if (terminal.usageValid === false && terminal.usage !== null) {
+      throw new DispatchClockError(
+        `dispatcher clock: invalid usage must be stored as null for ${entry.requestId}`,
+      );
     }
     if (terminal.usage !== null && !terminal.usageValid) {
       deps.log({
@@ -356,20 +388,14 @@ export function createDispatcher(deps: DispatcherDeps): {
       lastSeenAt: terminal.observedAt,
       terminal: stored,
     };
-    await writeRegistry(
-      deps.config.registryPath,
-      entries.map((candidate) => (candidate.requestId === entry.requestId ? updated : candidate)),
-    );
+    await replaceRegistryEntry(deps.config.registryPath, updated);
     const pending = pendingEntryOf(updated, stored);
     const ledger = await appendPending(deps.ledgerPath, pending);
     const appended: RegistryEntry = {
       ...updated,
       terminal: { ...stored, ledgerAppended: true },
     };
-    await writeRegistry(
-      deps.config.registryPath,
-      entries.map((candidate) => (candidate.requestId === entry.requestId ? appended : candidate)),
-    );
+    await replaceRegistryEntry(deps.config.registryPath, appended);
     const result = terminalResultOf(appended);
     deps.log({
       level: "info",
@@ -382,10 +408,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
   }
 
-  async function replayTerminal(
-    entries: RegistryEntry[],
-    entry: RegistryEntry,
-  ): Promise<FinishOutcome> {
+  async function replayTerminal(entry: RegistryEntry): Promise<FinishOutcome> {
     const terminal = entry.terminal;
     if (terminal === null) {
       throw new Error(`dispatcher: entry ${entry.requestId} has no terminal state`);
@@ -404,27 +427,26 @@ export function createDispatcher(deps: DispatcherDeps): {
       ...entry,
       terminal: { ...terminal, ledgerAppended: true },
     };
-    await writeRegistry(
-      deps.config.registryPath,
-      entries.map((candidate) => (candidate.requestId === entry.requestId ? appended : candidate)),
-    );
+    await replaceRegistryEntry(deps.config.registryPath, appended);
     const result = terminalResultOf(appended);
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
   }
 
   async function finishWait(
-    entries: RegistryEntry[],
     entry: RegistryEntry,
     result: Extract<WaitResult, { state: TerminalState }>,
   ): Promise<FinishOutcome> {
     const observedAt = deps.now().toISOString();
     const seconds = Math.floor((Date.parse(observedAt) - Date.parse(entry.startedAt)) / 1000);
-    return persistTerminalAndAppend(entries, entry, {
+    const usageValid = result.usage === null ? true : checkUsageValid(result.usage);
+    return persistTerminalAndAppend(entry, {
       state: result.state,
       observedAt,
       seconds,
-      usage: result.usage,
-      usageValid: result.usage === null ? true : checkUsageValid(result.usage),
+      // Invalid port usage is never kept: the registry stores null while
+      // the pending entry and the error log keep the invalid marker.
+      usage: usageValid ? result.usage : null,
+      usageValid,
       detail: result.detail,
     });
   }
@@ -435,144 +457,131 @@ export function createDispatcher(deps: DispatcherDeps): {
     model: ModelSelection,
     brief: string,
   ): Promise<StartOutcome> {
-    checkStartPreconditions(item, decision, model, brief);
     await checkProviderModel(model);
-    const request = await deriveRequest(item, decision, model, brief);
-    const existing = await readRegistry(deps.config.registryPath);
-    const hit = existing.find((candidate) => candidate.requestId === request.requestId);
-    if (hit !== undefined) {
-      // The registry holds no host-local worktree, so a replayed start
-      // rebuilds the request and returns the stored session identity.
-      const handle: SessionHandle = {
-        sessionId: hit.sessionId,
-        requestId: hit.requestId,
-        hostAlias: hit.hostAlias,
-        branch: hit.branch,
-        worktree: "",
-        baseCommit: null,
+    checkStartPreconditions(item, decision, model, brief);
+    const contents = await readLedger("Dispatcher ledger", deps.ledgerPath);
+    const request = deriveStartRequest(item, decision, model, brief, deps.config, contents);
+    return withRequestLock(request.requestId, async () => {
+      const existing = await readRegistry(deps.config.registryPath);
+      const hit = existing.find((candidate) => candidate.requestId === request.requestId);
+      if (hit !== undefined) {
+        // A replayed start returns the stored session identity, including
+        // the recorded worktree and base commit.
+        const handle: SessionHandle = {
+          sessionId: hit.sessionId,
+          requestId: hit.requestId,
+          hostAlias: hit.hostAlias,
+          branch: hit.branch,
+          worktree: hit.worktree,
+          baseCommit: hit.baseCommit,
+        };
+        return { kind: "started", handle, request };
+      }
+      const admission = await deps.budget.admit();
+      if (!admission.admit) {
+        return { kind: "refused", reason: admission.reason };
+      }
+      const handle = await deps.port.start(request);
+      const startedAt = deps.now().toISOString();
+      const entry: RegistryEntry = {
+        requestId: request.requestId,
+        workItemId: request.workItemId,
+        sessionId: handle.sessionId,
+        hostAlias: request.hostAlias,
+        branch: request.branch,
+        worktree: handle.worktree,
+        baseCommit: handle.baseCommit,
+        model,
+        startedAt,
+        cursor: null,
+        unreachableCount: 0,
+        lastSeenState: "starting",
+        lastSeenAt: startedAt,
+        cancelReason: null,
+        terminal: null,
       };
+      await insertRegistryEntry(deps.config.registryPath, entry);
+      deps.log({
+        level: "info",
+        event: "start",
+        requestId: request.requestId,
+        workItemId: request.workItemId,
+        sessionId: handle.sessionId,
+      });
       return { kind: "started", handle, request };
-    }
-    const admission = await deps.budget.admit();
-    if (!admission.admit) {
-      return { kind: "refused", reason: admission.reason };
-    }
-    const handle = await deps.port.start(request);
-    const startedAt = deps.now().toISOString();
-    const entry: RegistryEntry = {
-      requestId: request.requestId,
-      workItemId: request.workItemId,
-      sessionId: handle.sessionId,
-      hostAlias: request.hostAlias,
-      branch: request.branch,
-      model,
-      startedAt,
-      cursor: null,
-      unreachableCount: 0,
-      lastSeenState: "starting",
-      lastSeenAt: startedAt,
-      cancelReason: null,
-      terminal: null,
-    };
-    await writeRegistry(deps.config.registryPath, [...existing, entry]);
-    deps.log({
-      level: "info",
-      event: "start",
-      requestId: request.requestId,
-      workItemId: request.workItemId,
-      sessionId: handle.sessionId,
     });
-    return { kind: "started", handle, request };
   }
 
   async function watch(requestId: string): Promise<FinishOutcome> {
-    const { entries, entry: initial } = await loadEntry(requestId);
-    if (initial.terminal !== null) {
-      return replayTerminal(entries, initial);
-    }
-    let current = initial;
-    for (;;) {
-      let result: WaitResult;
-      try {
-        result = await deps.port.wait(
-          { sessionId: current.sessionId, hostAlias: current.hostAlias },
-          deps.config.waitTimeoutMs,
-          current.cursor,
-        );
-      } catch (error: unknown) {
-        if (error instanceof PortUnreachableError) {
-          const count = current.unreachableCount + 1;
-          if (count >= deps.config.lostAfterUnreachable) {
-            const observedAt = deps.now().toISOString();
-            const seconds = Math.floor(
-              (Date.parse(current.lastSeenAt) - Date.parse(current.startedAt)) / 1000,
-            );
-            const terminal = {
-              state: "lost" as const,
-              observedAt,
-              seconds,
-              usage: null,
-              usageValid: true,
-              detail: `unreachable ${String(count)} times`,
-            };
-            const persisted: RegistryEntry = { ...current, unreachableCount: count };
-            await writeRegistry(
-              deps.config.registryPath,
-              entries.map((candidate) =>
-                candidate.requestId === current.requestId ? persisted : candidate,
-              ),
-            );
-            return persistTerminalAndAppend(entries, persisted, terminal);
-          }
-          const persisted: RegistryEntry = { ...current, unreachableCount: count };
-          await writeRegistry(
-            deps.config.registryPath,
-            entries.map((candidate) =>
-              candidate.requestId === current.requestId ? persisted : candidate,
-            ),
+    return withRequestLock(requestId, async () => {
+      const initial = await loadEntry(requestId);
+      if (initial.terminal !== null) {
+        return replayTerminal(initial);
+      }
+      let current = initial;
+      for (;;) {
+        let result: WaitResult;
+        try {
+          result = await deps.port.wait(
+            { sessionId: current.sessionId, hostAlias: current.hostAlias },
+            deps.config.waitTimeoutMs,
+            current.cursor,
           );
+        } catch (error: unknown) {
+          if (error instanceof PortUnreachableError) {
+            const count = current.unreachableCount + 1;
+            if (count >= deps.config.lostAfterUnreachable) {
+              const observedAt = deps.now().toISOString();
+              const seconds = Math.floor(
+                (Date.parse(current.lastSeenAt) - Date.parse(current.startedAt)) / 1000,
+              );
+              const terminal = {
+                state: "lost" as const,
+                observedAt,
+                seconds,
+                usage: null,
+                usageValid: true,
+                detail: `unreachable ${String(count)} times`,
+              };
+              const persisted: RegistryEntry = { ...current, unreachableCount: count };
+              await replaceRegistryEntry(deps.config.registryPath, persisted);
+              return persistTerminalAndAppend(persisted, terminal);
+            }
+            const persisted: RegistryEntry = { ...current, unreachableCount: count };
+            await replaceRegistryEntry(deps.config.registryPath, persisted);
+            current = persisted;
+            await deps.sleep(deps.config.unreachableBackoffMs);
+            continue;
+          }
+          throw error;
+        }
+        if (!isTerminalResult(result)) {
+          const observedAt = deps.now().toISOString();
+          const persisted: RegistryEntry = {
+            ...current,
+            cursor: result.cursor,
+            unreachableCount: 0,
+            lastSeenState: result.state,
+            lastSeenAt: observedAt,
+          };
+          await replaceRegistryEntry(deps.config.registryPath, persisted);
           current = persisted;
-          await deps.sleep(deps.config.unreachableBackoffMs);
           continue;
         }
-        throw error;
-      }
-      if (!isTerminalResult(result)) {
-        const observedAt = deps.now().toISOString();
-        const persisted: RegistryEntry = {
+        const observed: RegistryEntry = {
           ...current,
           cursor: result.cursor,
           unreachableCount: 0,
-          lastSeenState: result.state,
-          lastSeenAt: observedAt,
+          lastSeenAt: deps.now().toISOString(),
         };
-        await writeRegistry(
-          deps.config.registryPath,
-          entries.map((candidate) =>
-            candidate.requestId === current.requestId ? persisted : candidate,
-          ),
-        );
-        current = persisted;
-        continue;
+        await replaceRegistryEntry(deps.config.registryPath, observed);
+        return finishWait(observed, result);
       }
-      const observed: RegistryEntry = {
-        ...current,
-        cursor: result.cursor,
-        unreachableCount: 0,
-        lastSeenAt: deps.now().toISOString(),
-      };
-      await writeRegistry(
-        deps.config.registryPath,
-        entries.map((candidate) =>
-          candidate.requestId === current.requestId ? observed : candidate,
-        ),
-      );
-      return finishWait(entries, observed, result);
-    }
+    });
   }
 
   async function diff(requestId: string): Promise<DiffResult> {
-    const { entry } = await loadEntry(requestId);
+    const entry = await loadEntry(requestId);
     return deps.port.diff(
       { sessionId: entry.sessionId, hostAlias: entry.hostAlias },
       `origin/${deps.config.baseBranch}`,
@@ -580,56 +589,43 @@ export function createDispatcher(deps: DispatcherDeps): {
   }
 
   async function cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome> {
-    const { entries, entry: initial } = await loadEntry(requestId);
-    if (initial.terminal !== null) {
-      // A terminal result observed before the cancel keeps its own state
-      // and its own attempt mapping; the stored cancelReason is untouched.
-      await deps.port.cancel(
-        { sessionId: initial.sessionId, hostAlias: initial.hostAlias },
+    const terminalOutcome = await withRequestLock(requestId, async () => {
+      const initial = await loadEntry(requestId);
+      if (initial.terminal !== null) {
+        // A terminal result observed before the cancel keeps its own state
+        // and its own attempt mapping; the port is never called again.
+        return replayTerminal(initial);
+      }
+      const persisted: RegistryEntry = { ...initial, cancelReason: reason };
+      await replaceRegistryEntry(deps.config.registryPath, persisted);
+      const cancelResult = await deps.port.cancel(
+        { sessionId: persisted.sessionId, hostAlias: persisted.hostAlias },
         reason,
       );
-      return replayTerminal(entries, initial);
-    }
-    const persisted: RegistryEntry = { ...initial, cancelReason: reason };
-    await writeRegistry(
-      deps.config.registryPath,
-      entries.map((candidate) =>
-        candidate.requestId === initial.requestId ? persisted : candidate,
-      ),
-    );
-    const cancelResult = await deps.port.cancel(
-      { sessionId: persisted.sessionId, hostAlias: persisted.hostAlias },
-      reason,
-    );
-    if (!isTerminalResult(cancelResult)) {
+      if (!isTerminalResult(cancelResult)) {
+        const observed: RegistryEntry = {
+          ...persisted,
+          cursor: cancelResult.cursor,
+          unreachableCount: 0,
+          lastSeenState: cancelResult.state,
+          lastSeenAt: deps.now().toISOString(),
+        };
+        await replaceRegistryEntry(deps.config.registryPath, observed);
+        return null;
+      }
       const observed: RegistryEntry = {
         ...persisted,
         cursor: cancelResult.cursor,
         unreachableCount: 0,
-        lastSeenState: cancelResult.state,
         lastSeenAt: deps.now().toISOString(),
       };
-      await writeRegistry(
-        deps.config.registryPath,
-        entries.map((candidate) =>
-          candidate.requestId === initial.requestId ? observed : candidate,
-        ),
-      );
-      return watch(requestId);
+      await replaceRegistryEntry(deps.config.registryPath, observed);
+      return finishWait(observed, cancelResult);
+    });
+    if (terminalOutcome !== null) {
+      return terminalOutcome;
     }
-    const observed: RegistryEntry = {
-      ...persisted,
-      cursor: cancelResult.cursor,
-      unreachableCount: 0,
-      lastSeenAt: deps.now().toISOString(),
-    };
-    await writeRegistry(
-      deps.config.registryPath,
-      entries.map((candidate) =>
-        candidate.requestId === initial.requestId ? observed : candidate,
-      ),
-    );
-    return finishWait(entries, observed, cancelResult);
+    return watch(requestId);
   }
 
   return { start, watch, diff, cancel };

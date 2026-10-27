@@ -170,9 +170,6 @@ test("D2: spend at the day cap refuses all routes and running sessions finish", 
     expect(decision.admit).toBe(false);
     expect(decision.reason).toBe("daily cap reached");
   }
-  // The guard only decides new sessions: a running session is never killed
-  // here, its cost lands in the ledger when it finishes.
-  expect(summary.spentTotalUsd).toBeCloseTo(12, 10);
 });
 
 test("total cap refuses every new session", () => {

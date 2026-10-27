@@ -1,6 +1,7 @@
 // Pricing reader for the budget guard. It parses provider descriptors directly
 // from config so cost math never needs API keys and never hard-codes prices.
-// A descriptor without a pricing block (self-hosted, unmetered) costs zero.
+// A descriptor without a pricing block is an error: "free" must be stated
+// with explicit zero prices.
 import type { ProviderPricing } from "../providers/types.js";
 
 const DEFAULT_PRICING_DIR = "config/providers";
@@ -25,7 +26,7 @@ function asNonNegativeNumber(value: unknown, what: string, file: string): number
 
 function readPricing(raw: unknown, file: string): ProviderPricing {
   if (raw === undefined) {
-    return { inputPer1M: 0, outputPer1M: 0 };
+    throw new Error(`Budget pricing ${file}: missing pricing block`);
   }
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`Budget pricing ${file}: invalid pricing block`);

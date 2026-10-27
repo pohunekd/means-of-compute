@@ -4,5 +4,9 @@
   "baseUrl": "http://localhost:11434/v1",
   "baseUrlEnv": "LOCAL_MODEL_BASE_URL",
   "model": "local-model",
-  "timeoutMs": 10000
+  "timeoutMs": 10000,
+  "pricing": {
+    "inputPer1M": 0,
+    "outputPer1M": 0
+  }
 }

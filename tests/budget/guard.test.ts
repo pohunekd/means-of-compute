@@ -629,6 +629,7 @@ test("pricing: stale same-id copy next to the descriptor has no effect", async (
       name: "Live",
       baseUrl: "https://live.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { inputPer1M: 1, outputPer1M: 2 },
     };
     const stale = {
@@ -636,6 +637,7 @@ test("pricing: stale same-id copy next to the descriptor has no effect", async (
       name: "Stale",
       baseUrl: "https://stale.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     };
     await Bun.write(join(dir, "live-api.json"), JSON.stringify(live));
@@ -657,6 +659,7 @@ test("pricing: symlink to a shared descriptor is read", async () => {
       name: "Linked",
       baseUrl: "https://linked.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { inputPer1M: 3, outputPer1M: 4 },
     };
     await Bun.write(join(shared, "shared.json"), JSON.stringify(live));
@@ -678,6 +681,7 @@ test("pricing: null or array pricing block exits 2", async () => {
       name: "Null",
       baseUrl: "https://null.example",
       model: "m",
+      timeoutMs: 10000,
     };
     await Bun.write(join(dir, "null-api.json"), JSON.stringify({ ...base, pricing: null }));
     await Bun.write(
@@ -707,6 +711,7 @@ test("pricing: price key outside pricing does not fill a missing price", async (
       name: "Outer",
       baseUrl: "https://outer.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { outputPer1M: 0.2 },
       legacy: { inputPer1M: 0 },
     };
@@ -731,6 +736,7 @@ test("pricing: 1e-7 price exits 2", async () => {
       name: "Tiny",
       baseUrl: "https://tiny.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { inputPer1M: 1e-7, outputPer1M: 0 },
     };
     await Bun.write(join(dir, "tiny-api.json"), JSON.stringify(descriptor));
@@ -771,6 +777,7 @@ test("pricing: descriptor id must match the file name", async () => {
       name: "Other",
       baseUrl: "https://other.example",
       model: "m",
+      timeoutMs: 10000,
       pricing: { inputPer1M: 1, outputPer1M: 2 },
     };
     await Bun.write(join(dir, "claimed-api.json"), JSON.stringify(mismatched));

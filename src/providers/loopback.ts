@@ -1,6 +1,7 @@
 export interface LoopbackResponse {
   status: number;
-  body: unknown;
+  body?: unknown;
+  rawBody?: string;
   delayMs?: number;
 }
 
@@ -23,6 +24,12 @@ export async function startLoopback(recordingsPath: string): Promise<{
       }
       if (resp.delayMs) {
         await new Promise((resolve) => setTimeout(resolve, resp.delayMs));
+      }
+      if (resp.rawBody !== undefined) {
+        return new Response(resp.rawBody, {
+          status: resp.status,
+          headers: { "Content-Type": "text/plain" },
+        });
       }
       return new Response(JSON.stringify(resp.body), {
         status: resp.status,

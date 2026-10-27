@@ -1,4 +1,5 @@
-import { getProviders } from "./config.js";
+import { getProviders, providerDescriptorExists, ROUTE_PATH } from "./config.js";
+import { loadProviderRoute } from "./route.js";
 import type { ProviderDescriptor } from "./types.js";
 
 export interface ModelCallResult {
@@ -21,6 +22,16 @@ class ProviderError extends Error {
   }
 }
 
+export class ProvidersExhaustedError extends Error {
+  readonly lastReason: string;
+  constructor(lastReason: string, lastError: unknown) {
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    super(`All providers failed (last: ${lastReason}: ${detail})`, { cause: lastError });
+    this.lastReason = lastReason;
+    this.name = "ProvidersExhaustedError";
+  }
+}
+
 async function callProvider(provider: ProviderDescriptor, request: ModelRequest): Promise<string> {
   const base = provider.baseUrl.replace(/\/$/, "");
   const url = `${base}/chat/completions`;
@@ -32,7 +43,7 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
     headers["Authorization"] = `Bearer ${key}`;
   }
   const controller = new AbortController();
-  const timeoutMs = provider.timeoutMs ?? 30000;
+  const timeoutMs = provider.timeoutMs;
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
@@ -52,7 +63,15 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
         resp.status,
       );
     }
-    const data = await resp.json();
+    let data: unknown;
+    try {
+      data = JSON.parse(await resp.text()) as unknown;
+    } catch (error: unknown) {
+      if (error instanceof SyntaxError) {
+        throw new ProviderError(`Provider ${provider.id} returned a non-JSON body`, 502);
+      }
+      throw error;
+    }
     const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
       ?.message?.content;
     if (typeof content !== "string") {
@@ -64,16 +83,11 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
   }
 }
 
-async function loadRoute(): Promise<string[]> {
-  const routeFile = Bun.file("config/providers/route.json");
-  const json = (await routeFile.json()) as { providers: string[] };
-  return json.providers;
-}
-
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
   const providers = await getProviders();
-  const route = await loadRoute();
+  const route = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
   let lastReason: string | undefined;
+  let lastError: unknown;
   for (const id of route) {
     const provider = providers[id];
     if (!provider) {
@@ -101,9 +115,7 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
           throw e;
         }
       } else if (e instanceof Error) {
-        if (e.message === "timeout") {
-          lastReason = "timeout";
-        } else if (e.name === "AbortError") {
+        if (e.name === "AbortError") {
           lastReason = "timeout";
         } else if (e instanceof TypeError) {
           lastReason = "connection";
@@ -113,8 +125,9 @@ export async function callWithFallback(request: ModelRequest): Promise<ModelCall
       } else {
         throw e;
       }
+      lastError = e;
       // continue to next provider
     }
   }
-  throw new Error("All providers failed");
+  throw new ProvidersExhaustedError(lastReason ?? "unknown", lastError);
 }

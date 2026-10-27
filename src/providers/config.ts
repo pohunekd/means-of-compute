@@ -1,59 +1,112 @@
+import { readInputText, statInputPath } from "../fs/input.js";
+import { loadProviderRoute } from "./route.js";
+import { MAX_TIMEOUT_MS, providerDescriptorErrors } from "./schema.js";
 import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
 
+export const ROUTE_PATH = "config/providers/route.json";
+const DESCRIPTOR_DIR = "config/providers";
+const TIMEOUT_PATTERN = /^[1-9][0-9]*$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
+
+// True exactly when a descriptor file exists for the id. The route parser
+// uses it so the known ids never come from the route itself.
+export async function providerDescriptorExists(id: string): Promise<boolean> {
+  if (!PROVIDER_ID_PATTERN.test(id)) {
+    return false;
+  }
+  return (await statInputPath("Provider descriptor", `${DESCRIPTOR_DIR}/${id}.json`)) === "file";
+}
+
+function baseUrlOverrideEnv(id: string): string {
+  return `PROVIDER_${id.toUpperCase().replace(/-/g, "_")}_BASE_URL`;
+}
+
+function timeoutOverrideEnv(id: string): string {
+  return `PROVIDER_${id.toUpperCase().replace(/-/g, "_")}_TIMEOUT_MS`;
+}
+
+async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
+  const label = "Provider descriptor";
+  const file = `${DESCRIPTOR_DIR}/${id}.json`;
+  if (!PROVIDER_ID_PATTERN.test(id)) {
+    throw new Error(`${label} ${file}: invalid provider id "${id}"`);
+  }
+  if ((await statInputPath(label, file)) === "absent") {
+    throw new Error(`${label} ${file}: file is missing`);
+  }
+  const text = await readInputText(label, file);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text) as unknown;
+  } catch (error: unknown) {
+    throw new Error(`${label} ${file}: not valid JSON`, { cause: error });
+  }
+  const errors = providerDescriptorErrors(raw);
+  if (errors !== null) {
+    throw new Error(`${label} ${file}: ${errors}`);
+  }
+  const descriptor = raw as RawProvider;
+  if (descriptor.id !== id) {
+    throw new Error(`${label} ${file}: id "${descriptor.id}" does not match file name`);
+  }
+
+  let baseUrl = descriptor.baseUrl;
+  if (descriptor.baseUrlEnv) {
+    const envVal = process.env[descriptor.baseUrlEnv];
+    if (!envVal) {
+      throw new Error(
+        `Missing required environment variable ${descriptor.baseUrlEnv} for provider ${id}`,
+      );
+    }
+    baseUrl = envVal;
+  }
+  const baseUrlOverride = process.env[baseUrlOverrideEnv(id)];
+  if (baseUrlOverride) {
+    baseUrl = baseUrlOverride;
+  }
+
+  let timeoutMs = descriptor.timeoutMs;
+  const timeoutEnv = timeoutOverrideEnv(id);
+  const timeoutRaw = process.env[timeoutEnv];
+  if (timeoutRaw !== undefined && timeoutRaw !== "") {
+    if (!TIMEOUT_PATTERN.test(timeoutRaw) || Number(timeoutRaw) > MAX_TIMEOUT_MS) {
+      throw new Error(
+        `Provider ${id}: ${timeoutEnv} must be an integer in 1..${String(MAX_TIMEOUT_MS)}`,
+      );
+    }
+    timeoutMs = Number(timeoutRaw);
+  }
+
+  if (descriptor.apiKeyEnv) {
+    const key = process.env[descriptor.apiKeyEnv];
+    if (!key) {
+      throw new Error(
+        `Missing required environment variable ${descriptor.apiKeyEnv} for provider ${id}`,
+      );
+    }
+  }
+
+  const resolved: ProviderDescriptor = {
+    id: descriptor.id,
+    name: descriptor.name,
+    baseUrl,
+    model: descriptor.model,
+    timeoutMs,
+    ...(descriptor.apiKeyEnv === undefined ? {} : { apiKeyEnv: descriptor.apiKeyEnv }),
+    ...(descriptor.pricing === undefined ? {} : { pricing: descriptor.pricing }),
+    ...(descriptor.rateLimit === undefined ? {} : { rateLimit: descriptor.rateLimit }),
+  };
+  return resolved;
+}
+
 async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
-  const dir = "config/providers";
-  const glob = new Bun.Glob(`${dir}/*.json`);
-  const files: string[] = [];
-  for await (const file of glob.scan({ cwd: "." })) {
-    files.push(file);
-  }
+  const ids = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
   const providers: Record<string, ProviderDescriptor> = {};
-
-  for (const file of files) {
-    if (file.endsWith("schema.json") || file.endsWith("route.json")) continue;
-    const raw = (await Bun.file(file).json()) as RawProvider;
-    const { baseUrlEnv, ...rest } = raw;
-
-    let baseUrl = rest.baseUrl;
-    if (baseUrlEnv) {
-      const envVal = process.env[baseUrlEnv];
-      if (!envVal) {
-        throw new Error(
-          `Missing required environment variable ${baseUrlEnv} for provider ${raw.id}`,
-        );
-      }
-      baseUrl = envVal;
-    }
-
-    const overrideEnv = `PROVIDER_${raw.id.toUpperCase().replace(/-/g, "_")}_BASE_URL`;
-    const overrideVal = process.env[overrideEnv];
-    if (overrideVal) {
-      baseUrl = overrideVal;
-    }
-    let timeoutMs = rest.timeoutMs;
-    const timeoutOverrideEnv = `PROVIDER_${raw.id.toUpperCase().replace(/-/g, "_")}_TIMEOUT_MS`;
-    const timeoutOverrideVal = process.env[timeoutOverrideEnv];
-    if (timeoutOverrideVal) {
-      const parsed = Number(timeoutOverrideVal);
-      if (!Number.isNaN(parsed)) {
-        timeoutMs = parsed;
-      }
-    }
-
-    if (raw.apiKeyEnv) {
-      const key = process.env[raw.apiKeyEnv];
-      if (!key) {
-        throw new Error(
-          `Missing required environment variable ${raw.apiKeyEnv} for provider ${raw.id}`,
-        );
-      }
-    }
-
-    providers[raw.id] = { ...rest, baseUrl, timeoutMs };
+  for (const id of ids) {
+    providers[id] = await loadDescriptor(id);
   }
-
   return providers;
 }
 

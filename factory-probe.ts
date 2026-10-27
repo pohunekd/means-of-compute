@@ -34,14 +34,13 @@ type Facts = Partial<{
   // of class user (remote sessions excluded): idle when on AC, battery above
   // threshold, inside the window. Requires an explicit secondsSinceInput
   // fact (combine the two in every scenario); without it the probe exits 1.
-  // A failed query is userActivityError instead (never idle). The manager
-  // hint failure fallback is simulated with the managerHintFailed fact,
-  // which uses /proc/uptime instead of the hint.
+  // A failed query is userActivityError instead (never idle). The live
+  // manager hint failure fallback (/proc/uptime) is covered by the loginctl
+  // test double, not by a fact.
   noLocalUserSession: boolean;
   // Fixture override for every sysfs path (power_supply, drm): a scenario
   // may point it at a committed fixture tree, as an absolute path.
   sysfsRoot: string;
-  managerHintFailed: boolean;
   acPower: boolean;
   batteryPercent: number | null;
   cpuCores: number;
@@ -688,10 +687,6 @@ async function main(): Promise<void> {
   let userActivityCause = facts.userActivityError ?? "";
   let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
-  const managerHintFailed = facts.managerHintFailed === true;
-  if (managerHintFailed && !loggedOut) {
-    throw new Error("managerHintFailed needs noLocalUserSession");
-  }
   if (loggedOut && facts.secondsSinceInput === undefined) {
     throw new Error("noLocalUserSession needs secondsSinceInput");
   }
@@ -702,11 +697,8 @@ async function main(): Promise<void> {
   // undefined falls back to the live reader, including inside the grouped
   // gpu and localModels objects. An explicitly set member (even false or an
   // empty list) always wins over the reader; that includes an explicit
-  // secondsSinceInput fact next to the logged-out facts. managerHintFailed
-  // is valid only together with noLocalUserSession (otherwise the probe
-  // exits 1); together they force the manager-hint/uptime path instead of
-  // the live session reader. A live value needed on an unsupported
-  // platform fails fast.
+  // secondsSinceInput fact next to the logged-out facts. A live value
+  // needed on an unsupported platform fails fast.
   function platformOrThrow(): "linux" | "darwin" {
     if (platform === "linux" || platform === "darwin") return platform;
     throw new Error("unsupported platform");
@@ -717,13 +709,10 @@ async function main(): Promise<void> {
   } else if (facts.secondsSinceInput === undefined) {
     try {
       if (platformOrThrow() === "linux") {
-        const secs = managerHintFailed
-          ? Number.NaN
-          : await linuxSecondsSinceInput(evalAt.getTime());
+        const secs = await linuxSecondsSinceInput(evalAt.getTime());
         if (Number.isNaN(secs)) {
           loggedOut = true;
           try {
-            if (managerHintFailed) throw new Error("simulated: manager hint query failed");
             loggedOutSecs = await linuxManagerIdleSecs(evalAt.getTime());
           } catch (managerError) {
             try {

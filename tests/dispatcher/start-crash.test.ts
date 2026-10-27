@@ -123,7 +123,7 @@ function gateUnused(): { admit(): Promise<{ admit: true; line: string }> } {
 }
 
 test("K0: an unwritable registry stops start before port.start", async () => {
-  await withHarness(async ({ dir, ledgerPath, registryPath, waits, dispatcher }) => {
+  await withHarness(async ({ control, dir, gate, ledgerPath, registryPath, waits, dispatcher }) => {
     await chmod(dir, 0o500);
     let error: unknown;
     try {
@@ -146,6 +146,19 @@ test("K0: an unwritable registry stops start before port.start", async () => {
     expect(contents.records).toHaveLength(0);
     const entries = await readRegistry(registryPath);
     expect(entries).toHaveLength(0);
+    // Second half: the restored registry stays empty, so a refused gate
+    // stops the replay before any port call or write.
+    gate.refuse("test refusal");
+    const refused = await dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    expect(refused.kind).toBe("refused");
+    expect(control.sessions()).toHaveLength(0);
+    const after = await readRegistry(registryPath);
+    expect(after).toHaveLength(0);
   });
 });
 
@@ -242,6 +255,9 @@ test("K2: a crash after port.start keeps one session", async () => {
     expect(entries[0]?.startedAt).toBe(provisionalStartedAt);
     expect(waits.calls("start")).toBe(2);
     expect(control.sessions()).toHaveLength(1);
+    // The replay returns the same session the first call created in the
+    // port (P1): no second session, no new registry entry.
+    expect(outcome.handle.sessionId).toBe(control.sessions()[0]?.handle.sessionId);
     control.complete(outcome.handle.sessionId, { state: "finished", usage: null, detail: "done" });
     const finished = dispatcher.watch(outcome.request.requestId);
     const parkedWatch = await waits.next("wait");
@@ -333,6 +349,7 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
     // The clock advances 30 s per read, so any clock read written into
     // the entry shows up as non-zero seconds on the lost terminal.
     const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
+    const events: Array<Record<string, unknown>> = [];
     const plain = createDispatcher({
       port: control.port,
       budget: gateUnused(),
@@ -344,7 +361,9 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
         return current;
       },
       sleep: () => Promise.resolve(),
-      log: () => undefined,
+      log: (event) => {
+        events.push({ ...event });
+      },
     });
     control.setUnreachable("laptop-a", true);
     const attempts: Array<unknown> = [];
@@ -367,6 +386,17 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
     if (typeof lost !== "object" || lost === null || !("kind" in lost) || lost.kind !== "lost") {
       throw new Error("expected the third start to return lost");
     }
+    // A lost-at-start outcome has no session id: the terminal result
+    // reports null and the terminal event omits the sessionId key.
+    if (typeof lost !== "object" || lost === null || !("requestId" in lost)) {
+      throw new Error("expected the third start to return lost");
+    }
+    const lostResult = await plain.watch((lost as { requestId: string }).requestId);
+    expect(lostResult.result.state).toBe("lost");
+    expect(lostResult.result.sessionId).toBeNull();
+    const terminalEvents = events.filter((event) => event["event"] === "terminal");
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]).not.toHaveProperty("sessionId");
     const entries = await readRegistry(registryPath);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.terminal?.state).toBe("lost");

@@ -204,6 +204,73 @@ test("a start during a watch keeps both registry entries", async () => {
   });
 });
 
+test("two concurrent watches on one completed session append exactly once", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-conc-c-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const waits = gatePort(control.port, new Set(["wait"]));
+    const gate = createSwitchGate();
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
+    const dispatcher = createDispatcher({
+      port: waits.port,
+      budget: gate.gate,
+      ledgerPath,
+      config,
+      // The clock advances 1 s per read: if the second hold skipped its
+      // terminal re-read and appended again, the duplicate pending line
+      // would carry a different finishedAt.
+      now: () => {
+        const current = ticks.now;
+        ticks.now = new Date(current.getTime() + 1000);
+        return current;
+      },
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    const first = dispatcher.watch(started.request.requestId);
+    const second = dispatcher.watch(started.request.requestId);
+    const parkedA = await waits.next("wait");
+    const parkedB = await waits.next("wait");
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    await parkedA.release();
+    const outcomeA = await first;
+    await parkedB.release();
+    const outcomeB = await second;
+    expect(outcomeA.result.state).toBe("finished");
+    expect(outcomeB.result.state).toBe("finished");
+    expect(outcomeA.ledger).toBe("appended");
+    expect(outcomeB.ledger).toBe("unchanged");
+    const contents = await readLedger("Test ledger", ledgerPath);
+    expect(contents.pending).toHaveLength(1);
+    expect(waits.calls("wait")).toBe(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("I1: two pending watches append once", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-conc-same-"));
   try {
@@ -537,6 +604,11 @@ test("I7: a replayed start during a watch returns the stored session", async () 
     }
     expect(replayed.handle.sessionId).toBe(started.handle.sessionId);
     expect(replayed.request.requestId).toBe(requestId);
+    // The replay returns the stored session with no new port call and no
+    // registry write: one port session and the settled revision unchanged.
+    expect(control.sessions()).toHaveLength(1);
+    const before = await readRegistry(registryPath);
+    expect(before[0]?.revision).toBe(1);
     control.complete(started.handle.sessionId, {
       state: "finished",
       usage: null,

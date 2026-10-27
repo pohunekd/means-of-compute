@@ -217,9 +217,12 @@ function terminalResultOf(entry: RegistryEntry): Extract<WaitResult, { state: Te
   if (terminal === null) {
     throw new Error(`dispatcher: entry ${entry.requestId} has no terminal state`);
   }
+  // A request that ends lost while still provisional has no session id:
+  // report null instead of the request id. Ledger entryId logic
+  // (pendingEntryOf) still falls back to the request id and is unchanged.
   return {
     state: terminal.state,
-    sessionId: entry.sessionId ?? entry.requestId,
+    sessionId: entry.sessionId,
     cursor: entry.cursor,
     usage: terminal.usage,
     detail: terminal.detail,
@@ -563,7 +566,7 @@ export function createDispatcher(deps: DispatcherDeps): {
       event: "terminal",
       requestId: entry.requestId,
       workItemId: entry.workItemId,
-      sessionId: entry.sessionId ?? entry.requestId,
+      ...(entry.sessionId === null ? {} : { sessionId: entry.sessionId }),
       detail: terminal.state,
     });
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
@@ -614,7 +617,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         event: "usage-invalid",
         requestId: entry.requestId,
         workItemId: entry.workItemId,
-        sessionId: entry.sessionId ?? entry.requestId,
+        ...(entry.sessionId === null ? {} : { sessionId: entry.sessionId }),
         detail: "port usage failed validation",
       });
     }
@@ -670,7 +673,7 @@ export function createDispatcher(deps: DispatcherDeps): {
       event: "terminal",
       requestId: entry.requestId,
       workItemId: entry.workItemId,
-      sessionId: entry.sessionId ?? entry.requestId,
+      ...(entry.sessionId === null ? {} : { sessionId: entry.sessionId }),
       detail: "lost",
     });
     return { result, attempt: attemptOf("lost", appended.cancelReason), ledger };

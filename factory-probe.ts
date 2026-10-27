@@ -29,10 +29,13 @@ type Facts = Partial<{
   // Simulates a failed user-activity reader: the probe reports activity as
   // unknown (never idle) with this cause instead of reading live input state.
   userActivityError: string;
-  // Simulates a host where the login query ran and found no graphical
-  // session of any user: idle when on AC, battery above threshold, inside
-  // the window. A failed query is userActivityError instead (never idle).
-  noGraphicalSession: boolean;
+  // Simulates a host where the login query ran and found no local session
+  // of class user (remote sessions excluded): idle when on AC, battery above
+  // threshold, inside the window. A failed query is userActivityError instead
+  // (never idle). The manager hint failure fallback is simulated with the
+  // managerHintFailed fact, which uses /proc/uptime instead of the hint.
+  noLocalUserSession: boolean;
+  managerHintFailed: boolean;
   acPower: boolean;
   batteryPercent: number | null;
   cpuCores: number;
@@ -342,13 +345,13 @@ async function linuxSecondsSinceInput(): Promise<number> {
   return minSecs;
 }
 
-async function linuxManagerIdleSecs(): Promise<number | null> {
-  const proc = Bun.spawn(["loginctl", "show", "-p", "IdleHint", "-p", "IdleSinceHint"], {
+async function linuxManagerIdleSecs(): Promise<number> {
+  const proc = Bun.spawn(["loginctl", "show-session", "-p", "IdleHint", "-p", "IdleSinceHint"], {
     stdout: "pipe",
   });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
-  if (proc.exitCode !== 0) throw new Error("loginctl show manager failed");
+  if (proc.exitCode !== 0) throw new Error("loginctl show-session manager failed");
   const props = new Map<string, string>();
   for (const line of out.split("\n")) {
     const eq = line.indexOf("=");
@@ -356,16 +359,17 @@ async function linuxManagerIdleSecs(): Promise<number | null> {
   }
   const sinceRaw = props.get("IdleSinceHint");
   const sinceUs = sinceRaw === undefined || sinceRaw === "" ? NaN : Number(sinceRaw);
-  if (Number.isFinite(sinceUs) && sinceUs > 0) {
-    return Math.max(0, Math.floor((Date.now() - sinceUs / 1000) / 1000));
+  if (!Number.isFinite(sinceUs) || sinceUs <= 0) {
+    throw new Error(`manager IdleSinceHint not above zero: ${sinceRaw ?? "missing"}`);
   }
-  return null;
+  return Math.max(0, Math.floor((Date.now() - sinceUs / 1000) / 1000));
 }
 
-function linuxUptimeSecs(): number | null {
+function linuxUptimeSecs(): number {
   const first = readFileIfExists("/proc/uptime")?.split(/\s+/)[0];
   const upSecs = first ? Math.floor(Number(first)) : NaN;
-  return Number.isFinite(upSecs) ? upSecs : null;
+  if (!Number.isFinite(upSecs)) throw new Error("/proc/uptime unreadable");
+  return upSecs;
 }
 
 async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number | null }> {
@@ -570,8 +574,9 @@ async function main(): Promise<void> {
 
   let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
-  let loggedOut = facts.noGraphicalSession === true;
+  let loggedOut = facts.noLocalUserSession === true;
   let loggedOutSecs: number | null = null;
+  const managerHintFailed = facts.managerHintFailed === true;
   let powerUnknown = false;
   let powerCause = "";
 
@@ -587,19 +592,26 @@ async function main(): Promise<void> {
 
   if (userActivityUnknown) {
     secondsSinceInput = 0;
-  } else if (loggedOut) {
+  } else if (loggedOut && facts.secondsSinceInput !== undefined && !managerHintFailed) {
     secondsSinceInput = 0;
-  } else if (facts.secondsSinceInput === undefined) {
+  } else if (facts.secondsSinceInput === undefined || (loggedOut && managerHintFailed)) {
     try {
       if (platformOrThrow() === "linux") {
-        const secs = await linuxSecondsSinceInput();
+        const secs = managerHintFailed ? Number.NaN : await linuxSecondsSinceInput();
         if (Number.isNaN(secs)) {
           loggedOut = true;
-          const managerIdle = await linuxManagerIdleSecs();
-          if (managerIdle !== null) {
-            loggedOutSecs = managerIdle;
-          } else {
-            loggedOutSecs = linuxUptimeSecs();
+          try {
+            if (managerHintFailed) throw new Error("simulated: manager hint query failed");
+            loggedOutSecs = await linuxManagerIdleSecs();
+          } catch (managerError) {
+            try {
+              loggedOutSecs = linuxUptimeSecs();
+            } catch (uptimeError) {
+              throw new Error(
+                `logged out but input time unreadable: ${String(managerError)}; ${String(uptimeError)}`,
+                { cause: uptimeError },
+              );
+            }
           }
         } else {
           secondsSinceInput = secs;
@@ -614,7 +626,7 @@ async function main(): Promise<void> {
       }
       if (loggedOut) {
         if (platform === "linux" && loggedOutSecs === null) {
-          throw new Error("logged out but neither IdleSinceHint nor uptime readable");
+          throw new Error("logged out but input time unreadable");
         }
         secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
       }

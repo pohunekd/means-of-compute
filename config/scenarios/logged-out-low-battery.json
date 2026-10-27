@@ -1,6 +1,6 @@
 {
   "secondsSinceInput": 0,
-  "noGraphicalSession": true,
+  "noLocalUserSession": true,
   "acPower": true,
   "batteryPercent": 20,
   "cpuCores": 4,

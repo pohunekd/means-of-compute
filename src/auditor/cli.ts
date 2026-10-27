@@ -1,10 +1,14 @@
-// CLI entry point: bun run audit --repo-dir <dir> --ref <ref> --base <ref>
-// --item <file> --ledger <path> --authors <source> [--author-model <id>...]
-// [--pull <n>] [--post yes]. Exit 0 prints the verdict file path, then the
+// CLI entry point: bun run audit --repo-dir <dir> --branch <ref> --base
+// <ref> --issue <n> --ledger <path> --authors <source>
+// [--author-model <id>...] [--pull <n>] [--post yes]. --branch aliases
+// --ref; --issue <n> reads <repo-dir>/issues/<n>.json, so --item <file>
+// is required only without --issue. Exit 0 prints the verdict file path,
+// then the
 // rendered comment (or a note when there is no pull request). Exit 3 is a
 // domain refusal, 4 a model, provider or post failure, 2 any input,
 // config or data error. Posting uses gh and verifies the posted comment.
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { contractErrors, isWorkItem } from "../../contracts/v1/validate.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
@@ -64,7 +68,9 @@ function checkUnknownFlags(args: string[]): void {
   const known = new Set([
     "--repo-dir",
     "--ref",
+    "--branch",
     "--base",
+    "--issue",
     "--item",
     "--ledger",
     "--authors",
@@ -94,19 +100,36 @@ interface CliOptions {
 function parseOptions(args: string[]): CliOptions {
   checkUnknownFlags(args);
   const repoDir = flagValue(args, "--repo-dir");
-  const ref = flagValue(args, "--ref");
+  const branch = flagValue(args, "--branch");
+  const refFlag = flagValue(args, "--ref");
   const base = flagValue(args, "--base");
-  const itemPath = flagValue(args, "--item");
+  const issueRaw = flagValue(args, "--issue");
+  const itemFlag = flagValue(args, "--item");
   const ledgerPath = flagValue(args, "--ledger");
   const authors = flagValue(args, "--authors");
   const pullRaw = flagValue(args, "--pull");
   const postRaw = flagValue(args, "--post");
   const authorModels = flagValues(args, "--author-model");
+  if (branch !== null && refFlag !== null) {
+    throw new Error("audit: use only one of --branch and --ref");
+  }
+  const ref = branch ?? refFlag;
+  if (issueRaw !== null && itemFlag !== null) {
+    throw new Error("audit: use only one of --issue and --item");
+  }
+  if (issueRaw !== null && !/^[1-9][0-9]*$/.test(issueRaw)) {
+    throw new Error("audit: --issue must be an integer >= 1");
+  }
+  if (issueRaw !== null && repoDir === null) {
+    throw new Error("audit: --issue needs --repo-dir");
+  }
+  const itemPath =
+    itemFlag ?? (issueRaw !== null ? join(repoDir as string, "issues", `${issueRaw}.json`) : null);
   const required: Readonly<Record<string, string | null>> = {
     "--repo-dir": repoDir,
-    "--ref": ref,
+    "--branch/--ref": ref,
     "--base": base,
-    "--item": itemPath,
+    "--issue/--item": itemPath,
     "--ledger": ledgerPath,
     "--authors": authors,
   };

@@ -579,6 +579,12 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
       throw new Error("missing laptop-mac row");
     }
     expect(asText(unreachable[1] as never)).toBe("unavailable: unreachable");
+    // PR 1 running column: every row carries the dispatcher-registry
+    // no-data, including the missing (laptop-b) and unavailable
+    // (laptop-mac) branches (mutation: running copies missing or state).
+    for (const cells of rows.values()) {
+      expect(cells[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
+    }
     // Every state goes through CAUSE_LABELS, never as the raw cause enum.
     expect(JSON.stringify(model)).not.toContain("host-unreachable");
   });

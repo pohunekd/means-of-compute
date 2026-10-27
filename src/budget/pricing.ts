@@ -13,7 +13,7 @@ interface RawPricing {
 
 interface RawDescriptor {
   readonly id?: unknown;
-  readonly pricing?: unknown;
+  readonly pricing?: RawPricing | undefined;
 }
 
 function asNonNegativeNumber(value: unknown, what: string, file: string): number {
@@ -23,20 +23,21 @@ function asNonNegativeNumber(value: unknown, what: string, file: string): number
   return value;
 }
 
-function readPricing(raw: RawPricing | undefined, file: string): ProviderPricing {
+function readPricing(raw: unknown, file: string): ProviderPricing {
   if (raw === undefined) {
     return { inputPer1M: 0, outputPer1M: 0 };
   }
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`Budget pricing ${file}: invalid pricing block`);
   }
+  const block = raw as RawPricing;
   const pricing: ProviderPricing = {
-    inputPer1M: asNonNegativeNumber(raw.inputPer1M, "inputPer1M", file),
-    outputPer1M: asNonNegativeNumber(raw.outputPer1M, "outputPer1M", file),
+    inputPer1M: asNonNegativeNumber(block.inputPer1M, "inputPer1M", file),
+    outputPer1M: asNonNegativeNumber(block.outputPer1M, "outputPer1M", file),
   };
-  if (raw.cachedInputPer1M !== undefined) {
+  if (block.cachedInputPer1M !== undefined) {
     pricing.cachedInputPer1M = asNonNegativeNumber(
-      raw.cachedInputPer1M,
+      block.cachedInputPer1M,
       "cachedInputPer1M",
       file,
     );
@@ -60,16 +61,20 @@ export async function loadPricing(
     if (file.endsWith("schema.json") || file.endsWith("route.json")) {
       continue;
     }
-    let raw: RawDescriptor;
+    let parsed: unknown;
     try {
-      raw = (await Bun.file(file).json()) as RawDescriptor;
+      parsed = (await Bun.file(file).json()) as unknown;
     } catch {
       throw new Error(`Budget pricing ${file}: not valid JSON`);
     }
-    if (typeof raw !== "object" || raw === null || typeof raw.id !== "string") {
+    if (typeof parsed !== "object" || parsed === null) {
       throw new Error(`Budget pricing ${file}: missing provider id`);
     }
-    pricing.set(raw.id, readPricing(raw.pricing as RawPricing | undefined, file));
+    const raw = parsed as RawDescriptor;
+    if (typeof raw.id !== "string") {
+      throw new Error(`Budget pricing ${file}: missing provider id`);
+    }
+    pricing.set(raw.id, readPricing(raw.pricing, file));
   }
   return pricing;
 }

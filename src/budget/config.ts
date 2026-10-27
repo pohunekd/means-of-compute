@@ -12,11 +12,7 @@ export interface BudgetConfig {
 
 const DEFAULT_CONFIG_PATH = "config/budget.json";
 
-function requiredString(
-  record: Record<string, unknown>,
-  field: string,
-  path: string,
-): string {
+function requiredString(record: Record<string, unknown>, field: string, path: string): string {
   const value = record[field];
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
@@ -24,11 +20,7 @@ function requiredString(
   return value;
 }
 
-function requiredNumber(
-  record: Record<string, unknown>,
-  field: string,
-  path: string,
-): number {
+function requiredNumber(record: Record<string, unknown>, field: string, path: string): number {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);

@@ -88,9 +88,9 @@ async function callProvider(
   }
   const controller = new AbortController();
   const timeoutMs = provider.timeoutMs;
-  let timedOut = false;
+  const state = { timedOut: false };
   const timeoutId = setTimeout(() => {
-    timedOut = true;
+    state.timedOut = true;
     controller.abort();
   }, timeoutMs);
   try {
@@ -150,7 +150,7 @@ async function callProvider(
     if (isAbortError(error)) {
       // The request was sent before the abort, so the call may be billed:
       // a late reply still counts server-side. Usage is unknown.
-      if (timedOut) {
+      if (state.timedOut) {
         throw new ProviderCallError(
           `Provider ${provider.id} timed out`,
           504,

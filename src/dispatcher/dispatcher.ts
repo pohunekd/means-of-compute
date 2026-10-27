@@ -3,6 +3,8 @@
 // outside src/dispatcher/ uses this service or the port type, never an
 // adapter. The budget gate is called only in start; watch, diff and cancel
 // never call it.
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { isPlacementDecision, isWorkItem } from "../../contracts/v1/validate.js";
 import type { PlacementDecision, TokenUsage, WorkItem } from "../../contracts/v1/types.js";
 import type { BudgetGate } from "../budget/gate.js";
@@ -18,6 +20,7 @@ import type {
   ModelSelection,
   PortUsage,
   SessionHandle,
+  SessionRef,
   StartRequest,
   TerminalState,
   WaitResult,
@@ -47,7 +50,27 @@ export interface DispatchLogEvent {
 
 export type StartOutcome =
   | { readonly kind: "started"; readonly handle: SessionHandle; readonly request: StartRequest }
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "lost"; readonly requestId: string; readonly ledger: WriteOutcome };
+
+export type DispatchStateCode =
+  | "request-provisional"
+  | "request-conflict"
+  | "request-unappended"
+  | "request-ledger-mismatch"
+  | "port-binding-conflict"
+  | "invalid-handle";
+
+export class DispatchStateError extends Error {
+  readonly code: DispatchStateCode;
+  readonly requestId: string;
+  constructor(code: DispatchStateCode, requestId: string, message?: string) {
+    super(message ?? `${code}: ${requestId}`);
+    this.name = "DispatchStateError";
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
 
 export interface FinishOutcome {
   readonly result: Extract<WaitResult, { state: TerminalState }>;
@@ -70,6 +93,7 @@ export class DispatchClockError extends Error {
 }
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const REQUEST_ID_PATTERN = /^([a-z0-9][a-z0-9-]{0,62}):(0|[1-9][0-9]*)$/;
 
 function attemptOf(
   state: TerminalState,
@@ -136,15 +160,14 @@ function isTerminalResult(
 function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): PendingUsage {
   const stored = terminal;
   const useReported = stored.usage !== null && stored.usageValid;
-  const reported = stored.usage;
   return {
-    entryId: `${entry.workItemId}:${entry.sessionId}`,
+    entryId: `${entry.workItemId}:${entry.sessionId ?? entry.requestId}`,
     kind: "session",
     workItemId: entry.workItemId,
     finishedAt: stored.observedAt,
     startModel: entry.model.model,
     tokens: useReported
-      ? (reported === null ? [] : reported.tokens).map((token) => ({
+      ? (stored.usage as PortUsage).tokens.map((token) => ({
           provider: token.provider,
           model: token.model,
           inputTokens: token.inputTokens,
@@ -159,7 +182,7 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): Pendi
             inputTokens: null,
             outputTokens: null,
             requests: null,
-            source: stored.usage === null ? "usage-unreported" : "usage-invalid",
+            source: stored.usageValid ? "usage-unreported" : "usage-invalid",
           },
         ],
     session: {
@@ -178,7 +201,7 @@ function terminalResultOf(entry: RegistryEntry): Extract<WaitResult, { state: Te
   }
   return {
     state: terminal.state,
-    sessionId: entry.sessionId,
+    sessionId: entry.sessionId ?? entry.requestId,
     cursor: entry.cursor,
     usage: terminal.usage,
     detail: terminal.detail,
@@ -270,6 +293,10 @@ function checkStartPreconditions(
   }
 }
 
+export function briefSha256Of(brief: string): string {
+  return createHash("sha256").update(brief, "utf8").digest("hex");
+}
+
 export function deriveStartRequest(
   item: WorkItem,
   decision: PlacementDecision,
@@ -311,20 +338,20 @@ export function createDispatcher(deps: DispatcherDeps): {
   diff(requestId: string): Promise<DiffResult>;
   cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome>;
 } {
-  // Serializes operations on one request id: two ops on the same
-  // request run one after the other, ops on different requests overlap
-  // and meet only in the serialized registry writes. Reads inside the
-  // lock therefore see the entry snapshot no concurrent op can stale.
-  const requestLocks = new Map<string, Promise<void>>();
+  // Item-keyed FIFO lock: one promise chain per registry path and work item.
+  // Two dispatcher instances on the same registry share the lock through
+  // the module-level map. Port wait/cancel/diff and sleep always run
+  // outside a hold; port start is the only port call made under the lock.
+  const itemLocks = new Map<string, Promise<void>>();
 
-  async function withRequestLock<T>(requestId: string, op: () => Promise<T>): Promise<T> {
-    const previous = requestLocks.get(requestId) ?? Promise.resolve();
+  async function withItemLock<T>(key: string, op: () => Promise<T>): Promise<T> {
+    const previous = itemLocks.get(key) ?? Promise.resolve();
     let release: () => void = () => undefined;
     const turn = new Promise<void>((resolve) => {
       release = resolve;
     });
-    requestLocks.set(
-      requestId,
+    itemLocks.set(
+      key,
       previous.then(() => turn),
     );
     await previous;
@@ -332,15 +359,29 @@ export function createDispatcher(deps: DispatcherDeps): {
       return await op();
     } finally {
       release();
-      if (requestLocks.get(requestId) !== undefined) {
-        const chained = requestLocks.get(requestId);
-        void chained?.then(() => {
-          if (requestLocks.get(requestId) === chained) {
-            requestLocks.delete(requestId);
+      const chained = itemLocks.get(key);
+      if (chained !== undefined) {
+        void chained.then(() => {
+          if (itemLocks.get(key) === chained) {
+            itemLocks.delete(key);
           }
         });
       }
     }
+  }
+
+  function workItemIdOf(requestId: string): string {
+    const match = REQUEST_ID_PATTERN.exec(requestId);
+    if (match === null || match[1] === undefined) {
+      throw new DispatchPreconditionError(
+        `dispatcher precondition known-request: unknown requestId "${requestId}"`,
+      );
+    }
+    return match[1];
+  }
+
+  function itemKeyFor(requestId: string): string {
+    return `${resolve(deps.config.registryPath)}|${workItemIdOf(requestId)}`;
   }
 
   async function loadEntry(requestId: string): Promise<RegistryEntry> {
@@ -363,32 +404,20 @@ export function createDispatcher(deps: DispatcherDeps): {
       readonly usage: PortUsage | null;
       readonly usageValid: boolean;
       readonly detail: string;
+      readonly cursor: string | null;
     },
   ): Promise<FinishOutcome> {
     if (terminal.seconds < 0) {
       throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
     }
-    if (!terminal.usageValid && terminal.usage !== null) {
-      throw new DispatchClockError(
-        `dispatcher clock: invalid usage must be stored as null for ${entry.requestId}`,
-      );
-    }
-    if (terminal.usage !== null && !terminal.usageValid) {
-      deps.log({
-        level: "error",
-        event: "usage-invalid",
-        requestId: entry.requestId,
-        workItemId: entry.workItemId,
-        sessionId: entry.sessionId,
-        detail: "port usage failed validation",
-      });
-    }
-    const stored = { ...terminal, ledgerAppended: false };
+    const { cursor, ...terminalFields } = terminal;
+    const stored = { ...terminalFields, ledgerAppended: false };
     const updated: RegistryEntry = {
       ...entry,
-      cursor: entry.cursor,
+      cursor,
       unreachableCount: 0,
       lastSeenAt: terminal.observedAt,
+      revision: entry.revision + 1,
       terminal: stored,
     };
     await replaceRegistryEntry(deps.config.registryPath, updated);
@@ -396,6 +425,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     const ledger = await appendPending(deps.ledgerPath, pending);
     const appended: RegistryEntry = {
       ...updated,
+      revision: updated.revision + 1,
       terminal: { ...stored, ledgerAppended: true },
     };
     await replaceRegistryEntry(deps.config.registryPath, appended);
@@ -405,7 +435,7 @@ export function createDispatcher(deps: DispatcherDeps): {
       event: "terminal",
       requestId: entry.requestId,
       workItemId: entry.workItemId,
-      sessionId: entry.sessionId,
+      sessionId: entry.sessionId ?? entry.requestId,
       detail: terminal.state,
     });
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
@@ -428,6 +458,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     const ledger = await appendPending(deps.ledgerPath, pending);
     const appended: RegistryEntry = {
       ...entry,
+      revision: entry.revision + 1,
       terminal: { ...terminal, ledgerAppended: true },
     };
     await replaceRegistryEntry(deps.config.registryPath, appended);
@@ -435,23 +466,88 @@ export function createDispatcher(deps: DispatcherDeps): {
     return { result, attempt: attemptOf(terminal.state, appended.cancelReason), ledger };
   }
 
-  async function finishWait(
+  // Terminal helpers: each one makes exactly two registry writes and one
+  // append in one hold. The invalid marker lives in the pending token
+  // source ("usage-invalid") and the usage-invalid error event, never in
+  // the stored usage, which stays null.
+  async function finishObserved(
     entry: RegistryEntry,
     result: Extract<WaitResult, { state: TerminalState }>,
   ): Promise<FinishOutcome> {
     const observedAt = deps.now().toISOString();
     const seconds = Math.floor((Date.parse(observedAt) - Date.parse(entry.startedAt)) / 1000);
+    if (seconds < 0) {
+      throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
+    }
     const usageValid = result.usage === null ? true : checkUsageValid(result.usage);
+    if (!usageValid) {
+      deps.log({
+        level: "error",
+        event: "usage-invalid",
+        requestId: entry.requestId,
+        workItemId: entry.workItemId,
+        sessionId: entry.sessionId ?? entry.requestId,
+        detail: "port usage failed validation",
+      });
+    }
     return persistTerminalAndAppend(entry, {
       state: result.state,
       observedAt,
       seconds,
-      // Invalid port usage is never kept: the registry stores null while
-      // the pending entry and the error log keep the invalid marker.
       usage: usageValid ? result.usage : null,
       usageValid,
       detail: result.detail,
+      cursor: result.cursor,
     });
+  }
+
+  async function finishLost(entry: RegistryEntry, count: number): Promise<FinishOutcome> {
+    const observedAt = deps.now().toISOString();
+    const seconds = Math.floor(
+      (Date.parse(entry.lastSeenAt) - Date.parse(entry.startedAt)) / 1000,
+    );
+    if (seconds < 0) {
+      throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
+    }
+    // A synthesized lost keeps the last observation and stores the final
+    // unreachable count; only the terminal and the count change.
+    const lost: RegistryEntry = {
+      ...entry,
+      unreachableCount: count,
+      revision: entry.revision + 1,
+      terminal: {
+        state: "lost",
+        observedAt,
+        seconds,
+        usage: null,
+        usageValid: true,
+        detail: `unreachable ${String(count)} times`,
+        ledgerAppended: false,
+      },
+    };
+    await replaceRegistryEntry(deps.config.registryPath, lost);
+    const stored = lost.terminal;
+    if (stored === null) {
+      throw new Error(`dispatcher: entry ${entry.requestId} has no terminal state`);
+    }
+    const pending = pendingEntryOf(lost, stored);
+    const ledger = await appendPending(deps.ledgerPath, pending);
+    const appended: RegistryEntry = {
+      ...lost,
+      revision: lost.revision + 1,
+      terminal: { ...stored, ledgerAppended: true },
+    };
+    await replaceRegistryEntry(deps.config.registryPath, appended);
+    const result = terminalResultOf(appended);
+    deps.log({
+      level: "info",
+      event: "terminal",
+      requestId: entry.requestId,
+      workItemId: entry.workItemId,
+      sessionId: entry.sessionId ?? entry.requestId,
+      detail: "lost",
+    });
+    return { result, attempt: attemptOf("lost", appended.cancelReason), ledger };
   }
 
   async function start(
@@ -464,10 +560,18 @@ export function createDispatcher(deps: DispatcherDeps): {
     checkStartPreconditions(item, decision, model, brief);
     const contents = await readLedger("Dispatcher ledger", deps.ledgerPath);
     const request = deriveStartRequest(item, decision, model, brief, deps.config, contents);
-    return withRequestLock(request.requestId, async () => {
+    const key = `${resolve(deps.config.registryPath)}|${item.id}`;
+    return withItemLock(key, async () => {
       const existing = await readRegistry(deps.config.registryPath);
       const hit = existing.find((candidate) => candidate.requestId === request.requestId);
       if (hit !== undefined) {
+        if (hit.sessionId === null) {
+          throw new DispatchStateError(
+            "request-provisional",
+            hit.requestId,
+            `dispatcher state request-provisional: ${hit.requestId} has no session yet`,
+          );
+        }
         // A replayed start returns the stored session identity, including
         // the recorded worktree and base commit.
         const handle: SessionHandle = {
@@ -489,12 +593,16 @@ export function createDispatcher(deps: DispatcherDeps): {
       const entry: RegistryEntry = {
         requestId: request.requestId,
         workItemId: request.workItemId,
-        sessionId: handle.sessionId,
+        repo: request.repo,
         hostAlias: request.hostAlias,
         branch: request.branch,
+        baseRef: request.baseRef,
+        resume: request.resume,
+        model,
+        briefSha256: briefSha256Of(brief),
+        sessionId: handle.sessionId,
         worktree: handle.worktree,
         baseCommit: handle.baseCommit,
-        model,
         startedAt,
         cursor: null,
         unreachableCount: 0,
@@ -502,6 +610,7 @@ export function createDispatcher(deps: DispatcherDeps): {
         lastSeenAt: startedAt,
         cancelReason: null,
         terminal: null,
+        revision: 0,
       };
       await insertRegistryEntry(deps.config.registryPath, entry);
       deps.log({
@@ -516,75 +625,96 @@ export function createDispatcher(deps: DispatcherDeps): {
   }
 
   async function watch(requestId: string): Promise<FinishOutcome> {
-    return withRequestLock(requestId, async () => {
-      const initial = await loadEntry(requestId);
-      if (initial.terminal !== null) {
-        return replayTerminal(initial);
-      }
-      let current = initial;
-      for (;;) {
-        let result: WaitResult;
-        try {
-          result = await deps.port.wait(
-            { sessionId: current.sessionId, hostAlias: current.hostAlias },
-            deps.config.waitTimeoutMs,
-            current.cursor,
+    const key = itemKeyFor(requestId);
+    for (;;) {
+      const prep = await withItemLock(key, async () => {
+        const entry = await loadEntry(requestId);
+        if (entry.terminal !== null) {
+          return { kind: "outcome" as const, outcome: await replayTerminal(entry) };
+        }
+        if (entry.sessionId === null) {
+          throw new DispatchStateError(
+            "request-provisional",
+            requestId,
+            `dispatcher state request-provisional: ${requestId} has no session yet`,
           );
-        } catch (error: unknown) {
-          if (error instanceof PortUnreachableError) {
-            const count = current.unreachableCount + 1;
-            if (count >= deps.config.lostAfterUnreachable) {
-              const observedAt = deps.now().toISOString();
-              const seconds = Math.floor(
-                (Date.parse(current.lastSeenAt) - Date.parse(current.startedAt)) / 1000,
-              );
-              const terminal = {
-                state: "lost" as const,
-                observedAt,
-                seconds,
-                usage: null,
-                usageValid: true,
-                detail: `unreachable ${String(count)} times`,
-              };
-              const persisted: RegistryEntry = { ...current, unreachableCount: count };
-              await replaceRegistryEntry(deps.config.registryPath, persisted);
-              return persistTerminalAndAppend(persisted, terminal);
-            }
-            const persisted: RegistryEntry = { ...current, unreachableCount: count };
-            await replaceRegistryEntry(deps.config.registryPath, persisted);
-            current = persisted;
-            await deps.sleep(deps.config.unreachableBackoffMs);
-            continue;
-          }
+        }
+        const ref: SessionRef = { sessionId: entry.sessionId, hostAlias: entry.hostAlias };
+        return {
+          kind: "wait" as const,
+          ref,
+          cursor: entry.cursor,
+          rev: entry.revision,
+        };
+      });
+      if (prep.kind === "outcome") {
+        return prep.outcome;
+      }
+      let result: WaitResult;
+      let miss = false;
+      try {
+        result = await deps.port.wait(prep.ref, deps.config.waitTimeoutMs, prep.cursor);
+      } catch (error: unknown) {
+        if (!(error instanceof PortUnreachableError)) {
           throw error;
         }
-        if (!isTerminalResult(result)) {
-          const observedAt = deps.now().toISOString();
+        miss = true;
+        result = { state: "starting", sessionId: prep.ref.sessionId, cursor: prep.cursor };
+      }
+      const after = await withItemLock(key, async () => {
+        const current = await loadEntry(requestId);
+        if (current.terminal !== null) {
+          return { kind: "outcome" as const, outcome: await replayTerminal(current) };
+        }
+        if (isTerminalResult(result)) {
+          return { kind: "outcome" as const, outcome: await finishObserved(current, result) };
+        }
+        if (current.revision !== prep.rev) {
+          return { kind: "loop" as const };
+        }
+        if (miss) {
+          const count = current.unreachableCount + 1;
+          if (count >= deps.config.lostAfterUnreachable) {
+            return { kind: "outcome" as const, outcome: await finishLost(current, count) };
+          }
           const persisted: RegistryEntry = {
             ...current,
-            cursor: result.cursor,
-            unreachableCount: 0,
-            lastSeenState: result.state,
-            lastSeenAt: observedAt,
+            unreachableCount: count,
+            revision: current.revision + 1,
           };
           await replaceRegistryEntry(deps.config.registryPath, persisted);
-          current = persisted;
-          continue;
+          return { kind: "sleep" as const };
         }
-        const observed: RegistryEntry = {
+        const observedAt = deps.now().toISOString();
+        const persisted: RegistryEntry = {
           ...current,
           cursor: result.cursor,
           unreachableCount: 0,
-          lastSeenAt: deps.now().toISOString(),
+          lastSeenState: result.state,
+          lastSeenAt: observedAt,
+          revision: current.revision + 1,
         };
-        await replaceRegistryEntry(deps.config.registryPath, observed);
-        return finishWait(observed, result);
+        await replaceRegistryEntry(deps.config.registryPath, persisted);
+        return { kind: "loop" as const };
+      });
+      if (after.kind === "outcome") {
+        return after.outcome;
       }
-    });
+      if (after.kind === "sleep") {
+        await deps.sleep(deps.config.unreachableBackoffMs);
+      }
+    }
   }
 
   async function diff(requestId: string): Promise<DiffResult> {
     const entry = await loadEntry(requestId);
+    if (entry.sessionId === null) {
+      throw new DispatchStateError(
+        "request-provisional",
+        requestId,
+        `dispatcher state request-provisional: ${requestId} has no session yet`,
+      );
+    }
     return deps.port.diff(
       { sessionId: entry.sessionId, hostAlias: entry.hostAlias },
       `origin/${deps.config.baseBranch}`,
@@ -592,41 +722,64 @@ export function createDispatcher(deps: DispatcherDeps): {
   }
 
   async function cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome> {
-    const terminalOutcome = await withRequestLock(requestId, async () => {
-      const initial = await loadEntry(requestId);
-      if (initial.terminal !== null) {
+    const key = itemKeyFor(requestId);
+    const first = await withItemLock(key, async () => {
+      const entry = await loadEntry(requestId);
+      if (entry.terminal !== null) {
         // A terminal result observed before the cancel keeps its own state
         // and its own attempt mapping; the port is never called again.
-        return replayTerminal(initial);
+        return { kind: "outcome" as const, outcome: await replayTerminal(entry) };
       }
-      const persisted: RegistryEntry = { ...initial, cancelReason: reason };
-      await replaceRegistryEntry(deps.config.registryPath, persisted);
-      const cancelResult = await deps.port.cancel(
-        { sessionId: persisted.sessionId, hostAlias: persisted.hostAlias },
-        reason,
-      );
-      if (!isTerminalResult(cancelResult)) {
-        const observed: RegistryEntry = {
-          ...persisted,
-          cursor: cancelResult.cursor,
-          unreachableCount: 0,
-          lastSeenState: cancelResult.state,
-          lastSeenAt: deps.now().toISOString(),
+      if (entry.sessionId === null) {
+        throw new DispatchStateError(
+          "request-provisional",
+          requestId,
+          `dispatcher state request-provisional: ${requestId} has no session yet`,
+        );
+      }
+      let current = entry;
+      if (current.cancelReason === null) {
+        // The first reason wins: a later cancel keeps the stored one.
+        const persisted: RegistryEntry = {
+          ...current,
+          cancelReason: reason,
+          revision: current.revision + 1,
         };
-        await replaceRegistryEntry(deps.config.registryPath, observed);
-        return null;
+        await replaceRegistryEntry(deps.config.registryPath, persisted);
+        current = persisted;
       }
-      const observed: RegistryEntry = {
-        ...persisted,
+      const ref: SessionRef = { sessionId: current.sessionId, hostAlias: current.hostAlias };
+      return { kind: "cancel" as const, ref, rev: current.revision };
+    });
+    if (first.kind === "outcome") {
+      return first.outcome;
+    }
+    const cancelResult = await deps.port.cancel(first.ref, reason);
+    const second = await withItemLock(key, async () => {
+      const current = await loadEntry(requestId);
+      if (current.terminal !== null) {
+        return { kind: "outcome" as const, outcome: await replayTerminal(current) };
+      }
+      if (isTerminalResult(cancelResult)) {
+        return { kind: "outcome" as const, outcome: await finishObserved(current, cancelResult) };
+      }
+      if (current.revision !== first.rev) {
+        return { kind: "watch" as const };
+      }
+      const observedAt = deps.now().toISOString();
+      const persisted: RegistryEntry = {
+        ...current,
         cursor: cancelResult.cursor,
         unreachableCount: 0,
-        lastSeenAt: deps.now().toISOString(),
+        lastSeenState: cancelResult.state,
+        lastSeenAt: observedAt,
+        revision: current.revision + 1,
       };
-      await replaceRegistryEntry(deps.config.registryPath, observed);
-      return finishWait(observed, cancelResult);
+      await replaceRegistryEntry(deps.config.registryPath, persisted);
+      return { kind: "watch" as const };
     });
-    if (terminalOutcome !== null) {
-      return terminalOutcome;
+    if (second.kind === "outcome") {
+      return second.outcome;
     }
     return watch(requestId);
   }

@@ -303,6 +303,55 @@ test("D3: exactly one escalation per cap event across repeated refusals", async 
   }
 });
 
+test("D3: total cap escalates once across days", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
+  try {
+    const statePath = join(dir, "state.json");
+    const logPath = join(dir, "escalations.log");
+    const stderr: string[] = [];
+    const refused = {
+      admit: false,
+      reason: "total cap reached",
+      spentTodayUsd: 1,
+      spentTotalUsd: 140,
+      nvidiaRequestsToday: 5,
+    } as const;
+    const push = (line: string): void => {
+      stderr.push(line);
+    };
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T12:00:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(true);
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T18:00:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(false);
+    // Next UTC day is still the same total-cap event.
+    expect(
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-27T00:01:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(false);
+    expect(stderr).toHaveLength(1);
+    const log = await Bun.file(logPath).text();
+    expect(log.trim().split("\n")).toHaveLength(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pricing reads Meta prices from config descriptors", async () => {
   const pricing = await loadPricing();
   const meta = pricing.get("meta-api");

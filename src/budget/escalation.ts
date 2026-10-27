@@ -12,6 +12,8 @@ export type CapKind = "day" | "total" | "nvidia-daily" | "spend-unknown";
 
 export interface EscalationState {
   readonly capKind: CapKind;
+  // UTC day for daily kinds (day, nvidia-daily); empty for total and
+  // spend-unknown, which escalate once regardless of the day.
   readonly day: string;
 }
 
@@ -43,7 +45,14 @@ export function eventKeyString(kind: CapKind, now: Date): string {
 }
 
 function eventKey(kind: CapKind, now: Date): EscalationState {
-  return { capKind: kind, day: utcCalendarDay(now) };
+  switch (kind) {
+    case "day":
+    case "nvidia-daily":
+      return { capKind: kind, day: utcCalendarDay(now) };
+    case "total":
+    case "spend-unknown":
+      return { capKind: kind, day: "" };
+  }
 }
 
 async function readState(statePath: string): Promise<EscalationState | null> {

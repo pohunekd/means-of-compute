@@ -89,6 +89,29 @@ try {
   );
 }
 
+// Calls the router against the temp tree after warming the provider cache
+// with a valid route, then rewriting the route: the second call exercises
+// the router's own route validation. Prints the result or the error.
+export async function runWarmCallCheck(dir: string, badRoute: unknown): Promise<ChildResult> {
+  return runHelper(
+    dir,
+    "warm-call-check.ts",
+    `import { join } from "node:path";
+import { getProviders } from ${JSON.stringify(CONFIG_TS)};
+import { callWithFallback } from ${JSON.stringify(ROUTER_TS)};
+try {
+  await getProviders();
+  await Bun.write(join("config", "providers", "route.json"), ${JSON.stringify(JSON.stringify(badRoute))});
+  const result = await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+  console.log("called " + JSON.stringify(result));
+} catch (error: unknown) {
+  console.log(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+`,
+  );
+}
+
 // Calls the router against the temp tree and prints the result or the error.
 export async function runCallCheck(dir: string): Promise<ChildResult> {
   return runHelper(

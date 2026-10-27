@@ -188,16 +188,12 @@ test("router rejects an unknown route id (mutation: predicate always true)", asy
   }
 });
 
-test("router rejects a duplicate route id (mutation: unvalidated route read)", async () => {
-  const { makeTempConfig, removeTempConfig, runCallCheck } = await import("./temp-config.js");
+test("router rejects a duplicate route id on a warm cache (mutation: unvalidated route read)", async () => {
+  const { makeTempConfig, removeTempConfig, runWarmCallCheck } =
+    await import("./temp-config.js");
   const dir = await makeTempConfig();
   try {
-    const { join } = await import("node:path");
-    await Bun.write(
-      join(dir, "config", "providers", "route.json"),
-      JSON.stringify({ providers: ["nvidia-build", "nvidia-build"] }),
-    );
-    const result = await runCallCheck(dir);
+    const result = await runWarmCallCheck(dir, { providers: ["nvidia-build", "nvidia-build"] });
     if (result.code === 0) throw new Error("Expected the duplicate route id to fail");
     if (!result.output.includes('duplicate provider id "nvidia-build"')) {
       throw new Error(`Unexpected output: ${result.output}`);

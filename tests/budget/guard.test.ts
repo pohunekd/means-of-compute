@@ -147,7 +147,7 @@ test("D1: spend below both caps admits", () => {
   expect(decision.reason).toBe("within budget");
 });
 
-test("D2: spend at the day cap refuses all routes and running sessions finish", () => {
+test("D2: spend at the day cap refuses all routes", () => {
   const big = record({
     tokens: [
       {

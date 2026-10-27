@@ -176,7 +176,35 @@ test("a start during a watch keeps both registry entries", async () => {
 });
 
 test("two concurrent watches on one completed session append exactly once", async () => {
-  await withHarness(async ({ control, dispatcher, ledgerPath }) => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-conc-same-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const control = createMemoryPort();
+    // The clock advances on every read: two watchers that both finish
+    // the same session concurrently would stamp different finishedAt
+    // values, so only the per-request lock keeps the second a replay.
+    let ticks = 0;
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => {
+        ticks += 1;
+        return new Date(Date.parse("2026-10-27T10:00:00.000Z") + ticks * 1000);
+      },
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
     const started = await dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-a") as never,
@@ -201,5 +229,7 @@ test("two concurrent watches on one completed session append exactly once", asyn
     expect(ledgers).toEqual(["appended", "unchanged"]);
     const contents = await readLedger("Test ledger", ledgerPath);
     expect(contents.pending).toHaveLength(1);
-  });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

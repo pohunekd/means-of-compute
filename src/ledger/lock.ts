@@ -1,124 +1,112 @@
 // Ledger lock: one writer at a time per ledger file. An in-process promise
-// chain serializes callers that share the module; a lock file beside the
-// ledger serializes processes. A stale lock (owner pid gone) is removed
-// once and retried once; a live owner exits 2. There is no waiting loop:
-// the loop runner retries at its next tick.
-import { open, readFile, unlink } from "node:fs/promises";
+// chain keyed by the resolved lock path serializes callers that share the
+// module; a kernel flock on the lock file serializes processes. The kernel
+// drops the lock when the holder dies, so there is no stale state to take
+// over and no waiting loop: the loop runner retries at its next tick.
+import { open } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { resolve } from "node:path";
+import { FFIType, dlopen } from "bun:ffi";
 import { LedgerDataError } from "./errors.js";
 
 const chains = new Map<string, Promise<unknown>>();
+
+const LOCK_EX = 2;
+const LOCK_NB = 4;
+
+type FlockFn = (fd: number, operation: number) => number;
+
+let cachedFlock: FlockFn | null = null;
+
+function loadFlock(lockPath: string): FlockFn {
+  if (cachedFlock !== null) {
+    return cachedFlock;
+  }
+  let library: string;
+  if (process.platform === "linux") {
+    library = "libc.so.6";
+  } else if (process.platform === "darwin") {
+    library = "libSystem.B.dylib";
+  } else {
+    throw new LedgerDataError(`ledger lock ${lockPath}: unsupported platform ${process.platform}`);
+  }
+  const loaded = dlopen(library, {
+    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+  });
+  cachedFlock = loaded.symbols.flock;
+  return cachedFlock;
+}
 
 function lockPathOf(ledgerPath: string): string {
   return `${ledgerPath}.lock`;
 }
 
-const LOCK_CONTENT_PATTERN = /^[1-9][0-9]*\n$/;
-
-async function readLockPid(lockPath: string): Promise<number> {
-  let text: string;
+async function acquire(lockPath: string): Promise<FileHandle> {
+  let handle: FileHandle;
   try {
-    text = await readFile(lockPath, "utf8");
+    handle = await open(lockPath, "a", 0o600);
   } catch (error: unknown) {
     throw new LedgerDataError(
-      `ledger lock ${lockPath}: cannot read lock (${String((error as NodeJS.ErrnoException).code)})`,
+      `ledger lock ${lockPath}: cannot open lock (${String((error as NodeJS.ErrnoException).code)})`,
     );
   }
-  if (!LOCK_CONTENT_PATTERN.test(text)) {
-    throw new LedgerDataError(`ledger lock ${lockPath}: unreadable content`);
+  const held = loadFlock(lockPath)(handle.fd, LOCK_EX | LOCK_NB);
+  if (held === 0) {
+    return handle;
   }
-  return Number.parseInt(text, 10);
-}
-
-function ownerAlive(pid: number): boolean {
   try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-      return false;
-    }
-    return true;
-  }
-}
-
-async function openLocked(lockPath: string): Promise<void> {
-  const handle = await open(lockPath, "wx", 0o600);
-  try {
-    await handle.writeFile(`${String(process.pid)}\n`, "utf8");
-    await handle.sync();
-  } finally {
     await handle.close();
+  } catch {
+    // The lock is held by another process; a close failure adds nothing.
   }
+  if (held === -1) {
+    throw new LedgerDataError(`ledger lock ${lockPath}: held by another process`);
+  }
+  throw new LedgerDataError(`ledger lock ${lockPath}: flock returned ${String(held)}`);
 }
 
-async function acquire(lockPath: string): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await openLocked(lockPath);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw new LedgerDataError(
-          `ledger lock ${lockPath}: cannot take lock (${String((error as NodeJS.ErrnoException).code)})`,
-        );
-      }
-      const pid = await readLockPid(lockPath);
-      if (pid === process.pid) {
-        throw new LedgerDataError(`ledger lock ${lockPath}: held by this process`);
-      }
-      if (ownerAlive(pid)) {
-        throw new LedgerDataError(`ledger lock ${lockPath}: held by pid ${String(pid)}`);
-      }
-      try {
-        await unlink(lockPath);
-      } catch (unlinkError: unknown) {
-        throw new LedgerDataError(
-          `ledger lock ${lockPath}: cannot remove stale lock (${String((unlinkError as NodeJS.ErrnoException).code)})`,
-        );
-      }
-      process.stderr.write(`ledger: removed stale lock of pid ${String(pid)}\n`);
-      continue;
-    }
-    return;
-  }
-  throw new LedgerDataError(`ledger lock ${lockPath}: lock reappeared after stale removal`);
-}
-
-async function release(lockPath: string): Promise<void> {
+async function release(lockPath: string, handle: FileHandle): Promise<void> {
   try {
-    await unlink(lockPath);
+    await handle.close();
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new LedgerDataError(`ledger lock ${lockPath}: removed by another process`);
-    }
-    throw error;
+    throw new LedgerDataError(
+      `ledger lock ${lockPath}: release failed (${String((error as NodeJS.ErrnoException).code)})`,
+    );
   }
 }
 
 export async function withLedgerLock<T>(ledgerPath: string, fn: () => Promise<T>): Promise<T> {
   const lockPath = lockPathOf(ledgerPath);
-  const previous = chains.get(lockPath) ?? Promise.resolve();
+  const key = resolve(lockPath);
+  const previous = chains.get(key) ?? Promise.resolve();
   let releaseChain: () => void = () => {};
   const current = previous
     .catch(() => {})
     .then(
       () =>
-        new Promise<void>((resolve) => {
-          releaseChain = resolve;
+        new Promise<void>((unlock) => {
+          releaseChain = unlock;
         }),
     );
-  chains.set(lockPath, current);
+  chains.set(key, current);
   await previous.catch(() => {});
   try {
-    await acquire(lockPath);
+    const handle = await acquire(lockPath);
+    let outcome: { readonly value: T } | { readonly thrown: unknown };
     try {
-      return await fn();
-    } finally {
-      await release(lockPath);
+      outcome = { value: await fn() };
+    } catch (error: unknown) {
+      outcome = { thrown: error };
     }
+    await release(lockPath, handle);
+    if ("thrown" in outcome) {
+      throw outcome.thrown;
+    }
+    return outcome.value;
   } finally {
     releaseChain();
-    if (chains.get(lockPath) === current) {
-      chains.delete(lockPath);
+    if (chains.get(key) === current) {
+      chains.delete(key);
     }
   }
 }

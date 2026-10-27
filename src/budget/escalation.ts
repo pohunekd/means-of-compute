@@ -10,6 +10,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
+import { readInputText, statInputPath } from "./fs.js";
 import type { BudgetDecision } from "./decision.js";
 
 export type CapKind = "day" | "total" | "nvidia-daily" | "spend-unknown";
@@ -51,10 +52,11 @@ function eventKey(kind: CapKind, now: Date): string {
 }
 
 async function readState(statePath: string): Promise<EscalationState> {
-  if (!(await Bun.file(statePath).exists())) {
+  const label = "Budget escalation state";
+  if ((await statInputPath(label, statePath)) === "absent") {
     return { escalated: [] };
   }
-  const text = await Bun.file(statePath).text();
+  const text = await readInputText(label, statePath);
   if (text.trim() === "") {
     return { escalated: [] };
   }
@@ -62,7 +64,7 @@ async function readState(statePath: string): Promise<EscalationState> {
   try {
     raw = JSON.parse(text) as unknown;
   } catch (error: unknown) {
-    throw new Error(`Budget escalation state ${statePath}: not valid JSON`, { cause: error });
+    throw new Error(`${label} ${statePath}: not valid JSON`, { cause: error });
   }
   const record = raw as Partial<EscalationState>;
   if (
@@ -71,7 +73,7 @@ async function readState(statePath: string): Promise<EscalationState> {
     !Array.isArray(record.escalated) ||
     record.escalated.some((entry: unknown) => typeof entry !== "string")
   ) {
-    throw new Error(`Budget escalation state ${statePath}: invalid state document`);
+    throw new Error(`${label} ${statePath}: invalid state document`);
   }
   return { escalated: record.escalated as string[] };
 }

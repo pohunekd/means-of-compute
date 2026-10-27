@@ -482,6 +482,36 @@ test("D3: spend unknown escalates again on the next UTC day", async () => {
   }
 });
 
+test("D3: a directory as state exits 2 before any log line is written", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
+  try {
+    const statePath = join(dir, "state-dir");
+    await mkdir(statePath);
+    const logPath = join(dir, "escalations.log");
+    const refused = {
+      admit: false,
+      reason: "daily cap reached",
+      spentTodayUsd: 12,
+      spentTotalUsd: 12,
+      nvidiaRequestsToday: 0,
+    } as const;
+    let message = "";
+    try {
+      await maybeEscalate(refused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-26T12:00:00.000Z"),
+      });
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("not a regular file");
+    expect(await Bun.file(logPath).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pricing reads Meta prices from config descriptors", async () => {
   const pricing = await loadPricing();
   const meta = pricing.get("meta-api");

@@ -91,13 +91,31 @@ async function withHarness(
 
 test("concurrent watches on two completed sessions keep both terminals", async () => {
   await withHarness(async ({ control, dispatcher, ledgerPath, registryPath }) => {
-    const first = await dispatcher.start(item("item-a") as never, decision("item-a", "laptop-a") as never, MODEL, "Do the work.");
-    const second = await dispatcher.start(item("item-b") as never, decision("item-b", "laptop-b") as never, MODEL, "Do the work.");
+    const first = await dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    const second = await dispatcher.start(
+      item("item-b") as never,
+      decision("item-b", "laptop-b") as never,
+      MODEL,
+      "Do the work.",
+    );
     if (first.kind !== "started" || second.kind !== "started") {
       throw new Error("expected two started sessions");
     }
-    control.complete(first.handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
-    control.complete(second.handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
+    control.complete(first.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    control.complete(second.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
     const [outcomeA, outcomeB] = await Promise.all([
       dispatcher.watch(first.request.requestId),
       dispatcher.watch(second.request.requestId),
@@ -117,14 +135,28 @@ test("concurrent watches on two completed sessions keep both terminals", async (
 
 test("a start during a watch keeps both registry entries", async () => {
   await withHarness(async ({ control, dispatcher, registryPath }) => {
-    const first = await dispatcher.start(item("item-a") as never, decision("item-a", "laptop-a") as never, MODEL, "Do the work.");
+    const first = await dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
     if (first.kind !== "started") {
       throw new Error("expected a started session");
     }
-    control.complete(first.handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
+    control.complete(first.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
     const [watched, second] = await Promise.all([
       dispatcher.watch(first.request.requestId),
-      dispatcher.start(item("item-b") as never, decision("item-b", "laptop-b") as never, MODEL, "Do the work."),
+      dispatcher.start(
+        item("item-b") as never,
+        decision("item-b", "laptop-b") as never,
+        MODEL,
+        "Do the work.",
+      ),
     ]);
     expect(watched.result.state).toBe("finished");
     if (second.kind !== "started") {
@@ -133,7 +165,11 @@ test("a start during a watch keeps both registry entries", async () => {
     const entries = await readRegistry(registryPath);
     expect(entries.map((entry) => entry.requestId).sort()).toEqual(["item-a:0", "item-b:0"]);
     expect(second.request.requestId).toBe("item-b:0");
-    control.complete(second.handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
+    control.complete(second.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
     const follow = await dispatcher.watch(second.request.requestId);
     expect(follow.result.state).toBe("finished");
   });
@@ -141,11 +177,20 @@ test("a start during a watch keeps both registry entries", async () => {
 
 test("two concurrent watches on one completed session append exactly once", async () => {
   await withHarness(async ({ control, dispatcher, ledgerPath }) => {
-    const started = await dispatcher.start(item("item-a") as never, decision("item-a", "laptop-a") as never, MODEL, "Do the work.");
+    const started = await dispatcher.start(
+      item("item-a") as never,
+      decision("item-a", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
     if (started.kind !== "started") {
       throw new Error("expected a started session");
     }
-    control.complete(started.handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
     const [first, second] = await Promise.all([
       dispatcher.watch(started.request.requestId),
       dispatcher.watch(started.request.requestId),

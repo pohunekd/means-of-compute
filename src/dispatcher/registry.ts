@@ -185,9 +185,7 @@ export function replaceRegistryEntry(path: string, entry: RegistryEntry): Promis
     }
     await persistDocument(
       path,
-      current.map((candidate) =>
-        candidate.requestId === entry.requestId ? entry : candidate,
-      ),
+      current.map((candidate) => (candidate.requestId === entry.requestId ? entry : candidate)),
     );
   });
   writeChain = task.then(

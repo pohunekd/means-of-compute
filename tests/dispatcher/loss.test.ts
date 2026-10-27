@@ -403,9 +403,7 @@ test("replay after a crash between append and write returns unchanged", async ()
     expect(outcome.result.state).toBe("finished");
     // Crash between appendPending and the second registry write: the
     // pending line stays while the entry claims ledgerAppended false.
-    const { readRegistry, replaceRegistryEntry } = await import(
-      "../../src/dispatcher/registry.js"
-    );
+    const { readRegistry, replaceRegistryEntry } = await import("../../src/dispatcher/registry.js");
     const entries = await readRegistry(registryPath);
     const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
     if (entry === undefined || entry.terminal === null) {

@@ -375,9 +375,7 @@ test("an empty registry file throws RegistryDataError", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-empty-registry-"));
   try {
     const registryPath = join(dir, "registry.json");
-    const { readRegistry, RegistryDataError } = await import(
-      "../../src/dispatcher/registry.js"
-    );
+    const { readRegistry, RegistryDataError } = await import("../../src/dispatcher/registry.js");
     const { writeFile } = await import("node:fs/promises");
     await writeFile(registryPath, "", "utf8");
     let error: unknown;

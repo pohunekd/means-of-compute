@@ -63,7 +63,7 @@ test("dry-run rejects the bad ledgers the service would reject", async () => {
     const cases: Readonly<Record<string, string>> = {
       "bad-attempts": '{"workItemId":"demo-item","attempts":"x"}\n',
       "bad-record": '{"foo":1}\n',
-      "unterminated": '{"pending":{"entryId":"demo-item:mem-1","kind":"session"',
+      unterminated: '{"pending":{"entryId":"demo-item:mem-1","kind":"session"',
     };
     for (const [name, line] of Object.entries(cases)) {
       const ledger = join(dir, `${name}.jsonl`);

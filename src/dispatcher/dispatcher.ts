@@ -323,7 +323,10 @@ export function createDispatcher(deps: DispatcherDeps): {
     const turn = new Promise<void>((resolve) => {
       release = resolve;
     });
-    requestLocks.set(requestId, previous.then(() => turn));
+    requestLocks.set(
+      requestId,
+      previous.then(() => turn),
+    );
     await previous;
     try {
       return await op();
@@ -365,7 +368,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     if (terminal.seconds < 0) {
       throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
     }
-    if (terminal.usageValid === false && terminal.usage !== null) {
+    if (!terminal.usageValid && terminal.usage !== null) {
       throw new DispatchClockError(
         `dispatcher clock: invalid usage must be stored as null for ${entry.requestId}`,
       );

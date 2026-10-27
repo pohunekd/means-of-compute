@@ -219,33 +219,33 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     let openVerdict: "request-conflict" | "grant-closed" | "meter-unavailable" | null;
     try {
       openVerdict = await appender.appendGuarded(
-      {
-        kind: "grant-open",
-        at: now().toISOString(),
-        requestId: spec.requestId,
-        workItemId: spec.workItemId,
-        hostAlias: spec.hostAlias,
-        providerId: spec.providerId,
-        model: spec.model,
-      },
-      (guarded) => {
-        const live = guarded.grants.get(spec.requestId);
-        if (live !== undefined) {
-          if (live.closed) {
-            return "grant-closed";
+        {
+          kind: "grant-open",
+          at: now().toISOString(),
+          requestId: spec.requestId,
+          workItemId: spec.workItemId,
+          hostAlias: spec.hostAlias,
+          providerId: spec.providerId,
+          model: spec.model,
+        },
+        (guarded) => {
+          const live = guarded.grants.get(spec.requestId);
+          if (live !== undefined) {
+            if (live.closed) {
+              return "grant-closed";
+            }
+            const first = live.open;
+            if (
+              first.workItemId !== spec.workItemId ||
+              first.hostAlias !== spec.hostAlias ||
+              first.providerId !== spec.providerId ||
+              first.model !== spec.model
+            ) {
+              return "request-conflict";
+            }
           }
-          const first = live.open;
-          if (
-            first.workItemId !== spec.workItemId ||
-            first.hostAlias !== spec.hostAlias ||
-            first.providerId !== spec.providerId ||
-            first.model !== spec.model
-          ) {
-            return "request-conflict";
-          }
-        }
-        return null;
-      },
+          return null;
+        },
       );
     } catch (error: unknown) {
       throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });
@@ -281,36 +281,32 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     // pre-check would race with a concurrent binder. S6: a checkRecord
     // rejection throws MeterUnavailableError with cause.
     let bindVerdict:
-      | "unknown-request"
-      | "already-bound"
-      | "session-conflict"
-      | "meter-unavailable"
-      | null;
+      "unknown-request" | "already-bound" | "session-conflict" | "meter-unavailable" | null;
     try {
       bindVerdict = await appender.appendGuarded(
-      {
-        kind: "grant-bind",
-        at: now().toISOString(),
-        requestId,
-        sessionId,
-      },
-      (guarded) => {
-        const live = guarded.grants.get(requestId);
-        if (live === undefined) {
-          return "unknown-request";
-        }
-        if (live.sessionId === sessionId) {
-          return "already-bound";
-        }
-        if (live.sessionId !== null) {
-          return "session-conflict";
-        }
-        const other = guarded.requestBySession.get(sessionId);
-        if (other !== undefined && other !== requestId) {
-          return "session-conflict";
-        }
-        return null;
-      },
+        {
+          kind: "grant-bind",
+          at: now().toISOString(),
+          requestId,
+          sessionId,
+        },
+        (guarded) => {
+          const live = guarded.grants.get(requestId);
+          if (live === undefined) {
+            return "unknown-request";
+          }
+          if (live.sessionId === sessionId) {
+            return "already-bound";
+          }
+          if (live.sessionId !== null) {
+            return "session-conflict";
+          }
+          const other = guarded.requestBySession.get(sessionId);
+          if (other !== undefined && other !== requestId) {
+            return "session-conflict";
+          }
+          return null;
+        },
       );
     } catch (error: unknown) {
       throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });

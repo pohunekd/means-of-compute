@@ -243,23 +243,20 @@ test("key handling: upstream sees the provider key, never the caller token", asy
 });
 
 test("include_usage is forced on streamed calls", async () => {
-  await withMeter(
-    "tests/meter/recordings/stream-ok.json",
-    async ({ meter, loopback, events }) => {
-      const { token, requestId } = await openBoundGrant(meter);
-      const resp = await post(meter, token, chatBody({ stream_options: { include_usage: false } }));
-      expect(resp.status).toBe(200);
-      await resp.text();
-      const sent = JSON.parse(loopback.requests()[0]?.body ?? "{}") as Record<string, unknown>;
-      expect((sent["stream_options"] as Record<string, unknown>)["include_usage"]).toBe(true);
-      // L6: call-finished carries the host alias for the billing join.
-      const finished = events.find((event) => event.event === "call-finished");
-      expect(finished?.hostAlias).toBe("laptop-a");
-      expect(finished?.requestId).toBe(requestId);
-      // L6: even a billed 200 logs no request-rejected.
-      expect(events.some((event) => event.event === "request-rejected")).toBe(false);
-    },
-  );
+  await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, loopback, events }) => {
+    const { token, requestId } = await openBoundGrant(meter);
+    const resp = await post(meter, token, chatBody({ stream_options: { include_usage: false } }));
+    expect(resp.status).toBe(200);
+    await resp.text();
+    const sent = JSON.parse(loopback.requests()[0]?.body ?? "{}") as Record<string, unknown>;
+    expect((sent["stream_options"] as Record<string, unknown>)["include_usage"]).toBe(true);
+    // L6: call-finished carries the host alias for the billing join.
+    const finished = events.find((event) => event.event === "call-finished");
+    expect(finished?.hostAlias).toBe("laptop-a");
+    expect(finished?.requestId).toBe(requestId);
+    // L6: even a billed 200 logs no request-rejected.
+    expect(events.some((event) => event.event === "request-rejected")).toBe(false);
+  });
 });
 
 test("no failover and no budget import: 429 passes through unbilled", async () => {
@@ -333,31 +330,28 @@ test("stream 200 without usage is billed with null counts", async () => {
 });
 
 test("2xx other than 200 is metered like 200", async () => {
-  await withMeter(
-    "tests/meter/recordings/json-201.json",
-    async ({ meter, tokenFor, logPath }) => {
-      const first = await openBoundGrant(meter, { requestId: "w1-demo:0" });
-      const one = await post(meter, tokenFor(first.requestId), chatBody({ stream: false }));
-      expect(one.status).toBe(201);
-      await one.text();
-      const second = await openBoundGrant(meter, { requestId: "w2-demo:0" });
-      const two = await post(meter, tokenFor(second.requestId), chatBody({ stream: false }));
-      expect(two.status).toBe(201);
-      await two.text();
-      const lines = await readLogLines(logPath);
-      const ends = lines
-        .filter((l) => l.includes('"kind":"call-end"'))
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
-      expect(ends.length).toBe(2);
-      expect(ends[0]?.["outcome"]).toBe("ok");
-      expect(ends[0]?.["billed"]).toBe(true);
-      expect(ends[0]?.["inputTokens"]).toBe(9);
-      expect(ends[0]?.["outputTokens"]).toBe(4);
-      expect(ends[1]?.["outcome"]).toBe("no-usage");
-      expect(ends[1]?.["inputTokens"]).toBeNull();
-      expect(ends[1]?.["outputTokens"]).toBeNull();
-    },
-  );
+  await withMeter("tests/meter/recordings/json-201.json", async ({ meter, tokenFor, logPath }) => {
+    const first = await openBoundGrant(meter, { requestId: "w1-demo:0" });
+    const one = await post(meter, tokenFor(first.requestId), chatBody({ stream: false }));
+    expect(one.status).toBe(201);
+    await one.text();
+    const second = await openBoundGrant(meter, { requestId: "w2-demo:0" });
+    const two = await post(meter, tokenFor(second.requestId), chatBody({ stream: false }));
+    expect(two.status).toBe(201);
+    await two.text();
+    const lines = await readLogLines(logPath);
+    const ends = lines
+      .filter((l) => l.includes('"kind":"call-end"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(ends.length).toBe(2);
+    expect(ends[0]?.["outcome"]).toBe("ok");
+    expect(ends[0]?.["billed"]).toBe(true);
+    expect(ends[0]?.["inputTokens"]).toBe(9);
+    expect(ends[0]?.["outputTokens"]).toBe(4);
+    expect(ends[1]?.["outcome"]).toBe("no-usage");
+    expect(ends[1]?.["inputTokens"]).toBeNull();
+    expect(ends[1]?.["outputTokens"]).toBeNull();
+  });
 });
 
 test("only config timeouts apply, never the descriptor timeout", async () => {
@@ -581,7 +575,11 @@ test("a failed call-start write forwards nothing and latches", async () => {
       );
       expect(rejected.length).toBe(2);
     },
-    { logIo: createFaultyIo(systemUsageLogIo, { failWhen: (line) => line.includes('"kind":"call-start"') }) },
+    {
+      logIo: createFaultyIo(systemUsageLogIo, {
+        failWhen: (line) => line.includes('"kind":"call-start"'),
+      }),
+    },
   );
 });
 
@@ -705,21 +703,18 @@ test("close race: concurrent calls are either counted or refused", () => {
 });
 
 test("provider key missing gives 503", async () => {
-  await withMeter(
-    "tests/meter/recordings/json-ok.json",
-    async ({ meter, tokenFor, events }) => {
-      const { requestId } = await openBoundGrant(meter);
-      delete process.env.META_API_KEY;
-      const resp = await post(meter, tokenFor(requestId), chatBody({ stream: false }));
-      expect(resp.status).toBe(503);
-      expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
-        "provider-key-missing",
-      );
-      const rejected = events.filter((event) => event.event === "request-rejected");
-      expect(rejected.length).toBe(1);
-      expect(rejected[0]?.code).toBe("provider-key-missing");
-      expect(rejected[0]?.status).toBe(503);
-      expect(rejected[0]?.requestId).toBe(requestId);
-    },
-  );
+  await withMeter("tests/meter/recordings/json-ok.json", async ({ meter, tokenFor, events }) => {
+    const { requestId } = await openBoundGrant(meter);
+    delete process.env.META_API_KEY;
+    const resp = await post(meter, tokenFor(requestId), chatBody({ stream: false }));
+    expect(resp.status).toBe(503);
+    expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
+      "provider-key-missing",
+    );
+    const rejected = events.filter((event) => event.event === "request-rejected");
+    expect(rejected.length).toBe(1);
+    expect(rejected[0]?.code).toBe("provider-key-missing");
+    expect(rejected[0]?.status).toBe(503);
+    expect(rejected[0]?.requestId).toBe(requestId);
+  });
 });

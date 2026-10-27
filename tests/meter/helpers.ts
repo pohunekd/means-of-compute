@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
-import { startMeter, type Meter, type MeterLiveView, type MeterLogEvent } from "../../src/meter/meter.js";
+import {
+  startMeter,
+  type Meter,
+  type MeterLiveView,
+  type MeterLogEvent,
+} from "../../src/meter/meter.js";
 import type { UsageLogIo } from "../../src/meter/usage-log.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { resetProvidersCache } from "../../src/providers/config.js";

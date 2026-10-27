@@ -22,9 +22,7 @@ export interface LoopbackControl {
   readonly waitHeld: (count: number) => Promise<void>;
 }
 
-export async function startLoopback(
-  recordingsPath: string,
-): Promise<LoopbackControl> {
+export async function startLoopback(recordingsPath: string): Promise<LoopbackControl> {
   const file = Bun.file(recordingsPath);
   const text = await file.text();
   const responses = JSON.parse(text) as LoopbackResponse[];

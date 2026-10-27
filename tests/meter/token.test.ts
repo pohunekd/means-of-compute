@@ -57,8 +57,7 @@ test("a sibling part 1 spelling of the same bytes is rejected", () => {
   const token = tokenFor(KEY_A, requestId);
   const [, encoded, mac] = token.split(".");
   const encodedPart = encoded as string;
-  const sibling =
-    encodedPart.slice(0, -1) + nextAlphabetChar(encodedPart.slice(-1));
+  const sibling = encodedPart.slice(0, -1) + nextAlphabetChar(encodedPart.slice(-1));
   expect(Buffer.from(sibling, "base64url").toString()).toBe(requestId);
   expect(sibling).not.toBe(encodedPart);
   expect(verifyBearer(KEY_A, `Bearer moc1.${sibling}.${String(mac)}`)).toBeNull();

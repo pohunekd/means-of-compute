@@ -91,13 +91,13 @@ Every error the proxy itself answers has the body
 
 The predicate runs in this order; the first failing row decides:
 
-| # | Check | Answer |
-| --- | --- | --- |
-| A1 | the `Authorization` header is exactly `Bearer <token>`, with a valid `moc1.<grant>.<mac>` shape and MAC | 401 `unauthorized` |
-| A2 | a grant exists for the token's request id | 403 `no-grant` |
-| A3 | the grant is not closed | 403 `grant-closed` |
-| A4 | a still-unbound grant is within `unboundGrantTtlMs` of its last opening | 403 `grant-unbound` |
-| A5 | the caller address is in the host map under the grant's host alias | 403 `wrong-host` |
+| #   | Check                                                                                                   | Answer              |
+| --- | ------------------------------------------------------------------------------------------------------- | ------------------- |
+| A1  | the `Authorization` header is exactly `Bearer <token>`, with a valid `moc1.<grant>.<mac>` shape and MAC | 401 `unauthorized`  |
+| A2  | a grant exists for the token's request id                                                               | 403 `no-grant`      |
+| A3  | the grant is not closed                                                                                 | 403 `grant-closed`  |
+| A4  | a still-unbound grant is within `unboundGrantTtlMs` of its last opening                                 | 403 `grant-unbound` |
+| A5  | the caller address is in the host map under the grant's host alias                                      | 403 `wrong-host`    |
 
 An unauthenticated caller learns nothing about grants: rows 2 and later run
 only after row 1 holds. A token is useless after the session ends, and

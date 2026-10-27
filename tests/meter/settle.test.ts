@@ -87,9 +87,12 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
         outputTokens: 3,
       });
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}",
-      ) as { outcome: string; billed: boolean; inputTokens: number; outputTokens: number };
+      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
+        outcome: string;
+        billed: boolean;
+        inputTokens: number;
+        outputTokens: number;
+      };
       expect(end.outcome).toBe("closed-abort");
       expect(end.billed).toBe(true);
       expect(end.inputTokens).toBe(7);
@@ -101,9 +104,7 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
         throw new Error("settle returned null");
       }
       expect(joinUsage(replayed, requestId)).toEqual(usage);
-      const finished = await waitForEvent(
-        (e) => e.event === "call-finished" && "requestId" in e,
-      );
+      const finished = await waitForEvent((e) => e.event === "call-finished" && "requestId" in e);
       expect(finished).toMatchObject({ requestId });
     },
     { config: { drainTimeoutMs: 30000 } },
@@ -131,9 +132,10 @@ test("drain with drainTimeoutMs 0 still awaits the end", async () => {
         outputTokens: 3,
       });
       const lines = await readLogLines(logPath);
-      const end = JSON.parse(
-        lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}",
-      ) as { outcome: string; billed: boolean };
+      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
+        outcome: string;
+        billed: boolean;
+      };
       expect(end.outcome).toBe("closed-abort");
       expect(end.billed).toBe(true);
       const replayed = await replayUsageLog(logPath, "read-only", () => {});
@@ -285,9 +287,7 @@ test("concurrent conflicting binds keep one", async () => {
     ]);
     // Exactly one writer wins; the loser meets session-conflict.
     expect(both.filter((r) => r.status === "fulfilled").length).toBe(1);
-    const rejected = both.filter(
-      (r): r is PromiseRejectedResult => r.status === "rejected",
-    );
+    const rejected = both.filter((r): r is PromiseRejectedResult => r.status === "rejected");
     expect(rejected.length).toBe(1);
     const reason = (rejected[0] as PromiseRejectedResult).reason as MeterGrantError;
     expect(reason).toBeInstanceOf(MeterGrantError);

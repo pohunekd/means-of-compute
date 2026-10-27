@@ -1,10 +1,13 @@
 [
   {
     "status": 201,
-    "body": {"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": 9, "completion_tokens": 4}}
+    "body": {
+      "choices": [{ "message": { "content": "ok" } }],
+      "usage": { "prompt_tokens": 9, "completion_tokens": 4 }
+    }
   },
   {
     "status": 201,
-    "body": {"choices": [{"message": {"content": "ok"}}]}
+    "body": { "choices": [{ "message": { "content": "ok" } }] }
   }
 ]

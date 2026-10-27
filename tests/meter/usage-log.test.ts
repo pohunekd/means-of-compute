@@ -306,9 +306,7 @@ test(
       .join("\n");
     expect(reread).toBe(`${expected}\n`);
     expect(reread.endsWith("\n")).toBe(true);
-    expect(Buffer.byteLength(reread, "utf8")).toBe(
-      Buffer.byteLength(`${expected}\n`, "utf8"),
-    );
+    expect(Buffer.byteLength(reread, "utf8")).toBe(Buffer.byteLength(`${expected}\n`, "utf8"));
     const tail = '{"kind":"call-st';
     const torn = events.find((e) => e.event === "usage-log-torn-tail");
     expect(torn?.count).toBe(Buffer.byteLength(tail, "utf8"));

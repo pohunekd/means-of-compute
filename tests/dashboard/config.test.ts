@@ -112,6 +112,18 @@ describe("dashboard config keys", () => {
     expect(message).toContain("workRowLimit");
   });
 
+  test("deleted baselines.frontierTokens key throws naming the key (mutation: default a missing baseline)", async () => {
+    const raw = validConfig();
+    delete (raw["baselines"] as Record<string, unknown>)["frontierTokens"];
+    let message = "";
+    try {
+      await loadTemp(raw);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("frontierTokens");
+  });
+
   test("extra key throws (mutation: allow extra keys)", async () => {
     const raw = { ...validConfig(), extra: 1 };
     let message = "";

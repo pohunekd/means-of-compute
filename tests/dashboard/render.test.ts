@@ -8,6 +8,7 @@ import { loadBudgetConfig } from "../../src/budget/config.js";
 import { loadProviderRoute } from "../../src/providers/route.js";
 import { providerDescriptorExists } from "../../src/providers/config.js";
 import { gatherInputs } from "../../src/dashboard/inputs.js";
+import type { UnavailableCause } from "../../src/hoststate/collector.js";
 
 async function renderFixture(): Promise<string> {
   const budget = await loadBudgetConfig();
@@ -158,6 +159,65 @@ describe("dashboard escaping (mutation: string interpolation without escapeHtml)
     }
     expect(message).not.toContain("Bad Alias");
     expect(message.length).toBeGreaterThan(0);
+  });
+});
+
+describe("dashboard unavailable causes (mutation: raw cause in a cell)", () => {
+  test("every cause renders its CAUSE_LABELS text, never host- or the raw cause", async () => {
+    const { HOST_STATE_FAILURES } = await import("../../src/hoststate/port.js");
+    const extra: readonly (readonly [UnavailableCause, string])[] = [
+      ["package-mismatch", "other plugin package"],
+      ["version-not-accepted", "plugin version not accepted"],
+      ["not-json", "output not JSON"],
+      ["contract-invalid", "output fails the HostCapacity contract"],
+      ["alias-mismatch", "reported alias differs"],
+      ["stale", "report too old"],
+      ["future-timestamp", "report from the future"],
+    ];
+    const causes: readonly UnavailableCause[] = [
+      ...HOST_STATE_FAILURES,
+      ...extra.map(([cause]) => cause),
+    ];
+    expect(new Set(causes).size).toBe(18);
+    const budget = await loadBudgetConfig();
+    const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
+    const inputs = await gatherInputs(
+      {
+        ledgerPath: "tests/fixtures/dashboard/ledger.jsonl",
+        verdictDir: "tests/fixtures/dashboard/verdicts",
+        hostState: {
+          collect: () =>
+            Promise.resolve(
+              causes.map((cause, index) => ({
+                kind: "unavailable" as const,
+                hostAlias: `a${String(index).padStart(2, "0")}`,
+                observedAt: "2026-10-27T12:00:00.000Z",
+                cause,
+                detail: cause,
+              })),
+            ),
+        },
+        registryPath: "",
+      },
+      {
+        budget,
+        route,
+        baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        workRowLimit: 50,
+        logPath: "logs/dashboard.jsonl",
+      },
+      new Date("2026-10-27T12:00:00.000Z"),
+      () => {},
+    );
+    const page = renderDashboard(buildDashboard(inputs));
+    for (const [, label] of extra) {
+      expect(page).toContain(`unavailable: ${label}`);
+    }
+    expect(page).toContain("unavailable: unreachable");
+    expect(page.toLowerCase()).not.toContain("host-");
+    for (const cause of causes) {
+      expect(page).not.toContain(cause);
+    }
   });
 });
 

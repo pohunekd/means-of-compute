@@ -166,7 +166,9 @@ test("a low-battery host with the most capacity is never chosen (mutation: drop 
   expect(decision.chosenHostAlias).toBe("desktop");
   const candidate = decision.candidates.find((entry) => entry.hostAlias === "laptop-b");
   expect(candidate?.excluded).toBe(true);
-  expect(candidate?.reason).toBe("excluded: not idle (battery at 34 percent, below the 50 percent floor)");
+  expect(candidate?.reason).toBe(
+    "excluded: not idle (battery at 34 percent, below the 50 percent floor)",
+  );
 });
 
 test("an idle host with recent input and the most capacity is never chosen (mutation: drop exclusion 4)", () => {

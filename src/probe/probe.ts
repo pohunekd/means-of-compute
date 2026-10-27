@@ -102,7 +102,7 @@ export async function runProbe(options: {
   let localModelsReachable = facts.localModelsReachable ?? false;
   let localModelsList = facts.localModels ?? [];
 
-  const userActivityUnknown = typeof facts.userActivityError === "string";
+  let userActivityUnknown = typeof facts.userActivityError === "string";
   let userActivityCause = facts.userActivityError ?? "";
   const loggedOutInit = facts.noLocalUserSession === true;
   let loggedOut = loggedOutInit;
@@ -167,6 +167,7 @@ export async function runProbe(options: {
         secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
       }
     } catch (e) {
+      userActivityUnknown = true;
       userActivityCause = e instanceof Error ? e.message : String(e);
       secondsSinceInput = 0;
     }

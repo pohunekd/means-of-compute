@@ -37,14 +37,26 @@ async function loadRoute(routePath = "config/providers/route.json"): Promise<str
   if (
     typeof raw !== "object" ||
     raw === null ||
-    !Array.isArray((raw as Record<string, unknown>).providers) ||
-    ((raw as Record<string, unknown>).providers as unknown[]).some(
-      (entry: unknown) => typeof entry !== "string",
-    )
+    !Array.isArray((raw as Record<string, unknown>).providers)
   ) {
     throw new Error(`Budget route ${routePath}: needs a string array "providers"`);
   }
-  return (raw as { providers: string[] }).providers;
+  const entries = (raw as { providers: unknown[] }).providers;
+  if (entries.some((entry: unknown) => typeof entry !== "string")) {
+    throw new Error(`Budget route ${routePath}: needs a string array "providers"`);
+  }
+  const providers = entries as string[];
+  if (providers.length === 0) {
+    throw new Error(`Budget route ${routePath}: providers must not be empty`);
+  }
+  const seen = new Set<string>();
+  for (const id of providers) {
+    if (seen.has(id)) {
+      throw new Error(`Budget route ${routePath}: duplicate provider id "${id}"`);
+    }
+    seen.add(id);
+  }
+  return providers;
 }
 
 const NUMBER_PATTERN = /^[0-9]+(\.[0-9]+)?$/;
@@ -123,6 +135,11 @@ async function run(): Promise<number> {
   try {
     const config = await loadBudgetConfig();
     const route = await loadRoute();
+    if (!route.includes(config.nvidiaProviderId)) {
+      throw new Error(
+        `Budget route: nvidiaProviderId "${config.nvidiaProviderId}" is not in the route`,
+      );
+    }
     ledgerStatePath = config.statePath;
     ledgerEscalationLogPath = config.escalationLogPath;
     if (parsed.spendTotal !== null || parsed.dayCap !== null || parsed.totalCap !== null) {

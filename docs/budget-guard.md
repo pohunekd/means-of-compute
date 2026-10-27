@@ -29,8 +29,9 @@ coordinator's daily digest channel.
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
   `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
   missing or unreadable file exits 2. The route comes from
-  `config/providers/route.json`, which must exist and hold a string array
-  `providers`.
+  `config/providers/route.json`, which must exist and hold a non-empty array
+  of unique string ids in `providers`. `nvidiaProviderId` must be in the
+  route and every route id must have a descriptor, or the run exits 2.
 
 ## Rules
 

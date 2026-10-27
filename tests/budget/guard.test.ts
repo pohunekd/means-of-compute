@@ -774,6 +774,22 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
   }
 });
 
+test("CLI: typo in nvidiaProviderId exits 2", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const configPath = join(sandbox.dir, "config", "budget.json");
+    const config = JSON.parse(await Bun.file(configPath).text()) as Record<string, unknown>;
+    config.nvidiaProviderId = "nvidia_build";
+    await Bun.write(configPath, JSON.stringify(config));
+    const result = await sandbox.run([]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("nvidia_build");
+    expect(result.stderr).toContain("is not in the route");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI: missing config file and missing providers dir exit 2", async () => {
   const sandbox = await makeCliSandbox();
   try {

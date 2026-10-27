@@ -146,6 +146,10 @@ describe("collector guard", () => {
     control.set("laptop-a", { kind: "hang" });
     const guardDeps: CollectorDeps = {
       ...deps,
+      config: {
+        ...CONFIG,
+        collector: { ...CONFIG.collector, pluginTimeoutMs: 20000, transportMarginMs: 3000 },
+      },
       sleep: () => Promise.resolve(),
     };
     await createCollector(guardDeps).collect();
@@ -154,8 +158,8 @@ describe("collector guard", () => {
       hostAlias: "laptop-a",
       packageId: PACKAGE_ID,
       limits: {
-        pluginTimeoutMs: 10000,
-        requestTimeoutMs: 12000,
+        pluginTimeoutMs: 20000,
+        requestTimeoutMs: 23000,
         maxOutputBytes: 16384,
       },
     });

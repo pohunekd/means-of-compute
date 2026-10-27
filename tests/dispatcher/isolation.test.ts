@@ -100,7 +100,10 @@ test("no tracked file outside the adapter names the SDK specifier", async () => 
   const extensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
   const allowListed = new Set(["eslint.config.js", "tests/dispatcher/isolation.test.ts"]);
   const specifier = /@pohunek\/(sdk|protocol)\b/;
-  const paths = Buffer.from(listed.stdout).toString("utf8").split("\0").filter((p) => p.length > 0);
+  const paths = Buffer.from(listed.stdout)
+    .toString("utf8")
+    .split("\0")
+    .filter((p) => p.length > 0);
   const hits: string[] = [];
   for (const path of paths) {
     if (path.startsWith("src/dispatcher/adapter/")) {

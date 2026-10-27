@@ -15,7 +15,7 @@ coordinator's daily digest channel.
   the caps from session end instead of only at task completion. A missing
   file with an existing parent directory means zero spend; a missing or
   dangling parent, or a parent that is not a directory, exits 2 naming the
-  path and the error code. A present line that fails validation is an error
+  path. A present line that fails validation is an error
   naming the line number and is never skipped.
 - NVIDIA requests: a token on the NVIDIA provider with `requests: null` on
   the evaluation day is unknown spend, not zero: its `workItemId` is

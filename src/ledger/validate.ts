@@ -15,6 +15,23 @@ export function pendingErrors(value: unknown): unknown {
   return validatePendingUsage.errors;
 }
 
+export function pendingReason(value: unknown): string {
+  validatePendingUsage(value);
+  const schemaErrors = validatePendingUsage.errors;
+  if (schemaErrors !== null && schemaErrors !== undefined) {
+    return JSON.stringify(schemaErrors);
+  }
+  const predicate = sourcePredicateError(value as PendingUsage);
+  if (predicate !== null) {
+    return predicate;
+  }
+  const entry = value as { finishedAt?: unknown };
+  if (typeof entry.finishedAt !== "string" || new Date(entry.finishedAt).toISOString() !== entry.finishedAt) {
+    return `finishedAt is not canonical: ${JSON.stringify(entry.finishedAt)}`;
+  }
+  return "invalid pending entry";
+}
+
 function sourcePredicateError(value: PendingUsage): string | null {
   if (value.kind === "session") {
     if (value.tokens.some((entry) => entry.source === AUDITOR_USAGE_SOURCE)) {

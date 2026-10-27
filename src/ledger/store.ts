@@ -1,12 +1,12 @@
-// Ledger error classes. LedgerRefusal is a domain refusal (CLI exit 3);
-// LedgerDataError is an input, config or data error (CLI exit 2).
+// Ledger store: every write takes the lock, reads the file, applies a pure
+// fold, and persists the whole file with one atomic write.
 import { isUsageRecord } from "../../contracts/v1/validate.js";
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { withLedgerLock } from "./lock.js";
 import { readLedger } from "./read.js";
 import { LedgerDataError, LedgerRefusal } from "./errors.js";
-import { isPendingUsage, pendingErrors } from "./validate.js";
+import { isPendingUsage, pendingReason } from "./validate.js";
 import type {
   FinalizeInput,
   LedgerContents,
@@ -214,7 +214,7 @@ export async function appendPending(
 ): Promise<WriteOutcome> {
   if (!isPendingUsage(entry)) {
     throw new LedgerDataError(
-      `ledger ${ledgerPath}: invalid pending entry ${JSON.stringify(pendingErrors(entry))}`,
+      `ledger ${ledgerPath}: invalid pending entry ${pendingReason(entry)}`,
     );
   }
   return withLedgerLock(ledgerPath, async () => {

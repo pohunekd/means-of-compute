@@ -155,6 +155,64 @@ test("reader invalid pending line exits 2 with the line number", async () => {
   }
 });
 
+test("reader errors name the caller label", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-read-"));
+  try {
+    const path = join(dir, "ledger.jsonl");
+    await Bun.write(path, JSON.stringify(record()));
+    let message = "";
+    try {
+      await readLedger("Ledger query", path);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("Ledger query");
+    expect(message).not.toContain("Budget ledger");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader code-predicate failure names its reason, never null", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-read-"));
+  try {
+    const path = join(dir, "ledger.jsonl");
+    const auditorInSession = pending({
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          inputTokens: 1,
+          outputTokens: 1,
+          requests: 1,
+          source: "auditor-usage",
+        },
+      ],
+    });
+    await Bun.write(path, `${JSON.stringify({ pending: auditorInSession })}\n`);
+    let sessionMessage = "";
+    try {
+      await readLedger("Budget ledger", path);
+    } catch (error: unknown) {
+      sessionMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(sessionMessage).toContain("must not carry auditor-usage tokens");
+    expect(sessionMessage).not.toContain("null");
+    const nonCanonical = pending({ finishedAt: "2026-02-30T10:40:00.000Z" });
+    await Bun.write(path, `${JSON.stringify({ pending: nonCanonical })}\n`);
+    let dateMessage = "";
+    try {
+      await readLedger("Budget ledger", path);
+    } catch (error: unknown) {
+      dateMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(dateMessage).toContain("finishedAt is not canonical");
+    expect(dateMessage).not.toContain("null");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("loadLedgerConfig reads the ledger path and rejects extras", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-config-"));
   try {

@@ -102,6 +102,12 @@ export class DispatchClockError extends Error {
   }
 }
 
+// Item-keyed FIFO lock shared by every dispatcher instance in this process:
+// one promise chain per registry path and work item (rule 1.1.2). Two
+// dispatcher instances on the same registry share the lock through this
+// module-level map.
+const itemLocks = new Map<string, Promise<void>>();
+
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const REQUEST_ID_PATTERN = /^([a-z0-9][a-z0-9-]{0,62}):(0|[1-9][0-9]*)$/;
 
@@ -426,11 +432,10 @@ export function createDispatcher(deps: DispatcherDeps): {
   diff(requestId: string): Promise<DiffResult>;
   cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome>;
 } {
-  // Item-keyed FIFO lock: one promise chain per registry path and work item.
-  // Two dispatcher instances on the same registry share the lock through
-  // the module-level map. Port wait/cancel/diff and sleep always run
-  // outside a hold; port start is the only port call made under the lock.
-  const itemLocks = new Map<string, Promise<void>>();
+  // Port wait/cancel/diff and sleep always run outside a hold; port start
+  // is the only port call made under the lock. The hold uses the
+  // module-level itemLocks map above, so two dispatcher instances on the
+  // same registry serialize on the same chain.
 
   async function withItemLock<T>(key: string, op: () => Promise<T>): Promise<T> {
     const previous = itemLocks.get(key) ?? Promise.resolve();

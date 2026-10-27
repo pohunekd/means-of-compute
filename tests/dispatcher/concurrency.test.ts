@@ -588,6 +588,62 @@ test("I9: two identical starts make one session", async () => {
   }
 });
 
+test("I9b: two dispatcher instances on one registry make one session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-i9b-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const gate = createSwitchGate();
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const clock = () => new Date("2026-10-27T10:00:00.000Z");
+    const makeDispatcher = () =>
+      createDispatcher({
+        port: control.port,
+        budget: gate.gate,
+        ledgerPath,
+        config,
+        now: clock,
+        sleep: () => Promise.resolve(),
+        log: () => undefined,
+      });
+    const a = makeDispatcher();
+    const b = makeDispatcher();
+    const [outcomeA, outcomeB] = await Promise.all([
+      a.start(
+        item("item-a") as never,
+        decision("item-a", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      ),
+      b.start(
+        item("item-a") as never,
+        decision("item-a", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      ),
+    ]);
+    if (outcomeA.kind !== "started" || outcomeB.kind !== "started") {
+      throw new Error("expected two started outcomes");
+    }
+    expect(outcomeA.handle.sessionId).toBe(outcomeB.handle.sessionId);
+    expect(gate.calls()).toBe(1);
+    expect(control.sessions()).toHaveLength(1);
+    const entries = await readRegistry(registryPath);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.requestId).toBe("item-a:0");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("I10: a second placement conflicts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-i10-"));
   try {

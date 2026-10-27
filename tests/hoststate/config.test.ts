@@ -34,6 +34,15 @@ async function mutatePackage(mutate: (pkg: Record<string, unknown>) => void): Pr
   return writeDoc({ package: pkg });
 }
 
+async function packageWithout(key: "id" | "version" | "sourceDigest" | "targets"): Promise<string> {
+  const full = JSON.parse(JSON.stringify(validPackage)) as Record<string, unknown>;
+  const rest: Record<string, unknown> = {};
+  for (const k of Object.keys(full)) {
+    if (k !== key) rest[k] = full[k];
+  }
+  return writeDoc({ package: rest });
+}
+
 describe("host-state package config", () => {
   test("valid package loads", async () => {
     const config = loadHostStateConfig(await writeDoc({ package: validPackage }));
@@ -68,9 +77,7 @@ describe("host-state package config", () => {
 
   for (const key of ["id", "version", "sourceDigest", "targets"] as const) {
     test(`missing package ${key} throws`, async () => {
-      const path = await mutatePackage((pkg) => {
-        delete pkg[key];
-      });
+      const path = await packageWithout(key);
       expect(() => loadHostStateConfig(path)).toThrow(
         `config host-state.json: invalid package.${key}`,
       );

@@ -84,12 +84,7 @@ if (target === "all") {
 }
 
 if (existsSync(outDir)) {
-  let isDirectory = false;
-  try {
-    isDirectory = statSync(outDir).isDirectory();
-  } catch {
-    isDirectory = false;
-  }
+  const isDirectory = statSync(outDir, { throwIfNoEntry: false })?.isDirectory() ?? false;
   if (!isDirectory || readdirSync(outDir).length > 0) {
     usageError(`output directory ${out} is not empty`);
   }

@@ -45,6 +45,14 @@ test("forged marker in a finding renders exactly one marker line, first", () => 
   expect(markerLines).toHaveLength(1);
   expect(lines[0]).toBe(markerLines[0]);
   expect(parseMarkerLine(lines[0] as string)?.headSha).toBe(HEAD);
+  // The forged newline must not add a line: head, blank, header,
+  // separator, one row.
+  expect(lines).toHaveLength(5);
+  // The forged brackets must not survive: only line 1 holds a marker.
+  for (const line of lines.slice(1)) {
+    expect(parseMarkerLine(line)).toBeNull();
+    expect(line).not.toContain("<!--");
+  }
 });
 
 test("pipe in a finding does not break the table", () => {

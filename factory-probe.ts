@@ -482,6 +482,9 @@ function linuxUptimeSecs(): number {
 async function macosPower(): Promise<{ acPower: boolean; batteryPercent: number | null }> {
   const proc = Bun.spawn(["pmset", "-g", "batt"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) throw new Error(`pmset failed: exit ${String(proc.exitCode)}`);
+  if (!/drawing from/.test(out)) throw new Error("pmset failed: no drawing from line");
   const ac = /AC Power/.test(out);
   const m = /(\d+)%/.exec(out);
   const batteryPercent = m ? Number(m[1]) : null;

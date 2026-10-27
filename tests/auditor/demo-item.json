@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "v1",
+  "id": "w9-demo",
+  "repo": "factory/demo",
+  "title": "Add two numbers",
+  "goal": "Sum two numbers",
+  "issue": 99,
+  "dod": [{ "id": "D1", "text": "add returns the sum of its arguments", "done": false }],
+  "dependencies": [],
+  "status": "review",
+  "statusReason": null,
+  "assignedHostAlias": "desktop",
+  "branch": "demo-good",
+  "pullNumber": 99,
+  "modelRouting": { "preferredModel": "meta/muse-glimmer-30b", "attempts": 1, "fallbackUsed": false },
+  "retryCount": 1,
+  "stallRounds": 0
+}

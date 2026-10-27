@@ -11,7 +11,7 @@ import { authorModelsOf, readLedger } from "../ledger/read.js";
 import { LedgerDataError, LedgerRefusal } from "../ledger/errors.js";
 import { createCliBudgetGate, loadBudgetGateConfig } from "../budget/gate.js";
 import { callProviderOnce } from "../providers/router.js";
-import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
+import { InputPathError, readInputText, requireInputDir, statInputPath } from "../fs/input.js";
 import { requireWritableTarget, writeFileAtomic } from "../fs/write.js";
 import { auditExitCode, runAudit } from "./audit.js";
 import type { AuditInput } from "./audit-types.js";
@@ -276,9 +276,7 @@ async function run(): Promise<number> {
     return 2;
   }
   try {
-    if ((await statInputPath("Repo dir", options.repoDir)) === "absent") {
-      throw new Error(`audit: Repo dir ${options.repoDir}: not a directory`);
-    }
+    await requireInputDir("Repo dir", options.repoDir);
     const { stdout, rc } = await createReadOnlyGit(options.repoDir)
       .resolveCommit("HEAD")
       .then(

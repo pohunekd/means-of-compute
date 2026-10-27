@@ -82,10 +82,7 @@ export class DispatchStateError extends Error {
   }
 }
 
-export type WatchResult = Omit<
-  Extract<WaitResult, { state: TerminalState }>,
-  "sessionId"
-> & {
+export type WatchResult = Omit<Extract<WaitResult, { state: TerminalState }>, "sessionId"> & {
   readonly sessionId: string | null;
 };
 

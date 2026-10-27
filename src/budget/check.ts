@@ -46,6 +46,10 @@ async function run(): Promise<number> {
   let parsed: CliArgs;
   try {
     parsed = parseCliArgs(Bun.argv);
+    if (parsed.spendTotal === null && (parsed.dayCap !== null || parsed.totalCap !== null)) {
+      console.error("budget:check: --day-cap and --total-cap need --spend");
+      return 2;
+    }
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;

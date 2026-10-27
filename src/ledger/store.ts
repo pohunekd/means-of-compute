@@ -31,6 +31,9 @@ function checkFinalizeInput(input: FinalizeInput): void {
   if (!isRecordId(input.workItemId)) {
     throw new LedgerDataError(`ledger: invalid workItemId ${JSON.stringify(input.workItemId)}`);
   }
+  if (input.result !== "success" && input.result !== "blocked") {
+    throw new LedgerDataError(`ledger: invalid result ${JSON.stringify(input.result)}`);
+  }
   if (!isNonNegativeInteger(input.retries)) {
     throw new LedgerDataError(`ledger: invalid retries ${JSON.stringify(input.retries)}`);
   }
@@ -262,6 +265,11 @@ export async function finalizeUsage(
       };
       if (Bun.deepEquals(next, record, true)) {
         return "unchanged";
+      }
+      if (!isUsageRecord(next)) {
+        throw new LedgerDataError(
+          `ledger ${ledgerPath}: updated record is not a valid UsageRecord`,
+        );
       }
       const records = contents.records.map((item) =>
         item.workItemId === input.workItemId ? next : item,

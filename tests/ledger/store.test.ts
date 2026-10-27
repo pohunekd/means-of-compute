@@ -125,6 +125,37 @@ test("finalize with null requests refuses and keeps the entries", async () => {
   }
 });
 
+test("finalize with a bogus result throws and writes nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    await appendPending(ledgerPath, sessionEntry());
+    await finalizeUsage(ledgerPath, {
+      workItemId: "w1-demo",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+    });
+    const before = await Bun.file(ledgerPath).text();
+    let error: unknown;
+    try {
+      await finalizeUsage(ledgerPath, {
+        workItemId: "w1-demo",
+        result: "bogus",
+        retries: 0,
+        humanInterventions: 0,
+      } as never);
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LedgerDataError);
+    expect((error as Error).message).toContain("invalid result");
+    expect(await Bun.file(ledgerPath).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("finalize with decreasing counters exits 2", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ledger-store-"));
   const ledgerPath = join(dir, "ledger.jsonl");

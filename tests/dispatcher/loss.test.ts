@@ -147,6 +147,67 @@ test("resume: retry on the same branch resumes from origin/moc/demo-item", async
   });
 });
 
+test("unreachable: miss, miss, running, miss recovers as finished", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-unreach-seq-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath: join(dir, "registry.json"),
+    };
+    const control = createMemoryPort();
+    let calls = 0;
+    const flaky = {
+      ...control.port,
+      wait(
+        ref: SessionRef,
+        timeoutMs: number,
+        cursor: string | null,
+      ): ReturnType<typeof control.port.wait> {
+        calls += 1;
+        if (calls <= 2 || calls === 4) {
+          return Promise.reject(new PortUnreachableError("host unreachable"));
+        }
+        if (calls === 3) {
+          return Promise.resolve({ state: "running" as const, sessionId: ref.sessionId, cursor });
+        }
+        return control.port.wait(ref, timeoutMs, cursor);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: flaky,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("finished");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("unreachable: two misses recover, the third is lost", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-unreach-"));
   try {
@@ -296,6 +357,72 @@ test("watch replay after a failed appendPending writes exactly one pending entry
     expect(contents2.pending).toHaveLength(1);
   } finally {
     await chmod(join(dir, "ledger-dir"), 0o755).catch(() => undefined);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("replay after a crash between append and write returns unchanged", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-replay-crash-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const control = createMemoryPort();
+    const clock = { now: new Date("2026-10-27T10:01:00.000Z") };
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => clock.now,
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.complete(started.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("finished");
+    // Crash between appendPending and the second registry write: the
+    // pending line stays while the entry claims ledgerAppended false.
+    const { readRegistry, replaceRegistryEntry } = await import(
+      "../../src/dispatcher/registry.js"
+    );
+    const entries = await readRegistry(registryPath);
+    const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
+    if (entry === undefined || entry.terminal === null) {
+      throw new Error("expected a terminal entry");
+    }
+    await replaceRegistryEntry(registryPath, {
+      ...entry,
+      terminal: { ...entry.terminal, ledgerAppended: false },
+    });
+    clock.now = new Date("2026-10-27T10:09:00.000Z");
+    const replayed = await dispatcher.watch(started.request.requestId);
+    // The stored finishedAt wins over the clock: the pending line is the
+    // same entry, so the ledger call is a no-op.
+    expect(replayed.ledger).toBe("unchanged");
+    const contents = await readLedger("Test ledger", ledgerPath);
+    expect(contents.pending).toHaveLength(1);
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

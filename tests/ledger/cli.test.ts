@@ -64,6 +64,28 @@ test("D1: record writes the record and validates as usage-record", async () => {
   }
 });
 
+test("record of the same completion twice refuses the replay and changes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "finished-task.json");
+    await Bun.write(completion, Bun.file("tests/fixtures/ledger/finished-task.json"));
+    const first = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(first.code).toBe(0);
+    const before = await Bun.file(ledger).text();
+    const totals = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
+    expect(totals.code).toBe(0);
+    const replay = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(replay.code).toBe(3);
+    expect(replay.stderr).toContain("pending entry e1-demo is not newer than the record of w1-demo");
+    expect(await Bun.file(ledger).text()).toBe(before);
+    const after = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
+    expect(after.code).toBe(0);
+    expect(after.stdout).toBe(totals.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("D2: query output deep-equals the hand-computed expected file", async () => {
   const { dir, ledger } = sandbox();
   try {
@@ -259,6 +281,7 @@ test("record with decreasing counters exits 2 and writes nothing", async () => {
       ...(raw.pending[0] as Record<string, unknown>),
       entryId: "e4-demo",
       workItemId: "w2-beta",
+      finishedAt: "2026-10-26T11:30:00.000Z",
     };
     const completion = join(dir, "decrease.json");
     await Bun.write(

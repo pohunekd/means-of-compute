@@ -26,7 +26,7 @@ import type {
   WaitResult,
 } from "./port.js";
 import { PortRejectedError, PortUnreachableError } from "./port.js";
-import { insertRegistryEntry, readRegistry, replaceRegistryEntry } from "./registry.js";
+import { insertRegistryEntry, readRegistry, removeProvisionalEntry, replaceRegistryEntry } from "./registry.js";
 import type { RegistryEntry, RegistryTerminal } from "./registry.js";
 
 export interface DispatcherDeps {
@@ -64,8 +64,8 @@ export type DispatchStateCode =
 export class DispatchStateError extends Error {
   readonly code: DispatchStateCode;
   readonly requestId: string;
-  constructor(code: DispatchStateCode, requestId: string, message?: string) {
-    super(message ?? `${code}: ${requestId}`);
+  constructor(code: DispatchStateCode, requestId: string, message?: string, options?: ErrorOptions) {
+    super(message ?? `${code}: ${requestId}`, options);
     this.name = "DispatchStateError";
     this.code = code;
     this.requestId = requestId;
@@ -159,15 +159,16 @@ function isTerminalResult(
 
 function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): PendingUsage {
   const stored = terminal;
-  const useReported = stored.usage !== null && stored.usageValid;
+  // usage is non-null only together with usageValid (enforced by the
+  // registry schema), so a non-null usage here is always the reported one.
   return {
     entryId: `${entry.workItemId}:${entry.sessionId ?? entry.requestId}`,
     kind: "session",
     workItemId: entry.workItemId,
     finishedAt: stored.observedAt,
     startModel: entry.model.model,
-    tokens: useReported
-      ? (stored.usage as PortUsage).tokens.map((token) => ({
+    tokens: stored.usage !== null
+      ? stored.usage.tokens.map((token) => ({
           provider: token.provider,
           model: token.model,
           inputTokens: token.inputTokens,
@@ -260,12 +261,7 @@ async function checkProviderModel(model: ModelSelection): Promise<void> {
   }
 }
 
-function checkStartPreconditions(
-  item: WorkItem,
-  decision: PlacementDecision,
-  model: ModelSelection,
-  brief: string,
-): void {
+function checkStartContract(item: WorkItem, decision: PlacementDecision): void {
   if (!isWorkItem(item) || !isPlacementDecision(decision)) {
     throw new DispatchPreconditionError(
       "dispatcher precondition contract: item must be a WorkItem and decision a PlacementDecision",
@@ -286,9 +282,90 @@ function checkStartPreconditions(
       `dispatcher precondition item-queued: item.status must be "queued", got "${item.status}"`,
     );
   }
+}
+
+function checkBrief(brief: string): void {
   if (brief.trim().length === 0) {
     throw new DispatchPreconditionError(
       "dispatcher precondition brief-present: brief must not be blank",
+    );
+  }
+}
+
+function sameRequest(hit: RegistryEntry, request: StartRequest, briefSha256: string): boolean {
+  return (
+    hit.repo === request.repo &&
+    hit.hostAlias === request.hostAlias &&
+    hit.branch === request.branch &&
+    hit.baseRef === request.baseRef &&
+    hit.resume === request.resume &&
+    hit.model.providerId === request.model.providerId &&
+    hit.model.model === request.model.model &&
+    hit.briefSha256 === briefSha256
+  );
+}
+
+function handleOf(entry: RegistryEntry): SessionHandle {
+  const sessionId = entry.sessionId;
+  const worktree = entry.worktree;
+  if (sessionId === null || worktree === null) {
+    throw new Error(`dispatcher: entry ${entry.requestId} is provisional and has no handle`);
+  }
+  return {
+    sessionId,
+    requestId: entry.requestId,
+    hostAlias: entry.hostAlias,
+    branch: entry.branch,
+    worktree,
+    baseCommit: entry.baseCommit,
+  };
+}
+
+function checkHandle(
+  handle: SessionHandle,
+  request: StartRequest,
+  entries: readonly RegistryEntry[],
+): void {
+  const failures: Array<{ readonly check: string; readonly detail: string }> = [];
+  if (handle.requestId !== request.requestId) {
+    failures.push({
+      check: "request-id",
+      detail: `handle requestId "${handle.requestId}" differs from "${request.requestId}"`,
+    });
+  }
+  if (handle.hostAlias !== request.hostAlias) {
+    failures.push({
+      check: "host",
+      detail: `handle host "${handle.hostAlias}" differs from "${request.hostAlias}"`,
+    });
+  }
+  if (handle.branch !== request.branch) {
+    failures.push({
+      check: "branch",
+      detail: `handle branch "${handle.branch}" differs from "${request.branch}"`,
+    });
+  }
+  if (handle.sessionId.length === 0) {
+    failures.push({ check: "session-id", detail: "handle sessionId is empty" });
+  }
+  if (handle.worktree.length === 0) {
+    failures.push({ check: "worktree", detail: "handle worktree is empty" });
+  }
+  if (handle.baseCommit !== null && handle.baseCommit.length === 0) {
+    failures.push({ check: "base-commit", detail: "handle baseCommit is an empty string" });
+  }
+  if (entries.some((entry) => entry.sessionId === handle.sessionId)) {
+    failures.push({
+      check: "session-unique",
+      detail: `sessionId "${handle.sessionId}" is already registered`,
+    });
+  }
+  if (failures.length > 0) {
+    const first = failures[0] as { readonly check: string; readonly detail: string };
+    throw new DispatchStateError(
+      "invalid-handle",
+      request.requestId,
+      `dispatcher state invalid-handle: ${first.check}: ${first.detail}`,
     );
   }
 }
@@ -556,63 +633,141 @@ export function createDispatcher(deps: DispatcherDeps): {
     model: ModelSelection,
     brief: string,
   ): Promise<StartOutcome> {
+    // Design rule order 1-4, then 5, then 6: contract, provider, brief.
+    checkStartContract(item, decision);
     await checkProviderModel(model);
-    checkStartPreconditions(item, decision, model, brief);
-    const contents = await readLedger("Dispatcher ledger", deps.ledgerPath);
-    const request = deriveStartRequest(item, decision, model, brief, deps.config, contents);
+    checkBrief(brief);
     const key = `${resolve(deps.config.registryPath)}|${item.id}`;
     return withItemLock(key, async () => {
+      const contents = await readLedger("Dispatcher ledger", deps.ledgerPath);
+      const request = deriveStartRequest(item, decision, model, brief, deps.config, contents);
+      const sha = briefSha256Of(brief);
       const existing = await readRegistry(deps.config.registryPath);
       const hit = existing.find((candidate) => candidate.requestId === request.requestId);
       if (hit !== undefined) {
-        if (hit.sessionId === null) {
+        if (hit.terminal !== null && !hit.terminal.ledgerAppended) {
           throw new DispatchStateError(
-            "request-provisional",
+            "request-unappended",
             hit.requestId,
-            `dispatcher state request-provisional: ${hit.requestId} has no session yet`,
+            `dispatcher state request-unappended: ${hit.requestId} finished but its ledger write is pending; watch it first`,
           );
         }
-        // A replayed start returns the stored session identity, including
-        // the recorded worktree and base commit.
-        const handle: SessionHandle = {
-          sessionId: hit.sessionId,
-          requestId: hit.requestId,
-          hostAlias: hit.hostAlias,
-          branch: hit.branch,
-          worktree: hit.worktree,
-          baseCommit: hit.baseCommit,
+        if (hit.terminal !== null) {
+          throw new DispatchStateError(
+            "request-ledger-mismatch",
+            hit.requestId,
+            `dispatcher state request-ledger-mismatch: ${hit.requestId} is already ledgered; move on to the next attempt`,
+          );
+        }
+        if (!sameRequest(hit, request, sha)) {
+          throw new DispatchStateError(
+            "request-conflict",
+            hit.requestId,
+            `dispatcher state request-conflict: ${hit.requestId} already holds other inputs`,
+          );
+        }
+        if (hit.sessionId !== null) {
+          // A settled hit returns the stored session: no gate, no port
+          // call. A provisional hit falls through to port.start below.
+          return { kind: "started", handle: handleOf(hit), request };
+        }
+      } else {
+        const admission = await deps.budget.admit();
+        if (!admission.admit) {
+          return { kind: "refused", reason: admission.reason };
+        }
+        const provisional: RegistryEntry = {
+          requestId: request.requestId,
+          workItemId: request.workItemId,
+          repo: request.repo,
+          hostAlias: request.hostAlias,
+          branch: request.branch,
+          baseRef: request.baseRef,
+          resume: request.resume,
+          model,
+          briefSha256: sha,
+          sessionId: null,
+          worktree: null,
+          baseCommit: null,
+          startedAt: deps.now().toISOString(),
+          cursor: null,
+          unreachableCount: 0,
+          lastSeenState: "starting",
+          lastSeenAt: deps.now().toISOString(),
+          cancelReason: null,
+          terminal: null,
+          revision: 0,
         };
-        return { kind: "started", handle, request };
+        await insertRegistryEntry(deps.config.registryPath, provisional);
       }
-      const admission = await deps.budget.admit();
-      if (!admission.admit) {
-        return { kind: "refused", reason: admission.reason };
+      const provisional = await loadEntry(request.requestId);
+      let handle: SessionHandle;
+      try {
+        handle = await deps.port.start(request);
+      } catch (error: unknown) {
+        if (error instanceof PortUnreachableError) {
+          const count = provisional.unreachableCount + 1;
+          if (count < deps.config.lostAfterUnreachable) {
+            const persisted: RegistryEntry = {
+              ...provisional,
+              unreachableCount: count,
+              lastSeenAt: deps.now().toISOString(),
+              revision: provisional.revision + 1,
+            };
+            await replaceRegistryEntry(deps.config.registryPath, persisted);
+            deps.log({
+              level: "info",
+              event: "start-unreachable",
+              requestId: request.requestId,
+              workItemId: request.workItemId,
+              detail: `unreachable ${String(count)} times`,
+            });
+            throw error;
+          }
+          const lost = await finishLost(provisional, count);
+          return { kind: "lost", requestId: request.requestId, ledger: lost.ledger };
+        }
+        if (error instanceof PortRejectedError) {
+          if (error.code === "request-conflict" || error.code === "request-duplicated") {
+            deps.log({
+              level: "error",
+              event: "port-binding-conflict",
+              requestId: request.requestId,
+              workItemId: request.workItemId,
+              detail: error.code,
+            });
+            throw new DispatchStateError("port-binding-conflict", request.requestId, error.message, {
+              cause: error,
+            });
+          }
+          await removeProvisionalEntry(
+            deps.config.registryPath,
+            request.requestId,
+            provisional.revision,
+          );
+          deps.log({
+            level: "info",
+            event: "start-rejected",
+            requestId: request.requestId,
+            workItemId: request.workItemId,
+            detail: error.code,
+          });
+          throw error;
+        }
+        throw error;
       }
-      const handle = await deps.port.start(request);
-      const startedAt = deps.now().toISOString();
-      const entry: RegistryEntry = {
-        requestId: request.requestId,
-        workItemId: request.workItemId,
-        repo: request.repo,
-        hostAlias: request.hostAlias,
-        branch: request.branch,
-        baseRef: request.baseRef,
-        resume: request.resume,
-        model,
-        briefSha256: briefSha256Of(brief),
+      checkHandle(handle, request, existing);
+      // startedAt stays the provisional insert time: the port call does
+      // not move the session clock.
+      const settled: RegistryEntry = {
+        ...provisional,
         sessionId: handle.sessionId,
         worktree: handle.worktree,
         baseCommit: handle.baseCommit,
-        startedAt,
-        cursor: null,
-        unreachableCount: 0,
-        lastSeenState: "starting",
-        lastSeenAt: startedAt,
-        cancelReason: null,
-        terminal: null,
-        revision: 0,
+        lastSeenAt: deps.now().toISOString(),
+        revision: provisional.revision + 1,
       };
-      await insertRegistryEntry(deps.config.registryPath, entry);
+      await replaceRegistryEntry(deps.config.registryPath, settled);
       deps.log({
         level: "info",
         event: "start",

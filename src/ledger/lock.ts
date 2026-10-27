@@ -30,9 +30,17 @@ function loadFlock(lockPath: string): FlockFn {
   } else {
     throw new LedgerDataError(`ledger lock ${lockPath}: unsupported platform ${process.platform}`);
   }
-  const loaded = dlopen(library, {
-    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-  });
+  let loaded: ReturnType<typeof dlopen>;
+  try {
+    loaded = dlopen(library, {
+      flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+    });
+  } catch (error: unknown) {
+    throw new LedgerDataError(
+      `ledger lock ${lockPath}: cannot load flock (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
+    );
+  }
   cachedFlock = loaded.symbols.flock;
   return cachedFlock;
 }
@@ -42,6 +50,7 @@ function lockPathOf(ledgerPath: string): string {
 }
 
 async function acquire(lockPath: string): Promise<FileHandle> {
+  const flock = loadFlock(lockPath);
   let handle: FileHandle;
   try {
     handle = await open(lockPath, "a", 0o600);
@@ -50,7 +59,7 @@ async function acquire(lockPath: string): Promise<FileHandle> {
       `ledger lock ${lockPath}: cannot open lock (${String((error as NodeJS.ErrnoException).code)})`,
     );
   }
-  const held = loadFlock(lockPath)(handle.fd, LOCK_EX | LOCK_NB);
+  const held = flock(handle.fd, LOCK_EX | LOCK_NB);
   if (held === 0) {
     return handle;
   }

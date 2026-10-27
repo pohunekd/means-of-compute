@@ -113,3 +113,26 @@ export function loadHostAlias(configDir: string, hostnameVal: string): string {
   }
   return alias;
 }
+
+const hostAliasPattern = /^[a-z][a-z0-9-]{0,31}$/;
+
+export function loadHostFile(path: string): string {
+  let raw: unknown;
+  try {
+    raw = readJson<unknown>(path);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    throw new Error(`host file ${path}: ${code}`, { cause: e });
+  }
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    Array.isArray(raw) ||
+    Object.keys(raw).length !== 1 ||
+    typeof (raw as Record<string, unknown>)["hostAlias"] !== "string" ||
+    !hostAliasPattern.test((raw as Record<string, unknown>)["hostAlias"] as string)
+  ) {
+    throw new Error(`host file ${path}: invalid hostAlias`);
+  }
+  return (raw as { hostAlias: string }).hostAlias;
+}

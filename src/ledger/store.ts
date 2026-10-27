@@ -215,6 +215,34 @@ function serialize(contents: LedgerContents): string {
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 
+export function applyPending(
+  contents: LedgerContents,
+  ledgerPath: string,
+  entry: PendingUsage,
+): { next: LedgerContents; result: WriteOutcome } {
+  if (!isPendingUsage(entry)) {
+    throw new LedgerDataError(
+      `ledger ${ledgerPath}: invalid pending entry ${pendingReason(entry)}`,
+    );
+  }
+  const same = contents.pending.find((item) => item.entryId === entry.entryId);
+  if (same !== undefined) {
+    if (Bun.deepEquals(same, entry, true)) {
+      return { next: contents, result: "unchanged" };
+    }
+    throw new LedgerDataError(
+      `ledger ${ledgerPath}: pending entry ${entry.entryId} exists with different content`,
+    );
+  }
+  return {
+    next: {
+      records: contents.records,
+      pending: [...contents.pending, entry],
+    },
+    result: "appended",
+  };
+}
+
 export async function appendPending(
   ledgerPath: string,
   entry: PendingUsage,
@@ -226,22 +254,78 @@ export async function appendPending(
   }
   return withLedgerLock(ledgerPath, async () => {
     const contents = await readLedger("Budget ledger", ledgerPath);
-    const same = contents.pending.find((item) => item.entryId === entry.entryId);
-    if (same !== undefined) {
-      if (Bun.deepEquals(same, entry, true)) {
-        return "unchanged";
-      }
+    const { next, result } = applyPending(contents, ledgerPath, entry);
+    if (result === "unchanged") {
+      return result;
+    }
+    await writeFileAtomic("Budget ledger", ledgerPath, serialize(next));
+    return result;
+  });
+}
+
+export function applyFinalize(
+  contents: LedgerContents,
+  ledgerPath: string,
+  input: FinalizeInput,
+): { next: LedgerContents; result: WriteOutcome } {
+  checkFinalizeInput(input);
+  const record = contents.records.find((item) => item.workItemId === input.workItemId) ?? null;
+  const pending = contents.pending.filter((item) => item.workItemId === input.workItemId);
+  if (record !== null) {
+    if (input.retries < record.retries || input.humanInterventions < record.humanInterventions) {
       throw new LedgerDataError(
-        `ledger ${ledgerPath}: pending entry ${entry.entryId} exists with different content`,
+        `ledger ${ledgerPath}: counters must not decrease for ${input.workItemId}`,
       );
     }
-    const next: LedgerContents = {
-      records: contents.records,
-      pending: [...contents.pending, entry],
+  }
+  if (pending.length === 0) {
+    if (record === null) {
+      throw new LedgerRefusal(`no usage recorded for ${input.workItemId}`);
+    }
+    const next = {
+      ...record,
+      result: input.result,
+      retries: input.retries,
+      humanInterventions: input.humanInterventions,
     };
-    await writeFileAtomic("Budget ledger", ledgerPath, serialize(next));
-    return "appended";
-  });
+    if (Bun.deepEquals(next, record, true)) {
+      return { next: contents, result: "unchanged" };
+    }
+    if (!isUsageRecord(next)) {
+      throw new LedgerDataError(
+        `ledger ${ledgerPath}: updated record is not a valid UsageRecord`,
+      );
+    }
+    return {
+      next: {
+        records: contents.records.map((item) =>
+          item.workItemId === input.workItemId ? next : item,
+        ),
+        pending: contents.pending,
+      },
+      result: "updated",
+    };
+  }
+  if (!pending.some((entry) => entry.kind === "session") && record === null) {
+    throw new LedgerRefusal(`no session usage for ${input.workItemId}`);
+  }
+  const unknownEntries = pending.filter((entry) =>
+    entry.tokens.some((token) => token.requests === null),
+  );
+  if (unknownEntries.length > 0) {
+    const ids = unknownEntries.map((entry) => entry.entryId).join(",");
+    throw new LedgerRefusal(`usage unknown for ${input.workItemId}: ${ids}`);
+  }
+  const next = foldRecord(record, pending, input);
+  if (!isUsageRecord(next)) {
+    throw new LedgerDataError(`ledger ${ledgerPath}: folded record is not a valid UsageRecord`);
+  }
+  const keptPending = contents.pending.filter((item) => item.workItemId !== input.workItemId);
+  const records =
+    record === null
+      ? [...contents.records, next]
+      : contents.records.map((item) => (item.workItemId === input.workItemId ? next : item));
+  return { next: { records, pending: keptPending }, result: record === null ? "appended" : "updated" };
 }
 
 export async function finalizeUsage(
@@ -251,67 +335,11 @@ export async function finalizeUsage(
   checkFinalizeInput(input);
   return withLedgerLock(ledgerPath, async () => {
     const contents = await readLedger("Budget ledger", ledgerPath);
-    const record = contents.records.find((item) => item.workItemId === input.workItemId) ?? null;
-    const pending = contents.pending.filter((item) => item.workItemId === input.workItemId);
-    if (record !== null) {
-      if (input.retries < record.retries || input.humanInterventions < record.humanInterventions) {
-        throw new LedgerDataError(
-          `ledger ${ledgerPath}: counters must not decrease for ${input.workItemId}`,
-        );
-      }
+    const { next, result } = applyFinalize(contents, ledgerPath, input);
+    if (result === "unchanged") {
+      return result;
     }
-    if (pending.length === 0) {
-      if (record === null) {
-        throw new LedgerRefusal(`no usage recorded for ${input.workItemId}`);
-      }
-      const next = {
-        ...record,
-        result: input.result,
-        retries: input.retries,
-        humanInterventions: input.humanInterventions,
-      };
-      if (Bun.deepEquals(next, record, true)) {
-        return "unchanged";
-      }
-      if (!isUsageRecord(next)) {
-        throw new LedgerDataError(
-          `ledger ${ledgerPath}: updated record is not a valid UsageRecord`,
-        );
-      }
-      const records = contents.records.map((item) =>
-        item.workItemId === input.workItemId ? next : item,
-      );
-      await writeFileAtomic(
-        "Budget ledger",
-        ledgerPath,
-        serialize({ records, pending: contents.pending }),
-      );
-      return "updated";
-    }
-    if (!pending.some((entry) => entry.kind === "session") && record === null) {
-      throw new LedgerRefusal(`no session usage for ${input.workItemId}`);
-    }
-    const unknownEntries = pending.filter((entry) =>
-      entry.tokens.some((token) => token.requests === null),
-    );
-    if (unknownEntries.length > 0) {
-      const ids = unknownEntries.map((entry) => entry.entryId).join(",");
-      throw new LedgerRefusal(`usage unknown for ${input.workItemId}: ${ids}`);
-    }
-    const next = foldRecord(record, pending, input);
-    if (!isUsageRecord(next)) {
-      throw new LedgerDataError(`ledger ${ledgerPath}: folded record is not a valid UsageRecord`);
-    }
-    const keptPending = contents.pending.filter((item) => item.workItemId !== input.workItemId);
-    const records =
-      record === null
-        ? [...contents.records, next]
-        : contents.records.map((item) => (item.workItemId === input.workItemId ? next : item));
-    await writeFileAtomic(
-      "Budget ledger",
-      ledgerPath,
-      serialize({ records, pending: keptPending }),
-    );
-    return record === null ? "appended" : "updated";
+    await writeFileAtomic("Budget ledger", ledgerPath, serialize(next));
+    return result;
   });
 }

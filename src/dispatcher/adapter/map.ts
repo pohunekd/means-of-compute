@@ -182,8 +182,8 @@ const WAIT_DETAILS = {
   sessionMissing: "session missing",
 } as const;
 
-export type WaitRunning = { kind: "running"; state: "starting" | "running" };
-export type WaitTerminal = {
+type WaitRunning = { kind: "running"; state: "starting" | "running" };
+type WaitTerminal = {
   kind: "terminal";
   state: TerminalState;
   detail: string;

@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { ConnectHostFn } from "../../../src/dispatcher/adapter/connection.js";
+import type { createHostConnector as createHostConnectorType } from "../../../src/dispatcher/adapter/connection.js";
 import { createHostConnector } from "../../../src/dispatcher/adapter/connection.js";
 import { PortRejectedError, PortUnreachableError } from "../../../src/dispatcher/port.js";
 
@@ -27,6 +27,8 @@ async function runtimeEnv(
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+type ConnectHostFn = NonNullable<Parameters<typeof createHostConnectorType>[1]["connectHost"]>;
 
 interface FakeClient {
   close(): Promise<void>;

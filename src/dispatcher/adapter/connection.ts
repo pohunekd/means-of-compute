@@ -20,9 +20,9 @@ export interface HostConnector {
   close(): Promise<void>;
 }
 
-export type ConnectHostFn = typeof connectHost;
+type ConnectHostFn = typeof connectHost;
 
-export interface HostConnectorOptions {
+interface HostConnectorOptions {
   readonly connectTimeoutMs: number;
   readonly connectHost?: ConnectHostFn;
 }

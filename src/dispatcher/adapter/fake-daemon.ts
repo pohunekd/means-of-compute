@@ -19,7 +19,7 @@ import {
 import { PortRejectedError } from "../port.js";
 import type { HostConnector } from "./connection.js";
 
-export interface SessionPatch {
+interface SessionPatch {
   readonly state?: SessionState;
   readonly exit_code?: number;
   readonly runtime?: SessionRuntime;
@@ -28,7 +28,7 @@ export interface SessionPatch {
   readonly metadata?: Record<string, string>;
 }
 
-export type FakeFailure =
+type FakeFailure =
   | { readonly error: ClientError; readonly apply: boolean }
   | { readonly errCode: string; readonly apply: boolean };
 

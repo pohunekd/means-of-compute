@@ -1,12 +1,10 @@
 import { readInputText, statInputPath } from "../fs/input.js";
 import { loadProviderRoute } from "./route.js";
 import { MAX_TIMEOUT_MS, providerDescriptorErrors } from "./schema.js";
+import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "./paths.js";
 import type { ProviderDescriptor } from "./types.js";
 
 type RawProvider = ProviderDescriptor & { baseUrlEnv?: string };
-
-export const ROUTE_PATH = "config/providers/route.json";
-const DESCRIPTOR_DIR = "config/providers";
 const TIMEOUT_PATTERN = /^[1-9][0-9]*$/;
 const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
 
@@ -16,7 +14,7 @@ export async function providerDescriptorExists(id: string): Promise<boolean> {
   if (!PROVIDER_ID_PATTERN.test(id)) {
     return false;
   }
-  return (await statInputPath("Provider descriptor", `${DESCRIPTOR_DIR}/${id}.json`)) === "file";
+  return (await statInputPath("Provider descriptor", `${PROVIDERS_DIR}/${id}.json`)) === "file";
 }
 
 function baseUrlOverrideEnv(id: string): string {
@@ -29,7 +27,7 @@ function timeoutOverrideEnv(id: string): string {
 
 async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
   const label = "Provider descriptor";
-  const file = `${DESCRIPTOR_DIR}/${id}.json`;
+  const file = `${PROVIDERS_DIR}/${id}.json`;
   if (!PROVIDER_ID_PATTERN.test(id)) {
     throw new Error(`${label} ${file}: invalid provider id "${id}"`);
   }
@@ -102,7 +100,7 @@ async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
 }
 
 async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
-  const ids = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
+  const ids = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
   const providers: Record<string, ProviderDescriptor> = {};
   for (const id of ids) {
     providers[id] = await loadDescriptor(id);

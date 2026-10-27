@@ -437,11 +437,14 @@ async function linuxSecondsSinceInput(nowMs: number): Promise<number> {
   let minSecs: number | null = null;
   for (const id of graphicalSessionIds) {
     const props = await showSessionProps(id, ["IdleHint", "IdleSinceHint"]);
-    if (props.get("IdleHint") !== "yes") return 0;
+    const hint = props.get("IdleHint");
+    if (hint === "no") return 0;
+    if (hint !== "yes") throw new Error(`loginctl session ${id} has no IdleHint`);
     const sinceRaw = props.get("IdleSinceHint");
-    if (sinceRaw === undefined || sinceRaw === "") throw new Error("IdleSinceHint missing");
-    const idleSinceUs = Number(sinceRaw);
-    if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) return 0;
+    const idleSinceUs = sinceRaw === undefined || sinceRaw === "" ? NaN : Number(sinceRaw);
+    if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) {
+      throw new Error(`loginctl session ${id} has no numeric IdleSinceHint`);
+    }
     const secs = Math.max(0, Math.floor((nowMs - idleSinceUs / 1000) / 1000));
     minSecs = minSecs === null ? secs : Math.min(minSecs, secs);
   }

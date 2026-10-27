@@ -1,0 +1,7 @@
+Class=user
+Type=wayland
+Active=yes
+Seat=seat0
+Remote=no
+IdleHint=yes
+IdleSinceHint=abc

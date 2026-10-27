@@ -102,6 +102,26 @@ describe.skipIf(process.platform !== "linux")("loginctl session rule", () => {
     });
   });
 
+  test("missing IdleHint line is unknown, not idle", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("idlehint-missing", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as { idle: boolean; idleReason: string };
+      expect(doc.idle).toBe(false);
+      expect(doc.idleReason).toContain("has no IdleHint");
+    });
+  });
+
+  test("non-numeric IdleSinceHint is unknown, not idle", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("idlesincehint-garbage", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as { idle: boolean; idleReason: string };
+      expect(doc.idle).toBe(false);
+      expect(doc.idleReason).toContain("has no numeric IdleSinceHint");
+    });
+  });
+
   test("greeter-only takes the logged-out path", async () => {
     await withFacts({ ...sessionFacts }, async (p) => {
       const r = await runProbe("greeter-only", p);

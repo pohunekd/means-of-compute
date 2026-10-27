@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadConfig } from "../factory-probe.ts";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const probe = join(repoRoot, "factory-probe.ts");
@@ -53,7 +54,104 @@ const allDayFacts = {
   timestamp: "2026-10-27T12:00:00.000Z",
 };
 
-describe("sysfsRoot validation", () => {
+const validConfig = {
+  idleMinutes: 15,
+  batteryThreshold: 50,
+  sysfsRoot: "/sys",
+  localModelsBaseUrl: "",
+  localModelsTimeoutMs: 2000,
+  policy: {
+    allowedWindowStart: "09:00",
+    allowedWindowEnd: "17:00",
+    maxConcurrentAgents: 2,
+  },
+};
+
+async function withConfig(
+  mutate: (cfg: Record<string, unknown>) => void,
+  fn: (configPath: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "probe-config-"));
+  try {
+    const cfg = JSON.parse(JSON.stringify(validConfig)) as Record<string, unknown>;
+    mutate(cfg);
+    const configPath = join(dir, "probe.json");
+    await Bun.write(configPath, JSON.stringify(cfg));
+    await fn(configPath);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("loadConfig validation", () => {
+  test("missing sysfsRoot key throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        delete cfg["sysfsRoot"];
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+      },
+    );
+  });
+
+  test("relative sysfsRoot throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        cfg["sysfsRoot"] = "tests/fixtures/sysfs/type-unreadable";
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+      },
+    );
+  });
+
+  test("non-existent sysfsRoot throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        cfg["sysfsRoot"] = "/no-such-sysfs-root";
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+      },
+    );
+  });
+
+  test("directory without class/ throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        cfg["sysfsRoot"] = tmpdir();
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+      },
+    );
+  });
+
+  test("allowedWindowStart 80:00 throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        (cfg["policy"] as Record<string, unknown>)["allowedWindowStart"] = "80:00";
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid policy.allowedWindowStart");
+      },
+    );
+  });
+
+  test("batteryThreshold 150 throws naming the key", async () => {
+    await withConfig(
+      (cfg) => {
+        cfg["batteryThreshold"] = 150;
+      },
+      async (p) => {
+        expect(() => loadConfig(p)).toThrow("config probe.json: invalid batteryThreshold");
+      },
+    );
+  });
+});
+
+describe.skipIf(process.platform !== "linux")("sysfsRoot validation", () => {
   test("relative path fails with exit 1 and no document", async () => {
     await withFacts(
       { ...allDayFacts, sysfsRoot: "tests/fixtures/sysfs/type-unreadable" },

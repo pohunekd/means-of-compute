@@ -74,11 +74,11 @@ function readJson<T>(path: string): T {
   }
 }
 
-function loadConfig(): ProbeConfig {
-  const raw = readJson<Record<string, unknown>>(configPath("probe.json"));
-  const num = (key: string, min: number): number => {
+export function loadConfig(path?: string): ProbeConfig {
+  const raw = readJson<Record<string, unknown>>(path ?? configPath("probe.json"));
+  const num = (key: string, min: number, max = Number.POSITIVE_INFINITY): number => {
     const v = raw[key];
-    if (typeof v !== "number" || !Number.isFinite(v) || v < min) {
+    if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
       throw new Error(`config probe.json: invalid ${key}`);
     }
     return v;
@@ -100,7 +100,7 @@ function loadConfig(): ProbeConfig {
   const policy = policyRaw as Record<string, unknown>;
   for (const key of ["allowedWindowStart", "allowedWindowEnd"]) {
     const v = policy[key];
-    if (typeof v !== "string" || !/^\d{1,2}:\d{2}$/.test(v)) {
+    if (typeof v !== "string" || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v)) {
       throw new Error(`config probe.json: invalid policy.${key}`);
     }
   }
@@ -110,10 +110,13 @@ function loadConfig(): ProbeConfig {
   }
   const sysfsRoot = nonEmpty("sysfsRoot");
   // The sysfs tree only exists on Linux; on other platforms the readers
-  // never use this root, so its existence is checked there.
+  // never use this root, so its existence is checked in main() instead.
+  if (process.platform === "linux") {
+    assertSysfsRoot(sysfsRoot, "config probe.json: invalid sysfsRoot");
+  }
   return {
     idleMinutes: num("idleMinutes", 1),
-    batteryThreshold: num("batteryThreshold", 0),
+    batteryThreshold: num("batteryThreshold", 0, 100),
     localModelsBaseUrl: str("localModelsBaseUrl"),
     localModelsTimeoutMs: num("localModelsTimeoutMs", 0),
     sysfsRoot,
@@ -651,15 +654,11 @@ async function main(): Promise<void> {
   let sysfsRoot = cfg.sysfsRoot;
   if (facts.sysfsRoot !== undefined) {
     sysfsRoot = facts.sysfsRoot;
-  }
-  // The sysfs tree only exists on Linux; the macOS readers never touch it.
-  if (process.platform === "linux") {
-    assertSysfsRoot(
-      sysfsRoot,
-      facts.sysfsRoot === undefined
-        ? "config probe.json: invalid sysfsRoot"
-        : "facts: invalid sysfsRoot",
-    );
+    // loadConfig already asserted the config root on Linux; a facts
+    // override gets the same rule with the matching label.
+    if (process.platform === "linux") {
+      assertSysfsRoot(sysfsRoot, "facts: invalid sysfsRoot");
+    }
   }
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();

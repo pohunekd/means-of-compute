@@ -35,14 +35,17 @@ export async function loadProviderSchema(): Promise<ProviderSchema> {
     throw new Error(`${label} ${path}: not valid JSON`, { cause });
   }
 
-  const maximum = (parsed as { properties?: { timeoutMs?: { maximum?: unknown } } }).properties?.timeoutMs?.maximum;
+  const maximum = (parsed as { properties?: { timeoutMs?: { maximum?: unknown } } }).properties
+    ?.timeoutMs?.maximum;
   if (
     typeof maximum !== "number" ||
     !Number.isInteger(maximum) ||
     maximum <= 0 ||
     maximum > SET_TIMEOUT_MAX_MS
   ) {
-    throw new Error(`${label} ${path}: timeoutMs.maximum must be an integer in 1..${String(SET_TIMEOUT_MAX_MS)}`);
+    throw new Error(
+      `${label} ${path}: timeoutMs.maximum must be an integer in 1..${String(SET_TIMEOUT_MAX_MS)}`,
+    );
   }
 
   let ajvInstance: Ajv;

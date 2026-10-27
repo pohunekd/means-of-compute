@@ -938,7 +938,9 @@ test("CLI: schema timeoutMs.maximum above the setTimeout limit exits 2 naming th
   const sandbox = await makeCliSandbox();
   try {
     const schemaPath = join(sandbox.dir, "config", "providers", "schema.json");
-    const schema = await Bun.file(schemaPath).json();
+    const schema = (await Bun.file(schemaPath).json()) as unknown as {
+      properties: { timeoutMs: { maximum: number } };
+    };
     schema.properties.timeoutMs.maximum = 2147483648;
     await Bun.write(schemaPath, JSON.stringify(schema));
     const result = await sandbox.run(["--spend", "3.20"]);

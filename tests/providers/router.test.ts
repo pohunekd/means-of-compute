@@ -292,7 +292,9 @@ async function startResetStub(): Promise<{ port: number; stop: () => Promise<voi
         port: address.port,
         stop: () =>
           new Promise<void>((done) => {
-            server.close(() => done());
+            server.close(() => {
+              done();
+            });
           }),
       });
     });
@@ -301,6 +303,7 @@ async function startResetStub(): Promise<{ port: number; stop: () => Promise<voi
 
 // Waits indefinitely for a gate promise before responding.
 async function startSilentStub(): Promise<{ port: number; stop: () => Promise<void> }> {
+  await Promise.resolve();
   let resolveGate: () => void;
   const gate = new Promise<void>((res) => {
     resolveGate = res;
@@ -313,7 +316,7 @@ async function startSilentStub(): Promise<{ port: number; stop: () => Promise<vo
       return new Response("late");
     },
   });
-  const port = server.port;
+  const port = server.port as number;
   return {
     port,
     stop: async () => {

@@ -98,7 +98,9 @@ test("config: schema timeoutMs.maximum 2147483648 fails the load (mutation: drop
   const dir = await makeTempConfig();
   try {
     const schemaPath = join(dir, "config", "providers", "schema.json");
-    const schema = await Bun.file(schemaPath).json();
+    const schema = (await Bun.file(schemaPath).json()) as unknown as {
+      properties: { timeoutMs: { maximum: number } };
+    };
     schema.properties.timeoutMs.maximum = 2147483648;
     await Bun.write(schemaPath, JSON.stringify(schema));
     const result = await runLoadCheck(dir);
@@ -115,7 +117,9 @@ test("config: schema timeoutMs.maximum 2147483647 loads (mutation: >= instead of
   const dir = await makeTempConfig();
   try {
     const schemaPath = join(dir, "config", "providers", "schema.json");
-    const schema = await Bun.file(schemaPath).json();
+    const schema = (await Bun.file(schemaPath).json()) as unknown as {
+      properties: { timeoutMs: { maximum: number } };
+    };
     schema.properties.timeoutMs.maximum = 2147483647;
     await Bun.write(schemaPath, JSON.stringify(schema));
     const result = await runLoadCheck(dir);
@@ -128,12 +132,15 @@ test("config: schema timeoutMs.maximum 2147483647 loads (mutation: >= instead of
 
 test("config: missing schema rejects getProviders, not the import (mutation: load the schema at module top level)", async () => {
   const { join } = await import("node:path");
+  const { unlink } = await import("node:fs/promises");
   const dir = await makeTempConfig();
   try {
-    await Bun.file(join(dir, "config", "providers", "schema.json")).remove();
+    await unlink(join(dir, "config", "providers", "schema.json"));
     const result = await runLoadCheck(dir);
     expect(result.code).toBe(1);
-    expect(result.output.trim()).toBe("Provider schema config/providers/schema.json: file is missing");
+    expect(result.output.trim()).toBe(
+      "Provider schema config/providers/schema.json: file is missing",
+    );
   } finally {
     removeTempConfig(dir);
   }

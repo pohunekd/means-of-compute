@@ -55,7 +55,9 @@ function idleHost(hostAlias: string): Record<string, unknown> {
   };
 }
 
-async function makeSandbox(weightsBody = '{"weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}'): Promise<{
+async function makeSandbox(
+  weightsBody = '{"weights": {"cpu": 0.4, "memory": 0.4, "gpu": 0.2}}',
+): Promise<{
   dir: string;
   run: (args: readonly string[]) => Promise<SpawnResult>;
 }> {
@@ -109,9 +111,7 @@ test("all hosts excluded: CLI exits 3 with a null decision (mutation: return the
 });
 
 test("weights summing to 0.9: CLI exits 2 (mutation: drop the sum check)", async () => {
-  const sandbox = await makeSandbox(
-    '{"weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}',
-  );
+  const sandbox = await makeSandbox('{"weights": {"cpu": 0.3, "memory": 0.3, "gpu": 0.3}}');
   try {
     const result = await sandbox.run([
       "--item",

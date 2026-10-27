@@ -29,7 +29,7 @@ export function place(
       schemaVersion: "v1",
       workItemId: item.id,
       chosenHostAlias: null,
-      reason: `no eligible host: ${candidates.length} of ${candidates.length} excluded`,
+      reason: `no eligible host: ${String(candidates.length)} of ${String(candidates.length)} excluded`,
       candidates,
     };
     assertValidDecision(decision);
@@ -55,7 +55,7 @@ export function place(
     chosenHostAlias: winner.candidate.hostAlias,
     reason:
       `${winner.candidate.hostAlias} is ${winner.candidate.reason}` +
-      ` inside its policy window, ${runningCount}/${winnerHost.policy.maxConcurrentAgents} agents running`,
+      ` inside its policy window, ${String(runningCount)}/${String(winnerHost.policy.maxConcurrentAgents)} agents running`,
     candidates,
   };
   assertValidDecision(decision);
@@ -78,7 +78,7 @@ function buildCandidate(
   weights: PlacementWeights,
 ): CandidateBuild {
   const loadRatio = host.cpu.load1m / host.cpu.cores;
-  if (host.idle === false) {
+  if (!host.idle) {
     return {
       loadRatio,
       candidate: {
@@ -89,7 +89,7 @@ function buildCandidate(
       },
     };
   }
-  if (host.policy.insideWindow === false) {
+  if (!host.policy.insideWindow) {
     return {
       loadRatio,
       candidate: {
@@ -107,7 +107,7 @@ function buildCandidate(
       candidate: {
         hostAlias: host.hostAlias,
         score: 0,
-        reason: `excluded: at agent limit (${runningCount}/${host.policy.maxConcurrentAgents})`,
+        reason: `excluded: at agent limit (${String(runningCount)}/${String(host.policy.maxConcurrentAgents)})`,
         excluded: true,
       },
     };
@@ -125,7 +125,7 @@ function buildCandidate(
     candidate: {
       hostAlias: host.hostAlias,
       score,
-      reason: `${powerText}, CPU ${cpuPercent}% free, memory ${memPercent}% free${gpuText}`,
+      reason: `${powerText}, CPU ${String(cpuPercent)}% free, memory ${String(memPercent)}% free${gpuText}`,
       excluded: false,
     },
   };

@@ -52,7 +52,9 @@ async function readJsonFile(label: string, path: string): Promise<unknown> {
 
 function readWorkItem(label: string, path: string, value: unknown): WorkItem {
   if (!isWorkItem(value)) {
-    throw new Error(`${label} ${path}: invalid work item at ${contractPointer("work-item", value)}`);
+    throw new Error(
+      `${label} ${path}: invalid work item at ${contractPointer("work-item", value)}`,
+    );
   }
   if (value.status !== "queued") {
     throw new Error(`${label} ${path}: work item status must be "queued", got "${value.status}"`);
@@ -73,11 +75,13 @@ function readHosts(label: string, path: string, value: unknown): HostCapacity[] 
     const entry: unknown = value[index];
     if (!isHostCapacity(entry)) {
       throw new Error(
-        `${label} ${path}: invalid host capacity at index ${index} (${contractPointer("host-capacity", entry)})`,
+        `${label} ${path}: invalid host capacity at index ${String(index)} (${contractPointer("host-capacity", entry)})`,
       );
     }
     if (seen.has(entry.hostAlias)) {
-      throw new Error(`${label} ${path}: duplicate hostAlias "${entry.hostAlias}" at index ${index}`);
+      throw new Error(
+        `${label} ${path}: duplicate hostAlias "${entry.hostAlias}" at index ${String(index)}`,
+      );
     }
     seen.add(entry.hostAlias);
     hosts.push(entry);
@@ -94,7 +98,7 @@ function readRunning(label: string, path: string, value: unknown): WorkItem[] {
     const entry: unknown = value[index];
     if (!isWorkItem(entry)) {
       throw new Error(
-        `${label} ${path}: invalid work item at index ${index} (${contractPointer("work-item", entry)})`,
+        `${label} ${path}: invalid work item at index ${String(index)} (${contractPointer("work-item", entry)})`,
       );
     }
     items.push(entry);

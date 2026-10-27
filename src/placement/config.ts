@@ -13,7 +13,9 @@ export interface PlacementWeights {
 const DEFAULT_CONFIG_PATH = "config/placement.json";
 const ALLOWED_KEYS = new Set(["cpu", "memory", "gpu"]);
 
-export async function loadPlacementWeights(path: string = DEFAULT_CONFIG_PATH): Promise<PlacementWeights> {
+export async function loadPlacementWeights(
+  path: string = DEFAULT_CONFIG_PATH,
+): Promise<PlacementWeights> {
   const label = "Placement config";
   if ((await statInputPath(label, path)) === "absent") {
     throw new Error(`${label} ${path}: file is missing`);
@@ -46,7 +48,7 @@ export async function loadPlacementWeights(path: string = DEFAULT_CONFIG_PATH): 
   };
   const sum = weights.cpu + weights.memory + weights.gpu;
   if (Math.abs(sum - 1) > 1e-9) {
-    throw new Error(`Placement config ${path}: weights must sum to 1, got ${sum}`);
+    throw new Error(`Placement config ${path}: weights must sum to 1, got ${String(sum)}`);
   }
   return weights;
 }
@@ -54,7 +56,9 @@ export async function loadPlacementWeights(path: string = DEFAULT_CONFIG_PATH): 
 function requiredWeight(record: Record<string, unknown>, field: string, path: string): number {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`Placement config ${path}: missing or invalid required field "weights.${field}"`);
+    throw new Error(
+      `Placement config ${path}: missing or invalid required field "weights.${field}"`,
+    );
   }
   return value;
 }

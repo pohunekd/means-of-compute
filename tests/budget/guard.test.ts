@@ -29,7 +29,6 @@ const PRICING = new Map([
 ]);
 
 const CONFIG: BudgetConfig = {
-  ledgerPath: "logs/usage-ledger.jsonl",
   statePath: "logs/budget-state.json",
   escalationLogPath: "logs/budget-escalations.log",
   dayCapNanoUsd: 12_000_000_000n,
@@ -807,7 +806,6 @@ async function makeCliSandbox(): Promise<CliSandbox> {
   await Bun.write(
     join(configDir, "budget.json"),
     JSON.stringify({
-      ledgerPath: join(dir, "ledger.jsonl"),
       statePath: join(dir, "state.json"),
       escalationLogPath: join(dir, "escalations.log"),
       dayCapUsd: 12,

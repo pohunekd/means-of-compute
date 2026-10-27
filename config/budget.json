@@ -1,5 +1,4 @@
 {
-  "ledgerPath": "logs/usage-ledger.jsonl",
   "statePath": "logs/budget-state.json",
   "escalationLogPath": "logs/budget-escalations.log",
   "dayCapUsd": 12,

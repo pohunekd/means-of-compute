@@ -30,7 +30,7 @@ test("gate config rejects unknown keys and bad values", async () => {
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toContain('only "command" and "timeoutMs" are allowed');
+    expect(message).toContain("only 'command' and 'timeoutMs' are allowed");
     await Bun.write(path, JSON.stringify({ command: [], timeoutMs: 30000 }));
     message = "";
     try {
@@ -38,7 +38,7 @@ test("gate config rejects unknown keys and bad values", async () => {
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toContain('"command"');
+    expect(message).toContain("'command'");
     await Bun.write(
       path,
       JSON.stringify({ command: ["bun", "run", "budget:check"], timeoutMs: 0 }),
@@ -49,7 +49,7 @@ test("gate config rejects unknown keys and bad values", async () => {
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toContain('"timeoutMs"');
+    expect(message).toContain("'timeoutMs'");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

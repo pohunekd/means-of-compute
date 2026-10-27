@@ -41,25 +41,29 @@ test("atomic write to a directory exits 2 with no tmp files left", async () => {
 
 test("atomic write failure after the temp write removes the temp file", async () => {
   const dir = mkdtempSync(join(tmpdir(), "fs-write-"));
-  const failingRename = (): Promise<void> => {
-    throw Object.assign(new Error("mocked rename failure"), { code: "MOCKRENAME" });
+  const failingPath = join(dir, "state.json");
+  const originalRename = fsPromises.rename;
+  const failingRename = (from: string, to: string): Promise<void> => {
+    if (to === failingPath) {
+      throw Object.assign(new Error("mocked rename failure"), { code: "MOCKRENAME" });
+    }
+    return originalRename(from, to);
   };
   void mock.module("node:fs/promises", () => ({
     ...fsPromises,
-    rename: (): Promise<void> => failingRename(),
+    rename: (from: string, to: string): Promise<void> => failingRename(from, to),
   }));
   try {
-    const path = join(dir, "ledger.jsonl");
     const specifier = "../../src/fs/write.js?rename-fail";
     const mocked = (await import(specifier)) as { writeFileAtomic: typeof writeFileAtomic };
     let message = "";
     try {
-      await mocked.writeFileAtomic("Test state", path, "new\n");
+      await mocked.writeFileAtomic("Test state", failingPath, "new\n");
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
     expect(message).toContain("MOCKRENAME");
-    expect(await Bun.file(path).exists()).toBe(false);
+    expect(await Bun.file(failingPath).exists()).toBe(false);
     expect(tmpNames(dir)).toEqual([]);
   } finally {
     mock.restore();

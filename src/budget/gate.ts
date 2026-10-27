@@ -83,10 +83,6 @@ const REFUSED_PATTERN = /^refused: (.+?) \(today /m;
 export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
   return {
     async admit(): Promise<Admission> {
-      const exit: { code: number | null; signal: NodeJS.Signals | number | null } = {
-        code: null,
-        signal: null,
-      };
       const proc = Bun.spawn([...options.command], {
         cwd: options.cwd,
         stdout: "pipe",
@@ -94,32 +90,27 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
         stdin: "ignore",
         timeout: options.timeoutMs,
         killSignal: "SIGKILL",
-        onExit(_child, code, signal): void {
-          exit.code = code;
-          exit.signal = signal;
-        },
       });
-      const [stdout, stderr] = await Promise.all([
+      const [stdout, stderr, code] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
+        proc.exited,
       ]);
-      await proc.exited;
+      const signal = proc.signalCode;
       const commandText = JSON.stringify(options.command);
-      const exitCode: number | null = exit.code;
-      const exitSignal: NodeJS.Signals | number | null = exit.signal;
-      if (exitCode === null) {
+      if (signal !== null) {
         const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
         throw new BudgetGateError(
-          `budget gate command ${commandText} exited without a code (signal ${String(exitSignal)}): ${snippet}`,
+          `budget gate command ${commandText} killed by signal ${String(signal)}: ${snippet}`,
         );
       }
-      if (exitCode === 0 && ADMITTED_PATTERN.test(stdout)) {
+      if (code === 0 && ADMITTED_PATTERN.test(stdout)) {
         const line = findLine(stdout, /^admitted: /);
         if (line !== undefined) {
           return { admit: true, line };
         }
       }
-      if (exitCode === 3) {
+      if (code === 3) {
         const reason = REFUSED_PATTERN.exec(stdout)?.[1];
         const line = findLine(stdout, /^refused: /);
         if (reason !== undefined && line !== undefined) {
@@ -128,7 +119,7 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
       }
       const snippet = stderr.slice(0, MAX_STDERR_SNIPPET);
       throw new BudgetGateError(
-        `budget gate command ${commandText} failed with rc ${String(exitCode)}: ${snippet}`,
+        `budget gate command ${commandText} failed with rc ${String(code)}: ${snippet}`,
       );
     },
   };

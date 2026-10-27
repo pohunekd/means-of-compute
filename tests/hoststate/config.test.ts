@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadHostStateConfig } from "../../src/hoststate/config.js";
@@ -37,6 +37,15 @@ async function writeDoc(doc: unknown): Promise<string> {
   const path = join(dir, "host-state.json");
   await Bun.write(path, JSON.stringify(doc));
   return path;
+}
+
+async function writeProbe(overrides: Record<string, unknown>): Promise<string> {
+  const base = JSON.parse(readFileSync(repoProbePath, "utf-8")) as Record<string, unknown>;
+  const merged = { ...base, ...overrides };
+  const dir = mkdtempSync(join(tmpdir(), "hoststate-config-"));
+  tempDirs.push(dir);
+  await Bun.write(join(dir, "probe.json"), JSON.stringify(merged));
+  return dir;
 }
 
 async function mutatePackage(mutate: (pkg: Record<string, unknown>) => void): Promise<string> {
@@ -250,9 +259,15 @@ describe("host-state collector config", () => {
   });
 
   test("pluginTimeoutMs below range throws", async () => {
-    const path = await mutateCollector((collector) => {
-      collector["pluginTimeoutMs"] = 500;
-    });
+    const dir = await writeProbe({ localModelsTimeoutMs: 100 });
+    const path = join(dir, "host-state.json");
+    await Bun.write(
+      path,
+      JSON.stringify({
+        package: validPackage,
+        collector: { ...validCollector, pluginTimeoutMs: 500 },
+      }),
+    );
     expect(() => loadHostStateConfig(path)).toThrow(
       "config host-state.json: invalid collector.pluginTimeoutMs",
     );

@@ -279,6 +279,27 @@ describe("dashboard http (mutation: Host allowlist removed or checked after rout
     await response.text();
   });
 
+  test("unparseable URL gives 421 and logs (unparsed) (mutation: fixed / fallback path)", async () => {
+    const logged: DashboardLogEvent[] = [];
+    const { port } = await startTestServer(logged);
+    const { connect } = await import("node:net");
+    const raw = await new Promise<string>((resolve, reject) => {
+      const client = connect(port, "127.0.0.1", () => {
+        client.write("GET /p?q=1 HTTP/1.1\r\nHost: a b\r\nConnection: close\r\n\r\n");
+      });
+      let data = "";
+      client.on("data", (chunk) => {
+        data += chunk.toString();
+      });
+      client.on("close", () => {
+        resolve(data);
+      });
+      client.on("error", reject);
+    });
+    expect(raw).toContain("421");
+    expect(logged.find((event) => event.event === "request")?.path).toBe("(unparsed)");
+  });
+
   test("421 request log records the real pathname (mutation: fixed / path)", async () => {
     const logged: DashboardLogEvent[] = [];
     const { port } = await startTestServer(logged);

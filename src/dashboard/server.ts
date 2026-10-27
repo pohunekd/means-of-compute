@@ -123,7 +123,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           try {
             pathname = new URL(req.url).pathname;
           } catch {
-            pathname = "/";
+            // An unparseable URL must not log a real-looking path the
+            // request never had (mutation: fixed / fallback path).
+            pathname = "(unparsed)";
           }
           return respond(textResponse(421, "misdirected request\n"), pathname);
         }

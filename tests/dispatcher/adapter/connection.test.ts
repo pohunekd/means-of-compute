@@ -129,6 +129,7 @@ test("the in-flight client is closed when close wins the race", async () => {
       caught = error;
     }
     expect(caught).toBeInstanceOf(PortRejectedError);
+    expect((caught as PortRejectedError).code).toBe("connector-closed");
     expect(closedCount).toBe(1);
   });
 });

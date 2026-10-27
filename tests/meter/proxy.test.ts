@@ -666,14 +666,20 @@ test("caller disconnect still records usage with clientGone", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(resp.status).toBe(200);
-      // Nobody pulls the caller stream at all: no locked reader means
-      // the pump is the only reader, so cancel() reaches it and the
-      // usage frame arrives after the release to bill the call.
+      // F9: read the first chunk (which proves the tap saw the content
+      // frame), cancel the reader, release, then await call-finished.
+      const reader = resp.body?.getReader();
+      if (reader === undefined) {
+        throw new Error("no body");
+      }
+      const first = await reader.read();
+      expect(first.done).toBe(false);
       await loopback.waitHeld(1);
-      await resp.body?.cancel();
-      // Let the transport deliver the cancellation to the pump before
-      // the release: the loop turns are IO yields, not timers, so the
-      // no-wall-clock rule still holds.
+      await reader.cancel();
+      // Let the transport deliver the cancellation to the pump's strand
+      // before the release: these are event-loop yields, not timers, so
+      // the no-wall-clock rule still holds. Without them the usage frame
+      // can win the race and clientGone stays false.
       for (let i = 0; i < 5; i += 1) {
         await new Promise<void>((resolve) => {
           setImmediate(resolve);

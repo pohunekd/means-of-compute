@@ -1,0 +1,4 @@
+{
+  "command": ["bun", "src/budget/check.ts"],
+  "timeoutMs": 30000
+}

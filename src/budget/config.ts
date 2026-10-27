@@ -4,7 +4,6 @@
 import { readInputText, statInputPath } from "../fs/input.js";
 import { priceToNanoUsd } from "./money.js";
 export interface BudgetConfig {
-  readonly ledgerPath: string;
   readonly statePath: string;
   readonly escalationLogPath: string;
   readonly dayCapNanoUsd: bigint;
@@ -56,7 +55,6 @@ export async function loadBudgetConfig(path: string = DEFAULT_CONFIG_PATH): Prom
   }
   const record = raw as Record<string, unknown>;
   return {
-    ledgerPath: requiredString(record, "ledgerPath", path),
     statePath: requiredString(record, "statePath", path),
     escalationLogPath: requiredString(record, "escalationLogPath", path),
     dayCapNanoUsd: requiredCap(record, "dayCapUsd", path),

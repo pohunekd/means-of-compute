@@ -10,7 +10,7 @@
 import { loadBudgetConfig } from "./config.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { TOKENS_PER_1M } from "./cost.js";
-import { readUsageLedger } from "./ledger.js";
+import { loadLedgerConfig, readLedger, spendEntriesOf } from "../ledger/read.js";
 import { decimalToNanoUsd } from "./money.js";
 import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
@@ -181,14 +181,16 @@ async function run(): Promise<number> {
         { route },
       );
     } else {
-      const records = await readUsageLedger(config.ledgerPath);
-      const ledgerIds = records.flatMap((record) => record.tokens.map((entry) => entry.provider));
+      const { ledgerPath } = await loadLedgerConfig();
+      const contents = await readLedger("Budget ledger", ledgerPath);
+      const entries = spendEntriesOf(contents);
+      const ledgerIds = entries.flatMap((entry) => entry.tokens.map((token) => token.provider));
       const pricing = await loadPricingForIds("config/providers", [
         ...route,
         config.nvidiaProviderId,
         ...ledgerIds,
       ]);
-      const summary = summarizeSpend(records, pricing, config.nvidiaProviderId, clock.now);
+      const summary = summarizeSpend(entries, pricing, config.nvidiaProviderId, clock.now);
       decision = decideAdmission(summary, config, { route });
     }
   } catch (error: unknown) {

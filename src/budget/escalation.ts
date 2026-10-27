@@ -7,8 +7,9 @@
 // set grows by at most a few keys a day. Each escalation appends one JSON
 // line to the escalation log and prints one line on stderr for the
 // coordinator's daily digest channel.
-import { access, appendFile, constants } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { requireWritableTarget } from "../fs/write.js";
 import { utcCalendarDay } from "./cost.js";
 import { readInputText, requireInputDir, statInputPath } from "../fs/input.js";
 import type { BudgetDecision } from "./decision.js";
@@ -118,18 +119,7 @@ export async function maybeEscalate(
   // Writability is checked before the log line is appended: a successful
   // log write followed by a failed state write would break "exactly one
   // escalation" by adding one line per run.
-  const writableTarget =
-    (await statInputPath("Budget escalation state", options.statePath)) === "absent"
-      ? dirname(options.statePath)
-      : options.statePath;
-  try {
-    await access(writableTarget, constants.W_OK);
-  } catch (error: unknown) {
-    throw new Error(
-      `Budget escalation state ${writableTarget}: not writable (${String((error as NodeJS.ErrnoException).code)})`,
-      { cause: error },
-    );
-  }
+  await requireWritableTarget("Budget escalation state", options.statePath);
   await appendFile(options.escalationLogPath, `${JSON.stringify(entry)}\n`);
   await writeState(options.statePath, { escalated: [...state.escalated, key] });
   if (options.stderr !== undefined) {

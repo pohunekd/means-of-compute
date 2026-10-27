@@ -8,7 +8,7 @@ import { chmod, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
-import { readUsageLedger } from "../../src/budget/ledger.js";
+import { readLedger } from "../../src/ledger/read.js";
 import { costOfRecord, summarizeSpend } from "../../src/budget/cost.js";
 import type { BudgetDecision } from "../../src/budget/decision.js";
 import { decideAdmission } from "../../src/budget/decision.js";
@@ -29,7 +29,6 @@ const PRICING = new Map([
 ]);
 
 const CONFIG: BudgetConfig = {
-  ledgerPath: "logs/usage-ledger.jsonl",
   statePath: "logs/budget-state.json",
   escalationLogPath: "logs/budget-escalations.log",
   dayCapNanoUsd: 12_000_000_000n,
@@ -325,8 +324,8 @@ test("NVIDIA daily request limit refuses only NVIDIA-led routes", () => {
 test("ledger: missing file means zero spend", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
   try {
-    const records = await readUsageLedger(join(dir, "no-such-ledger.jsonl"));
-    expect(records).toEqual([]);
+    const contents = await readLedger("Budget ledger", join(dir, "no-such-ledger.jsonl"));
+    expect(contents).toEqual({ records: [], pending: [] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -335,7 +334,7 @@ test("ledger: missing file means zero spend", async () => {
 async function expectLedgerError(path: string, fragment: string): Promise<void> {
   let message = "";
   try {
-    await readUsageLedger(path);
+    await readLedger("Budget ledger", path);
   } catch (error: unknown) {
     message = error instanceof Error ? error.message : String(error);
   }
@@ -399,7 +398,7 @@ test("ledger: invalid line names the line number", async () => {
     );
     let message = "";
     try {
-      await readUsageLedger(path);
+      await readLedger("Budget ledger", path);
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
@@ -814,7 +813,6 @@ async function makeCliSandbox(): Promise<CliSandbox> {
   await Bun.write(
     join(configDir, "budget.json"),
     JSON.stringify({
-      ledgerPath: join(dir, "ledger.jsonl"),
       statePath: join(dir, "state.json"),
       escalationLogPath: join(dir, "escalations.log"),
       dayCapUsd: 12,
@@ -822,6 +820,10 @@ async function makeCliSandbox(): Promise<CliSandbox> {
       nvidiaDailyRequestLimit: 1000,
       nvidiaProviderId: "nvidia-build",
     }),
+  );
+  await Bun.write(
+    join(configDir, "ledger.json"),
+    JSON.stringify({ ledgerPath: join(dir, "ledger.jsonl") }),
   );
   for (const name of [
     "meta-api.json",
@@ -1016,6 +1018,84 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
       .trim()
       .split("\n");
     expect(logAgain).toHaveLength(1);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: pending meta-api spend counts toward the daily cap", async () => {
+  const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
+  try {
+    const pendingLine = JSON.stringify({
+      pending: {
+        entryId: "e1-pending",
+        kind: "session",
+        workItemId: "w1-pending",
+        finishedAt: `${day}T12:00:00.000Z`,
+        startModel: "muse-spark-1.3-contributor",
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 40_000_000,
+            outputTokens: 40_000_000,
+            requests: 20,
+            source: "provider-usage",
+          },
+        ],
+        session: {
+          hostAlias: "desktop",
+          seconds: 540,
+          source: "dispatcher-clock",
+          result: "success",
+        },
+      },
+    });
+    await Bun.write(join(sandbox.dir, "ledger.jsonl"), `${pendingLine}\n`);
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00.000Z` };
+    const result = await sandbox.run([], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: daily cap reached");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: pending nvidia null requests refuses as spend unknown", async () => {
+  const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
+  try {
+    const pendingLine = JSON.stringify({
+      pending: {
+        entryId: "e1-unknown",
+        kind: "session",
+        workItemId: "w1-unknown",
+        finishedAt: `${day}T12:00:00.000Z`,
+        startModel: "meta/muse-glimmer-30b",
+        tokens: [
+          {
+            provider: "nvidia-build",
+            model: "meta/muse-glimmer-30b",
+            inputTokens: 10,
+            outputTokens: 10,
+            requests: null,
+            source: "dispatcher-usage",
+          },
+        ],
+        session: {
+          hostAlias: "desktop",
+          seconds: 60,
+          source: "dispatcher-clock",
+          result: "success",
+        },
+      },
+    });
+    await Bun.write(join(sandbox.dir, "ledger.jsonl"), `${pendingLine}\n`);
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00.000Z` };
+    const result = await sandbox.run([], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: spend unknown");
   } finally {
     rmSync(sandbox.dir, { recursive: true, force: true });
   }

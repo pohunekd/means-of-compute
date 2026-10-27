@@ -14,7 +14,7 @@ export interface ProviderDescriptor {
   baseUrl: string;
   model: string;
   apiKeyEnv?: string;
-  timeoutMs?: number;
+  readonly timeoutMs: number;
   pricing?: ProviderPricing;
   rateLimit?: ProviderRateLimit;
 }

@@ -32,7 +32,7 @@ async function callProvider(provider: ProviderDescriptor, request: ModelRequest)
     headers["Authorization"] = `Bearer ${key}`;
   }
   const controller = new AbortController();
-  const timeoutMs = provider.timeoutMs ?? 30000;
+  const timeoutMs = provider.timeoutMs;
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeoutMs);

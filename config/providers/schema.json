@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Provider descriptor",
   "type": "object",
-  "required": ["id", "name", "baseUrl", "model", "pricing"],
+  "required": ["id", "name", "baseUrl", "model", "timeoutMs", "pricing"],
   "additionalProperties": false,
   "properties": {
     "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },

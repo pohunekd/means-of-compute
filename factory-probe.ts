@@ -607,14 +607,14 @@ function deriveIdle(
   if (!insideWindow) {
     return { idle: false, reason: "outside the policy window" };
   }
+  if (!acPower) {
+    return { idle: false, reason: "not on AC power" };
+  }
   if (!batteryOk) {
     return {
       idle: false,
       reason: `battery at ${String(batteryPercent)} percent, at or below the ${String(batteryThreshold)} percent floor`,
     };
-  }
-  if (!acPower) {
-    return { idle: false, reason: "not on AC power" };
   }
   if (loggedOut) {
     return { idle: true, reason: "no user logged in, on AC power" };

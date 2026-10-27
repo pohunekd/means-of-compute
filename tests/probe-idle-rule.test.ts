@@ -118,4 +118,17 @@ describe.skipIf(process.platform !== "linux")("final idle rule", () => {
     expect(doc.idle).toBe(false);
     expect(doc.idleReason).toBe("outside the policy window");
   });
+
+  test("off AC with a low battery names AC power first", async () => {
+    const doc = await idleOf({
+      ...baseFacts,
+      secondsSinceInput: 3600,
+      acPower: false,
+      batteryPercent: 30,
+      policyAllowedWindowStart: "00:00",
+      policyAllowedWindowEnd: "00:00",
+    });
+    expect(doc.idle).toBe(false);
+    expect(doc.idleReason).toBe("not on AC power");
+  });
 });

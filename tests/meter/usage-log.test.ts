@@ -211,10 +211,9 @@ test("write-ahead: the fsync precedes the in-memory apply in source order", asyn
   // The order is structural, so assert it structurally: every handle.write
   // in the appender is followed by a datasync before the next applyRecord.
   const source = await Bun.file("src/meter/usage-log.ts").text();
-  const writes = [...source.matchAll(/await handle\.write\([^;]+;/g)];
-  expect(writes.length).toBe(2);
-  for (const write of writes) {
-    const rest = source.slice((write.index ?? 0) + write[0].length);
+  const writes = source.split("await handle.write(");
+  expect(writes.length).toBe(3);
+  for (const rest of writes.slice(1)) {
     const syncAt = rest.indexOf("await handle.datasync();");
     const applyAt = rest.indexOf("applyRecord(mutable, record, path, 0);");
     expect(syncAt).toBeGreaterThanOrEqual(0);

@@ -28,6 +28,7 @@ interface RunResult {
   readonly verdictDir: string;
   readonly ledgerPath: string;
   readonly cleanup: () => void;
+  readonly requestCount: () => number;
 }
 
 async function runCase(
@@ -46,6 +47,14 @@ async function runCase(
     process.env[key] = value;
   }
   resetProvidersCache();
+  let requests = 0;
+  const counting = async (
+    providerId: string,
+    request: Parameters<typeof callProviderOnce>[1],
+  ): Promise<Awaited<ReturnType<typeof callProviderOnce>>> => {
+    requests += 1;
+    return callProviderOnce(providerId, request);
+  };
   const server = await startLoopback(recording);
   process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
@@ -77,11 +86,11 @@ async function runCase(
         timeoutMs: 30000,
         cwd: process.cwd(),
       }),
-      call: callProviderOnce,
+      call: counting,
       ledgerPath,
       now: () => new Date("2026-10-27T10:00:00.000Z"),
     });
-    return { outcome, verdictDir, ledgerPath, cleanup: stop };
+    return { outcome, verdictDir, ledgerPath, cleanup: stop, requestCount: () => requests };
   } catch (error: unknown) {
     stop();
     throw error;
@@ -237,6 +246,198 @@ test("bad location exits 4 with no verdict (mutation: drop the invalid finding)"
     expect(await readdir(join(verdictDir, "w9-demo")).catch(() => [] as string[])).toEqual([]);
   } finally {
     void server.stop();
+    delete process.env.PROVIDER_META_API_BASE_URL;
+    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    delete process.env.PROVIDER_WONDER_BASE_URL;
+    resetProvidersCache();
+    removeTempRepo(repo.dir);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("200 with null content exits 4 and keeps the billed tokens (mutation: append only on success)", async () => {
+  const repo = await makeTempRepo();
+  const workdir = mkdtempSync(join(tmpdir(), "auditor-nullcontent-"));
+  const verdictDir = join(workdir, "verdicts");
+  await mkdir(verdictDir, { recursive: true });
+  const ledgerPath = join(workdir, "ledger.jsonl");
+  await Bun.write(ledgerPath, "");
+  for (const [key, value] of Object.entries(AUDITOR_ENV)) {
+    process.env[key] = value;
+  }
+  resetProvidersCache();
+  let requests = 0;
+  const counting: typeof callProviderOnce = async (providerId, request) => {
+    requests += 1;
+    return callProviderOnce(providerId, request);
+  };
+  const server = await startLoopback("tests/auditor/recordings/null-content.json");
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  process.env.PROVIDER_WONDER_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  try {
+    const config = await loadAuditorConfig();
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item: demoItem("demo-good") as unknown as AuditInput["item"],
+          repoDir: repo.dir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir },
+          git: createReadOnlyGit(repo.dir),
+          budget: createCliBudgetGate({
+            command: ["bun", "src/budget/check.ts"],
+            timeoutMs: 30000,
+            cwd: process.cwd(),
+          }),
+          call: counting,
+          ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(4);
+    expect(requests).toBe(1);
+    const ledger = await Bun.file(ledgerPath).text();
+    expect(ledger).toContain('"kind":"audit"');
+    expect(ledger).toContain('"inputTokens":140');
+    expect(ledger).toContain('"outputTokens":3');
+    expect(ledger).toContain('"requests":1');
+  } finally {
+    void server.stop();
+    delete process.env.PROVIDER_META_API_BASE_URL;
+    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    delete process.env.PROVIDER_WONDER_BASE_URL;
+    resetProvidersCache();
+    removeTempRepo(repo.dir);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("200 with a non-JSON body exits 4 with null tokens and requests 1", async () => {
+  const repo = await makeTempRepo();
+  const workdir = mkdtempSync(join(tmpdir(), "auditor-nonjson-"));
+  const verdictDir = join(workdir, "verdicts");
+  await mkdir(verdictDir, { recursive: true });
+  const ledgerPath = join(workdir, "ledger.jsonl");
+  await Bun.write(ledgerPath, "");
+  for (const [key, value] of Object.entries(AUDITOR_ENV)) {
+    process.env[key] = value;
+  }
+  resetProvidersCache();
+  let requests = 0;
+  const counting: typeof callProviderOnce = async (providerId, request) => {
+    requests += 1;
+    return callProviderOnce(providerId, request);
+  };
+  const server = await startLoopback("tests/auditor/recordings/non-json.json");
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  process.env.PROVIDER_WONDER_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+  try {
+    const config = await loadAuditorConfig();
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item: demoItem("demo-good") as unknown as AuditInput["item"],
+          repoDir: repo.dir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir },
+          git: createReadOnlyGit(repo.dir),
+          budget: createCliBudgetGate({
+            command: ["bun", "src/budget/check.ts"],
+            timeoutMs: 30000,
+            cwd: process.cwd(),
+          }),
+          call: counting,
+          ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(4);
+    expect(requests).toBe(1);
+    const ledger = await Bun.file(ledgerPath).text();
+    expect(ledger).toContain('"kind":"audit"');
+    expect(ledger).toContain('"inputTokens":null');
+    expect(ledger).toContain('"outputTokens":null');
+    expect(ledger).toContain('"requests":1');
+  } finally {
+    void server.stop();
+    delete process.env.PROVIDER_META_API_BASE_URL;
+    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    delete process.env.PROVIDER_WONDER_BASE_URL;
+    resetProvidersCache();
+    removeTempRepo(repo.dir);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("closed connection exits 4 with no ledger entry", async () => {
+  const repo = await makeTempRepo();
+  const workdir = mkdtempSync(join(tmpdir(), "auditor-closed-"));
+  const verdictDir = join(workdir, "verdicts");
+  await mkdir(verdictDir, { recursive: true });
+  const ledgerPath = join(workdir, "ledger.jsonl");
+  await Bun.write(ledgerPath, "");
+  for (const [key, value] of Object.entries(AUDITOR_ENV)) {
+    process.env[key] = value;
+  }
+  resetProvidersCache();
+  // No loopback server listens here: the connection is refused before
+  // any response, so nothing was billed and nothing is recorded.
+  process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:9";
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:9";
+  process.env.PROVIDER_WONDER_BASE_URL = "http://127.0.0.1:9";
+  try {
+    const config = await loadAuditorConfig();
+    let code = 0;
+    try {
+      await runAudit(
+        {
+          item: demoItem("demo-good") as unknown as AuditInput["item"],
+          repoDir: repo.dir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: 99,
+          authorModels: ["meta/muse-glimmer-30b"],
+        },
+        {
+          config: { ...config, verdictDir },
+          git: createReadOnlyGit(repo.dir),
+          budget: createCliBudgetGate({
+            command: ["bun", "src/budget/check.ts"],
+            timeoutMs: 30000,
+            cwd: process.cwd(),
+          }),
+          call: callProviderOnce,
+          ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (error: unknown) {
+      code = auditExitCode(error);
+    }
+    expect(code).toBe(4);
+    const ledger = await Bun.file(ledgerPath).text();
+    expect(ledger).toBe("");
+  } finally {
     delete process.env.PROVIDER_META_API_BASE_URL;
     delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
     delete process.env.PROVIDER_WONDER_BASE_URL;

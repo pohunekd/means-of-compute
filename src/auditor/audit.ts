@@ -16,7 +16,7 @@ import { AuditModelError, parseReply } from "./reply.js";
 import { buildPrompt } from "./prompt.js";
 import { NoEligibleAuditorError, selectAuditor } from "./select.js";
 import { readVerdicts, VerdictConflictError, writeVerdict } from "./store.js";
-import { ProviderError } from "../providers/router.js";
+import { ProviderCallError, ProviderError } from "../providers/router.js";
 import { BudgetGateError } from "../budget/gate.js";
 
 export type AuditOutcome =
@@ -52,6 +52,47 @@ function toExitCode(error: unknown): 2 | 3 | 4 {
     return 2;
   }
   return 2;
+}
+
+interface AuditorUsage {
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
+// One ledger entry per provider call that may be billed, on success
+// and on failure alike. An append failure is exit 2, never a verdict.
+async function recordAuditUsage(
+  ledgerPath: string,
+  workItemId: string,
+  auditor: { providerId: string; model: string },
+  usage: AuditorUsage | null,
+  now: () => Date,
+): Promise<void> {
+  try {
+    await appendPending(ledgerPath, {
+      entryId: `${workItemId}:audit:${randomUUID()}`,
+      kind: "audit",
+      workItemId,
+      finishedAt: now().toISOString(),
+      startModel: auditor.model,
+      tokens: [
+        {
+          provider: auditor.providerId,
+          model: auditor.model,
+          inputTokens: usage?.inputTokens ?? null,
+          outputTokens: usage?.outputTokens ?? null,
+          requests: 1,
+          source: AUDITOR_USAGE_SOURCE,
+        },
+      ],
+      session: null,
+    });
+  } catch (error: unknown) {
+    throw new Error(
+      `audit: cannot record usage: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
@@ -136,6 +177,14 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
   try {
     call = await deps.call(auditor.providerId, buildPrompt(input.item, files, diff, deps.config));
   } catch (error: unknown) {
+    // A call that reached the provider may be billed even though it
+    // failed, so it reaches the ledger before the error maps to 4.
+    if (
+      error instanceof ProviderCallError &&
+      error.reachedProvider
+    ) {
+      await recordAuditUsage(deps.ledgerPath, input.item.id, auditor, error.usage, deps.now);
+    }
     if (
       error instanceof ProviderError ||
       (error instanceof Error && (error.name === "AbortError" || error instanceof TypeError))
@@ -148,31 +197,13 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     throw error;
   }
 
-  try {
-    await appendPending(deps.ledgerPath, {
-      entryId: `${input.item.id}:audit:${randomUUID()}`,
-      kind: "audit",
-      workItemId: input.item.id,
-      finishedAt: deps.now().toISOString(),
-      startModel: auditor.model,
-      tokens: [
-        {
-          provider: auditor.providerId,
-          model: auditor.model,
-          inputTokens: call.inputTokens,
-          outputTokens: call.outputTokens,
-          requests: 1,
-          source: AUDITOR_USAGE_SOURCE,
-        },
-      ],
-      session: null,
-    });
-  } catch (error: unknown) {
-    throw new Error(
-      `audit: cannot record usage: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
+  await recordAuditUsage(
+    deps.ledgerPath,
+    input.item.id,
+    auditor,
+    { inputTokens: call.inputTokens, outputTokens: call.outputTokens },
+    deps.now,
+  );
 
   let findings: readonly AuditFinding[];
   try {

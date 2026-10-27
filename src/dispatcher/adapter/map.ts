@@ -1,5 +1,4 @@
-// Pure adapter decisions, part 1 (design sections 3.1 and 3.2): the
-// metadata binding, the request digest and the session.new parameters.
+// Pure adapter decisions of design sections 3.1, 3.2, 3.3 and 3.6.
 import { createHash } from "node:crypto";
 import { ClientError } from "@pohunek/sdk";
 import type {
@@ -172,7 +171,7 @@ export function acceptanceFailure(req: StartRequest, r: SessionNewResult): strin
   return null;
 }
 
-export const WAIT_DETAILS = {
+const WAIT_DETAILS = {
   exited: (code: number | undefined): string =>
     code === undefined ? "exited none" : `exited ${String(code)}`,
   sessionFailed: "session failed",
@@ -193,7 +192,7 @@ export type WaitTerminal = {
 };
 export type WaitDecision = WaitRunning | WaitTerminal;
 
-const TERMINAL_DETAILS = new Set([
+const TERMINAL_DETAILS: ReadonlySet<string> = new Set([
   "exited 0",
   "session failed",
   "session stopped",
@@ -202,8 +201,17 @@ const TERMINAL_DETAILS = new Set([
   "approval_required",
   "idle after turn",
   "agent blocked",
+  "runtime lost",
+  "runtime conflict",
+  "runtime incompatible",
   "session missing",
 ]);
+
+const EXITED_DETAIL_PATTERN = /^exited (?:none|-?[1-9][0-9]*)$/;
+
+function isStoredTerminalDetail(detail: string): boolean {
+  return TERMINAL_DETAILS.has(detail) || EXITED_DETAIL_PATTERN.test(detail);
+}
 
 function exitedDetail(code: number | undefined): string {
   if (code === 0) {
@@ -222,7 +230,7 @@ export function waitDecision(
   if (
     (outcome === "finished" || outcome === "failed" || outcome === "lost") &&
     typeof outcomeDetail === "string" &&
-    TERMINAL_DETAILS.has(outcomeDetail)
+    isStoredTerminalDetail(outcomeDetail)
   ) {
     const live = info.state === "starting" || info.state === "running";
     return { kind: "terminal", state: outcome, detail: outcomeDetail, mark: false, stop: live };
@@ -318,7 +326,7 @@ export function waitDecision(
 
 const KEBAB_PATTERN = /^[a-z0-9]+(_[a-z0-9]+)*$/;
 
-export function kebabCode(code: string): string {
+function kebabCode(code: string): string {
   if (KEBAB_PATTERN.test(code)) {
     return code.replaceAll("_", "-");
   }

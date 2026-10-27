@@ -10,8 +10,8 @@ import { loadProviderRoute } from "../../src/providers/route.js";
 const KNOWN = new Set(["nvidia-build", "meta-api"]);
 const PATH = "route.json";
 
-async function isKnownId(id: string): Promise<boolean> {
-  return KNOWN.has(id);
+function isKnownId(id: string): Promise<boolean> {
+  return Promise.resolve(KNOWN.has(id));
 }
 
 async function writeCase(dir: string, contents: string | null): Promise<string> {

@@ -713,8 +713,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
         label: "Frontier-token baseline",
         cell: noDataCell(`token counts not reported for ${nullIds.join(", ")}`),
         source:
-          `ledger records tokens (input ${groupDigits(records.reduce((sum, record) => sum + record.tokens.reduce((inner, token) => inner + (token.inputTokens ?? 0), 0), 0))}, ` +
-          `output ${groupDigits(records.reduce((sum, record) => sum + record.tokens.reduce((inner, token) => inner + (token.outputTokens ?? 0), 0), 0))}); ` +
+          `ledger records tokens; ` +
           `config/dashboard.json baselines.frontierTokens input $${priceText(frontier.inputNanoPer1M)} per 1M, ` +
           `output $${priceText(frontier.outputNanoPer1M)} per 1M (${frontier.label}; ${frontier.source}; as of ${frontier.asOf})`,
       });

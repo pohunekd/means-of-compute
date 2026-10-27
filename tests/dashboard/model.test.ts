@@ -649,6 +649,25 @@ describe("dashboard unknown spend 10.2 (mutation: ?? 0 on null tokens; summary r
   });
 });
 
+describe("dashboard unknown token counts (mutation: ?? 0 on the no-data path)", () => {
+  test("ledger-unknown baseline shows no digit total in figure or source", async () => {
+    const model = buildDashboard(await loadInputs(UNKNOWN, VERDICTS, { ...PRICED_BASELINES }));
+    const savings = model.panels[3] as (typeof model.panels)[number];
+    const baseline = figureOf(savings, "Frontier-token baseline");
+    expect(baseline.cell).toEqual({
+      kind: "no-data",
+      reason: "token counts not reported for d1-alpha",
+    });
+    expect(baseline.source).not.toMatch(/input \d/);
+    expect(baseline.source).not.toMatch(/output \d/);
+    const actual = figureOf(savings, "Actual token cost");
+    expect(actual.cell).toEqual({
+      kind: "no-data",
+      reason: "token counts not reported for d1-alpha",
+    });
+  });
+});
+
 describe("dashboard failures (mutation: message text in the page, or missing log path)", () => {
   test("ledger-invalid page carries the code only, never the message", async () => {
     const model = buildDashboard(await loadInputs(INVALID));

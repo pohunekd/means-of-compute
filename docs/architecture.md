@@ -83,7 +83,9 @@ the `Authorization` header; the proxy verifies it before anything else,
 checks the caller address against the host map, confirms the grant is bound
 to the session and not past its TTL, and only then forwards the call with
 the key taken from the configured environment variable. Provider keys never
-appear in the usage log, the factory log, or error responses.
+appear in the usage log, the factory log, or error responses. See
+[meter.md](meter.md) for the proxy, the config keys, the env vars, the
+usage-log format, and the operator secret command.
 
 Before forwarding, the proxy overwrites the request body with the grant's
 provider, model, and (for streams) `stream_options.include_usage`, and

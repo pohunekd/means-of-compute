@@ -2,7 +2,7 @@
   "$id": "https://pohunekd.github.io/means-of-compute/dispatcher/registry.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "DispatcherRegistry",
-  "description": "Durable dispatcher session registry: one entry per started session.",
+  "description": "Durable dispatcher session registry: one entry per start request.",
   "type": "object",
   "additionalProperties": false,
   "required": ["sessions"],
@@ -121,28 +121,33 @@
       "required": [
         "requestId",
         "workItemId",
-        "sessionId",
+        "repo",
         "hostAlias",
         "branch",
+        "baseRef",
+        "resume",
+        "model",
+        "briefSha256",
+        "sessionId",
         "worktree",
         "baseCommit",
-        "model",
         "startedAt",
         "cursor",
         "unreachableCount",
         "lastSeenState",
         "lastSeenAt",
         "cancelReason",
-        "terminal"
+        "terminal",
+        "revision"
       ],
       "properties": {
         "requestId": { "type": "string", "minLength": 1 },
         "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
-        "sessionId": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
         "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
         "branch": { "type": "string", "minLength": 1 },
-        "worktree": { "type": "string", "minLength": 1 },
-        "baseCommit": { "type": ["string", "null"], "minLength": 1 },
+        "baseRef": { "type": "string", "minLength": 1 },
+        "resume": { "type": "boolean" },
         "model": {
           "type": "object",
           "additionalProperties": false,
@@ -152,6 +157,10 @@
             "model": { "type": "string", "minLength": 1 }
           }
         },
+        "briefSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sessionId": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "worktree": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "baseCommit": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
         "startedAt": {
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
@@ -167,7 +176,28 @@
           "type": ["string", "null"],
           "enum": ["stall", "host-left", "user-returned", "operator", null]
         },
-        "terminal": { "anyOf": [{ "$ref": "#/$defs/terminal" }, { "type": "null" }] }
+        "terminal": { "anyOf": [{ "$ref": "#/$defs/terminal" }, { "type": "null" }] },
+        "revision": { "type": "integer", "minimum": 0 }
+      },
+      "if": { "properties": { "sessionId": { "type": "null" } } },
+      "then": {
+        "properties": {
+          "worktree": { "type": "null" },
+          "baseCommit": { "type": "null" },
+          "terminal": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["state", "usage"],
+                "properties": {
+                  "state": { "const": "lost" },
+                  "usage": { "type": "null" }
+                }
+              }
+            ]
+          }
+        }
       }
     }
   }

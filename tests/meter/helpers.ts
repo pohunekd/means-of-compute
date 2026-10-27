@@ -12,8 +12,9 @@ import {
   type MeterLiveView,
   type MeterLogEvent,
 } from "../../src/meter/meter.js";
-import type { UsageLogIo } from "../../src/meter/usage-log.js";
+import type { UsageIndex, UsageLogIo } from "../../src/meter/usage-log.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
+import type { ProxyState } from "../../src/meter/proxy.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { createManualTimers, type ManualTimers } from "./manual-timers.js";
@@ -27,6 +28,8 @@ export interface MeterFixture {
   readonly timers: ManualTimers;
   readonly tokenFor: (requestId: string) => string;
   readonly waitForEvent: (match: (e: MeterLogEvent) => boolean) => Promise<MeterLogEvent>;
+  readonly buildState: () => ProxyState;
+  readonly usageIndex: UsageIndex;
 }
 
 const META_MODEL = "muse-spark-1.3-contributor";
@@ -45,86 +48,110 @@ export async function withMeter(
   run: (fixture: MeterFixture) => Promise<void>,
   overrides: MeterOverrides = {},
 ): Promise<void> {
+  // L4: every variable set below is saved first and restored in the
+  // finally: a value that was set keeps its earlier value, one that
+  // was unset is deleted again. The env, the loopback and the temp
+  // dir are all created inside the try, after the saves.
+  const savedEnv: Record<string, string | undefined> = {
+    META_API_KEY: process.env.META_API_KEY,
+    NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    LOCAL_MODEL_BASE_URL: process.env.LOCAL_MODEL_BASE_URL,
+    PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
+    PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+  };
+  const restoreEnv = (): void => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
   const secret = randomBytes(32).toString("base64");
   const dir = mkdtempSync(join(tmpdir(), "meter-proxy-"));
   const hostsFile = join(dir, "hosts.json");
   const logPath = join(dir, "usage.jsonl");
-  await Bun.write(hostsFile, JSON.stringify(overrides.hosts ?? { "laptop-a": ["127.0.0.1"] }));
-  const loopback = await startLoopback(recordingsPath);
-  resetProvidersCache();
-  process.env.META_API_KEY = "test-meta-key";
-  process.env.NVIDIA_API_KEY = "test-nvidia-key";
-  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
-  const upstream = overrides.upstreamBaseUrl ?? `http://127.0.0.1:${String(loopback.port)}`;
-  process.env.PROVIDER_META_API_BASE_URL = upstream;
-  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = upstream;
-  const events: MeterLogEvent[] = [];
-  const eventWaiters: Array<{
-    match: (e: MeterLogEvent) => boolean;
-    resolve: (e: MeterLogEvent) => void;
-  }> = [];
-  const log = (e: MeterLogEvent): void => {
-    events.push(e);
-    for (let i = eventWaiters.length - 1; i >= 0; i -= 1) {
-      const waiter = eventWaiters[i] as {
+  try {
+    await Bun.write(hostsFile, JSON.stringify(overrides.hosts ?? { "laptop-a": ["127.0.0.1"] }));
+    const loopback = await startLoopback(recordingsPath);
+    try {
+      resetProvidersCache();
+      process.env.META_API_KEY = "test-meta-key";
+      process.env.NVIDIA_API_KEY = "test-nvidia-key";
+      process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+      const upstream = overrides.upstreamBaseUrl ?? `http://127.0.0.1:${String(loopback.port)}`;
+      process.env.PROVIDER_META_API_BASE_URL = upstream;
+      process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = upstream;
+      const events: MeterLogEvent[] = [];
+      const eventWaiters: Array<{
         match: (e: MeterLogEvent) => boolean;
         resolve: (e: MeterLogEvent) => void;
+      }> = [];
+      const log = (e: MeterLogEvent): void => {
+        events.push(e);
+        for (let i = eventWaiters.length - 1; i >= 0; i -= 1) {
+          const waiter = eventWaiters[i] as {
+            match: (e: MeterLogEvent) => boolean;
+            resolve: (e: MeterLogEvent) => void;
+          };
+          if (waiter.match(e)) {
+            eventWaiters.splice(i, 1);
+            waiter.resolve(e);
+          }
+        }
       };
-      if (waiter.match(e)) {
-        eventWaiters.splice(i, 1);
-        waiter.resolve(e);
+      const timers = createManualTimers();
+      const base = await loadMeterConfig();
+      const config: MeterConfig = { ...base, usageLogPath: logPath, ...overrides.config };
+      const env = await resolveMeterEnv(config, {
+        MOC_METER_LISTEN: "127.0.0.1:0",
+        MOC_METER_SECRET: secret,
+        MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
+      });
+      const { getProviders } = await import("../../src/providers/config.js");
+      const providers = await getProviders();
+      const meter = await startMeter({
+        config,
+        env,
+        providers,
+        timers,
+        logIo: overrides.logIo ?? systemUsageLogIo,
+        now: overrides.now ?? (() => new Date()),
+        log,
+      });
+      const waitForEvent = (match: (e: MeterLogEvent) => boolean): Promise<MeterLogEvent> => {
+        const past = events.find(match);
+        if (past !== undefined) {
+          return Promise.resolve(past);
+        }
+        return new Promise<MeterLogEvent>((resolve) => {
+          eventWaiters.push({ match, resolve });
+        });
+      };
+      try {
+        await run({
+          meter,
+          live: meter,
+          events,
+          logPath,
+          loopback,
+          timers,
+          tokenFor: (requestId: string) => meter.tokenFor(requestId),
+          waitForEvent,
+          buildState: () => meter.buildState(),
+          usageIndex: meter.usageIndex,
+        });
+      } finally {
+        loopback.release();
+        await meter.close();
+        await loopback.stop();
       }
+    } finally {
+      resetProvidersCache();
+      restoreEnv();
     }
-  };
-  const timers = createManualTimers();
-  const base = await loadMeterConfig();
-  const config: MeterConfig = { ...base, usageLogPath: logPath, ...overrides.config };
-  const env = await resolveMeterEnv(config, {
-    MOC_METER_LISTEN: "127.0.0.1:0",
-    MOC_METER_SECRET: secret,
-    MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
-  });
-  const { getProviders } = await import("../../src/providers/config.js");
-  const providers = await getProviders();
-  const meter = await startMeter({
-    config,
-    env,
-    providers,
-    timers,
-    logIo: overrides.logIo ?? systemUsageLogIo,
-    now: overrides.now ?? (() => new Date()),
-    log,
-  });
-  const waitForEvent = (match: (e: MeterLogEvent) => boolean): Promise<MeterLogEvent> => {
-    const past = events.find(match);
-    if (past !== undefined) {
-      return Promise.resolve(past);
-    }
-    return new Promise<MeterLogEvent>((resolve) => {
-      eventWaiters.push({ match, resolve });
-    });
-  };
-  try {
-    await run({
-      meter,
-      live: meter,
-      events,
-      logPath,
-      loopback,
-      timers,
-      tokenFor: (requestId: string) => meter.tokenFor(requestId),
-      waitForEvent,
-    });
   } finally {
-    loopback.release();
-    await meter.close();
-    await loopback.stop();
-    resetProvidersCache();
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
-    delete process.env.META_API_KEY;
-    delete process.env.NVIDIA_API_KEY;
-    delete process.env.LOCAL_MODEL_BASE_URL;
     rmSync(dir, { recursive: true, force: true });
   }
 }

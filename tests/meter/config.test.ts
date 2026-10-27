@@ -173,6 +173,81 @@ test("shared address refused", async () => {
   }
 });
 
+test("listen port below 1 and above 65535 refused", async () => {
+  // M5: the listen port comes from the env, not the config file: port
+  // 0 is the test wildcard and both edges refuse without echoing.
+  for (const listen of ["127.0.0.1:-1", "127.0.0.1:65536"]) {
+    const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+    const file = join(dir, "hosts.json");
+    await Bun.write(file, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
+    try {
+      let message = "";
+      try {
+        await resolveMeterEnv(
+          baseConfig(),
+          envWith({ MOC_METER_LISTEN: listen, MOC_METER_HOST_ADDRESSES_FILE: file }),
+        );
+      } catch (error: unknown) {
+        message = (error as Error).message;
+      }
+      expect(message.length).toBeGreaterThan(0);
+      expect(message.includes(listen)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("non-canonical base64 secret refused", async () => {
+  // M5: trailing `=` dropped from a padded encoding stays valid
+  // base64 but re-encodes with the padding back, so it refuses on
+  // the strict check with the padding restored.
+  const strict = Buffer.from("x".repeat(32)).toString("base64");
+  const nonCanonical = strict.replace(/=+$/, "");
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
+  let message = "";
+  try {
+    await resolveMeterEnv(
+      baseConfig(),
+      envWith({ MOC_METER_SECRET: nonCanonical, MOC_METER_HOST_ADDRESSES_FILE: file }),
+    );
+  } catch (error: unknown) {
+    message = (error as Error).message;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  expect(message).toContain("strict base64");
+  expect(message.includes(nonCanonical)).toBe(false);
+});
+
+test("every 2.1 integer key refused at min-1 and max+1", async () => {
+  // M5: one refusal per edge of every integer rule in section 2.1.
+  const edges: Array<{ key: keyof MeterConfig; min: number; max: number }> = [
+    { key: "maxRequestBytes", min: 1024, max: 67108864 },
+    { key: "maxUsageScanBytes", min: 1024, max: 67108864 },
+    { key: "clientIdleTimeoutSec", min: 1, max: 255 },
+    { key: "firstByteTimeoutMs", min: 1, max: 600000 },
+    { key: "idleTimeoutMs", min: 1, max: 600000 },
+    { key: "totalTimeoutMs", min: 1, max: 86400000 },
+    { key: "drainTimeoutMs", min: 0, max: 600000 },
+    { key: "unboundGrantTtlMs", min: 1000, max: 3600000 },
+    { key: "maxInFlightPerSession", min: 1, max: 64 },
+  ];
+  for (const { key, min, max } of edges) {
+    for (const value of [min - 1, max + 1]) {
+      let message = "";
+      try {
+        await configFromObject(baseConfig({ [key]: value } as Partial<MeterConfig>));
+      } catch (error: unknown) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain(`"${key}"`);
+    }
+  }
+});
+
 test("no error text contains the env value", async () => {
   const probe = "probe-value-abcdef";
   let message = "";

@@ -1,4 +1,7 @@
 // Join tests: the unknown, unbilled, orphan and zero rules of section 4.4.
+// L5 settles a real grant with zero billed calls and expects one
+// all-zero row back, instead of hand-building records.
+// Uses the live meter through the fixture.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +9,7 @@ import { join } from "node:path";
 import { joinUsage } from "../../src/meter/join.js";
 import { replayUsageLog } from "../../src/meter/usage-log.js";
 import type { UsageLogRecord } from "../../src/meter/usage-log.js";
+import { openBoundGrant, withMeter } from "./helpers.js";
 
 function at(no: number): string {
   return new Date(Date.UTC(2026, 9, 27, 10, 0, no)).toISOString();
@@ -75,6 +79,23 @@ async function joinOf(
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test("L5: settle with zero billed calls returns one all-zero row", async () => {
+  await withMeter("tests/meter/recordings/json-ok.json", async ({ meter }) => {
+    const { sessionId } = await openBoundGrant(meter);
+    const usage = await meter.settle(sessionId, "finished");
+    expect(usage?.tokens).toEqual([
+      {
+        provider: "meta-api",
+        model: "muse-spark-1.3-contributor",
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        source: "meter-proxy",
+      },
+    ]);
+  });
+});
 
 test("billed plus unknown gives null counts with two requests", async () => {
   const usage = await joinOf(

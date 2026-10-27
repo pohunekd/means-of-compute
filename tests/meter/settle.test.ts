@@ -14,13 +14,14 @@ import {
   type MeterLogEvent,
 } from "../../src/meter/meter.js";
 import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
-import { joinUsage } from "../../src/meter/join.js";
-import { replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { createManualTimers } from "./manual-timers.js";
+import { joinUsage } from "../../src/meter/join.js";
+import { replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { createFaultyIo } from "./faulty-io.js";
 import { meterUrl, openBoundGrant, readLogLines, withMeter } from "./helpers.js";
 import type { MeterOverrides } from "./helpers.js";
+import type { UsageLogIo } from "../../src/meter/usage-log.js";
 
 function chatBody(): Record<string, unknown> {
   return {
@@ -111,6 +112,74 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
   );
 });
 
+test("a non-2xx body that stalls is aborted at drain and not billed", async () => {
+  await withMeter(
+    "tests/meter/recordings/status-500-hold.json",
+    async ({ meter, tokenFor, logPath, loopback, timers, waitForEvent }) => {
+      const { requestId, token, sessionId } = await openBoundGrant(meter);
+      const resp = await post(meter, token, chatBody());
+      expect(resp.status).toBe(500);
+      // The whole body stalls behind the gate: nothing reaches the
+      // caller yet. The idle timer armed at the headers; the 4001ms
+      // timer must be pending before advancing.
+      await loopback.waitHeld(1);
+      await timers.waitForTimer(4001);
+      // M3: settle queues the grant-close, then the drain aborts the
+      // stalled non-2xx call. The drain budget is 777.
+      const settling = meter.settle(sessionId, "finished");
+      await timers.waitForTimer(777);
+      timers.advance(4001);
+      const usage = await settling;
+      // The grant carried no billed call, so the join has one zero row.
+      expect(usage?.tokens).toEqual([
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          source: "meter-proxy",
+        },
+      ]);
+      const lines = await readLogLines(logPath);
+      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
+        outcome: string;
+        billed: boolean;
+        status: number;
+      };
+      expect(end.outcome).toBe("upstream-status");
+      expect(end.billed).toBe(false);
+      expect(end.status).toBe(500);
+      await waitForEvent((e) => e.event === "call-finished");
+      await meter.close();
+    },
+    { config: { idleTimeoutMs: 4001, firstByteTimeoutMs: 60001, drainTimeoutMs: 777 } },
+  );
+});
+
+test("close aborts a held call without release", async () => {
+  await withMeter(
+    "tests/meter/recordings/status-500-hold.json",
+    async ({ meter, tokenFor, logPath, loopback, waitForEvent }) => {
+      const { requestId, token } = await openBoundGrant(meter);
+      const resp = await post(meter, token, chatBody());
+      expect(resp.status).toBe(500);
+      // The body stalls behind the gate and the hold is never
+      // released: close must still abort the live call and return.
+      await loopback.waitHeld(1);
+      await meter.close();
+      await waitForEvent((e) => e.event === "call-finished");
+      const lines = await readLogLines(logPath);
+      const end = JSON.parse(lines.find((line) => line.includes('"kind":"call-end"')) ?? "{}") as {
+        outcome: string;
+        billed: boolean;
+      };
+      expect(end.billed).toBe(false);
+      expect(requestId.length).toBeGreaterThan(0);
+    },
+  );
+});
+
 test("drain with drainTimeoutMs 0 still awaits the end", async () => {
   await withMeter(
     "tests/meter/recordings/stream-hold-after-usage.json",
@@ -149,6 +218,8 @@ test("drain with drainTimeoutMs 0 still awaits the end", async () => {
 });
 
 test("close race: concurrent calls are either counted or refused", async () => {
+  // L2: ten calls hang inside call-start, racing a close that cannot
+  // interleave until each either commits or refuses.
   await withMeter(
     "tests/meter/recordings/stream-hold-after-first.json",
     async ({ meter, loopback, timers }) => {
@@ -156,10 +227,10 @@ test("close race: concurrent calls are either counted or refused", async () => {
       // Ten calls reach the upstream hold: every one is live and held.
       const pendings = Array.from({ length: 10 }, () => post(meter, token, chatBody()));
       await loopback.waitHeld(10);
+      const timerArmed = timers.waitForTimer(999);
       // The settle below queues the grant-close and arms the 999 ms
       // drain timer; the close is durable at that point.
       const settling = meter.settle(sessionId, "finished");
-      await timers.waitForTimer(999);
       // Ten more calls race the durable close: each is 403 grant-closed,
       // and none reaches the upstream.
       const late = await Promise.all(
@@ -172,6 +243,7 @@ test("close race: concurrent calls are either counted or refused", async () => {
         );
       }
       expect(loopback.requests().length).toBe(10);
+      await timerArmed;
       // The first ten finish once the gate opens; the drain then joins.
       loopback.release();
       const first = await Promise.all(pendings);
@@ -183,6 +255,68 @@ test("close race: concurrent calls are either counted or refused", async () => {
       expect(usage?.tokens[0]?.requests).toBe(10);
     },
     { config: { drainTimeoutMs: 999, maxInFlightPerSession: 32 } },
+  );
+});
+
+test("a settled grant returns its memo after a later latch", async () => {
+  // L9: settle A, latch the meter through the IO seam with grant B,
+  // then settle A again. The resolved memo wins over the latch.
+  let failWrites = false;
+  const latchIo = (base: UsageLogIo): UsageLogIo => ({
+    async open(path: string) {
+      const real = await base.open(path);
+      return {
+        async write(text: string): Promise<void> {
+          if (failWrites) {
+            throw new Error("injected write failure");
+          }
+          await real.write(text);
+        },
+        async datasync(): Promise<void> {
+          await real.datasync();
+        },
+        async close(): Promise<void> {
+          await real.close();
+        },
+      };
+    },
+  });
+  await withMeter(
+    "tests/meter/recordings/stream-ok.json",
+    async ({ meter, events, logPath }) => {
+      const { token, sessionId } = await openBoundGrant(meter);
+      // Settle A while the IO is healthy: the memo is durable.
+      const resp = await post(meter, token, chatBody());
+      expect(resp.status).toBe(200);
+      await resp.text();
+      const once = await meter.settle(sessionId, "finished");
+      expect(once?.tokens[0]?.requests).toBe(1);
+      // Settle A closed the grant, so open a second grant B, then latch
+      // the meter through the IO seam with a call on B whose call-start
+      // write fails: the caller gets 503 meter-unavailable and the
+      // usage-log-failed event is logged. Then settle A again: the
+      // resolved memo wins over the latch, with no error.
+      await meter.openGrant({
+        requestId: "w2-demo:0",
+        workItemId: "w2-demo",
+        hostAlias: "laptop-a",
+        providerId: "meta-api",
+        model: "muse-spark-1.3-contributor",
+      });
+      await meter.bindGrant("w2-demo:0", "sess-2");
+      const tokenB = meter.tokenFor("w2-demo:0");
+      failWrites = true;
+      const latched = await post(meter, tokenB, chatBody());
+      expect(latched.status).toBe(503);
+      expect(((await latched.json()) as { error: { code: string } }).error.code).toBe(
+        "meter-unavailable",
+      );
+      expect(events.some((e) => e.event === "usage-log-failed")).toBe(true);
+      failWrites = false;
+      const again = await meter.settle(sessionId, "finished");
+      expect(again).toEqual(once);
+    },
+    { logIo: latchIo(systemUsageLogIo) },
   );
 });
 

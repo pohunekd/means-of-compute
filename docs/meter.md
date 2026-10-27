@@ -2,7 +2,9 @@
 
 All model traffic from fleet sessions flows through the metering proxy
 (`src/meter/`). The proxy holds the provider keys: the host environment
-carries only a short-lived caller token, and the proxy records per-session
+carries only a short-lived caller token, valid only while its grant is
+open and delivered through session metadata, and the proxy records
+per-session
 token usage into an append-only log. PR A delivers the proxy itself; the
 dispatcher port wiring, the usage CLI, and the host token helper land in
 later PRs of issue #35.
@@ -31,8 +33,11 @@ nothing goes upstream:
    The caller never chooses the model: the proxy overwrites the body with
    the grant's provider model, and for streams it forces
    `stream_options.include_usage` to `true`.
-5. The grant's provider must be routed. When its key variable is empty at
-   this moment, the answer is 503 `provider-key-missing`.
+5. The grant's provider must be routed. A grant whose provider left the
+   routes gets 503 `provider-not-routed`: the status is 503 because the
+   cause is the meter's own route config, not the caller. When the
+   provider is routed but its key variable is empty at this moment, the
+   answer is 503 `provider-key-missing`.
 6. Record `call-start` through the guarded append: S6 validate runs
    first (`checkRecord`, no write, no latch), then the write, then
    `datasync`, then the in-memory commit. A validation failure rejects
@@ -56,6 +61,8 @@ nothing goes upstream:
    (or of the JSON body), with `prompt_tokens` as input and
    `completion_tokens` as output. A missing or unreadable usage
    gives a billed `no-usage` record with null counts — never zero.
+   A count that is missing or not an integer is `null`, and the
+   outcome stays `ok`.
    A non-2xx answer is always `call-end` `upstream-status`, unbilled,
    with null counts, whatever happens to the body.
 9. Timeouts come only from this config, never from a provider descriptor's
@@ -81,7 +88,7 @@ Every error the proxy itself answers with status `>= 400` logs exactly
 one `request-rejected` event with the code and status, plus the
 `requestId` whenever the bearer MAC already held (A1). This covers 404,
 405, 401, every A2-to-A5 code, 415, 413, `invalid-json`,
-`invalid-body`, `model-mismatch`, `provider-key-missing`, and the guard
+`invalid-body`, `model-mismatch`, `provider-not-routed`, `provider-key-missing`, and the guard
 verdicts `grant-closed`, `session-concurrency`, and `meter-unavailable`.
 `call-finished` carries the `hostAlias` for the billing join.
 
@@ -102,7 +109,9 @@ The predicate runs in this order; the first failing row decides:
 
 An unauthenticated caller learns nothing about grants: rows 2 and later run
 only after row 1 holds. A token is useless after the session ends, and
-rotating the secret invalidates every live token.
+rotating the secret invalidates every live token. A caller token
+is valid only while its grant is open, and it travels through
+session metadata, never through a config file.
 
 ### Caller token
 
@@ -170,8 +179,8 @@ the committed names. Every error names the variable, never its value.
 Generate the secret and store it without printing it:
 
 ```sh
-( umask 077 && openssl rand -base64 32 > "$file" )
-export MOC_METER_SECRET="$(cat /run/moc/meter-secret)"
+( umask 077 && openssl rand -base64 32 > logs/meter-secret )
+export MOC_METER_SECRET="$(cat logs/meter-secret)"
 test -n "$MOC_METER_SECRET" && echo set
 ```
 

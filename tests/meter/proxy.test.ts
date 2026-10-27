@@ -2,10 +2,19 @@
 // to 4.6 and 5.1 to 5.8, plus one test per surviving mutation named in
 // the round-2 decisions.
 import { expect, test } from "bun:test";
-import { callStartGuard } from "../../src/meter/proxy.js";
-import type { UsageIndex } from "../../src/meter/usage-log.js";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
+import type { MeterConfig } from "../../src/meter/config.js";
+import { startMeter, type Meter, type MeterLogEvent } from "../../src/meter/meter.js";
+import { callStartGuard, handleMeterRequest } from "../../src/meter/proxy.js";
 import { createFaultyIo } from "./faulty-io.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
+import { createManualTimers } from "./manual-timers.js";
+import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
+import { startLoopback } from "../../src/providers/loopback.js";
 import { meterUrl, openBoundGrant, readLogLines, withMeter } from "./helpers.js";
 
 function chatBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -81,6 +90,157 @@ test("auth order: a token for an unknown grant gives 403", async () => {
   );
 });
 
+for (const row of [
+  {
+    name: "an unknown path gives 404",
+    path: "/v1/other",
+    method: "POST",
+    headers: {},
+    body: chatBody(),
+    code: "not-found",
+    status: 404,
+  },
+  {
+    name: "a wrong method gives 405",
+    path: undefined,
+    method: "GET",
+    headers: {},
+    body: chatBody(),
+    code: "method-not-allowed",
+    status: 405,
+  },
+  {
+    name: "a wrong content type gives 415",
+    path: undefined,
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: chatBody(),
+    code: "unsupported-media-type",
+    status: 415,
+  },
+  {
+    name: "invalid JSON gives 400 invalid-json",
+    path: undefined,
+    method: "POST",
+    headers: {},
+    body: undefined,
+    raw: "{bad",
+    code: "invalid-json",
+    status: 400,
+  },
+  {
+    name: "a non-object body gives 400 invalid-body",
+    path: undefined,
+    method: "POST",
+    headers: {},
+    body: [1, 2],
+    code: "invalid-body",
+    status: 400,
+  },
+  {
+    name: "a non-boolean stream gives 400 invalid-body",
+    path: undefined,
+    method: "POST",
+    headers: {},
+    body: { ...chatBody(), stream: "yes" },
+    code: "invalid-body",
+    status: 400,
+  },
+  {
+    name: "a non-object stream_options gives 400 invalid-body",
+    path: undefined,
+    method: "POST",
+    headers: {},
+    body: { ...chatBody(), stream_options: 7 },
+    code: "invalid-body",
+    status: 400,
+  },
+] as const) {
+  test(row.name, async () => {
+    await withMeter(
+      "tests/meter/recordings/stream-ok.json",
+      async ({ meter, tokenFor, events, logPath, loopback }) => {
+        const { requestId } = await openBoundGrant(meter);
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokenFor(requestId)}`,
+          ...row.headers,
+        };
+        // GET cannot carry a body. The 404 check fires before auth, so
+        // only rows past the router still carry the requestId.
+        const init: RequestInit =
+          row.method === "GET"
+            ? { method: row.method, headers }
+            : {
+                method: row.method,
+                headers,
+                body:
+                  row.body === undefined && "raw" in row && row.raw !== undefined
+                    ? row.raw
+                    : JSON.stringify(row.body),
+              };
+        const resp = await fetch(meterUrl(meter, row.path ?? "/v1/chat/completions"), init);
+        expect(resp.status).toBe(row.status);
+        expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(row.code);
+        // M6: nothing upstream, and exactly one request-rejected log
+        // with this code and status.
+        expect(loopback.requests().length).toBe(0);
+        const rejected = events.filter((event) => event.event === "request-rejected");
+        expect(rejected.length).toBe(1);
+        expect(rejected[0]?.code).toBe(row.code);
+        expect(rejected[0]?.status).toBe(row.status);
+        // The 404 and 405 checks fire before auth, so they carry no
+        // requestId; everything past the router does.
+        if (row.code === "not-found" || row.code === "method-not-allowed") {
+          expect(rejected[0]?.requestId).toBeUndefined();
+        } else {
+          expect(rejected[0]?.requestId).toBe(requestId);
+        }
+      },
+      {},
+    );
+  });
+}
+
+test("an oversize body gives 413", async () => {
+  // M6: Bun's own transport cap answers before the handler when the
+  // real bytes exceed it, so this row calls handleMeterRequest with a
+  // lying Content-Length header. The branch answers on the header
+  // value alone, before reading the body.
+  await withMeter(
+    "tests/meter/recordings/stream-ok.json",
+    async ({ meter, tokenFor, events, loopback, buildState, usageIndex }) => {
+      const { requestId } = await openBoundGrant(meter);
+      // Bun's own transport cap answers before the handler when the
+      // real bytes exceed it, so this row calls handleMeterRequest
+      // with the live state and a lying Content-Length header. The
+      // branch answers on the header value alone, before any append.
+      const req = new Request(meterUrl(meter), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokenFor(requestId)}`,
+          "Content-Length": "2000",
+        },
+        body: JSON.stringify(chatBody()),
+      });
+      expect(req.headers.get("content-length")).toBe("2000");
+      const resp = await handleMeterRequest(buildState(), req, null, "127.0.0.1", usageIndex);
+      expect(resp.status).toBe(413);
+      expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
+        "body-too-large",
+      );
+      expect(loopback.requests().length).toBe(0);
+      const rejected = events.filter((event) => event.event === "request-rejected");
+      expect(rejected.length).toBe(1);
+      expect(rejected[0]?.code).toBe("body-too-large");
+      expect(rejected[0]?.status).toBe(413);
+      expect(rejected[0]?.requestId).toBe(requestId);
+    },
+    { config: { maxRequestBytes: 100 } },
+  );
+});
+
 test("wrong host gives 403", async () => {
   await withMeter(
     "tests/meter/recordings/stream-ok.json",
@@ -90,7 +250,9 @@ test("wrong host gives 403", async () => {
       expect(resp.status).toBe(403);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("wrong-host");
       // L6: nothing upstream; the grant-open record stays. A1 held, so
-      // the event carries the requestId.
+      // the event carries the requestId. Through the live state this
+      // also covers the owner-of lookup: dropping it leaves the alias
+      // unknown and this test fails.
       expect(loopback.requests().length).toBe(0);
       expect(
         (await readLogLines(logPath)).some((line) => line.includes('"kind":"grant-open"')),
@@ -232,6 +394,11 @@ test("key handling: upstream sees the provider key, never the caller token", asy
       expect(seen.length).toBe(1);
       expect(seen[0]?.headers["authorization"]).toBe("Bearer test-meta-key");
       expect(seen[0]?.headers["x-caller-probe"]).toBeUndefined();
+      // M4: no upstream header value carries the caller token, under
+      // any name.
+      for (const value of Object.values(seen[0]?.headers ?? {})) {
+        expect(value.includes(token)).toBe(false);
+      }
       const bodies = await readLogLines(logPath);
       for (const line of [...bodies, JSON.stringify(events)]) {
         expect(line.includes("test-meta-key")).toBe(false);
@@ -712,9 +879,90 @@ test("caller disconnect still records usage with clientGone", async () => {
   );
 });
 
-test("close race: concurrent calls are either counted or refused", () => {
-  // Placeholder: the full test follows once settle.test.ts is rewritten.
-  expect(true).toBe(true);
+test("a grant whose provider left the routes gives 503 provider-not-routed", async () => {
+  // The grant opens while meta-api is still routed; a second meter on
+  // the same log directory then serves the call with meta-api removed
+  // from the route table. The fixture cannot swap providers mid-test,
+  // so this test builds both meters by hand.
+  const dir = mkdtempSync(join(tmpdir(), "meter-unrouted-"));
+  const hostsFile = join(dir, "hosts.json");
+  await Bun.write(hostsFile, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
+  resetProvidersCache();
+  process.env.META_API_KEY = "test-meta-key";
+  process.env.NVIDIA_API_KEY = "test-nvidia-key";
+  const loopback = await startLoopback("tests/meter/recordings/json-ok.json");
+  const started: Meter[] = [];
+  try {
+    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(loopback.port)}`;
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(loopback.port)}`;
+    const base = await loadMeterConfig();
+    const secret = randomBytes(32).toString("base64");
+    const full = await getProviders();
+    const firstConfig: MeterConfig = { ...base, usageLogPath: join(dir, "usage.jsonl") };
+    const firstEnv = await resolveMeterEnv(firstConfig, {
+      MOC_METER_LISTEN: "127.0.0.1:0",
+      MOC_METER_SECRET: secret,
+      MOC_METER_HOST_ADDRESSES_FILE: hostsFile,
+    });
+    const first = await startMeter({
+      config: firstConfig,
+      env: firstEnv,
+      providers: full,
+      timers: createManualTimers(),
+      logIo: systemUsageLogIo,
+      now: () => new Date(),
+      log: () => {},
+    });
+    started.push(first);
+    await first.openGrant({
+      requestId: "w1-demo:0",
+      workItemId: "w1-demo",
+      hostAlias: "laptop-a",
+      providerId: "meta-api",
+      model: "muse-spark-1.3-contributor",
+    });
+    await first.bindGrant("w1-demo:0", "sess-1");
+    const token = first.tokenFor("w1-demo:0");
+    await first.close();
+    const reduced = { ...full };
+    delete reduced["meta-api"];
+    const events: MeterLogEvent[] = [];
+    const second = await startMeter({
+      config: firstConfig,
+      env: firstEnv,
+      providers: reduced,
+      timers: createManualTimers(),
+      logIo: systemUsageLogIo,
+      now: () => new Date(),
+      log: (e) => events.push(e),
+    });
+    started.push(second);
+    const resp = await fetch(meterUrl(second), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(chatBody({ stream: false })),
+    });
+    expect(resp.status).toBe(503);
+    expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
+      "provider-not-routed",
+    );
+    const rejected = events.filter((event) => event.event === "request-rejected");
+    expect(rejected.length).toBe(1);
+    expect(rejected[0]?.code).toBe("provider-not-routed");
+    expect(rejected[0]?.status).toBe(503);
+    expect(rejected[0]?.requestId).toBe("w1-demo:0");
+  } finally {
+    for (const meter of started) {
+      await meter.close().catch(() => {});
+    }
+    await loopback.stop();
+    resetProvidersCache();
+    delete process.env.META_API_KEY;
+    delete process.env.NVIDIA_API_KEY;
+    delete process.env.PROVIDER_META_API_BASE_URL;
+    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("provider key missing gives 503", async () => {

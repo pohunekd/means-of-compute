@@ -5,7 +5,9 @@ import type { PortUsage, SessionRef, TerminalState } from "../dispatcher/port.js
 import type { ProviderDescriptor } from "../providers/types.js";
 import { MeterConfigError, type MeterConfig, type MeterEnv } from "./config.js";
 import { joinUsage } from "./join.js";
-import { handleMeterRequest, type ProxyState } from "./proxy.js";
+import { handleMeterRequest } from "./proxy.js";
+import type { ProxyState } from "./proxy.js";
+import type { UsageIndex } from "./usage-log.js";
 import { serveMeter, type MeterServer } from "./server.js";
 import type { MeterTimers } from "./timers.js";
 import { tokenFor } from "./token.js";
@@ -90,6 +92,8 @@ export interface MeterLiveView {
 export interface Meter extends MeterLiveView {
   readonly port: number;
   tokenFor(requestId: string): string;
+  buildState(): ProxyState;
+  readonly usageIndex: UsageIndex;
   openGrant(spec: GrantSpec): Promise<void>;
   bindGrant(requestId: string, sessionId: string): Promise<void>;
   settle(sessionId: string, state: TerminalState): Promise<PortUsage | null>;
@@ -112,8 +116,9 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   const { config, env, providers, now, log, timers, logIo } = deps;
   const index = await replayUsageLog(config.usageLogPath, "repair", log);
   const appender = await openUsageAppender(config.usageLogPath, index, log, logIo);
-  // Live calls join inside their call-start chain step and leave when their
-  // call-end append settles; finish() is the only way out, idempotent.
+  // Live calls join inside their call-start atomic step and leave when
+  // their call-end append settles; finish() is the only way out,
+  // idempotent.
   const live = new Map<string, Map<string, LiveCall>>();
   let closing = false;
   const settleMemos = new Map<string, Promise<PortUsage | null>>();
@@ -213,9 +218,9 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     if (!env.hostAddresses.has(spec.hostAlias)) {
       throw new MeterGrantError("unknown-host", `meter: unknown host "${spec.hostAlias}"`);
     }
-    // F5: the open-vs-reopen decision happens inside the chain step, not
+    // The open-vs-reopen check runs inside the append chain step, not
     // here — a pre-check would race with a concurrent opener.
-    // S6: a checkRecord rejection throws MeterUnavailableError with cause.
+    // A checkRecord rejection throws MeterUnavailableError with cause.
     let openVerdict: "request-conflict" | "grant-closed" | "meter-unavailable" | null;
     try {
       openVerdict = await appender.appendGuarded(
@@ -277,8 +282,8 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
 
   async function bindGrant(requestId: string, sessionId: string): Promise<void> {
     checkFailed(appender);
-    // F3: the bind decision happens inside the chain step, not here — a
-    // pre-check would race with a concurrent binder. S6: a checkRecord
+    // The bind check runs inside the append chain step, not here — a
+    // pre-check would race with a concurrent binder. A checkRecord
     // rejection throws MeterUnavailableError with cause.
     let bindVerdict:
       "unknown-request" | "already-bound" | "session-conflict" | "meter-unavailable" | null;
@@ -334,16 +339,18 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       return null;
     }
     const known = requestId;
-    // Settling takes the failing fast path when the log already failed:
-    // the close could never have gone durable, so awaiting live ends
-    // that will resolve meter-unavailable is not useful work.
-    checkFailed(appender);
-    let memo = settleMemos.get(known);
-    if (memo === undefined) {
-      memo = settleGrant(known, state);
-      settleMemos.set(known, memo);
+    // A resolved memo is returned before the latch check: a grant
+    // that has settled keeps its value. A grant that has not settled
+    // still sees the latch first, because its close could never have
+    // gone durable.
+    const memo = settleMemos.get(known);
+    if (memo !== undefined) {
+      return memo;
     }
-    return memo;
+    checkFailed(appender);
+    const fresh = settleGrant(known, state);
+    settleMemos.set(known, fresh);
+    return fresh;
   }
 
   async function settleGrant(requestId: string, state: TerminalState): Promise<PortUsage | null> {
@@ -370,13 +377,14 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       throw new MeterUnavailableError("meter: usage log failed");
     }
     // already-closed continues with no record.
-    // F6: after the grant-close is queued, settle waits up to
-    // drainTimeoutMs (manual timers) for the racing live calls, aborts
-    // every call that is still live, and only then joins usage.
+    // After the grant-close is queued, the live set is snapshotted,
+    // then the drain timer is armed: settle waits up to
+    // drainTimeoutMs for the racing calls, aborts every call that is
+    // still live, and only then joins usage. Because the timer arms
+    // after the snapshot, a call that ends between the verdict and
+    // the await still lets the race resolve instead of stalling on
+    // an abort nobody needs.
     const racing = [...(live.get(requestId)?.values() ?? [])];
-    // F3: the timer arms before the race snapshot resolves, so a call
-    // that ends between the verdict and the await still lets the race
-    // win instead of stalling on an abort nobody needs.
     let cancelDrain!: () => void;
     const drainTimer = new Promise<void>((resolve) => {
       cancelDrain = timers.after(config.drainTimeoutMs, resolve);
@@ -441,6 +449,8 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
       return server.port;
     },
     tokenFor: mintToken,
+    buildState,
+    usageIndex: index,
     openGrant,
     bindGrant,
     settle,

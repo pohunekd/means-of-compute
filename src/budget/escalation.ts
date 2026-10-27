@@ -1,8 +1,10 @@
-// Once-per-event escalation for the budget guard. The state file remembers
-// the last escalated cap event (cap kind plus UTC day for the daily caps); a
-// second refusal for the same event appends nothing and prints nothing. Each
-// escalation appends one JSON line to the escalation log and prints one line
-// on stderr for the coordinator's daily digest channel.
+// Once-per-event escalation for the budget guard. The state file keeps
+// every escalated event key: "day:<UTC day>" for the daily cap,
+// "nvidia:<UTC day>" for the NVIDIA daily limit, "total" for the total
+// cap (once regardless of the day). An event escalates only when its key is
+// absent; keys are never dropped because the set grows by at most a few
+// keys a day. Each escalation appends one JSON line to the escalation log
+// and prints one line on stderr for the coordinator's daily digest channel.
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
@@ -11,10 +13,7 @@ import type { BudgetDecision } from "./decision.js";
 export type CapKind = "day" | "total" | "nvidia-daily" | "spend-unknown";
 
 export interface EscalationState {
-  readonly capKind: CapKind;
-  // UTC day for daily kinds (day, nvidia-daily); empty for total and
-  // spend-unknown, which escalate once regardless of the day.
-  readonly day: string;
+  readonly escalated: readonly string[];
 }
 
 export function capKindOfReason(reason: string): CapKind | null {
@@ -44,40 +43,34 @@ export function eventKeyString(kind: CapKind, now: Date): string {
   }
 }
 
-function eventKey(kind: CapKind, now: Date): EscalationState {
-  switch (kind) {
-    case "day":
-    case "nvidia-daily":
-      return { capKind: kind, day: utcCalendarDay(now) };
-    case "total":
-    case "spend-unknown":
-      return { capKind: kind, day: "" };
-  }
+function eventKey(kind: CapKind, now: Date): string {
+  return eventKeyString(kind, now);
 }
 
-async function readState(statePath: string): Promise<EscalationState | null> {
+async function readState(statePath: string): Promise<EscalationState> {
   if (!(await Bun.file(statePath).exists())) {
-    return null;
+    return { escalated: [] };
   }
   const text = await Bun.file(statePath).text();
   if (text.trim() === "") {
-    return null;
+    return { escalated: [] };
   }
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
-  } catch {
-    throw new Error(`Budget escalation state ${statePath}: not valid JSON`);
+  } catch (error: unknown) {
+    throw new Error(`Budget escalation state ${statePath}: not valid JSON`, { cause: error });
   }
+  const record = raw as Partial<EscalationState>;
   if (
     typeof raw !== "object" ||
     raw === null ||
-    typeof (raw as Record<string, unknown>).capKind !== "string" ||
-    typeof (raw as Record<string, unknown>).day !== "string"
+    !Array.isArray(record.escalated) ||
+    record.escalated.some((entry: unknown) => typeof entry !== "string")
   ) {
     throw new Error(`Budget escalation state ${statePath}: invalid state document`);
   }
-  return raw as EscalationState;
+  return { escalated: record.escalated as string[] };
 }
 
 async function writeState(statePath: string, state: EscalationState): Promise<void> {
@@ -102,13 +95,12 @@ export async function maybeEscalate(
     throw new Error(`Budget escalation: unknown refusal reason "${decision.reason}"`);
   }
   const key = eventKey(kind, options.now);
-  const previous = await readState(options.statePath);
-  if (previous !== null && previous.capKind === key.capKind && previous.day === key.day) {
+  const state = await readState(options.statePath);
+  if (state.escalated.includes(key)) {
     return false;
   }
   const entry = {
-    capKind: key.capKind,
-    day: key.day,
+    eventKey: key,
     reason: decision.reason,
     spentTodayUsd: decision.spentTodayUsd,
     spentTotalUsd: decision.spentTotalUsd,
@@ -117,11 +109,11 @@ export async function maybeEscalate(
   };
   await mkdir(dirname(options.escalationLogPath), { recursive: true });
   await appendFile(options.escalationLogPath, `${JSON.stringify(entry)}\n`);
-  await writeState(options.statePath, key);
+  await writeState(options.statePath, { escalated: [...state.escalated, key] });
   if (options.stderr !== undefined) {
-    options.stderr(`budget escalation: ${key.capKind} cap reached (${decision.reason})\n`);
+    options.stderr(`budget escalation: ${key} (${decision.reason})\n`);
   } else {
-    process.stderr.write(`budget escalation: ${key.capKind} cap reached (${decision.reason})\n`);
+    process.stderr.write(`budget escalation: ${key} (${decision.reason})\n`);
   }
   return true;
 }

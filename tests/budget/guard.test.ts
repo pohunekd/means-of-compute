@@ -357,24 +357,31 @@ test("D3: exactly one escalation per cap event across repeated refusals", async 
   }
 });
 
-test("D3: total cap escalates once across days", async () => {
+test("D3: interleaved cap events escalate total@D, day@D, total@D+1, total@D+1 -> true, true, false, false", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-escalation-"));
   try {
     const statePath = join(dir, "state.json");
     const logPath = join(dir, "escalations.log");
     const stderr: string[] = [];
-    const refused = {
+    const push = (line: string): void => {
+      stderr.push(line);
+    };
+    const totalRefused = {
       admit: false,
       reason: "total cap reached",
       spentTodayUsd: 1,
       spentTotalUsd: 140,
       nvidiaRequestsToday: 5,
     } as const;
-    const push = (line: string): void => {
-      stderr.push(line);
-    };
+    const dayRefused = {
+      admit: false,
+      reason: "daily cap reached",
+      spentTodayUsd: 12,
+      spentTotalUsd: 152,
+      nvidiaRequestsToday: 5,
+    } as const;
     expect(
-      await maybeEscalate(refused, {
+      await maybeEscalate(totalRefused, {
         statePath,
         escalationLogPath: logPath,
         now: new Date("2026-10-26T12:00:00.000Z"),
@@ -382,25 +389,34 @@ test("D3: total cap escalates once across days", async () => {
       }),
     ).toBe(true);
     expect(
-      await maybeEscalate(refused, {
+      await maybeEscalate(dayRefused, {
         statePath,
         escalationLogPath: logPath,
         now: new Date("2026-10-26T18:00:00.000Z"),
         stderr: push,
       }),
-    ).toBe(false);
-    // Next UTC day is still the same total-cap event.
+    ).toBe(true);
     expect(
-      await maybeEscalate(refused, {
+      await maybeEscalate(totalRefused, {
         statePath,
         escalationLogPath: logPath,
         now: new Date("2026-10-27T00:01:00.000Z"),
         stderr: push,
       }),
     ).toBe(false);
-    expect(stderr).toHaveLength(1);
+    expect(
+      await maybeEscalate(totalRefused, {
+        statePath,
+        escalationLogPath: logPath,
+        now: new Date("2026-10-27T06:00:00.000Z"),
+        stderr: push,
+      }),
+    ).toBe(false);
+    expect(stderr).toHaveLength(2);
     const log = await Bun.file(logPath).text();
-    expect(log.trim().split("\n")).toHaveLength(1);
+    expect(log.trim().split("\n")).toHaveLength(2);
+    const state = JSON.parse(await Bun.file(statePath).text()) as { escalated: string[] };
+    expect(state.escalated).toEqual(["total", "day:2026-10-26"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

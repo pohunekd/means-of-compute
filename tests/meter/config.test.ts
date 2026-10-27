@@ -99,7 +99,14 @@ test("totalTimeoutMs below firstByteTimeoutMs fails", async () => {
 });
 
 test("listen wildcard refused", async () => {
-  for (const listen of ["0.0.0.0:8787", "[::]:8787"]) {
+  for (const listen of [
+    "0.0.0.0:8787",
+    "[::]:8787",
+    "[::ffff:0.0.0.0]:8787",
+    "[0:0:0:0:0:ffff:0.0.0.0]:8787",
+    "[::0.0.0.0]:8787",
+    "[::ffff:127.0.0.1]:8787",
+  ]) {
     const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
     const file = join(dir, "hosts.json");
     await Bun.write(file, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
@@ -114,6 +121,7 @@ test("listen wildcard refused", async () => {
         message = (error as Error).message;
       }
       expect(message).toContain("must not be a wildcard");
+      expect(message.includes(listen)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -175,4 +183,68 @@ test("no error text contains the env value", async () => {
   }
   expect(message.length).toBeGreaterThan(0);
   expect(message.includes(probe)).toBe(false);
+});
+
+test("secret values stay out of config errors", async () => {
+  // M04: echoing the secret in its error would leak it. One secret
+  // fails the strict base64 check, the other decodes to 16 bytes.
+  for (const secret of ["not-base64-SECRETMARK", "c2hvcnQtU0VDUkVUTUFSSw=="]) {
+    let message = "";
+    let name = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_SECRET: secret }));
+    } catch (error: unknown) {
+      message = (error as Error).message;
+      name = (error as Error).name;
+    }
+    expect(name).toBe("MeterConfigError");
+    expect(message.includes(secret)).toBe(false);
+    expect(message.includes("SECRETMARK")).toBe(false);
+  }
+});
+
+test("invalid IP refused", async () => {
+  // M06: dropping the invalid-IP check would accept these.
+  let listenMessage = "";
+  try {
+    await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_LISTEN: "999.1.1.1:8787" }));
+  } catch (error: unknown) {
+    listenMessage = (error as Error).message;
+  }
+  expect(listenMessage).toContain("invalid IP");
+  expect(listenMessage.includes("999.1.1.1")).toBe(false);
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify({ "laptop-a": ["not-an-ip"] }));
+  try {
+    let hostsMessage = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_HOST_ADDRESSES_FILE: file }));
+    } catch (error: unknown) {
+      hostsMessage = (error as Error).message;
+    }
+    expect(hostsMessage).toContain("holds an invalid IP");
+    expect(hostsMessage.includes("not-an-ip")).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("duplicate address in one alias refused", async () => {
+  // M07: dropping the in-alias duplicate check would accept this.
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify({ "laptop-a": ["127.0.0.1", "127.0.0.1"] }));
+  try {
+    let message = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_HOST_ADDRESSES_FILE: file }));
+    } catch (error: unknown) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("duplicate address");
+    expect(message.includes("127.0.0.1")).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

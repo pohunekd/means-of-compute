@@ -4,10 +4,11 @@
 // entry after a failed settle is observable: the entry stays, the port
 // holds one live session, and a replayed start settles that same session.
 // Deterministic: memory port, in-process switch gate, temp ledger and registry.
-import { expect, test } from "bun:test";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { expect, spyOn, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as registryModule from "../../src/dispatcher/registry.js";
 // Dynamic imports load the modules under test after the static helpers above.
 const { createDispatcher } = await import("../../src/dispatcher/dispatcher.js");
 const { createMemoryPort } = await import("../../src/dispatcher/memory-port.js");
@@ -100,7 +101,7 @@ async function withHarness(body: (h: SettleHarness) => Promise<void>): Promise<v
 }
 
 test("K2b: a failed settle write keeps the provisional entry and one session", async () => {
-  await withHarness(async ({ control, dir, dispatcher, registryPath, starts }) => {
+  await withHarness(async ({ control, dispatcher, registryPath, starts }) => {
     const first = dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-a") as never,
@@ -108,18 +109,21 @@ test("K2b: a failed settle write keeps the provisional entry and one session", a
       "Do the work.",
     );
     const parked = await starts.next("start");
+    // The spy is armed after the provisional insert, so only the settle
+    // write fails; every later write (a wrongful removal included) passes.
+    const settleWrite = spyOn(registryModule, "replaceRegistryEntry").mockImplementationOnce(
+      () => Promise.reject(new Error("injected settle failure")),
+    );
     let failure: unknown;
     try {
-      // The release runs the port call first, then makes the registry
-      // directory read-only, so the settle write that follows fails.
-      await parked.release(() => chmod(dir, 0o500));
+      await parked.release();
       await first;
     } catch (error) {
       failure = error;
     } finally {
-      await chmod(dir, 0o700);
+      settleWrite.mockRestore();
     }
-    expect(String(failure)).toContain("EACCES");
+    expect(String(failure)).toContain("injected settle failure");
     // The provisional entry is still present and the port holds one live
     // session; no entry was removed after the failed settle.
     const kept = await readRegistry(registryPath);

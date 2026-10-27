@@ -528,11 +528,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       ),
     );
     if (requestsUnknownToday.length > 0) {
-      const ids = [
-        ...new Set(
-          requestsUnknownToday.flatMap((entry) => entry.tokens.map((token) => token.provider)),
-        ),
-      ].sort();
+      const ids = [...new Set(requestsUnknownToday.map((entry) => entry.workItemId))].sort();
       figures.push({
         label: `NVIDIA Build requests today (UTC ${day})`,
         cell: noDataCell(`requests not reported for ${ids.join(", ")}`),

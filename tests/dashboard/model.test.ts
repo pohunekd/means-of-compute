@@ -2,7 +2,7 @@
 // every number is recomputed below from the fixture text, never from the
 // code under test. Each test names the mutation it must catch.
 import { describe, expect, test } from "bun:test";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { loadBudgetConfig } from "../../src/budget/config.js";
 import { loadPricingForIds } from "../../src/budget/pricing.js";
 import { readLedger } from "../../src/ledger/read.js";
@@ -665,6 +665,32 @@ describe("dashboard unknown token counts (mutation: ?? 0 on the no-data path)", 
       kind: "no-data",
       reason: "token counts not reported for d1-alpha",
     });
+  });
+});
+
+describe("dashboard unknown requests (mutation: provider ids instead of work item ids)", () => {
+  test("one pending entry names its workItemId, not a provider", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-requests-");
+    try {
+      const line =
+        `{"pending":{"entryId":"w9-null:0","kind":"session","workItemId":"w9-null",` +
+        `"finishedAt":"2026-10-27T11:00:00.000Z","startModel":"meta/muse-glimmer-30b",` +
+        `"tokens":[{"provider":"nvidia-build","model":"meta/muse-glimmer-30b",` +
+        `"inputTokens":100000,"outputTokens":20000,"requests":null,"source":"meter-proxy"},` +
+        `{"provider":"meta-api","model":"muse-spark-1.3-contributor",` +
+        `"inputTokens":100000,"outputTokens":50000,"requests":1,"source":"meter-proxy"}],` +
+        `"session":{"hostAlias":"laptop-a","seconds":600,"source":"dispatcher-clock","result":"success"}}}\n`;
+      await writeFile(`${dir}/ledger.jsonl`, line, "utf8");
+      await mkdir(`${dir}/verdicts`, { recursive: true });
+      const model = buildDashboard(await loadInputs(`${dir}/ledger.jsonl`, `${dir}/verdicts`));
+      const usage = model.panels[2] as (typeof model.panels)[number];
+      expect(figureOf(usage, "NVIDIA Build requests today (UTC 2026-10-27)").cell).toEqual({
+        kind: "no-data",
+        reason: "requests not reported for w9-null",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

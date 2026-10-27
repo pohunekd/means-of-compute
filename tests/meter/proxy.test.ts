@@ -340,9 +340,14 @@ test("no failover and no budget import: 429 passes through unbilled", async () =
 test("first-byte timeout is billed with null counts", async () => {
   await withMeter(
     "tests/meter/recordings/stream-slow-first-byte.json",
-    async ({ meter, tokenFor, logPath }) => {
+    async ({ meter, tokenFor, logPath, timers }) => {
       const { requestId } = await openBoundGrant(meter);
-      const resp = await post(meter, tokenFor(requestId), chatBody());
+      const pending = post(meter, tokenFor(requestId), chatBody());
+      // The first-byte deadline is a meter timer: advance past it while the
+      // upstream holds the headers, then the pump aborts and answers 504.
+      await timers.waitForTimer(50);
+      timers.advance(50);
+      const resp = await pending;
       expect(resp.status).toBe(504);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
         "upstream-timeout",
@@ -405,9 +410,14 @@ test("only config timeouts apply, never the descriptor timeout", async () => {
 test("idle timeout aborts a slow stream", async () => {
   await withMeter(
     "tests/meter/recordings/stream-slow-chunks.json",
-    async ({ meter, tokenFor, logPath }) => {
+    async ({ meter, tokenFor, logPath, timers }) => {
       const { requestId } = await openBoundGrant(meter);
-      const resp = await post(meter, tokenFor(requestId), chatBody());
+      const pending = post(meter, tokenFor(requestId), chatBody());
+      // The idle deadline is a meter timer: advance past it mid-stream so
+      // the pump aborts between chunks while the response stays 200.
+      await timers.waitForTimer(50);
+      timers.advance(50);
+      const resp = await pending;
       expect(resp.status).toBe(200);
       await resp.text().catch(() => "");
       const lines = await readLogLines(logPath);

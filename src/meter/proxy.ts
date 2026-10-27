@@ -1,14 +1,15 @@
 // Metering proxy request handler: route, call authorization, forwarding,
 // response pump, timers and usage extraction of design sections 3.1 to 3.7.
 import { randomUUID } from "node:crypto";
-import type { TerminalState } from "../dispatcher/port.js";
 import type { ProviderDescriptor } from "../providers/types.js";
 import type { MeterConfig } from "./config.js";
 import type { MeterLogEvent } from "./meter.js";
 import type { MeterTimers } from "./timers.js";
 import { createJsonUsageTap, createSseUsageTap } from "./sse.js";
 import { verifyBearer } from "./token.js";
+import { MeterLogError } from "./usage-log.js";
 import type { CallOutcome, UsageAppender, UsageIndex, UsageLogRecord } from "./usage-log.js";
+import type { LiveCall } from "./meter.js";
 
 export type MeterRejectCode =
   | "not-found"
@@ -37,11 +38,11 @@ export interface ProxyState {
   readonly providers: Readonly<Record<string, ProviderDescriptor>>;
   readonly timers: MeterTimers;
   readonly appender: () => UsageAppender;
-  readonly maxInFlight: (requestId: string) => number;
+  readonly liveCount: (requestId: string) => number;
+  readonly reserveCall: (requestId: string, callId: string) => LiveCall;
+  readonly closing: () => boolean;
   readonly now: () => Date;
   readonly log: (event: MeterLogEvent) => void;
-  readonly trackCall: (requestId: string) => () => void;
-  readonly drainSignal: (requestId: string) => AbortSignal | null;
 }
 
 interface GrantView {
@@ -52,8 +53,6 @@ interface GrantView {
   readonly sessionId: string | null;
   readonly lastOpenAt: string;
 }
-
-const TERMINAL_STATES: readonly string[] = ["finished", "failed", "lost", "cancelled"];
 
 function errorResponse(code: MeterRejectCode, status: number): Response {
   return new Response(JSON.stringify({ error: { type: "moc_meter", code, message: code } }), {
@@ -117,10 +116,6 @@ function authorize(
     return { code: "wrong-host", status: 403 };
   }
   return { requestId, grant };
-}
-
-function isTerminalState(value: unknown): value is TerminalState {
-  return typeof value === "string" && TERMINAL_STATES.some((state) => state === value);
 }
 
 export async function handleMeterRequest(
@@ -247,71 +242,116 @@ export async function handleMeterRequest(
     model: descriptor.model,
     stream,
   };
-  const verdict = await state.appender().appendGuarded(callStart, (live) => {
-    const liveGrant = live.grants.get(grantId);
-    if (liveGrant === undefined || liveGrant.closed) {
-      return "grant-closed";
+  const slot: { reserved: Pick<LiveCall, "finish"> | null } = { reserved: null };
+  let proceed = false;
+  try {
+    const verdict = await state.appender().appendGuarded(callStart, (index) => {
+      const result = callStartGuard(
+        index,
+        grantId,
+        callId,
+        state,
+        state.config.maxInFlightPerSession,
+      );
+      slot.reserved = result.reserved;
+      return result.failure;
+    });
+    if (verdict !== null) {
+      state.log({
+        level: "warn",
+        event: "request-rejected",
+        code: verdict,
+        status: verdict === "grant-closed" ? 403 : verdict === "session-concurrency" ? 429 : 503,
+        requestId: grantId,
+      });
+      if (verdict === "grant-closed") {
+        return errorResponse("grant-closed", 403);
+      }
+      if (verdict === "session-concurrency") {
+        return errorResponse("session-concurrency", 429);
+      }
+      return errorResponse("meter-unavailable", 503);
     }
-    if (state.maxInFlight(grantId) >= state.config.maxInFlightPerSession) {
-      return "session-concurrency";
+    proceed = true;
+  } catch (error: unknown) {
+    if (!(error instanceof MeterLogError)) {
+      throw error;
     }
-    return null;
-  });
-  if (verdict === "grant-closed") {
-    return errorResponse("grant-closed", 403);
-  }
-  if (verdict === "session-concurrency") {
-    return errorResponse("session-concurrency", 429);
-  }
-  if (verdict === "meter-unavailable") {
+    state.log({
+      level: "warn",
+      event: "request-rejected",
+      code: "meter-unavailable",
+      status: 503,
+      requestId: grantId,
+    });
     return errorResponse("meter-unavailable", 503);
+  } finally {
+    if (!proceed) {
+      slot.reserved?.finish();
+    }
   }
-  // The call joins the in-flight set after its call-start resolves and
-  // leaves after its call-end settles (5.4). forwardCall owns the release so
-  // a streamed call stays counted until its end record is durable.
-  const release = state.trackCall(grantId);
+  // The LiveCall passes into forwardCall, which owns its finish().
+  const call = slot.reserved as unknown as LiveCall;
   try {
     return await forwardCall(
       state,
       descriptor,
       auth.requestId,
-      callId,
+      call,
+      auth.grant.hostAlias,
       bodyText,
       fields,
       stream,
-      release,
     );
   } catch (error: unknown) {
-    release();
+    call.finish();
     throw error;
   }
 }
 
-interface CallTimings {
-  readonly firstByteMs: number;
-  readonly idleMs: number;
-  readonly totalMs: number;
-}
-
-function callTimings(state: ProxyState): CallTimings {
-  return {
-    firstByteMs: state.config.firstByteTimeoutMs,
-    idleMs: state.config.idleTimeoutMs,
-    totalMs: state.config.totalTimeoutMs,
-  };
+// F1: a call joins the live set inside its call-start chain step, when
+// the guard passes and before the write. It leaves when its call-end
+// append settles; a failed call-start write removes it. The exported
+// guard also returns the reserved LiveCall so the caller can finish it
+// when the append fails.
+export function callStartGuard(
+  index: UsageIndex,
+  requestId: string,
+  callId: string,
+  state: {
+    liveCount: (requestId: string) => number;
+    reserveCall: (requestId: string, callId: string) => LiveCall;
+    closing: () => boolean;
+  },
+  max: number,
+): {
+  failure: "grant-closed" | "session-concurrency" | "meter-unavailable" | null;
+  reserved: LiveCall | null;
+} {
+  if (state.closing()) {
+    return { failure: "meter-unavailable", reserved: null };
+  }
+  const grant = index.grants.get(requestId);
+  if (grant === undefined || grant.closed) {
+    return { failure: "grant-closed", reserved: null };
+  }
+  if (state.liveCount(requestId) >= max) {
+    return { failure: "session-concurrency", reserved: null };
+  }
+  return { failure: null, reserved: state.reserveCall(requestId, callId) };
 }
 
 async function forwardCall(
   state: ProxyState,
   descriptor: ProviderDescriptor,
   requestId: string,
-  callId: string,
+  call: LiveCall,
+  hostAlias: string,
   bodyText: string,
   fields: Record<string, unknown>,
   stream: boolean,
-  release: () => void,
 ): Promise<Response> {
-  const timings = callTimings(state);
+  const callId = call.callId;
   const callerBody = JSON.parse(bodyText) as Record<string, unknown>;
   callerBody["model"] = descriptor.model;
   if (stream) {
@@ -330,43 +370,46 @@ async function forwardCall(
     }
   }
   const url = `${descriptor.baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const controller = new AbortController();
+  const upstreamController = new AbortController();
   const abortState: { reason: CallOutcome | null } = { reason: null };
   const abortWith = (reason: CallOutcome): void => {
     abortState.reason = reason;
-    controller.abort();
+    // controller.abort() is always called with no argument.
+    upstreamController.abort();
   };
+  // The aborter lets settle and close abort a call that reserved its slot
+  // but has not reached fetch yet; the stored reason decides the outcome.
+  call.attachAborter(() => {
+    abortWith("closed-abort");
+  });
   const t0 = Date.now();
-  const timers: ReturnType<typeof setTimeout>[] = [];
-  const clearTimers = (): void => {
-    for (const timer of timers) {
-      clearTimeout(timer);
+  // L1: the first-byte timer is cancelled at the headers, the idle timer
+  // is armed at the headers and re-armed after each chunk, and the total
+  // timer is armed once at t0 and cancelled only after the pump ends.
+  const cancelFirstByte = state.timers.after(state.config.firstByteTimeoutMs, () => {
+    if (abortState.reason === null) {
+      abortWith("first-byte-timeout");
     }
+  });
+  const cancelTotal = state.timers.after(state.config.totalTimeoutMs, () => {
+    if (abortState.reason === null) {
+      abortWith("total-timeout");
+    }
+  });
+  let cancelIdle: (() => void) | null = null;
+  const armIdle = (): void => {
+    cancelIdle?.();
+    cancelIdle = state.timers.after(state.config.idleTimeoutMs, () => {
+      if (abortState.reason === null) {
+        abortWith("idle-timeout");
+      }
+    });
   };
-  const drain = state.drainSignal(requestId);
-  let onDrain: (() => void) | null = null;
-  if (drain !== null) {
-    if (drain.aborted) {
-      abortWith("closed-abort");
-    } else {
-      onDrain = (): void => {
-        abortWith("closed-abort");
-      };
-      drain.addEventListener("abort", onDrain, { once: true });
-    }
-  }
-  timers.push(
-    setTimeout(() => {
-      if (abortState.reason === null) {
-        abortWith("first-byte-timeout");
-      }
-    }, timings.firstByteMs),
-    setTimeout(() => {
-      if (abortState.reason === null) {
-        abortWith("total-timeout");
-      }
-    }, timings.totalMs),
-  );
+  const cancelPumpTimers = (): void => {
+    cancelIdle?.();
+    cancelIdle = null;
+    cancelTotal();
+  };
   const bytesIn = new TextEncoder().encode(bodyText).length;
   const tap = stream
     ? createSseUsageTap(state.config.maxUsageScanBytes)
@@ -375,6 +418,24 @@ async function forwardCall(
   let outcome: CallOutcome | null = null;
   let clientGone = false;
   let bytesOut = 0;
+  let errorReason: string | null = null;
+  const errorCaller = (
+    reason: string,
+    streamController: ReadableStreamDefaultController<Uint8Array>,
+  ): void => {
+    state.log({
+      level: "warn",
+      event: "caller-stream-errored",
+      callId,
+      requestId,
+      outcome: reason,
+    });
+    try {
+      streamController.error(new Error(reason));
+    } catch {
+      clientGone = true;
+    }
+  };
   const finishEnd = async (final: {
     outcome: CallOutcome;
     billed: boolean;
@@ -400,13 +461,23 @@ async function forwardCall(
       bytesIn,
       bytesOut: final.bytesOut,
     };
-    await state.appender().appendUnguarded(record);
+    try {
+      const verdict = await state.appender().appendGuarded(record, () => null);
+      if (verdict !== null) {
+        errorReason = "meter-unavailable";
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof MeterLogError)) {
+        throw error;
+      }
+      errorReason = "meter-unavailable";
+    }
     state.log({
       level: "info",
       event: "call-finished",
       callId,
       requestId,
-      hostAlias: undefined,
+      hostAlias,
       providerId: descriptor.id,
       model: descriptor.model,
       status: final.status ?? undefined,
@@ -426,48 +497,18 @@ async function forwardCall(
       method: "POST",
       headers: upstreamHeaders,
       body: JSON.stringify(callerBody),
-      signal: controller.signal,
+      signal: upstreamController.signal,
     });
   } catch (error: unknown) {
-    clearTimers();
-    if (onDrain !== null) {
-      drain?.removeEventListener("abort", onDrain);
-    }
+    cancelFirstByte();
+    cancelPumpTimers();
     const ms = Date.now() - t0;
-    try {
-      if (abortState.reason !== null) {
-        const out: CallOutcome = abortState.reason;
-        await finishEnd({
-          outcome: out,
-          billed: true,
-          status: null,
-          inputTokens: null,
-          outputTokens: null,
-          clientGone,
-          ms,
-          bytesOut: 0,
-        });
-        state.log({ level: "error", event: "error", outcome: (error as Error).name });
-        return errorResponse(
-          abortState.reason === "closed-abort" ? "upstream-error" : "upstream-timeout",
-          504,
-        );
-      }
-      if (error instanceof TypeError) {
-        await finishEnd({
-          outcome: "upstream-unreachable",
-          billed: false,
-          status: null,
-          inputTokens: null,
-          outputTokens: null,
-          clientGone,
-          ms,
-          bytesOut: 0,
-        });
-        return errorResponse("upstream-unreachable", 502);
-      }
+    // The early paths use the F4 order: finishEnd, then finish, then the
+    // error answer.
+    if (abortState.reason !== null) {
+      const out: CallOutcome = abortState.reason;
       await finishEnd({
-        outcome: "upstream-error",
+        outcome: out,
         billed: true,
         status: null,
         inputTokens: null,
@@ -477,105 +518,91 @@ async function forwardCall(
         bytesOut: 0,
       });
       state.log({ level: "error", event: "error", outcome: (error as Error).name });
-      return errorResponse("upstream-error", 502);
-    } finally {
-      release();
+      call.finish();
+      return errorResponse(
+        abortState.reason === "closed-abort" ? "upstream-error" : "upstream-timeout",
+        504,
+      );
     }
-  }
-  status = upstream.status;
-  clearTimers();
-  if (status < 200 || status > 299) {
-    if (onDrain !== null) {
-      drain?.removeEventListener("abort", onDrain);
-    }
-    const body = await upstream.text().catch(() => "");
-    bytesOut = new TextEncoder().encode(body).length;
-    try {
+    if (error instanceof TypeError) {
       await finishEnd({
-        outcome: "upstream-status",
+        outcome: "upstream-unreachable",
         billed: false,
-        status,
+        status: null,
         inputTokens: null,
         outputTokens: null,
         clientGone,
-        ms: Date.now() - t0,
-        bytesOut,
+        ms,
+        bytesOut: 0,
       });
-    } finally {
-      release();
+      call.finish();
+      return errorResponse("upstream-unreachable", 502);
     }
-    const headers = new Headers();
-    const upstreamType = upstream.headers.get("content-type");
-    if (upstreamType !== null) {
-      headers.set("content-type", upstreamType);
-    }
-    return new Response(body, { status, headers });
+    await finishEnd({
+      outcome: "upstream-error",
+      billed: true,
+      status: null,
+      inputTokens: null,
+      outputTokens: null,
+      clientGone,
+      ms,
+      bytesOut: 0,
+    });
+    state.log({ level: "error", event: "error", outcome: (error as Error).name });
+    call.finish();
+    return errorResponse("upstream-error", 502);
   }
-  // From here the body is pumped by hand so usage is recovered even when the
-  // caller disconnects. Timeouts below cover the idle gap and the total time.
-  const idleTimer = { current: null as ReturnType<typeof setTimeout> | null };
-  const armIdle = (): void => {
-    if (idleTimer.current !== null) {
-      clearTimeout(idleTimer.current);
-    }
-    idleTimer.current = setTimeout(() => {
-      if (abortState.reason === null) {
-        abortWith("idle-timeout");
-      }
-    }, timings.idleMs);
-  };
+  status = upstream.status;
+  cancelFirstByte();
   armIdle();
-  const totalTimer = setTimeout(() => {
-    if (abortState.reason === null) {
-      abortWith("total-timeout");
-    }
-  }, timings.totalMs);
-  const reader = upstream.body?.getReader();
+  const httpStatus: number = upstream.status;
   const upstreamType = upstream.headers.get("content-type");
+  const is2xx = httpStatus >= 200 && httpStatus <= 299;
+  const reader = upstream.body?.getReader();
   let streamClosed = false;
   const callerStream = new ReadableStream<Uint8Array>({
-    async start(controller) {
+    async start(streamController) {
+      // F4 order: the pump catch only records the outcome; after the pump
+      // loop ends, for any reason, run exactly tap.end, finishEnd,
+      // call.finish, then either errorCaller or close.
       try {
-        if (reader === undefined) {
-          controller.close();
-          streamClosed = true;
-          return;
-        }
-        for (;;) {
-          let read: Awaited<ReturnType<NonNullable<typeof reader>["read"]>>;
-          try {
-            read = await reader.read();
-          } catch (error: unknown) {
+        if (reader !== undefined) {
+          for (;;) {
+            let read: Awaited<ReturnType<NonNullable<typeof reader>["read"]>>;
+            try {
+              read = await reader.read();
+            } catch (error: unknown) {
+              outcome = abortState.reason ?? "upstream-broken";
+              throw error;
+            }
+            if (read.done) {
+              break;
+            }
+            armIdle();
+            const chunk = read.value as Uint8Array;
+            if (is2xx) {
+              tap.push(chunk);
+            }
+            bytesOut += chunk.length;
+            if (!clientGone) {
+              try {
+                streamController.enqueue(chunk);
+              } catch {
+                clientGone = true;
+              }
+            }
             if (abortState.reason !== null) {
               outcome = abortState.reason;
-            } else {
-              outcome = "upstream-broken";
-            }
-            throw error;
-          }
-          if (read.done) {
-            break;
-          }
-          armIdle();
-          const chunk = read.value as Uint8Array;
-          tap.push(chunk);
-          bytesOut += chunk.length;
-          if (!clientGone) {
-            try {
-              controller.enqueue(chunk);
-            } catch {
-              clientGone = true;
+              try {
+                await reader.cancel();
+              } catch {
+                // The upstream reader is already closed; the outcome stands.
+              }
+              break;
             }
           }
-          if (abortState.reason !== null) {
-            outcome = abortState.reason;
-            try {
-              await reader.cancel();
-            } catch {
-              // The upstream reader is already closed; the outcome stands.
-            }
-            break;
-          }
+        } else {
+          streamClosed = true;
         }
         if (outcome === null) {
           outcome = "ok";
@@ -584,58 +611,56 @@ async function forwardCall(
         if (outcome === null) {
           outcome = abortState.reason ?? "upstream-broken";
         }
-        if (!clientGone) {
-          try {
-            controller.error(new Error(outcome));
-          } catch {
-            clientGone = true;
+      } finally {
+        cancelPumpTimers();
+        const seen = is2xx ? tap.end() : { seen: false as const };
+        let finalOutcome: CallOutcome;
+        let billed: boolean;
+        let inputTokens: number | null;
+        let outputTokens: number | null;
+        if (!is2xx) {
+          // F2: whatever happens to the body, the end is upstream-status,
+          // unbilled, with null counts.
+          finalOutcome = "upstream-status";
+          billed = false;
+          inputTokens = null;
+          outputTokens = null;
+          const pumpOutcome: CallOutcome = outcome ?? "ok";
+          if (pumpOutcome !== "ok") {
+            errorReason = pumpOutcome;
+          }
+        } else {
+          const counts =
+            seen.seen && httpStatus >= 200 && httpStatus <= 299
+              ? { inputTokens: seen.inputTokens, outputTokens: seen.outputTokens }
+              : { inputTokens: null, outputTokens: null };
+          finalOutcome = outcome ?? "ok";
+          billed = true;
+          if (finalOutcome === "ok" && !seen.seen) {
+            finalOutcome = "no-usage";
+          }
+          inputTokens = counts.inputTokens;
+          outputTokens = counts.outputTokens;
+          if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
+            errorReason = outcome ?? "upstream-broken";
           }
         }
-      } finally {
-        if (idleTimer.current !== null) {
-          clearTimeout(idleTimer.current);
-        }
-        clearTimeout(totalTimer);
-        if (onDrain !== null && drain !== null) {
-          drain.removeEventListener("abort", onDrain);
-        }
-        clearTimers();
-        const seen = tap.end();
-        const counts =
-          status === 200 && seen.seen
-            ? { inputTokens: seen.inputTokens, outputTokens: seen.outputTokens }
-            : { inputTokens: null, outputTokens: null };
-        let finalOutcome = outcome ?? "ok";
-        let billed = true;
-        if (finalOutcome === "ok" && !seen.seen && status === 200) {
-          finalOutcome = "no-usage";
-        }
-        if (finalOutcome === "ok" && seen.seen) {
-          billed = true;
-        }
-        let errorReason: string | null = null;
-        if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
-          errorReason = outcome ?? "upstream-broken";
-        }
-        try {
-          await finishEnd({
-            outcome: finalOutcome,
-            billed,
-            status,
-            inputTokens: counts.inputTokens,
-            outputTokens: counts.outputTokens,
-            clientGone,
-            ms: Date.now() - t0,
-            bytesOut,
-          });
-        } finally {
-          release();
-        }
+        await finishEnd({
+          outcome: finalOutcome,
+          billed,
+          status,
+          inputTokens,
+          outputTokens,
+          clientGone,
+          ms: Date.now() - t0,
+          bytesOut,
+        });
+        call.finish();
         if (errorReason !== null) {
-          controller.error(new Error(errorReason));
+          errorCaller(errorReason, streamController);
         } else if (!streamClosed) {
           try {
-            controller.close();
+            streamController.close();
           } catch {
             // The caller cancelled first; the end record already stands.
           }
@@ -653,8 +678,4 @@ async function forwardCall(
     headers.set("content-type", upstreamType);
   }
   return new Response(callerStream, { status, headers });
-}
-
-export function isTerminal(value: unknown): value is TerminalState {
-  return isTerminalState(value);
 }

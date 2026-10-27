@@ -328,6 +328,37 @@ export function applyFinalize(
   return { next: { records, pending: keptPending }, result: record === null ? "appended" : "updated" };
 }
 
+export interface RecordCompletionResult {
+  readonly pending: readonly WriteOutcome[];
+  readonly finalize: WriteOutcome;
+}
+
+export async function recordCompletion(
+  ledgerPath: string,
+  pending: readonly PendingUsage[],
+  input: FinalizeInput,
+): Promise<RecordCompletionResult> {
+  return withLedgerLock(ledgerPath, async () => {
+    const contents = await readLedger("Budget ledger", ledgerPath);
+    let next = contents;
+    const outcomes: WriteOutcome[] = [];
+    for (const entry of pending) {
+      const applied = applyPending(next, ledgerPath, entry);
+      next = applied.next;
+      outcomes.push(applied.result);
+    }
+    const finalized = applyFinalize(next, ledgerPath, input);
+    next = finalized.next;
+    const changed =
+      outcomes.some((outcome) => outcome !== "unchanged") ||
+      finalized.result !== "unchanged";
+    if (changed) {
+      await writeFileAtomic("Budget ledger", ledgerPath, serialize(next));
+    }
+    return { pending: outcomes, finalize: finalized.result };
+  });
+}
+
 export async function finalizeUsage(
   ledgerPath: string,
   input: FinalizeInput,

@@ -41,7 +41,9 @@ integer in `0..65535`; `0` means ephemeral and is used by tests.
 Remote viewing is not in v1: run the command on the factory machine, or use
 `ssh -L <p>:127.0.0.1:<p> <factory machine>` with the same port number, so
 `localhost:<p>` passes the Host check. The request Host header must be
-`<host>:<port>` as bound, `[::1]:<port>`, or `localhost:<port>`; anything
+the bound host with the bound port, or `localhost:<port>`: for an IPv4
+bind `{<host>:<p>, localhost:<p>}` where `<host>` is the configured
+listen host, for a `::1` bind `{[::1]:<p>, localhost:<p>}`; anything
 else, including a missing header, gets 421. Method must be `GET` (405) and
 the path `/` (404, the query string is ignored).
 

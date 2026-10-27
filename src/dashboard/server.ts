@@ -60,12 +60,11 @@ const TEXT_HEADERS = {
   "x-content-type-options": "nosniff",
 } as const;
 
-function allowlist(_config: DashboardConfig, port: number): Set<string> {
-  return new Set([
-    `127.0.0.1:${String(port)}`,
-    `localhost:${String(port)}`,
-    `[::1]:${String(port)}`,
-  ]);
+function allowlist(host: string, port: number): Set<string> {
+  if (host === "::1") {
+    return new Set([`[::1]:${String(port)}`, `localhost:${String(port)}`]);
+  }
+  return new Set([`${host}:${String(port)}`, `localhost:${String(port)}`]);
 }
 
 function textResponse(status: number, body: string, allowGet = false): Response {
@@ -119,7 +118,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         // The Host check runs before any routing or URL parsing (1.4, 2.7):
         // a request without a Host header gets 421, never a 500.
         const boundPort = server.port ?? deps.listen.port;
-        if (!allowlist(deps.config, boundPort).has(rawHost)) {
+        if (!allowlist(deps.listen.host, boundPort).has(rawHost)) {
           return respond(textResponse(421, "misdirected request\n"), "/");
         }
         const url = new URL(req.url);

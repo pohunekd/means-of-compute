@@ -20,7 +20,10 @@ afterEach(async () => {
   servers = [];
 });
 
-async function startTestServer(logged: DashboardLogEvent[]): Promise<{ port: number }> {
+async function startTestServer(
+  logged: DashboardLogEvent[],
+  host = "127.0.0.1",
+): Promise<{ port: number }> {
   const budget = await loadBudgetConfig();
   const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
   const deps: DashboardDeps = {
@@ -33,7 +36,7 @@ async function startTestServer(logged: DashboardLogEvent[]): Promise<{ port: num
       workRowLimit: 50,
       baselines: { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
     },
-    listen: { host: "127.0.0.1", port: 0 },
+    listen: { host, port: 0 },
     fixed: {
       budget,
       route,
@@ -249,6 +252,31 @@ describe("dashboard http (mutation: Host allowlist removed or checked after rout
     const request = logged.find((event) => event.event === "request");
     expect(request?.path).toBe("/");
     expect(JSON.stringify(logged)).not.toContain("secret=1");
+  });
+
+  test("127.0.0.2 bind allows its host and rejects 127.0.0.1 (mutation: fixed 127.0.0.1 allowlist)", async () => {
+    const logged: DashboardLogEvent[] = [];
+    const { port } = await startTestServer(logged, "127.0.0.2");
+    const good = await fetch(`http://127.0.0.2:${String(port)}/`, {
+      headers: { host: `127.0.0.2:${String(port)}` },
+    });
+    expect(good.status).toBe(200);
+    await good.text();
+    const bad = await fetch(`http://127.0.0.2:${String(port)}/`, {
+      headers: { host: `127.0.0.1:${String(port)}` },
+    });
+    expect(bad.status).toBe(421);
+    await bad.text();
+  });
+
+  test("127.0.0.1 bind rejects [::1] (mutation: [::1] always allowed)", async () => {
+    const logged: DashboardLogEvent[] = [];
+    const { port } = await startTestServer(logged, "127.0.0.1");
+    const response = await fetch(`http://127.0.0.1:${String(port)}/`, {
+      headers: { host: `[::1]:${String(port)}` },
+    });
+    expect(response.status).toBe(421);
+    await response.text();
   });
 
   test("query string is ignored and the page stays 200", async () => {

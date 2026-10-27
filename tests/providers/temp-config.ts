@@ -16,6 +16,7 @@ export interface ChildResult {
 
 export async function makeTempConfig(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "provider-config-"));
+  const ids: string[] = [];
   for (const name of [
     "meta-api.json",
     "nvidia-build.json",
@@ -25,7 +26,11 @@ export async function makeTempConfig(): Promise<string> {
   ]) {
     const source = Bun.file(join(REPO_ROOT, "config", "providers", name));
     await Bun.write(join(dir, "config", "providers", name), await source.text());
+    if (name !== "route.json" && name !== "schema.json") {
+      ids.push(name.replace(/\.json$/, ""));
+    }
   }
+  await Bun.write(join(dir, "provider-ids.json"), JSON.stringify(ids));
   return dir;
 }
 
@@ -39,7 +44,7 @@ export function setChildEnv(extra: Record<string, string>): void {
   extraChildEnv = extra;
 }
 
-function childEnv(): Record<string, string> {
+async function childEnv(cwd: string): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !key.startsWith("PROVIDER_")) {
@@ -49,6 +54,13 @@ function childEnv(): Record<string, string> {
   env["NVIDIA_API_KEY"] = "test";
   env["META_API_KEY"] = "test";
   env["LOCAL_MODEL_BASE_URL"] = "http://localhost:1148/v1";
+  // Pin every descriptor base URL to a closed loopback port, so a regression
+  // in a child can never reach a third-party endpoint.
+  for (const id of JSON.parse(
+    await Bun.file(join(cwd, "provider-ids.json")).text(),
+  ) as string[]) {
+    env[`PROVIDER_${id.toUpperCase().replace(/-/g, "_")}_BASE_URL`] = "http://127.0.0.1:9";
+  }
   for (const [key, value] of Object.entries(extraChildEnv)) {
     env[key] = value;
   }
@@ -62,7 +74,7 @@ async function runHelper(dir: string, name: string, source: string): Promise<Chi
     cwd: dir,
     stdout: "pipe",
     stderr: "pipe",
-    env: childEnv(),
+    env: await childEnv(dir),
   });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),

@@ -104,10 +104,7 @@ test("append with an invalid date throws LedgerDataError", async () => {
   try {
     let error: unknown;
     try {
-      await appendPending(
-        ledgerPath,
-        sessionEntry({ finishedAt: "2026-13-01T00:00:00.000Z" }),
-      );
+      await appendPending(ledgerPath, sessionEntry({ finishedAt: "2026-13-01T00:00:00.000Z" }));
     } catch (thrown: unknown) {
       error = thrown;
     }

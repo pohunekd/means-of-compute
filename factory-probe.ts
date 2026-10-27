@@ -109,7 +109,7 @@ export function loadConfig(path?: string): ProbeConfig {
   }
   const sysfsRoot = nonEmpty("sysfsRoot");
   // The sysfs tree only exists on Linux; on other platforms the readers
-  // never use this root, so its existence is checked in main() instead.
+  // never use this root, so it is not checked there.
   if (process.platform === "linux") {
     assertSysfsRoot(sysfsRoot, "config probe.json: invalid sysfsRoot");
   }

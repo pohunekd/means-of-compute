@@ -66,6 +66,9 @@ function flagValues(args: string[], flag: string): string[] {
   return values;
 }
 
+// Every known flag takes a value, so each pair is a flag plus its
+// value: anything else (a positional argument or a single-dash typo)
+// is an unknown argument.
 function checkUnknownFlags(args: string[]): void {
   const known = new Set([
     "--repo-dir",
@@ -77,10 +80,13 @@ function checkUnknownFlags(args: string[]): void {
     "--pull",
     "--post",
   ]);
-  for (const arg of args) {
-    if (arg.startsWith("--") && !known.has(arg)) {
-      throw new Error(`audit: unknown flag ${arg}`);
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index] as string;
+    if (!known.has(arg)) {
+      throw new Error(`audit: unknown argument ${arg}`);
     }
+    index += 2;
   }
 }
 
@@ -229,30 +235,26 @@ async function postComment(repo: string, pull: number, comment: string): Promise
       throw new AuditPostError(`gh pr comment failed (rc ${String(rc)}): ${stderr.slice(0, 500)}`);
     }
     const verify = Bun.spawn(
-      ["gh", "api", `repos/${repo}/issues/${String(pull)}/comments`, "--paginate"],
+      [
+        "gh",
+        "api",
+        `repos/${repo}/issues/${String(pull)}/comments`,
+        "--paginate",
+        "--jq",
+        '.[] | .body | split("\n")[0]',
+      ],
       { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
     );
-    const [body, verifyRc] = await Promise.all([
+    const [firstLines, verifyRc] = await Promise.all([
       new Response(verify.stdout as ReadableStream).text(),
       verify.exited,
     ]);
     if (verifyRc !== 0) {
       throw new AuditPostError(`gh api comments failed (rc ${String(verifyRc)})`);
     }
-    let comments: unknown;
-    try {
-      comments = JSON.parse(body) as unknown;
-    } catch {
-      throw new AuditPostError("posted comment not found");
-    }
-    const bodies = Array.isArray(comments) ? comments : [];
-    const found = bodies.some(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        typeof (entry as { body?: unknown }).body === "string" &&
-        ((entry as { body: string }).body.split("\n")[0] as string) === markerLine,
-    );
+    // One JSON array per page would not parse past page one: gh prints
+    // only the first line of each body, and the marker matches one line.
+    const found = firstLines.split("\n").some((line) => line === markerLine);
     if (!found) {
       throw new AuditPostError("posted comment not found");
     }
@@ -300,7 +302,20 @@ async function run(): Promise<number> {
       const stored = await readVerdicts(config.verdictDir, item.id);
       const match = stored.find((verdict) => verdict.headSha === headSha) ?? null;
       if (match !== null) {
-        const comment = renderComment(match);
+        // The stored verdict belongs to a PR: re-post keeps the PR it
+        // was stored for, or renders the marker for --pull when the
+        // stored verdict has none. A verdict stored for another PR
+        // refuses instead of posting a marker that rule 2.6 rejects.
+        if (match.pullNumber !== null && match.pullNumber !== options.pull) {
+          console.error(
+            `audit: stored verdict ${headSha} is for #${String(match.pullNumber)}, not #${String(options.pull)}`,
+          );
+          return 2;
+        }
+        const comment =
+          match.pullNumber === null
+            ? renderComment({ ...match, pullNumber: options.pull })
+            : renderComment(match);
         if (comment === null || options.pull === null) {
           console.error("audit: --post requires a pull request");
           return 2;

@@ -140,8 +140,9 @@ async function runCliWithLoopback(
   }
 }
 
-// A fake gh on PATH: `pr comment` stores the body and fails or succeeds
-// per $GH_STATE/mode; `api` lists the stored body for the marker check.
+// A fake gh on PATH: `pr comment` stores the body, counts the call and
+// fails or succeeds per $GH_STATE/mode; `api` prints the first line of
+// the stored body, or two pages' worth when $GH_STATE/two-pages exists.
 async function installFakeGh(tree: CliTree, mode: "fail" | "ok"): Promise<void> {
   const bin = join(tree.dir, "bin");
   const state = join(tree.dir, "gh-state");
@@ -153,6 +154,7 @@ async function installFakeGh(tree: CliTree, mode: "fail" | "ok"): Promise<void> 
     `#!/bin/sh\n` +
       `state="${state}"\n` +
       `if [ "$1" = "pr" ]; then\n` +
+      `  echo x >> "$state/calls"\n` +
       `  body=""; prev="";\n` +
       `  for arg in "$@"; do if [ "$prev" = "--body-file" ]; then body="$arg"; fi; prev="$arg"; done\n` +
       `  cp "$body" "$state/comment.md"\n` +
@@ -160,10 +162,17 @@ async function installFakeGh(tree: CliTree, mode: "fail" | "ok"): Promise<void> 
       `  exit 0\n` +
       `fi\n` +
       `body=$(cat "$state/comment.md" 2>/dev/null || echo "")\n` +
-      `escaped=$(printf '%s' "$body" | bun -e 'console.log(JSON.stringify(await new Response(Bun.stdin.stream()).text()))')\n` +
-      `printf '[{"body": %s}]' "$escaped"\n`,
+      `first=$(printf '%s' "$body" | head -n 1)\n` +
+      `if [ -f "$state/two-pages" ]; then printf 'unrelated first line\n%s\n' "$first"; else printf '%s\n' "$first"; fi\n`,
   );
   await Bun.$`chmod +x ${join(bin, "gh")}`;
+}
+
+async function ghCommentCalls(tree: CliTree): Promise<number> {
+  const text = await Bun.file(join(tree.dir, "gh-state", "calls"))
+    .text()
+    .catch(() => "");
+  return text.split("\n").filter((line) => line === "x").length;
 }
 
 function ghEnv(port: number, tree: CliTree): Record<string, string> {
@@ -359,6 +368,144 @@ test("M5: --post re-posts a stored verdict with no model call and no new ledger 
     expect(stdout.trim()).toBe(`posted stored verdict ${head}`);
     expect(requests).toBe(0);
     expect(await Bun.file(join(tree.dir, "ledger.jsonl")).text()).toBe(ledgerBefore);
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("M-2: re-post to another PR exits 2 and makes no gh pr comment call", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    const head = (await Bun.$`git -C ${repo.dir} rev-parse demo-good`.text()).trim();
+    await installFakeGh(tree, "ok");
+    const first = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "99"],
+    );
+    expect(first.code).toBe(0);
+    const second = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "100", "--post", "yes"],
+    );
+    expect(second.code).toBe(2);
+    expect(second.stderr).toContain(`stored verdict ${head} is for #99, not #100`);
+    expect(await ghCommentCalls(tree)).toBe(0);
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L-4: a null-PR stored verdict re-posts with the --pull marker", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    const head = (await Bun.$`git -C ${repo.dir} rev-parse demo-good`.text()).trim();
+    await installFakeGh(tree, "ok");
+    const first = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      [],
+    );
+    expect(first.code).toBe(0);
+    expect(first.stdout).toContain("no pull request: verdict stored without a marker");
+    const second = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "99", "--post", "yes"],
+    );
+    expect(second.stderr).toBe("");
+    expect(second.code).toBe(0);
+    expect(second.stdout.trim()).toBe(`posted stored verdict ${head}`);
+    const posted = await Bun.file(join(tree.dir, "gh-state", "comment.md")).text();
+    expect(posted.split("\n")[0]).toContain(`#99@${head}`);
+    // The stored file keeps its null PR: the marker is rendered, not stored.
+    const stored = JSON.parse(
+      await readFile(join(tree.dir, "verdicts", "w9-demo", `${head}.json`), "utf8"),
+    ) as { pullNumber: number | null };
+    expect(stored.pullNumber).toBeNull();
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("C-1: a marker on the second page verifies with rc 0 (mutation: read only the first line)", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    const head = (await Bun.$`git -C ${repo.dir} rev-parse demo-good`.text()).trim();
+    await installFakeGh(tree, "ok");
+    await Bun.write(join(tree.dir, "gh-state", "two-pages"), "");
+    const first = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "99"],
+    );
+    expect(first.code).toBe(0);
+    const run = await runCliWithGh(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
+      "--pull",
+      "99",
+      "--post",
+      "yes",
+    ]);
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    expect(run.stdout.trim()).toBe(`posted stored verdict ${head}`);
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L-5: a positional argument exits 2 with audit: unknown argument", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    await installFakeGh(tree, "ok");
+    const run = await runCliWithGh(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
+      "--pull",
+      "99",
+      "extra-positional",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("audit: unknown argument extra-positional");
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L-5: a single-dash typo exits 2 with audit: unknown argument", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    await installFakeGh(tree, "ok");
+    const run = await runCliWithGh(tree, repo, "demo-good", "tests/auditor/recordings/clean.json", [
+      "-pull",
+      "99",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("audit: unknown argument -pull");
   } finally {
     tree.cleanup();
     removeTempRepo(repo.dir);

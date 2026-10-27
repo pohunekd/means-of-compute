@@ -116,9 +116,9 @@ test("record of an older completion after a later one exits 3 and writes nothing
         finalize: { workItemId: "w1-demo", result: "success", retries: 1, humanInterventions: 0 },
       }),
     );
-    expect((await runCli(["record", "--ledger", ledger, "--completion", firstCompletion])).code).toBe(
-      0,
-    );
+    expect(
+      (await runCli(["record", "--ledger", ledger, "--completion", firstCompletion])).code,
+    ).toBe(0);
     expect(
       (await runCli(["record", "--ledger", ledger, "--completion", secondCompletion])).code,
     ).toBe(0);

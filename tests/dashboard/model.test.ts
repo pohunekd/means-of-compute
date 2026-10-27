@@ -2,6 +2,7 @@
 // every number is recomputed below from the fixture text, never from the
 // code under test. Each test names the mutation it must catch.
 import { describe, expect, test } from "bun:test";
+import { mkdir, rm } from "node:fs/promises";
 import { loadBudgetConfig } from "../../src/budget/config.js";
 import { loadPricingForIds } from "../../src/budget/pricing.js";
 import { readLedger } from "../../src/ledger/read.js";
@@ -406,6 +407,32 @@ describe("dashboard input failures (mutation: collapse error into no-data; drop 
       kind: "error",
       code: "pricing-unavailable",
     });
+  });
+
+  test("a ledger provider without a descriptor fails pricing end to end", async () => {
+    const dir = `${import.meta.dir}/.tmp-ledger-noprice`;
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(dir, { recursive: true });
+    const raw = await Bun.file(FIXTURE).text();
+    await Bun.write(
+      `${dir}/ledger.jsonl`,
+      raw.replaceAll('"provider":"meta-api"', '"provider":"no-such-provider"'),
+    );
+    const inputs = await loadInputs(`${dir}/ledger.jsonl`);
+    const pricing = inputs.pricing;
+    expect(pricing.ok).toBe(false);
+    if (pricing.ok || pricing.failure.kind !== "error") {
+      throw new Error("expected a pricing error failure");
+    }
+    expect(pricing.failure.code).toBe("pricing-unavailable");
+    const model = buildDashboard(inputs);
+    const usage = model.panels[2] as (typeof model.panels)[number];
+    expect(figureOf(usage, "Spent today (UTC 2026-10-27)").cell).toEqual({
+      kind: "error",
+      code: "pricing-unavailable",
+    });
+    expect(textOf(usage, "Day cap")).toBe("$12.0000");
+    await rm(dir, { recursive: true, force: true });
   });
 
   test("missing verdict store is no-data without touching the caps", async () => {

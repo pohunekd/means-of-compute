@@ -197,6 +197,27 @@ describe("dashboard serve D1 (mutation: bind the wildcard; print the address in 
     }
   }, 30000);
 
+  test("positional argument exits 2 with factory: (mutation: ignore positional args)", async () => {
+    const dir = await makeSandbox();
+    try {
+      const proc = Bun.spawn(["bun", SERVE_SCRIPT, "positional"], {
+        cwd: dir,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: serveEnv(dir, {}),
+      });
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr as ReadableStream).text(),
+        proc.exited,
+      ]);
+      expect(code).toBe(2);
+      expect(stderr).toContain("factory: ");
+      expect(stderr).toContain("unexpected argument");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+
   test("repeated --ledger exits 2 with factory: (mutation: last flag wins)", async () => {
     const dir = await makeSandbox();
     try {

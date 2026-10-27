@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Config paths resolve from the script location inside factory-probe.ts, so
+# the probe runs from any directory and relative --facts paths resolve
+# against the caller's directory.
+ROOT="$(dirname "$(readlink -f "$0")")"
+exec bun run "$ROOT/factory-probe.ts" "$@"

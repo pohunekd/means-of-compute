@@ -1,0 +1,18 @@
+{
+  "userActivityError": "logged in without an active graphical session: tty session, no graphical session",
+  "acPower": true,
+  "batteryPercent": null,
+  "cpuCores": 4,
+  "cpuLoad1m": 0.1,
+  "memoryTotalMb": 8192,
+  "memoryFreeMb": 4096,
+  "gpuPresent": false,
+  "gpuName": null,
+  "gpuFreeMb": null,
+  "localModelsReachable": false,
+  "localModels": [],
+  "hostAlias": "desktop",
+  "policyAllowedWindowStart": "00:00",
+  "policyAllowedWindowEnd": "00:00",
+  "timestamp": "2026-10-27T12:00:00.000Z"
+}

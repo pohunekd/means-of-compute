@@ -1,0 +1,11 @@
+#!/bin/sh
+# Test-double pmset for factory-probe tests. Prints the fixture file named by
+# MOC_PMSET_FIXTURE, ignoring its arguments like the real "pmset -g batt".
+set -eu
+fixture="${MOC_PMSET_FIXTURE:-}"
+if [ -z "$fixture" ]; then
+  echo "pmset double: MOC_PMSET_FIXTURE is not set" >&2
+  exit 1
+fi
+cat "$fixture"
+exit 0

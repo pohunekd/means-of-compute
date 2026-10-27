@@ -1,0 +1,12 @@
+{
+  "idleMinutes": 15,
+  "batteryThreshold": 50,
+  "localModelsBaseUrl": "",
+  "localModelsTimeoutMs": 2000,
+  "sysfsRoot": "/sys",
+  "policy": {
+    "allowedWindowStart": "08:00",
+    "allowedWindowEnd": "22:00",
+    "maxConcurrentAgents": 2
+  }
+}

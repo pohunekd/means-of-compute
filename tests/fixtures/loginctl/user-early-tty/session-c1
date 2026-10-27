@@ -1,0 +1,5 @@
+Class=user-early
+Type=tty
+Active=yes
+Seat=seat0
+Remote=no

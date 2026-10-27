@@ -1,0 +1,6 @@
+Class=user
+Type=wayland
+Active=yes
+Seat=seat0
+Remote=no
+IdleSinceHint=3600000000

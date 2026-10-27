@@ -76,11 +76,12 @@ function isRegistryEntry(value: unknown): value is RegistryEntry {
   if (typeof entry["requestId"] !== "string" || entry["requestId"].length === 0) {
     return false;
   }
-  const sessionId = entry["sessionId"] as unknown;
+  const sessionId: unknown = entry["sessionId"];
   if (sessionId !== null && (typeof sessionId !== "string" || sessionId.length === 0)) {
     return false;
   }
-  if (!Number.isInteger(entry["revision"]) || (entry["revision"] as number) < 0) {
+  const revision = entry["revision"];
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
     return false;
   }
   const terminal = entry["terminal"] as { state?: unknown } | null;

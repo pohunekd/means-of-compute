@@ -19,9 +19,9 @@ type PortArgs = readonly unknown[];
 
 export interface PendingCall {
   readonly method: GatedMethod;
-  release(after?: () => Promise<unknown>): Promise<unknown>;
-  fail(error: unknown): void;
-  releaseThenFail(error: unknown): Promise<unknown>;
+  readonly release: (after?: () => Promise<unknown>) => Promise<unknown>;
+  readonly fail: (error: unknown) => void;
+  readonly releaseThenFail: (error: unknown) => Promise<unknown>;
 }
 
 interface ParkedCall {
@@ -32,8 +32,8 @@ interface ParkedCall {
 
 export interface GatePort {
   readonly port: DispatcherPort;
-  next(method: GatedMethod): Promise<PendingCall>;
-  calls(method: GatedMethod): number;
+  readonly next: (method: GatedMethod) => Promise<PendingCall>;
+  readonly calls: (method: GatedMethod) => number;
 }
 
 export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod>): GatePort {
@@ -54,20 +54,27 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
   ]);
 
   function makeCall(method: GatedMethod, parked: ParkedCall): PendingCall {
+    // Bound thunks keep the port's `this`: indexed `inner[method]`
+    // reads trip the unbound-method rule when detached from `inner`.
+    const run: Record<GatedMethod, (...args: PortArgs) => Promise<unknown>> = {
+      start: (request) => inner.start(request as StartRequest),
+      wait: (ref, timeoutMs, cursor) =>
+        inner.wait(ref as SessionRef, timeoutMs as number, cursor as string | null),
+      cancel: (ref, reason) => inner.cancel(ref as SessionRef, reason as CancelReason),
+    };
+    const target = run[method];
     return {
       method,
-      async release(after?: () => Promise<unknown>): Promise<unknown> {
-        const target = inner[method] as (...args: PortArgs) => Promise<unknown>;
+      release: async (after?: () => Promise<unknown>): Promise<unknown> => {
         const result = await target(...parked.args);
         await after?.();
         parked.resolve(result);
         return result;
       },
-      fail(error: unknown): void {
+      fail: (error: unknown): void => {
         parked.reject(error);
       },
-      async releaseThenFail(error: unknown): Promise<unknown> {
-        const target = inner[method] as (...args: PortArgs) => Promise<unknown>;
+      releaseThenFail: async (error: unknown): Promise<unknown> => {
         const result = await target(...parked.args);
         parked.reject(error);
         return result;
@@ -75,10 +82,13 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
     };
   }
 
-  function gated(method: GatedMethod, args: PortArgs): Promise<unknown> {
+  function gated(
+    method: GatedMethod,
+    args: PortArgs,
+    direct: (...args: PortArgs) => Promise<unknown>,
+  ): Promise<unknown> {
     if (!methods.has(method)) {
-      const target = inner[method] as (...args: PortArgs) => Promise<unknown>;
-      return target(...args);
+      return direct(...args);
     }
     counts.set(method, (counts.get(method) ?? 0) + 1);
     return new Promise<unknown>((resolve, reject) => {
@@ -96,18 +106,24 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
   // The wrapper keeps diff and close ungated: tests never park them.
   const port: DispatcherPort = {
     start: (request: StartRequest): Promise<SessionHandle> =>
-      gated("start", [request]) as Promise<SessionHandle>,
+      gated("start", [request], (input) =>
+        inner.start(input as StartRequest),
+      ) as Promise<SessionHandle>,
     wait: (ref: SessionRef, timeoutMs: number, cursor: string | null): Promise<WaitResult> =>
-      gated("wait", [ref, timeoutMs, cursor]) as Promise<WaitResult>,
+      gated("wait", [ref, timeoutMs, cursor], (input, limit, seen) =>
+        inner.wait(input as SessionRef, limit as number, seen as string | null),
+      ) as Promise<WaitResult>,
     diff: (ref: SessionRef, base: string): Promise<DiffResult> => inner.diff(ref, base),
     cancel: (ref: SessionRef, reason: CancelReason): Promise<WaitResult> =>
-      gated("cancel", [ref, reason]) as Promise<WaitResult>,
+      gated("cancel", [ref, reason], (input, why) =>
+        inner.cancel(input as SessionRef, why as CancelReason),
+      ) as Promise<WaitResult>,
     close: () => inner.close(),
   };
 
   return {
     port,
-    next(method: GatedMethod): Promise<PendingCall> {
+    next: (method: GatedMethod): Promise<PendingCall> => {
       const parked = queues.get(method)?.shift();
       if (parked !== undefined) {
         return Promise.resolve(makeCall(method, parked));
@@ -116,9 +132,7 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
         waiters.get(method)?.push(resolve);
       });
     },
-    calls(method: GatedMethod): number {
-      return counts.get(method) ?? 0;
-    },
+    calls: (method: GatedMethod): number => counts.get(method) ?? 0,
   };
 }
 

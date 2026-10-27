@@ -593,8 +593,30 @@ test("I10: a second placement conflicts", async () => {
   try {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
-    const { control, dispatcher } = dispatcherAt(registryPath, ledgerPath, {
-      now: new Date("2026-10-27T10:00:00.000Z"),
+    const control = createMemoryPort();
+    // Gate port.start too: parking first's start proves its hold owns
+    // the item lock (provisional inserted), so the second start
+    // deterministically queues behind it instead of racing the stat
+    // calls that precede the lock. Without the gate, whichever call's
+    // provider stat resolves first would win the lock.
+    const starts = gatePort(control.port, new Set(["start", "wait", "cancel"]));
+    const gate = createSwitchGate();
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath,
+    };
+    const dispatcher = createDispatcher({
+      port: starts.port,
+      budget: gate.gate,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
     });
     const first = dispatcher.start(
       item("item-a") as never,
@@ -602,12 +624,14 @@ test("I10: a second placement conflicts", async () => {
       MODEL,
       "Do the work.",
     );
+    const parkedStart = await starts.next("start");
     const second = dispatcher.start(
       item("item-a") as never,
       decision("item-a", "laptop-b") as never,
       MODEL,
       "Do the work.",
     );
+    await parkedStart.release();
     const [outcomeA, outcomeB] = await Promise.allSettled([first, second]);
     if (outcomeA.status !== "fulfilled" || outcomeA.value.kind !== "started") {
       throw new Error("expected the first start to win");

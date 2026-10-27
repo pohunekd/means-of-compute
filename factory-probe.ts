@@ -282,25 +282,34 @@ async function linuxSecondsSinceInput(): Promise<number> {
     }
   }
   if (sessionIds.length === 0) return Number.NaN;
-  // Prefer the active graphical session of any user: Active=yes on a seat
-  // with an X11 or Wayland type. A session without a seat (manager, ssh)
-  // must never decide idleness for a user who is active on the graphical
-  // session. NaN means the query ran and found no graphical session.
-  const graphicalSessionIds: string[] = [];
+  // Somebody is logged in when at least one session has class user and is
+  // not remote. Every Type counts, with or without a seat, active or not;
+  // only remote sessions are ignored. NaN means the query ran and found no
+  // such session. When somebody is logged in but has no active graphical
+  // session, activity is unknown (never idle).
+  const loggedInIds: string[] = [];
   for (const id of sessionIds) {
-    const props = await showSessionProps(id, ["Active", "Type", "Seat", "Remote"]);
+    const props = await showSessionProps(id, ["Class", "Remote"]);
+    if (props.get("Class") === "user" && props.get("Remote") !== "yes") {
+      loggedInIds.push(id);
+    }
+  }
+  if (loggedInIds.length === 0) return Number.NaN;
+  const graphicalSessionIds: string[] = [];
+  for (const id of loggedInIds) {
+    const props = await showSessionProps(id, ["Active", "Type", "Seat"]);
     const seat = props.get("Seat") ?? "";
     const sessionType = props.get("Type") ?? "";
     if (
       props.get("Active") === "yes" &&
       seat !== "" &&
-      (sessionType === "x11" || sessionType === "wayland") &&
-      props.get("Remote") !== "yes"
+      (sessionType === "x11" || sessionType === "wayland")
     ) {
       graphicalSessionIds.push(id);
     }
   }
-  if (graphicalSessionIds.length === 0) return Number.NaN;
+  if (graphicalSessionIds.length === 0)
+    throw new Error("logged in without an active graphical session");
   // Any graphical session with recent input means the user is active; only
   // when all of them are idle does the most recent idle timestamp decide.
   let minSecs: number | null = null;

@@ -21,12 +21,48 @@ README.
    window, on AC power, its battery is above the configured threshold (or it has
    none), and either nobody is logged in or the last input is at least
    `idleMinutes` ago. Anything unreadable makes the host not idle with the cause.
+   The probe ships to hosts as a compiled plugin package; see
+   [host-state.md](host-state.md). The host-state collector asks each host for
+   that package's output and validates it before placement sees it.
 3. The **dispatcher** starts a session on the chosen host through `DispatcherPort`,
    watches it, and reschedules the item when the host leaves or the session is lost.
 4. The **auditor** checks the resulting branch against the item's DoD and posts a
    verdict bound to the commit SHA.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
+
+## Auditor
+
+`runAudit` in `src/auditor/audit.ts` is a read-only check of one revision
+against a `WorkItem`'s DoD. The CLI takes the item only from
+`--item <file>`, the revision from `--ref`, and the PR number from
+`--pull`. It resolves the revision to a 40-character commit with
+`git rev-parse --verify`. It reads the merge-base diff, and file contents
+only at the locations the model cites. Every git call goes through an
+allowlist; `--output`, `--ext-diff` and `--textconv` are refused before
+any process starts. The author models come from the configured ledger
+(`config/ledger.json`) with `--authors ledger`, or from `--author-model`
+with `--authors flags`. The auditor is the first configured auditor model
+that is not an author. An empty author set, or no eligible auditor,
+refuses with exit 3. The budget gate runs before the model call; a refusal
+is exit 3. It makes exactly one model call through `callProviderOnce`,
+with no retry and no fallback. It appends one `kind: "audit"` pending
+entry to the configured ledger before the reply is parsed, for a 200
+response (tokens from the provider's usage, or `null` when absent or
+unreadable) and for a timeout (`null` tokens). A connection failure
+before any response, and a non-200 status, append nothing. The reply is
+validated (schema,
+cited file and line); an empty, invalid or out-of-tree reply is exit 4.
+Counts are recomputed from the findings. The verdict is stored once at
+`<verdictDir>/<item id>/<sha>.json` by temp file plus `link(2)`. An
+existing verdict refuses with exit 3, unless `--post` is given: then the
+stored verdict is posted with no model call, no budget gate and no ledger
+entry, if it belongs to the same PR or has none. `--post` posts the
+marker comment with `gh pr comment`, then checks that some comment on
+that PR has the marker as its first line. A post failure is exit 4. Exit codes:
+0 done; 2 input, config, unknown revision or data error; 3 refusal
+(verdict exists, empty diff, no eligible auditor, budget); 4 model call,
+reply or post failure.
 
 ## Placement
 

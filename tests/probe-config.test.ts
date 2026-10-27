@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "../factory-probe.ts";
+import { loadConfig } from "../src/probe/config.ts";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const probe = join(repoRoot, "factory-probe.ts");

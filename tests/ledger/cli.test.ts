@@ -1,0 +1,501 @@
+// Ledger CLI tests: the real record and query scripts run as child
+// processes on temp files. D1 records the finished-task fixture and the last
+// line validates as a UsageRecord; D2 output deep-equals the hand-computed
+// expected file; the section-3 rows the CLI owns each exit 2.
+import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const REPO = process.cwd();
+
+interface RunResult {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+async function runCli(args: string[], cwd: string = REPO): Promise<RunResult> {
+  const proc = Bun.spawn(["bun", "run", "src/ledger/cli.ts", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    cwd,
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
+    proc.exited,
+  ]);
+  return { code, stdout, stderr };
+}
+
+function sandbox(): { dir: string; ledger: string } {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-cli-"));
+  return { dir, ledger: join(dir, "ledger.jsonl") };
+}
+
+test("D1: record writes the record and validates as usage-record", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "finished-task.json");
+    await Bun.write(completion, Bun.file("tests/fixtures/ledger/finished-task.json"));
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(0);
+    expect(recorded.stdout).toBe("recorded w1-demo (appended)\n");
+    const text = await Bun.file(ledger).text();
+    expect(text.endsWith("\n")).toBe(true);
+    const last = text.trim().split("\n").pop() as string;
+    expect(JSON.parse(last)).not.toHaveProperty("pending");
+    const proc = Bun.spawn(["bun", "run", "scripts/contracts-check.ts", "usage-record", "-"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: new Response(last).body,
+      cwd: REPO,
+    });
+    const [stdout, code] = await Promise.all([
+      new Response(proc.stdout as ReadableStream).text(),
+      proc.exited,
+    ]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("ok usage-record <- stdin");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record of the same completion twice refuses the replay and changes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "finished-task.json");
+    await Bun.write(completion, Bun.file("tests/fixtures/ledger/finished-task.json"));
+    const first = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(first.code).toBe(0);
+    const before = await Bun.file(ledger).text();
+    const totals = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
+    expect(totals.code).toBe(0);
+    const replay = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(replay.code).toBe(3);
+    expect(replay.stderr).toContain(
+      "pending entry e1-demo is not newer than the record of w1-demo",
+    );
+    expect(await Bun.file(ledger).text()).toBe(before);
+    const after = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
+    expect(after.code).toBe(0);
+    expect(after.stdout).toBe(totals.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record of an older completion after a later one exits 3 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+    };
+    const first = raw.pending[0] as Record<string, unknown>;
+    const second = {
+      ...first,
+      entryId: "e2-demo",
+      finishedAt: "2026-10-26T11:00:00.000Z",
+    };
+    const firstCompletion = join(dir, "first.json");
+    await Bun.write(
+      firstCompletion,
+      JSON.stringify({
+        pending: [first],
+        finalize: { workItemId: "w1-demo", result: "blocked", retries: 1, humanInterventions: 0 },
+      }),
+    );
+    const secondCompletion = join(dir, "second.json");
+    await Bun.write(
+      secondCompletion,
+      JSON.stringify({
+        pending: [second],
+        finalize: { workItemId: "w1-demo", result: "success", retries: 1, humanInterventions: 0 },
+      }),
+    );
+    expect(
+      (await runCli(["record", "--ledger", ledger, "--completion", firstCompletion])).code,
+    ).toBe(0);
+    expect(
+      (await runCli(["record", "--ledger", ledger, "--completion", secondCompletion])).code,
+    ).toBe(0);
+    const before = await Bun.file(ledger).text();
+    const replay = await runCli(["record", "--ledger", ledger, "--completion", firstCompletion]);
+    expect(replay.code).toBe(3);
+    expect(replay.stderr).toContain(
+      "pending entry e1-demo is not newer than the record of w1-demo",
+    );
+    expect(await Bun.file(ledger).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("D2: query output deep-equals the hand-computed expected file", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli(["query", "--ledger", ledger, "--by", "provider,host,model"]);
+    expect(queried.code).toBe(0);
+    const expected = (await Bun.file(
+      "tests/fixtures/ledger/query-expected.json",
+    ).json()) as unknown;
+    expect(JSON.parse(queried.stdout) as unknown).toEqual(expected);
+    expect(await Bun.file(`${ledger}.lock`).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query --record prints one JSON line for a known record", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli(["query", "--ledger", ledger, "--record", "w1-alpha"]);
+    expect(queried.code).toBe(0);
+    expect(queried.stdout.endsWith("\n")).toBe(true);
+    expect(queried.stdout.trim().split("\n")).toHaveLength(1);
+    const record = JSON.parse(queried.stdout) as { workItemId: string };
+    expect(record.workItemId).toBe("w1-alpha");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query --record for a missing id exits 3 and never writes", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const before = await Bun.file(ledger).text();
+    const queried = await runCli(["query", "--ledger", ledger, "--record", "w9-missing"]);
+    expect(queried.code).toBe(3);
+    expect(queried.stderr).toContain("no record for w9-missing");
+    expect(await Bun.file(ledger).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with a missing completion file exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const missing = join(dir, "no-such-completion.json");
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", missing]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("file is missing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with bad JSON in the completion file exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "bad.json");
+    await Bun.write(completion, "{not json");
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("not valid JSON");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with an unknown completion key exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "extra.json");
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as Record<
+      string,
+      unknown
+    >;
+    await Bun.write(completion, JSON.stringify({ ...raw, extra: 1 }));
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain('must hold exactly "pending" and "finalize"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with an invalid pending entry exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const completion = join(dir, "invalid.json");
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+      finalize: unknown;
+    };
+    await Bun.write(
+      completion,
+      JSON.stringify({ ...raw, pending: [{ ...raw.pending[0], session: null }] }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("invalid pending entry at index 0");
+    expect(await Bun.file(ledger).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with a mismatched pending work id exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+      finalize: unknown;
+    };
+    const entry = { ...(raw.pending[0] as Record<string, unknown>), workItemId: "w1-demo" };
+    const completion = join(dir, "mismatch.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({
+        pending: [entry],
+        finalize: { workItemId: "w2-other", result: "success", retries: 0, humanInterventions: 0 },
+      }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("w2-other");
+    expect(await Bun.file(ledger).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with a mismatched pending id on a known record exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const before = await Bun.file(ledger).text();
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+    };
+    const entry = { ...(raw.pending[0] as Record<string, unknown>), workItemId: "w1-demo" };
+    const completion = join(dir, "mismatch-known.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({
+        pending: [entry],
+        finalize: { workItemId: "w2-beta", result: "success", retries: 0, humanInterventions: 1 },
+      }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("w2-beta");
+    expect(await Bun.file(ledger).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with duplicate pending entry ids exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+      finalize: unknown;
+    };
+    const entry = raw.pending[0] as Record<string, unknown>;
+    const other = {
+      ...entry,
+      finishedAt: "2026-10-26T11:40:00.000Z",
+    };
+    const completion = join(dir, "duplicate.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({ pending: [entry, other], finalize: raw.finalize }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("unique");
+    expect(await Bun.file(ledger).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with decreasing counters exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+    };
+    const entry = {
+      ...(raw.pending[0] as Record<string, unknown>),
+      entryId: "e4-demo",
+      workItemId: "w2-beta",
+      finishedAt: "2026-10-26T11:30:00.000Z",
+    };
+    const completion = join(dir, "decrease.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({
+        pending: [entry],
+        finalize: { workItemId: "w2-beta", result: "success", retries: 0, humanInterventions: 0 },
+      }),
+    );
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const before = await Bun.file(ledger).text();
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("must not decrease");
+    expect(await Bun.file(ledger).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with an invalid finalize exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+    };
+    const completion = join(dir, "invalid-finalize.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({
+        pending: [raw.pending[0]],
+        finalize: { workItemId: "w1-demo", result: "bogus", retries: 0, humanInterventions: 0 },
+      }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("invalid finalize result");
+    expect(await Bun.file(ledger).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with a valid then invalid pending entry exits 2 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+      finalize: unknown;
+    };
+    const completion = join(dir, "mixed.json");
+    await Bun.write(
+      completion,
+      JSON.stringify({
+        pending: [
+          raw.pending[0],
+          { ...(raw.pending[0] as Record<string, unknown>), session: null },
+        ],
+        finalize: raw.finalize,
+      }),
+    );
+    const recorded = await runCli(["record", "--ledger", ledger, "--completion", completion]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain("invalid pending entry at index 1");
+    expect(await Bun.file(ledger).exists()).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("record with a missing ledger parent exits 2", async () => {
+  const { dir } = sandbox();
+  try {
+    const ledger = join(dir, "no-such-dir", "ledger.jsonl");
+    const recorded = await runCli([
+      "record",
+      "--ledger",
+      ledger,
+      "--completion",
+      "tests/fixtures/ledger/finished-task.json",
+    ]);
+    expect(recorded.code).toBe(2);
+    expect(recorded.stderr).toContain(ledger);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query with both --by and --record exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli([
+      "query",
+      "--ledger",
+      ledger,
+      "--by",
+      "provider",
+      "--record",
+      "w1-alpha",
+    ]);
+    expect(queried.code).toBe(2);
+    expect(queried.stderr).toContain("exactly one of --by and --record");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query with neither --by nor --record exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli(["query", "--ledger", ledger]);
+    expect(queried.code).toBe(2);
+    expect(queried.stderr).toContain("exactly one of --by and --record");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query with an unknown --by value exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli(["query", "--ledger", ledger, "--by", "provider,owner"]);
+    expect(queried.code).toBe(2);
+    expect(queried.stderr).toContain("unknown dimension");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("query with a repeated --by dimension exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const queried = await runCli(["query", "--ledger", ledger, "--by", "provider,provider"]);
+    expect(queried.code).toBe(2);
+    expect(queried.stderr).toContain("must not repeat a dimension");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an unknown flag or a repeated flag exits 2", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    await Bun.write(ledger, Bun.file("tests/fixtures/ledger/ledger.jsonl"));
+    const unknown = await runCli(["query", "--ledger", ledger, "--by", "provider", "--owner", "x"]);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain("unknown flag --owner");
+    const repeated = await runCli([
+      "query",
+      "--ledger",
+      ledger,
+      "--by",
+      "provider",
+      "--by",
+      "host",
+    ]);
+    expect(repeated.code).toBe(2);
+    expect(repeated.stderr).toContain("repeated flag --by");
+    const missingValue = await runCli(["query", "--ledger"]);
+    expect(missingValue.code).toBe(2);
+    expect(missingValue.stderr).toContain("--ledger needs a value");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

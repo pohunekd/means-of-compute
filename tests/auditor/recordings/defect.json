@@ -1,0 +1,15 @@
+[
+  {
+    "status": 200,
+    "body": {
+      "choices": [
+        {
+          "message": {
+            "content": "{\"findings\": [{\"severity\": \"high\", \"location\": \"src/add.ts:2\", \"defect\": \"add subtracts instead of adding\", \"scenario\": \"any caller summing two numbers gets the wrong result\", \"fixDirection\": \"return a + b\"}]}"
+          }
+        }
+      ],
+      "usage": { "prompt_tokens": 130, "completion_tokens": 40 }
+    }
+  }
+]

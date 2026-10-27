@@ -1,0 +1,36 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/src/probe/facts.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProbeFacts",
+  "description": "Host probe --facts / --scenario overrides. Every key matches its contracts/v1/host-capacity field so a fact can never produce output the contract rejects.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "secondsSinceInput": { "type": "integer", "minimum": 0 },
+    "userActivityError": { "type": "string", "minLength": 1 },
+    "noLocalUserSession": { "const": true },
+    "sysfsRoot": { "type": "string", "pattern": "^/" },
+    "acPower": { "type": "boolean" },
+    "batteryPercent": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+    "cpuCores": { "type": "integer", "minimum": 1 },
+    "cpuLoad1m": { "type": "number", "minimum": 0 },
+    "memoryTotalMb": { "type": "integer", "minimum": 1 },
+    "memoryFreeMb": { "type": "integer", "minimum": 0 },
+    "gpuPresent": { "type": "boolean" },
+    "gpuName": { "type": ["string", "null"], "minLength": 1 },
+    "gpuFreeMb": { "type": ["integer", "null"], "minimum": 0 },
+    "localModelsReachable": { "type": "boolean" },
+    "localModels": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "policyAllowedWindowStart": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+    "policyAllowedWindowEnd": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+  }
+}

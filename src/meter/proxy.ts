@@ -248,10 +248,10 @@ export async function handleMeterRequest(
       level: "warn",
       event: "request-rejected",
       code: "provider-not-routed",
-      status: 403,
+      status: 503,
       requestId: auth.requestId,
     });
-    return errorResponse("provider-key-missing", 503);
+    return errorResponse("provider-not-routed", 503);
   }
   if (descriptor.apiKeyEnv !== undefined && !process.env[descriptor.apiKeyEnv]) {
     state.log({

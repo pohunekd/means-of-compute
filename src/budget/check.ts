@@ -120,7 +120,10 @@ async function run(): Promise<number> {
         dayCapUsd: parsed.dayCap ?? config.dayCapUsd,
         totalCapUsd: parsed.totalCap ?? config.totalCapUsd,
       };
-      const overrideTotal = parsed.spendTotal ?? 0;
+      const overrideTotal = parsed.spendTotal;
+      if (overrideTotal === null) {
+        throw new Error("budget:check: --spend needs a value");
+      }
       decision = decideAdmission(
         {
           spentTodayUsd: overrideTotal,

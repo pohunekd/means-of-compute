@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { runAudit, auditExitCode } from "../../src/auditor/audit.js";
+import { writeVerdict, VerdictConflictError } from "../../src/auditor/store.js";
 import type { AuditInput } from "../../src/auditor/audit-types.js";
 import { loadAuditorConfig } from "../../src/auditor/config.js";
 import { createReadOnlyGit } from "../../src/auditor/git.js";
@@ -322,7 +323,7 @@ test("work item without DoD exits 2: the library and the CLI share isWorkItem", 
   }
 });
 
-test("second audit at one sha refuses 3 (mutation: overwrite the stored verdict)", async () => {
+test("second write at one sha conflicts (mutation: overwrite the stored verdict)", async () => {
   const setup = await setupLibraryCase("auditor-twice-");
   const restoreEnv = applyTestEnv();
   const server = await startLoopback("tests/auditor/recordings/clean.json");
@@ -355,10 +356,16 @@ test("second audit at one sha refuses 3 (mutation: overwrite the stored verdict)
     if (first.kind !== "verdict") {
       throw new Error(`first audit refused: ${first.reason}`);
     }
-    const second = await runAudit(input, deps);
-    if (second.kind !== "refused" || !second.reason.includes(first.verdict.headSha)) {
-      throw new Error(`expected a same-sha refusal, got ${JSON.stringify(second)}`);
+    // The store is the authority for the same-sha rule: a second claim
+    // of the same sha file must conflict even when called directly,
+    // so an overwrite mutates into a thrown VerdictConflictError here.
+    let conflicted = false;
+    try {
+      await writeVerdict(setup.verdictDir, first.verdict);
+    } catch (error: unknown) {
+      conflicted = error instanceof VerdictConflictError;
     }
+    expect(conflicted).toBe(true);
   } finally {
     cleanup();
   }

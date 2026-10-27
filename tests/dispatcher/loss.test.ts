@@ -403,23 +403,47 @@ test("replay after a crash between append and write returns unchanged", async ()
     expect(outcome.result.state).toBe("finished");
     // Crash between appendPending and the second registry write: the
     // pending line stays while the entry claims ledgerAppended false.
-    const { readRegistry, replaceRegistryEntry } = await import("../../src/dispatcher/registry.js");
+    // The revision bump keeps the manual clear valid: without it the
+    // replay would hit the stale-revision check below.
+    const { readRegistry } = await import("../../src/dispatcher/registry.js");
     const entries = await readRegistry(registryPath);
     const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
     if (entry === undefined || entry.terminal === null) {
       throw new Error("expected a terminal entry");
     }
-    await replaceRegistryEntry(registryPath, {
+    const cleared = {
       ...entry,
+      revision: entry.revision + 1,
       terminal: { ...entry.terminal, ledgerAppended: false },
-    });
+    };
+    // Crash between appendPending and the second registry write: the
+    // pending line stays while the entry claims ledgerAppended false.
+    // A direct file rewrite keeps the cleared revision without tripping
+    // the stale-revision check below.
+    const { writeFile } = await import("node:fs/promises");
+    const document = { sessions: entries.map((candidate) =>
+      candidate.requestId === cleared.requestId ? cleared : candidate,
+    ) };
+    await writeFile(registryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
     clock.now = new Date("2026-10-27T10:09:00.000Z");
+    // Crash between appendPending and the second registry write: the
+    // pending line stays while the entry claims ledgerAppended false.
+    // The terminal content differs only by the flag, so the append is
+    // an identical rewrite of the same row and the flag flips back.
     const replayed = await dispatcher.watch(started.request.requestId);
     // The stored finishedAt wins over the clock: the pending line is the
-    // same entry, so the ledger call is a no-op.
+    // same entry, so the replay reports unchanged and flips the flag
+    // back without a duplicate row.
     expect(replayed.ledger).toBe("unchanged");
     const contents = await readLedger("Test ledger", ledgerPath);
     expect(contents.pending).toHaveLength(1);
+    expect(contents.pending[0]?.finishedAt).toBe(entry.terminal.observedAt);
+    // The flag moves back to true on the next revision; the observed
+    // content is unchanged.
+    const stored = await readRegistry(registryPath);
+    const storedEntry = stored.find((candidate) => candidate.requestId === started.request.requestId);
+    expect(storedEntry?.terminal?.ledgerAppended).toBe(true);
+    expect(storedEntry?.terminal?.observedAt).toBe(entry.terminal.observedAt);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

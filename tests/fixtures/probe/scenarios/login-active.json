@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "v1",
+  "hostAlias": "desktop",
+  "timestamp": "2026-10-27T12:00:00.000Z",
+  "idle": false,
+  "idleReason": "user input 0 seconds ago",
+  "secondsSinceInput": 0,
+  "acPower": true,
+  "batteryPercent": null,
+  "cpu": {
+    "cores": 4,
+    "load1m": 0.1
+  },
+  "memory": {
+    "totalMb": 8192,
+    "freeMb": 4096
+  },
+  "gpu": {
+    "present": false,
+    "name": null,
+    "freeMb": null
+  },
+  "localModels": {
+    "reachable": false,
+    "models": []
+  },
+  "policy": {
+    "allowedWindow": {
+      "start": "00:00",
+      "end": "00:00"
+    },
+    "insideWindow": true,
+    "maxConcurrentAgents": 2
+  }
+}

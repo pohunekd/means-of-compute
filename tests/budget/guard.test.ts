@@ -1016,6 +1016,84 @@ test("CLI: ledger over the daily cap refuses once per event", async () => {
   }
 });
 
+test("CLI: pending meta-api spend counts toward the daily cap", async () => {
+  const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
+  try {
+    const pendingLine = JSON.stringify({
+      pending: {
+        entryId: "e1-pending",
+        kind: "session",
+        workItemId: "w1-pending",
+        finishedAt: `${day}T12:00:00.000Z`,
+        startModel: "muse-spark-1.3-contributor",
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 40_000_000,
+            outputTokens: 40_000_000,
+            requests: 20,
+            source: "provider-usage",
+          },
+        ],
+        session: {
+          hostAlias: "desktop",
+          seconds: 540,
+          source: "dispatcher-clock",
+          result: "success",
+        },
+      },
+    });
+    await Bun.write(join(sandbox.dir, "ledger.jsonl"), `${pendingLine}\n`);
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00.000Z` };
+    const result = await sandbox.run([], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: daily cap reached");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: pending nvidia null requests refuses as spend unknown", async () => {
+  const sandbox = await makeCliSandbox();
+  const day = "2026-10-26";
+  try {
+    const pendingLine = JSON.stringify({
+      pending: {
+        entryId: "e1-unknown",
+        kind: "session",
+        workItemId: "w1-unknown",
+        finishedAt: `${day}T12:00:00.000Z`,
+        startModel: "meta/muse-glimmer-30b",
+        tokens: [
+          {
+            provider: "nvidia-build",
+            model: "meta/muse-glimmer-30b",
+            inputTokens: 10,
+            outputTokens: 10,
+            requests: null,
+            source: "dispatcher-usage",
+          },
+        ],
+        session: {
+          hostAlias: "desktop",
+          seconds: 60,
+          source: "dispatcher-clock",
+          result: "success",
+        },
+      },
+    });
+    await Bun.write(join(sandbox.dir, "ledger.jsonl"), `${pendingLine}\n`);
+    const env = { MOC_BUDGET_NOW: `${day}T23:00:00.000Z` };
+    const result = await sandbox.run([], env);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: spend unknown");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI: typo in nvidiaProviderId exits 2", async () => {
   const sandbox = await makeCliSandbox();
   try {

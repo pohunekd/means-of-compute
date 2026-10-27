@@ -4,7 +4,7 @@
 // null token counts on a priced provider is "no data": it is reported in
 // unknownWorkItemIds and refuses the session instead of silently counting
 // zero.
-import type { UsageRecord } from "../../contracts/v1/types.js";
+import type { SpendEntry } from "../ledger/types.js";
 import type { NanoPricing } from "./pricing.js";
 
 export interface SpendSummary {
@@ -42,12 +42,12 @@ export function utcCalendarDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function utcDayOfRecord(record: UsageRecord): string {
-  return utcCalendarDay(new Date(record.finishedAt));
+function utcDayOfEntry(entry: SpendEntry): string {
+  return utcCalendarDay(new Date(entry.finishedAt));
 }
 
 export function costOfRecord(
-  record: UsageRecord,
+  record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
 ): bigint {
   return costOfRecordNanoTimes1M(record, pricing) / TOKENS_PER_1M;
@@ -55,7 +55,7 @@ export function costOfRecord(
 
 /** Undivided record cost: tokens * priceNanoPer1M, for scope accumulation. */
 function costOfRecordNanoTimes1M(
-  record: UsageRecord,
+  record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
 ): bigint {
   let costNanoTimes1M = 0n;
@@ -80,7 +80,7 @@ function costOfRecordNanoTimes1M(
 }
 
 export function summarizeSpend(
-  records: readonly UsageRecord[],
+  records: readonly SpendEntry[],
   pricing: ReadonlyMap<string, NanoPricing>,
   nvidiaProviderId: string,
   now: Date,
@@ -92,11 +92,18 @@ export function summarizeSpend(
   const unknownWorkItemIds: string[] = [];
   for (const record of records) {
     // Request counts are data, not cost: they are tallied before pricing
-    // so a spend-unknown record still reports its NVIDIA requests.
-    if (utcDayOfRecord(record) === today) {
+    // so a spend-unknown record still reports its NVIDIA requests. A null
+    // request count on the NVIDIA provider is unknown, not zero.
+    if (utcDayOfEntry(record) === today) {
       for (const entry of record.tokens) {
         if (entry.provider === nvidiaProviderId) {
-          nvidiaRequestsToday += entry.requests;
+          if (entry.requests === null) {
+            if (!unknownWorkItemIds.includes(record.workItemId)) {
+              unknownWorkItemIds.push(record.workItemId);
+            }
+          } else {
+            nvidiaRequestsToday += entry.requests;
+          }
         }
       }
     }
@@ -105,13 +112,15 @@ export function summarizeSpend(
       costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing);
     } catch (error: unknown) {
       if (error instanceof SpendUnknownError) {
-        unknownWorkItemIds.push(record.workItemId);
+        if (!unknownWorkItemIds.includes(record.workItemId)) {
+          unknownWorkItemIds.push(record.workItemId);
+        }
         continue;
       }
       throw error;
     }
     spentTotalNanoTimes1M += costNanoTimes1M;
-    if (utcDayOfRecord(record) === today) {
+    if (utcDayOfEntry(record) === today) {
       spentTodayNanoTimes1M += costNanoTimes1M;
     }
   }

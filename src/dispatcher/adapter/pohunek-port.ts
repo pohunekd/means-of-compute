@@ -1,9 +1,17 @@
 // Pohunek-backed DispatcherPort (design section 3): the port composes the
 // pure decisions in map.ts over SDK clients behind DispatcherPort.
-import type { Client, HostCapabilities, SessionInfo, SessionNewResult } from "@pohunek/sdk";
+import { MAX_SESSION_WAIT_TURN_MS } from "@pohunek/sdk";
+import type {
+  Client,
+  HostCapabilities,
+  SessionInfo,
+  SessionNewResult,
+  SessionWaitTurnResult,
+} from "@pohunek/sdk";
 import {
   PortRejectedError,
   PortUnreachableError,
+  type CancelReason,
   type DiffResult,
   type SessionHandle,
   type SessionRef,
@@ -24,6 +32,7 @@ import {
   portErrorOf,
   requestDigestOf,
   sessionNewParams,
+  waitDecision,
 } from "./map.js";
 
 export interface AdapterLogEvent {
@@ -378,6 +387,167 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   };
 }
 
+// Lost terminal shared by W1, W3, W5 and X1: no mark, no stop, cached (3.7).
+function lostTerminal(
+  port: PortInternals,
+  alias: string,
+  id: string,
+  cursor: string,
+): TerminalResult {
+  return storeTerminal(port, alias, {
+    state: "lost",
+    sessionId: id,
+    cursor,
+    usage: null,
+    detail: "session missing",
+  });
+}
+
+// W5 mark then stop (rows with mark): if the cache already holds a terminal,
+// return it. Else write the marker (session_not_found: lost / session
+// missing), then stop; any stop error is logged as adapter-stop-failed with
+// its code and does not change the result.
+async function markThenStop(
+  port: PortInternals,
+  client: Client,
+  alias: string,
+  id: string,
+  cursor: string,
+  state: TerminalState,
+  detail: string,
+): Promise<TerminalResult> {
+  const cached = cachedTerminal(port, alias, id);
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    await client.call("session.set_metadata", {
+      session_id: id,
+      metadata: { [MOC_METADATA.outcome]: state, [MOC_METADATA.outcomeDetail]: detail },
+    });
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return lostTerminal(port, alias, id, cursor);
+    }
+    throw await mappedError(port, alias, error);
+  }
+  try {
+    await client.call("session.stop", id);
+  } catch (error) {
+    port.log({
+      level: "error",
+      event: "adapter-stop-failed",
+      hostAlias: alias,
+      sessionId: id,
+      code: error instanceof Error ? error.constructor.name : "unknown",
+      detail,
+    });
+  }
+  return storeTerminal(port, alias, {
+    state,
+    sessionId: id,
+    cursor,
+    usage: null,
+    detail,
+  });
+}
+
+async function waitSession(
+  port: PortInternals,
+  ref: SessionRef,
+  timeoutMs: number,
+  cursor: string | null,
+): Promise<WaitResult> {
+  if (port.closed) {
+    throw new PohunekAdapterError("closed");
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_SESSION_WAIT_TURN_MS) {
+    throw new RangeError(`timeoutMs must be an integer in 1..${String(MAX_SESSION_WAIT_TURN_MS)}`);
+  }
+  const alias = ref.hostAlias;
+  const id = ref.sessionId;
+  const cached = cachedTerminal(port, alias, id);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const client = await clientFor(port, alias);
+  let turn: SessionWaitTurnResult;
+  try {
+    turn = await client.sessionWaitTurn({
+      session_ids: [id],
+      until: ["turn_completed", "agent_blocked", "approval_required", "exited"],
+      ...(cursor === null ? {} : { after: cursor }),
+      timeout_ms: timeoutMs,
+    });
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return lostTerminal(port, alias, id, cursor ?? "");
+    }
+    throw await mappedError(port, alias, error);
+  }
+  const progress = turn.progress.find((entry) => entry.session_id === id) ?? null;
+  if (progress === null || (turn.reason === "event" && turn.event?.session_id !== id)) {
+    throw new PortRejectedError("progress-mismatch");
+  }
+  let info: SessionInfo;
+  try {
+    info = (await client.call("session.inspect", id)) as SessionInfo;
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return lostTerminal(port, alias, id, turn.cursor);
+    }
+    throw await mappedError(port, alias, error);
+  }
+  const decision = waitDecision(id, turn, info);
+  if (decision.kind === "running") {
+    return { state: decision.state, sessionId: id, cursor: turn.cursor };
+  }
+  if (decision.mark) {
+    return markThenStop(port, client, alias, id, turn.cursor, decision.state, decision.detail);
+  }
+  return storeTerminal(port, alias, {
+    state: decision.state,
+    sessionId: id,
+    cursor: turn.cursor,
+    usage: null,
+    detail: decision.detail,
+  });
+}
+
+// X0-X2: a cached terminal wins; stop (stopped:false is fine,
+// session_not_found is a cached lost); then wait with cancelWaitTimeoutMs.
+// The reason is logged, never sent.
+async function cancelSession(
+  port: PortInternals,
+  ref: SessionRef,
+  reason: CancelReason,
+): Promise<WaitResult> {
+  if (port.closed) {
+    throw new PohunekAdapterError("closed");
+  }
+  port.log({
+    level: "info",
+    event: "adapter-cancel",
+    hostAlias: ref.hostAlias,
+    sessionId: ref.sessionId,
+    detail: reason,
+  });
+  const cached = cachedTerminal(port, ref.hostAlias, ref.sessionId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const client = await clientFor(port, ref.hostAlias);
+  try {
+    await client.call("session.stop", ref.sessionId);
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return lostTerminal(port, ref.hostAlias, ref.sessionId, "");
+    }
+    throw await mappedError(port, ref.hostAlias, error);
+  }
+  return waitSession(port, ref, port.config.cancelWaitTimeoutMs, null);
+}
+
 // 3.8: session.diff mapped onto DiffResult. session_not_found gives
 // PortRejectedError("session-not-found").
 async function diffSession(
@@ -434,13 +604,10 @@ export function createPohunekPort(
   };
   return {
     start: (req: StartRequest) => startSession(port, req),
-    wait: () => {
-      throw new PohunekAdapterError("closed");
-    },
+    wait: (ref: SessionRef, timeoutMs: number, cursor: string | null) =>
+      waitSession(port, ref, timeoutMs, cursor),
     diff: (ref: SessionRef, base: string) => diffSession(port, ref, base),
-    cancel: () => {
-      throw new PohunekAdapterError("closed");
-    },
+    cancel: (ref: SessionRef, reason: CancelReason) => cancelSession(port, ref, reason),
     close: () => closePort(port),
   };
 }

@@ -39,8 +39,7 @@ type Facts = Partial<{
   // fact, which uses /proc/uptime instead of the hint.
   noLocalUserSession: boolean;
   // Fixture override for every sysfs path (power_supply, drm): a scenario
-  // may point it at a committed fixture tree under tests/fixtures/sysfs,
-  // resolved against the repository root.
+  // may point it at a committed fixture tree, as an absolute path.
   sysfsRoot: string;
   managerHintFailed: boolean;
   acPower: boolean;
@@ -76,7 +75,63 @@ function readJson<T>(path: string): T {
 }
 
 function loadConfig(): ProbeConfig {
-  return readJson<ProbeConfig>(configPath("probe.json"));
+  const raw = readJson<Record<string, unknown>>(configPath("probe.json"));
+  const num = (key: string, min: number): number => {
+    const v = raw[key];
+    if (typeof v !== "number" || !Number.isFinite(v) || v < min) {
+      throw new Error(`config probe.json: invalid ${key}`);
+    }
+    return v;
+  };
+  const str = (key: string): string => {
+    const v = raw[key];
+    if (typeof v !== "string") throw new Error(`config probe.json: invalid ${key}`);
+    return v;
+  };
+  const policyRaw = raw["policy"];
+  if (typeof policyRaw !== "object" || policyRaw === null) {
+    throw new Error("config probe.json: invalid policy");
+  }
+  const policy = policyRaw as Record<string, unknown>;
+  for (const key of ["allowedWindowStart", "allowedWindowEnd"]) {
+    const v = policy[key];
+    if (typeof v !== "string" || !/^\d{1,2}:\d{2}$/.test(v)) {
+      throw new Error(`config probe.json: invalid policy.${key}`);
+    }
+  }
+  const maxAgents = policy["maxConcurrentAgents"];
+  if (typeof maxAgents !== "number" || !Number.isInteger(maxAgents) || maxAgents < 1) {
+    throw new Error("config probe.json: invalid policy.maxConcurrentAgents");
+  }
+  const sysfsRoot = str("sysfsRoot");
+  assertSysfsRoot(sysfsRoot, "config probe.json: invalid sysfsRoot");
+  return {
+    idleMinutes: num("idleMinutes", 1),
+    batteryThreshold: num("batteryThreshold", 0),
+    localModelsBaseUrl: str("localModelsBaseUrl"),
+    localModelsTimeoutMs: num("localModelsTimeoutMs", 0),
+    sysfsRoot,
+    policy: {
+      allowedWindowStart: policy["allowedWindowStart"] as string,
+      allowedWindowEnd: policy["allowedWindowEnd"] as string,
+      maxConcurrentAgents: maxAgents,
+    },
+  };
+}
+
+function assertSysfsRoot(root: unknown, label: string): void {
+  if (typeof root !== "string" || !root.startsWith("/")) {
+    throw new Error(`${label}: ${String(root)}: not an absolute path`);
+  }
+  let stat;
+  try {
+    stat = lstatSync(root);
+  } catch (e) {
+    throw new Error(`${label}: ${root}: ${(e as NodeJS.ErrnoException).code ?? "unknown"}`, {
+      cause: e,
+    });
+  }
+  if (!stat.isDirectory()) throw new Error(`${label}: ${root}: not a directory`);
 }
 
 function loadHostAlias(hostnameVal: string): string {
@@ -161,7 +216,7 @@ function linuxPower(sysfsRoot: string): { acPower: boolean; batteryPercent: numb
       const cap = readRequired(`${base}/${entry}/capacity`, `capacity of ${entry}`);
       const n = Number(cap);
       if (!Number.isFinite(n)) {
-        throw new Error(`power unknown: cannot read capacity of ${entry}`);
+        throw new Error(`cannot read capacity of ${entry}: not a number`);
       }
       batteryPercent = batteryPercent === null ? n : Math.min(batteryPercent, n);
     }
@@ -170,7 +225,7 @@ function linuxPower(sysfsRoot: string): { acPower: boolean; batteryPercent: numb
     return { acPower: true, batteryPercent: null };
   }
   if (hasBattery && !hasMains) {
-    throw new Error("power unknown: battery present without mains");
+    throw new Error("battery present without mains");
   }
   return { acPower, batteryPercent };
 }
@@ -583,7 +638,11 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
-  const sysfsRoot = facts.sysfsRoot ? join(repoRoot, facts.sysfsRoot) : cfg.sysfsRoot;
+  let sysfsRoot = cfg.sysfsRoot;
+  if (facts.sysfsRoot !== undefined) {
+    sysfsRoot = facts.sysfsRoot;
+    assertSysfsRoot(sysfsRoot, "facts: invalid sysfsRoot");
+  }
   const hostAlias = facts.hostAlias ?? loadHostAlias(osHostname());
   const now = new Date();
   const timestamp = facts.timestamp ?? now.toISOString();

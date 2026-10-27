@@ -1,6 +1,7 @@
-// Budget guard unit tests: cost, decision, ledger, escalation and the DoD
-// CLI overrides. Deterministic only: synthetic records with UTC finishedAt,
-// real contract validation, real pricing files under a temp dir.
+// Budget guard tests: unit tests for cost, decision, ledger and escalation,
+// plus CLI tests that spawn `bun run budget:check` against a temp config
+// and ledger. Deterministic only: synthetic records with UTC finishedAt,
+// real contract validation.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -366,4 +367,126 @@ test("pricing reads Meta prices from config descriptors", async () => {
   expect(meta?.outputPer1M).toBe(0.2);
   expect(meta?.cachedInputPer1M).toBe(0.002);
   expect(pricing.get("nvidia-build")?.inputPer1M).toBe(0);
+});
+
+interface SpawnResult {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+interface CliSandbox {
+  readonly dir: string;
+  run(args: readonly string[]): Promise<SpawnResult>;
+  writeEntry(entry: UsageRecord): Promise<void>;
+}
+
+async function makeCliSandbox(): Promise<CliSandbox> {
+  const repoRoot = join(import.meta.dir, "..", "..");
+  const dir = mkdtempSync(join(tmpdir(), "budget-cli-"));
+  const configDir = join(dir, "config");
+  const providersDir = join(configDir, "providers");
+  await Bun.write(
+    join(configDir, "budget.json"),
+    JSON.stringify({
+      ledgerPath: join(dir, "ledger.jsonl"),
+      statePath: join(dir, "state.json"),
+      escalationLogPath: join(dir, "escalations.log"),
+      dayCapUsd: 12,
+      totalCapUsd: 140,
+      nvidiaDailyRequestLimit: 1000,
+      nvidiaProviderId: "nvidia-build",
+    }),
+  );
+  for (const name of ["meta-api.json", "nvidia-build.json", "local.json", "route.json"]) {
+    const source = Bun.file(join(repoRoot, "config", "providers", name));
+    await Bun.write(join(providersDir, name), await source.text());
+  }
+  const script = join(repoRoot, "src", "budget", "check.ts");
+  const run = async (args: readonly string[]): Promise<SpawnResult> => {
+    const proc = Bun.spawn(["bun", script, ...args], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { code, stdout, stderr };
+  };
+  return {
+    dir,
+    run,
+    writeEntry: async (entry: UsageRecord): Promise<void> => {
+      const handle = Bun.file(join(dir, "ledger.jsonl")).writer();
+      handle.write(`${JSON.stringify(entry)}\n`);
+      await handle.end();
+    },
+  };
+}
+
+test("CLI: cap flag without --spend exits 2", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const result = await sandbox.run(["--day-cap", "12"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("need --spend");
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: override refusal writes no state and prints would-escalate", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    const result = await sandbox.run(["--spend", "12.00", "--day-cap", "12"]);
+    expect(result.code).toBe(3);
+    expect(result.stdout).toContain("refused: daily cap reached");
+    expect(result.stderr).toContain("would escalate: day:");
+    expect(await Bun.file(join(sandbox.dir, "state.json")).exists()).toBe(false);
+    expect(await Bun.file(join(sandbox.dir, "escalations.log")).exists()).toBe(false);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: ledger over the daily cap refuses once per event", async () => {
+  const sandbox = await makeCliSandbox();
+  try {
+    await sandbox.writeEntry(
+      record({
+        workItemId: "w1-over",
+        finishedAt: new Date().toISOString().replace(/\.\d+Z$/, ".000Z"),
+        tokens: [
+          {
+            provider: "meta-api",
+            model: "muse-spark-1.3-contributor",
+            inputTokens: 40_000_000,
+            outputTokens: 40_000_000,
+            requests: 20,
+            source: "provider-usage",
+          },
+        ],
+      }),
+    );
+    const first = await sandbox.run([]);
+    expect(first.code).toBe(3);
+    expect(first.stdout).toContain("refused: daily cap reached");
+    expect(first.stderr).toContain("budget escalation:");
+    const logLines = (await Bun.file(join(sandbox.dir, "escalations.log")).text())
+      .trim()
+      .split("\n");
+    expect(logLines).toHaveLength(1);
+    const second = await sandbox.run([]);
+    expect(second.code).toBe(3);
+    expect(second.stderr).not.toContain("budget escalation:");
+    const logAgain = (await Bun.file(join(sandbox.dir, "escalations.log")).text())
+      .trim()
+      .split("\n");
+    expect(logAgain).toHaveLength(1);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
 });

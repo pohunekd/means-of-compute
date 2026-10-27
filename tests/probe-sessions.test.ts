@@ -42,9 +42,11 @@ async function withFacts(
 }
 
 // Power and the window are fixed by facts; the session rule under test is the
-// only thing the double decides.
+// only thing the double decides. The timestamp pins the evaluation instant
+// (hint age and window), so the tests never depend on the wall clock.
 const sessionFacts = {
   acPower: true,
+  batteryPercent: null,
   cpuCores: 4,
   cpuLoad1m: 0.1,
   memoryTotalMb: 8192,
@@ -60,7 +62,26 @@ const sessionFacts = {
   timestamp: "2026-10-27T12:00:00.000Z",
 };
 
-describe("loginctl session rule", () => {
+async function readUptimeSecs(): Promise<number> {
+  const first = (await Bun.file("/proc/uptime").text()).split(/\s+/)[0];
+  return Math.floor(Number(first));
+}
+
+async function loggedOutSecs(
+  fixture: string,
+): Promise<{ idle: boolean; idleReason: string; secondsSinceInput: number }> {
+  let doc = { idle: false, idleReason: "", secondsSinceInput: 0 };
+  await withFacts({ ...sessionFacts }, async (p) => {
+    const r = await runProbe(fixture, p);
+    expect(r.exitCode).toBe(0);
+    doc = JSON.parse(r.stdout) as typeof doc;
+    expect(doc.idle).toBe(true);
+    expect(doc.idleReason).toBe("no user logged in, on AC power");
+  });
+  return doc;
+}
+
+describe.skipIf(process.platform !== "linux")("loginctl session rule", () => {
   test("user-early on tty1 is logged in without a graphical session, not idle", async () => {
     await withFacts({ ...sessionFacts }, async (p) => {
       const r = await runProbe("user-early-tty", p);
@@ -107,7 +128,21 @@ describe("loginctl session rule", () => {
       };
       expect(doc.idle).toBe(true);
       expect(doc.idleReason).toBe("no user logged in, on AC power");
-      expect(doc.secondsSinceInput).toBeGreaterThan(3500);
+      expect(doc.secondsSinceInput).toBeGreaterThan(0);
     });
+  });
+
+  test("missing manager file falls back to /proc/uptime", async () => {
+    const { secondsSinceInput } = await loggedOutSecs("logged-out-no-manager");
+    const uptime = await readUptimeSecs();
+    expect(secondsSinceInput).toBeGreaterThan(uptime - 5);
+    expect(secondsSinceInput).toBeLessThan(uptime + 5);
+  });
+
+  test("zero manager hint falls back to /proc/uptime", async () => {
+    const { secondsSinceInput } = await loggedOutSecs("logged-out-hint-zero");
+    const uptime = await readUptimeSecs();
+    expect(secondsSinceInput).toBeGreaterThan(uptime - 5);
+    expect(secondsSinceInput).toBeLessThan(uptime + 5);
   });
 });

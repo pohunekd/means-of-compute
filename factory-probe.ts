@@ -384,7 +384,7 @@ async function showSessionProps(
   return props;
 }
 
-async function linuxSecondsSinceInput(): Promise<number> {
+async function linuxSecondsSinceInput(nowMs: number): Promise<number> {
   const listProc = Bun.spawn(["loginctl", "list-sessions", "--no-legend"], { stdout: "pipe" });
   const listOut = await new Response(listProc.stdout).text();
   await listProc.exited;
@@ -443,14 +443,14 @@ async function linuxSecondsSinceInput(): Promise<number> {
     if (sinceRaw === undefined || sinceRaw === "") throw new Error("IdleSinceHint missing");
     const idleSinceUs = Number(sinceRaw);
     if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) return 0;
-    const secs = Math.max(0, Math.floor((Date.now() - idleSinceUs / 1000) / 1000));
+    const secs = Math.max(0, Math.floor((nowMs - idleSinceUs / 1000) / 1000));
     minSecs = minSecs === null ? secs : Math.min(minSecs, secs);
   }
   if (minSecs === null) throw new Error("IdleSinceHint missing");
   return minSecs;
 }
 
-async function linuxManagerIdleSecs(): Promise<number> {
+async function linuxManagerIdleSecs(nowMs: number): Promise<number> {
   const proc = Bun.spawn(["loginctl", "show-session", "-p", "IdleHint", "-p", "IdleSinceHint"], {
     stdout: "pipe",
   });
@@ -467,7 +467,7 @@ async function linuxManagerIdleSecs(): Promise<number> {
   if (!Number.isFinite(sinceUs) || sinceUs <= 0) {
     throw new Error(`manager IdleSinceHint not above zero: ${sinceRaw ?? "missing"}`);
   }
-  return Math.max(0, Math.floor((Date.now() - sinceUs / 1000) / 1000));
+  return Math.max(0, Math.floor((nowMs - sinceUs / 1000) / 1000));
 }
 
 function linuxUptimeSecs(): number {
@@ -717,12 +717,14 @@ async function main(): Promise<void> {
   } else if (facts.secondsSinceInput === undefined) {
     try {
       if (platformOrThrow() === "linux") {
-        const secs = managerHintFailed ? Number.NaN : await linuxSecondsSinceInput();
+        const secs = managerHintFailed
+          ? Number.NaN
+          : await linuxSecondsSinceInput(evalAt.getTime());
         if (Number.isNaN(secs)) {
           loggedOut = true;
           try {
             if (managerHintFailed) throw new Error("simulated: manager hint query failed");
-            loggedOutSecs = await linuxManagerIdleSecs();
+            loggedOutSecs = await linuxManagerIdleSecs(evalAt.getTime());
           } catch (managerError) {
             try {
               loggedOutSecs = linuxUptimeSecs();

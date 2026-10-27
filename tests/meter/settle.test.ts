@@ -10,6 +10,8 @@ import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type Meter } from "../../src/meter/meter.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
+import { systemTimers } from "../../src/meter/timers.js";
+import { systemUsageLogIo } from "../../src/meter/usage-log.js";
 
 interface Rig {
   readonly meter: Meter;
@@ -43,7 +45,15 @@ async function startRig(
   });
   const { getProviders } = await import("../../src/providers/config.js");
   const providers = await getProviders();
-  const meter = await startMeter({ config, env, providers, now: () => new Date(), log: () => {} });
+  const meter = await startMeter({
+    config,
+    env,
+    providers,
+    timers: systemTimers,
+    logIo: systemUsageLogIo,
+    now: () => new Date(),
+    log: () => {},
+  });
   await meter.openGrant({
     requestId: "w1-demo:0",
     workItemId: "w1-demo",
@@ -175,6 +185,8 @@ test("determinism: settle twice, restart, settle again", async () => {
       providers,
       now: () => new Date(),
       log: () => {},
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
     });
     await first.openGrant({
       requestId: "w1-demo:0",
@@ -202,6 +214,8 @@ test("determinism: settle twice, restart, settle again", async () => {
       providers,
       now: () => new Date(),
       log: () => {},
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
     });
     try {
       const again = await second.settle("sess-1", "finished");

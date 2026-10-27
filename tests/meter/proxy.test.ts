@@ -10,6 +10,8 @@ import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter } from "../../src/meter/meter.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
+import { systemTimers } from "../../src/meter/timers.js";
+import { systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { meterUrl, openBoundGrant, readLogLines, withMeter } from "./helpers.js";
 
 function chatBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -81,6 +83,8 @@ test("wrong host gives 403", async () => {
       config,
       env,
       providers,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
       now: () => new Date(),
       log: () => {},
     });
@@ -137,7 +141,15 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
     });
     const { getProviders } = await import("../../src/providers/config.js");
     const providers = await getProviders();
-    const meter = await startMeter({ config, env, providers, now: () => now, log: () => {} });
+    const meter = await startMeter({
+      config,
+      env,
+      providers,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
+      now: () => now,
+      log: () => {},
+    });
     try {
       await meter.openGrant({
         requestId: "w1-demo:0",
@@ -212,6 +224,8 @@ test("key handling: upstream sees the provider key, never the caller token", asy
       config,
       env,
       providers,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
       now: () => new Date(),
       log: (e) => events.push(e),
     });
@@ -272,6 +286,8 @@ test("include_usage is forced on streamed calls", async () => {
       config,
       env,
       providers,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
       now: () => new Date(),
       log: () => {},
     });
@@ -432,6 +448,8 @@ test("connection failure gives 502 and is not billed", async () => {
       config,
       env,
       providers,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
       now: () => new Date(),
       log: () => {},
     });

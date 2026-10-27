@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openUsageAppender, replayUsageLog } from "../../src/meter/usage-log.js";
+import { openUsageAppender, replayUsageLog, systemUsageLogIo } from "../../src/meter/usage-log.js";
 import type { MeterLogEvent } from "../../src/meter/meter.js";
 import type { UsageLogRecord } from "../../src/meter/usage-log.js";
 
@@ -191,7 +191,7 @@ test(
     await writeLog(path, [openGrant()]);
     const events: MeterLogEvent[] = [];
     const index = await replayUsageLog(path, "repair", () => {});
-    const appender = await openUsageAppender(path, index, (e) => events.push(e));
+    const appender = await openUsageAppender(path, index, (e) => events.push(e), systemUsageLogIo);
     // Force the append to fail by closing the handle first; the write then
     // rejects and the failure latch must engage. The in-memory index must
     // not contain the failed record: applyRecord runs only after the fsync.
@@ -208,15 +208,17 @@ test(
 
 test("write-ahead: the fsync precedes the in-memory apply in source order", async () => {
   // A failing fsync must not leave an applied-but-undurable record behind.
-  // The order is structural, so assert it structurally: every handle.write
-  // in the appender is followed by a datasync before the next applyRecord.
+  // The order is structural, so assert it structurally: the single appender
+  // write path runs the write, then a datasync, before the in-memory apply.
   const source = await Bun.file("src/meter/usage-log.ts").text();
-  const writes = source.split("await handle.write(");
-  expect(writes.length).toBe(3);
-  for (const rest of writes.slice(1)) {
-    const syncAt = rest.indexOf("await handle.datasync();");
-    const applyAt = rest.indexOf("applyRecord(mutable, record, path, 0);");
-    expect(syncAt).toBeGreaterThanOrEqual(0);
-    expect(applyAt).toBeGreaterThan(syncAt);
-  }
+  const marker = "async function runAppend(record: UsageLogRecord)";
+  const at = source.indexOf(marker);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const body = source.slice(at);
+  const writeAt = body.indexOf("await handle.write(");
+  const syncAt = body.indexOf("await handle.datasync();");
+  const applyAt = body.indexOf("applyRecord(mutable, record, path, 0);");
+  expect(writeAt).toBeGreaterThanOrEqual(0);
+  expect(syncAt).toBeGreaterThan(writeAt);
+  expect(applyAt).toBeGreaterThan(syncAt);
 });

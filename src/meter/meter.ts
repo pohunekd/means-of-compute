@@ -7,8 +7,10 @@ import { MeterConfigError, type MeterConfig, type MeterEnv } from "./config.js";
 import { joinUsage } from "./join.js";
 import { handleMeterRequest, type ProxyState } from "./proxy.js";
 import { serveMeter, type MeterServer } from "./server.js";
+import type { MeterTimers } from "./timers.js";
 import { tokenFor } from "./token.js";
-import { openUsageAppender, replayUsageLog, type UsageAppender } from "./usage-log.js";
+import { openUsageAppender, replayUsageLog } from "./usage-log.js";
+import type { UsageAppender, UsageLogIo } from "./usage-log.js";
 
 export interface GrantSpec {
   readonly requestId: string;
@@ -69,6 +71,8 @@ export interface MeterDeps {
   readonly providers: Readonly<Record<string, ProviderDescriptor>>;
   readonly now: () => Date;
   readonly log: (event: MeterLogEvent) => void;
+  readonly timers: MeterTimers;
+  readonly logIo: UsageLogIo;
 }
 
 export interface Meter {
@@ -92,9 +96,9 @@ function checkFailed(appender: UsageAppender): void {
 }
 
 export async function startMeter(deps: MeterDeps): Promise<Meter> {
-  const { config, env, providers, now, log } = deps;
+  const { config, env, providers, now, log, timers, logIo } = deps;
   const index = await replayUsageLog(config.usageLogPath, "repair", log);
-  const appender = await openUsageAppender(config.usageLogPath, index, log);
+  const appender = await openUsageAppender(config.usageLogPath, index, log, logIo);
   const inFlight = new Map<string, number>();
   const drainControllers = new Map<string, AbortController>();
   const settleMemos = new Map<string, Promise<PortUsage | null>>();
@@ -104,6 +108,7 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
     secret: env.secret,
     hostAddresses: env.hostAddresses,
     providers,
+    timers,
     appender: () => appender,
     maxInFlight: (requestId: string) => inFlight.get(requestId) ?? 0,
     now,

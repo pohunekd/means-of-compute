@@ -8,6 +8,8 @@ import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type Meter, type MeterLogEvent } from "../../src/meter/meter.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
+import { systemTimers } from "../../src/meter/timers.js";
+import { systemUsageLogIo } from "../../src/meter/usage-log.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 
 export interface MeterFixture {
@@ -51,6 +53,8 @@ export async function withMeter(
     config,
     env,
     providers,
+    timers: systemTimers,
+    logIo: systemUsageLogIo,
     now: () => new Date(),
     log: (e) => events.push(e),
   });

@@ -5,6 +5,7 @@ import type { TerminalState } from "../dispatcher/port.js";
 import type { ProviderDescriptor } from "../providers/types.js";
 import type { MeterConfig } from "./config.js";
 import type { MeterLogEvent } from "./meter.js";
+import type { MeterTimers } from "./timers.js";
 import { createJsonUsageTap, createSseUsageTap } from "./sse.js";
 import { verifyBearer } from "./token.js";
 import type { CallOutcome, UsageAppender, UsageIndex, UsageLogRecord } from "./usage-log.js";
@@ -34,6 +35,7 @@ export interface ProxyState {
   readonly secret: Buffer;
   readonly hostAddresses: ReadonlyMap<string, ReadonlySet<string>>;
   readonly providers: Readonly<Record<string, ProviderDescriptor>>;
+  readonly timers: MeterTimers;
   readonly appender: () => UsageAppender;
   readonly maxInFlight: (requestId: string) => number;
   readonly now: () => Date;

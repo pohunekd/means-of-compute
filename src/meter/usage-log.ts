@@ -288,6 +288,34 @@ async function readLogBody(
   return body;
 }
 
+export interface UsageLogHandle {
+  write(text: string): Promise<void>;
+  datasync(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface UsageLogIo {
+  open(path: string): Promise<UsageLogHandle>;
+}
+
+// Production file IO for the usage log: append-only opens with mode 0o600.
+export const systemUsageLogIo: UsageLogIo = {
+  async open(path: string): Promise<UsageLogHandle> {
+    const handle = await open(path, "a", 0o600);
+    return {
+      async write(text: string): Promise<void> {
+        await handle.write(text);
+      },
+      async datasync(): Promise<void> {
+        await handle.datasync();
+      },
+      async close(): Promise<void> {
+        await handle.close();
+      },
+    };
+  },
+};
+
 export async function replayUsageLog(
   path: string,
   mode: "repair" | "read-only",
@@ -321,12 +349,13 @@ export async function openUsageAppender(
   path: string,
   index: UsageIndex,
   log: (e: MeterLogEvent) => void,
+  io: UsageLogIo,
 ): Promise<UsageAppender> {
   await requireInputDir("Meter usage log", dirname(path));
   const mutable = index as MutableIndex;
-  let handle: Awaited<ReturnType<typeof open>>;
+  let handle: UsageLogHandle;
   try {
-    handle = await open(path, "a", 0o600);
+    handle = await io.open(path);
   } catch (error: unknown) {
     throw new MeterLogError(
       `Meter usage log ${path}: cannot open log (${String((error as NodeJS.ErrnoException).code)})`,
@@ -341,15 +370,19 @@ export async function openUsageAppender(
     log({ level: "error", event: "usage-log-failed", outcome: detail });
   }
 
+  async function runAppend(record: UsageLogRecord): Promise<void> {
+    await handle.write(`${JSON.stringify(record)}\n`);
+    await handle.datasync();
+    applyRecord(mutable, record, path, 0);
+  }
+
   function writeLine(record: UsageLogRecord): Promise<void> {
     const step = chain.then(async () => {
       if (failed) {
         throw new MeterLogError(`Meter usage log ${path}: writer failed`);
       }
       try {
-        await handle.write(`${JSON.stringify(record)}\n`);
-        await handle.datasync();
-        applyRecord(mutable, record, path, 0);
+        await runAppend(record);
       } catch (error: unknown) {
         failLatch(error);
         throw new MeterLogError(`Meter usage log ${path}: append failed`);
@@ -376,9 +409,7 @@ export async function openUsageAppender(
           return;
         }
         try {
-          await handle.write(`${JSON.stringify(record)}\n`);
-          await handle.datasync();
-          applyRecord(mutable, record, path, 0);
+          await runAppend(record);
         } catch (error: unknown) {
           failLatch(error);
           verdict = "meter-unavailable";

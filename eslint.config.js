@@ -29,6 +29,14 @@ export default defineConfig(
           selector: "ImportExpression[source.value=/^@pohunek\\/(sdk|protocol)(\\/|$)/]",
           message: sdkMessage,
         },
+        {
+          selector: "TSImportType[argument.literal.value=/^@pohunek\\/(sdk|protocol)(\\/|$)/]",
+          message: sdkMessage,
+        },
+        {
+          selector: "ImportExpression[source.type!='Literal']",
+          message: "Dynamic import() needs a string literal source.",
+        },
       ],
     },
   },

@@ -7,17 +7,24 @@ import { ESLint } from "eslint";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-const CODE =
+const STATIC_CODE =
   'import type { A } from "@pohunek/sdk";\n' +
   "export type B = A | null;\n" +
   "export async function load(): Promise<unknown> {\n" +
   '  return import("@pohunek/sdk/client");\n' +
   "}\n";
 
-async function lintRulesAt(relativePath: string): Promise<readonly (string | null)[]> {
+const TYPE_CODE = 'export type C = import("@pohunek/sdk").A | null;\n';
+
+const TEMPLATE_CODE =
+  "export async function loadTemplate(): Promise<unknown> {\n" +
+  "  return import(`@pohunek/sdk/client`);\n" +
+  "}\n";
+
+async function lintRulesAt(relativePath: string, code: string): Promise<readonly (string | null)[]> {
   const full = join(process.cwd(), relativePath);
   await mkdir(dirname(full), { recursive: true });
-  await writeFile(full, CODE);
+  await writeFile(full, code);
   try {
     const lint = new ESLint({ cwd: process.cwd() });
     const results = await lint.lintFiles([relativePath]);
@@ -34,12 +41,25 @@ function sdkRules(rules: readonly (string | null)[]): readonly (string | null)[]
 }
 
 test("static and dynamic SDK imports are restricted outside the adapter", async () => {
-  const rules = await lintRulesAt("src/x/__sdk-proof.ts");
+  const rules = await lintRulesAt("src/x/__sdk-proof.ts", STATIC_CODE);
   expect(rules).toContain("no-restricted-imports");
   expect(rules).toContain("no-restricted-syntax");
 });
 
+test("a type import of the SDK is restricted outside the adapter", async () => {
+  const rules = await lintRulesAt("src/x/__sdk-type-proof.ts", TYPE_CODE);
+  expect(rules).toContain("no-restricted-syntax");
+});
+
+test("a template-literal SDK import is restricted outside the adapter", async () => {
+  const rules = await lintRulesAt("src/x/__sdk-template-proof.ts", TEMPLATE_CODE);
+  expect(rules).toContain("no-restricted-syntax");
+});
+
 test("the same SDK imports are allowed under the adapter path", async () => {
-  const rules = await lintRulesAt("src/dispatcher/adapter/__sdk-proof.ts");
+  const rules = await lintRulesAt(
+    "src/dispatcher/adapter/__sdk-proof.ts",
+    STATIC_CODE + TYPE_CODE + TEMPLATE_CODE,
+  );
   expect(sdkRules(rules)).toEqual([]);
 });

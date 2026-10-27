@@ -98,9 +98,9 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
         );
       }
       const startedAt = Date.now();
-      let timedOut = false;
+      const state = { timedOut: false };
       const timer = setTimeout(() => {
-        timedOut = true;
+        state.timedOut = true;
         proc.kill("SIGKILL");
       }, options.timeoutMs);
       try {
@@ -109,7 +109,7 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
         const code = await proc.exited;
         clearTimeout(timer);
         if (proc.signalCode !== null) {
-          if (timedOut) {
+          if (state.timedOut) {
             throw new BudgetGateError(
               `budget gate: timed out after ${String(options.timeoutMs)} ms`,
             );
@@ -122,10 +122,8 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
             `budget gate: killed by signal ${String(proc.signalCode)}: ${snippet}`,
           );
         }
-        if (timedOut) {
-          throw new BudgetGateError(
-            `budget gate: timed out after ${String(options.timeoutMs)} ms`,
-          );
+        if (state.timedOut) {
+          throw new BudgetGateError(`budget gate: timed out after ${String(options.timeoutMs)} ms`);
         }
         const remaining = options.timeoutMs - (Date.now() - startedAt);
         const reads = Promise.all([stdoutPromise, stderrPromise]);

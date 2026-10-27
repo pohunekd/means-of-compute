@@ -41,7 +41,11 @@ function loadFlock(lockPath: string): FlockFn {
       { cause: error },
     );
   }
-  cachedFlock = loaded.symbols.flock;
+  const flockSymbol = loaded.symbols.flock as unknown;
+  if (typeof flockSymbol !== "function") {
+    throw new LedgerDataError(`ledger lock ${lockPath}: cannot load flock (missing symbol)`);
+  }
+  cachedFlock = flockSymbol as FlockFn;
   return cachedFlock;
 }
 

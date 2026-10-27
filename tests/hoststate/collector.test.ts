@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isHostCapacity } from "../../contracts/v1/validate.js";
-import type { HostCapacity } from "../../contracts/v1/types.js";
+import type { HostCapacity, WorkItem } from "../../contracts/v1/types.js";
 import type { HostStateConfig } from "../../src/hoststate/config.js";
 import {
   createCollector,
@@ -12,6 +13,8 @@ import {
   type HostStateLogEvent,
 } from "../../src/hoststate/collector.js";
 import { createMemoryHostStatePort } from "../../src/hoststate/memory-port.js";
+import type { PlacementConfig } from "../../src/placement/config.js";
+import { placeObserved } from "../../src/placement/observed.js";
 import {
   HOST_STATE_FAILURES,
   HostStateError,
@@ -38,6 +41,37 @@ const CONFIG: HostStateConfig = {
 };
 
 const GUARD_MS = 10000 + 2 * 2000;
+
+const PLACEMENT: PlacementConfig = {
+  weights: { cpu: 0.4, memory: 0.4, gpu: 0.2 },
+  batteryFloorPercent: 50,
+  minInputIdleSeconds: 900,
+};
+
+function workItem(): WorkItem {
+  return {
+    schemaVersion: "v1",
+    id: "w1-demo",
+    repo: "pohunekd/means-of-compute",
+    title: "Demo placement run",
+    goal: "Demo placement on the synthetic fleet",
+    issue: 11,
+    dod: [{ id: "D1", text: "Placement chooses the idle desktop", done: false }],
+    dependencies: [],
+    status: "queued",
+    statusReason: null,
+    assignedHostAlias: null,
+    branch: null,
+    pullNumber: null,
+    modelRouting: {
+      preferredModel: "meta/muse-glimmer-30b",
+      attempts: 0,
+      fallbackUsed: false,
+    },
+    retryCount: 0,
+    stallRounds: 0,
+  };
+}
 
 function fixtureCapacity(): HostCapacity {
   const raw = JSON.parse(
@@ -118,6 +152,24 @@ describe("collector port failures", () => {
     expect(first.detail).toBe("daemon-rejected (gone)");
   });
 
+  test("a synchronously thrown HostStateError maps to its cause (mutation: read outside the guard)", async () => {
+    const { deps, control } = depsFor(["laptop-a"]);
+    const syncDeps: CollectorDeps = {
+      ...deps,
+      port: {
+        ...control.port,
+        read: (): Promise<HostStateReply> => {
+          throw new HostStateError("host-unreachable", null);
+        },
+      },
+    };
+    const observations = await createCollector(syncDeps).collect();
+    const first = observations[0] as HostObservation;
+    if (first.kind !== "unavailable") throw new Error("expected unavailable");
+    expect(first.cause).toBe("host-unreachable");
+    expect(first.detail).toBe("host-unreachable");
+  });
+
   test("the 11 causes are distinct (mutation: reuse one cause)", () => {
     expect(new Set(HOST_STATE_FAILURES).size).toBe(11);
   });
@@ -127,9 +179,13 @@ describe("collector guard", () => {
   test("a hanging port yields request-timeout once sleep settles (mutation: no guard)", async () => {
     const { deps, control, nowValue } = depsFor(["laptop-a"]);
     control.set("laptop-a", { kind: "hang" });
+    let sleepMs = -1;
     const guardDeps: CollectorDeps = {
       ...deps,
-      sleep: () => Promise.resolve(),
+      sleep: (ms) => {
+        sleepMs = ms;
+        return Promise.resolve();
+      },
     };
     const observations = await createCollector(guardDeps).collect();
     expect(observations).toHaveLength(1);
@@ -138,6 +194,7 @@ describe("collector guard", () => {
     if (first.kind !== "unavailable") throw new Error("expected unavailable");
     expect(first.cause).toBe("request-timeout");
     expect(first.detail).toBe(`no reply within ${String(GUARD_MS)} ms`);
+    expect(sleepMs).toBe(GUARD_MS);
     expect(nowValue.current).toBeDefined();
   });
 
@@ -148,7 +205,12 @@ describe("collector guard", () => {
       ...deps,
       config: {
         ...CONFIG,
-        collector: { ...CONFIG.collector, pluginTimeoutMs: 20000, transportMarginMs: 3000 },
+        collector: {
+          ...CONFIG.collector,
+          pluginTimeoutMs: 20000,
+          transportMarginMs: 3000,
+          maxOutputBytes: 8192,
+        },
       },
       sleep: () => Promise.resolve(),
     };
@@ -160,9 +222,25 @@ describe("collector guard", () => {
       limits: {
         pluginTimeoutMs: 20000,
         requestTimeoutMs: 23000,
-        maxOutputBytes: 16384,
+        maxOutputBytes: 8192,
       },
     });
+  });
+
+  test("the guard signal is aborted once the reply wins (mutation: remove controller.abort())", async () => {
+    const { deps, control } = depsFor(["laptop-a"]);
+    control.set("laptop-a", { kind: "reply", reply: replyFor(fixtureCapacity()) });
+    let signal: AbortSignal | undefined;
+    const replyDeps: CollectorDeps = {
+      ...deps,
+      sleep: (ms: number, candidate: AbortSignal) => {
+        signal = candidate;
+        expect(ms).toBe(GUARD_MS);
+        return new Promise<void>(() => {});
+      },
+    };
+    await createCollector(replyDeps).collect();
+    expect(signal?.aborted).toBe(true);
   });
 });
 
@@ -315,6 +393,26 @@ describe("collector time bounds", () => {
     expect(future.cause).toBe("future-timestamp");
     expect(future.detail).toBe(`ahead ${String(skew + 1)} ms`);
   });
+
+  test("leap-second timestamp is contract-invalid and never placed (mutation: drop the finite check)", async () => {
+    const capacity = fixtureCapacity();
+    const leap = { ...capacity, timestamp: "2020-01-01T23:59:60Z" };
+    const direct = observe(
+      "desktop",
+      replyFor(leap),
+      CONFIG,
+      new Date("2026-10-27T12:00:01.000Z"),
+    );
+    if (direct.kind !== "unavailable") throw new Error("expected unavailable");
+    expect(direct.cause).toBe("contract-invalid");
+    expect(direct.detail).toBe("timestamp unparseable");
+    const { deps, control } = depsFor(["desktop", "laptop-a"]);
+    control.set("desktop", { kind: "reply", reply: replyFor(leap) });
+    control.set("laptop-a", { kind: "fail", failure: "host-unreachable", code: null });
+    const observations = await createCollector(deps).collect();
+    const decision = placeObserved(workItem(), observations, [], PLACEMENT);
+    expect(decision.chosenHostAlias).toBeNull();
+  });
 });
 
 describe("collector round rules", () => {
@@ -365,6 +463,42 @@ describe("collector round rules", () => {
     expect(first).toBe(second);
     expect(control.calls().length).toBe(1);
   });
+
+  test("sequential collects re-read and return the fresh round (mutation: delete inFlight = null)", async () => {
+    const { deps, control } = depsFor(["laptop-a"]);
+    control.set("laptop-a", { kind: "fail", failure: "host-unreachable", code: null });
+    const collector = createCollector(deps);
+    const first = await collector.collect();
+    control.set("laptop-a", { kind: "fail", failure: "plugin-busy", code: null });
+    const second = await collector.collect();
+    expect(control.calls()).toHaveLength(2);
+    expect(first).not.toBe(second);
+    const firstEntry = first[0] as HostObservation;
+    const secondEntry = second[0] as HostObservation;
+    if (firstEntry.kind !== "unavailable" || secondEntry.kind !== "unavailable") {
+      throw new Error("expected unavailable");
+    }
+    expect(firstEntry.cause).toBe("host-unreachable");
+    expect(secondEntry.cause).toBe("plugin-busy");
+  });
+
+  test("a rejected round is not cached (mutation: delete inFlight = null)", async () => {
+    const { deps, control } = depsFor(["laptop-a"]);
+    const boom = new Error("socket exploded");
+    control.set("laptop-a", { kind: "throw", error: boom });
+    const collector = createCollector(deps);
+    const failure = await collector.collect().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBe(boom);
+    control.set("laptop-a", { kind: "fail", failure: "host-unreachable", code: null });
+    const second = await collector.collect();
+    expect(control.calls()).toHaveLength(2);
+    const entry = second[0] as HostObservation;
+    if (entry.kind !== "unavailable") throw new Error("expected unavailable");
+    expect(entry.cause).toBe("host-unreachable");
+  });
 });
 
 describe("collector logs", () => {
@@ -396,6 +530,71 @@ describe("collector logs", () => {
         expect(value).not.toContain("host.example");
       }
     }
+  });
+
+  test("route-shaped failure text never reaches events (mutation: copy the code into detail)", async () => {
+    const { deps, control, events } = depsFor(["laptop-a"]);
+    control.set("laptop-a", {
+      kind: "fail",
+      failure: "daemon-rejected",
+      code: "host.example:7443",
+    });
+    const observations = await createCollector(deps).collect();
+    const first = observations[0] as HostObservation;
+    if (first.kind !== "unavailable") throw new Error("expected unavailable");
+    expect(first.cause).toBe("daemon-rejected");
+    expect(first.detail).toBe("daemon-rejected");
+    expect(events).toHaveLength(1);
+    for (const logged of events) {
+      for (const value of Object.values(logged)) {
+        if (typeof value === "string") {
+          expect(value).not.toContain("host.example:7443");
+          expect(value).not.toContain("host.example");
+        }
+      }
+    }
+  });
+
+  test("a thrown route-shaped message leaves no event (mutation: log non-port errors)", async () => {
+    const { deps, control, events } = depsFor(["laptop-a"]);
+    const boom = new Error("dial laptop-a.overlay.example:7443 failed");
+    control.set("laptop-a", { kind: "throw", error: boom });
+    const failure = await createCollector(deps)
+      .collect()
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failure).toBe(boom);
+    expect(events).toHaveLength(0);
+  });
+
+  test("three hosts log one event per host with reported fields (mutation: drop an event)", async () => {
+    const { deps, control, events } = depsFor(["desktop", "laptop-a", "laptop-b"]);
+    const stdout = JSON.stringify(fixtureCapacity());
+    control.set("desktop", {
+      kind: "reply",
+      reply: {
+        identity: { packageId: PACKAGE_ID, version: "0.1.0", digest: DIGEST },
+        stdout,
+      },
+    });
+    control.set("laptop-a", { kind: "fail", failure: "host-unreachable", code: null });
+    control.set("laptop-b", { kind: "fail", failure: "plugin-busy", code: null });
+    const observations = await createCollector(deps).collect();
+    expect(observations).toHaveLength(3);
+    expect(events).toHaveLength(3);
+    expect(events.map((entry) => entry.hostAlias)).toEqual(["desktop", "laptop-a", "laptop-b"]);
+    const reported = events[0] as HostStateLogEvent;
+    expect(reported.kind).toBe("reported");
+    expect(reported.cause).toBeNull();
+    expect(reported.detail).toBeNull();
+    expect(reported.packageVersion).toBe("0.1.0");
+    expect(reported.packageDigest).toBe(DIGEST);
+    expect(reported.stdoutBytes).toBe(Buffer.byteLength(stdout, "utf8"));
+    expect(reported.stdoutSha256).toBe(
+      createHash("sha256").update(stdout, "utf8").digest("hex"),
+    );
   });
 });
 

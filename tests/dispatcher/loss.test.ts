@@ -297,9 +297,7 @@ test("unreachable: two misses recover, the third is lost", async () => {
     // 10:00:00 start, and the third miss ends the session.
     const { readRegistry } = await import("../../src/dispatcher/registry.js");
     const entries = await readRegistry(join(dir, "registry2.json"));
-    const entry = entries.find(
-      (candidate) => candidate.requestId === started2.request.requestId,
-    );
+    const entry = entries.find((candidate) => candidate.requestId === started2.request.requestId);
     expect(entry?.lastSeenAt).toBe("2026-10-27T10:00:00.000Z");
     expect(entry?.unreachableCount).toBe(3);
     expect(entry?.terminal?.seconds).toBe(0);
@@ -432,9 +430,11 @@ test("replay after a crash between append and write returns unchanged", async ()
     // A direct file rewrite keeps the cleared revision without tripping
     // the stale-revision check below.
     const { writeFile } = await import("node:fs/promises");
-    const document = { sessions: entries.map((candidate) =>
-      candidate.requestId === cleared.requestId ? cleared : candidate,
-    ) };
+    const document = {
+      sessions: entries.map((candidate) =>
+        candidate.requestId === cleared.requestId ? cleared : candidate,
+      ),
+    };
     await writeFile(registryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
     clock.now = new Date("2026-10-27T10:09:00.000Z");
     // Crash between appendPending and the second registry write: the
@@ -452,7 +452,9 @@ test("replay after a crash between append and write returns unchanged", async ()
     // The flag moves back to true on the next revision; the observed
     // content is unchanged.
     const stored = await readRegistry(registryPath);
-    const storedEntry = stored.find((candidate) => candidate.requestId === started.request.requestId);
+    const storedEntry = stored.find(
+      (candidate) => candidate.requestId === started.request.requestId,
+    );
     expect(storedEntry?.terminal?.ledgerAppended).toBe(true);
     expect(storedEntry?.terminal?.observedAt).toBe(entry.terminal.observedAt);
   } finally {

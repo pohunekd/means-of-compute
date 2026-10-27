@@ -358,9 +358,8 @@ test("replaceRegistryEntry rejects a stale revision", async () => {
     if (started.kind !== "started") {
       throw new Error("expected a started session");
     }
-    const { readRegistry, replaceRegistryEntry, RegistryDataError } = await import(
-      "../../src/dispatcher/registry.js"
-    );
+    const { readRegistry, replaceRegistryEntry, RegistryDataError } =
+      await import("../../src/dispatcher/registry.js");
     const entries = await readRegistry(registryPath);
     const entry = entries.find((candidate) => candidate.requestId === started.request.requestId);
     if (entry === undefined) {

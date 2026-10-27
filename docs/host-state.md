@@ -1,9 +1,9 @@
 # Host state plugin
 
 The host probe (`src/probe/`) ships to fleet hosts as a compiled plugin package.
-A host-state extension point in a Pohunek release runs the plugin on each host
-and carries its `HostCapacity` output back to the coordinator, where the
-collector validates it before placement sees it.
+A Pohunek release with a host-state extension point (PR 3) will run the plugin
+on each host and carry its `HostCapacity` output back to the coordinator, where
+a planned collector (PR 2) validates it before placement sees it.
 
 ## Package contents
 
@@ -35,9 +35,10 @@ flag and records `native-<platform>-<arch>` in `build.json`.
 `plugin:build` refuses to build when `plugin:digest` does not match, so a stale
 digest cannot be built.
 
-The source digest pins exactly what the binary was built from: every repo file
+The source digest pins the source inputs of the binary: every repo file
 the bundle includes (from the `Bun.build` metafile, excluding `node_modules/`),
 plus `bun.lock`, `config/probe.json` and every `config/scenarios/*.json` file.
+The toolchain is recorded separately as `bunVersion` in `build.json`.
 `plugin:digest` prints the digest and exits 0 only when it equals
 `package.sourceDigest` in `config/host-state.json`.
 

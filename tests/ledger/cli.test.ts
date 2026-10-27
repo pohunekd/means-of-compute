@@ -88,6 +88,52 @@ test("record of the same completion twice refuses the replay and changes nothing
   }
 });
 
+test("record of an older completion after a later one exits 3 and writes nothing", async () => {
+  const { dir, ledger } = sandbox();
+  try {
+    const raw = (await Bun.file("tests/fixtures/ledger/finished-task.json").json()) as {
+      pending: Record<string, unknown>[];
+    };
+    const first = raw.pending[0] as Record<string, unknown>;
+    const second = {
+      ...first,
+      entryId: "e2-demo",
+      finishedAt: "2026-10-26T11:00:00.000Z",
+    };
+    const firstCompletion = join(dir, "first.json");
+    await Bun.write(
+      firstCompletion,
+      JSON.stringify({
+        pending: [first],
+        finalize: { workItemId: "w1-demo", result: "blocked", retries: 1, humanInterventions: 0 },
+      }),
+    );
+    const secondCompletion = join(dir, "second.json");
+    await Bun.write(
+      secondCompletion,
+      JSON.stringify({
+        pending: [second],
+        finalize: { workItemId: "w1-demo", result: "success", retries: 1, humanInterventions: 0 },
+      }),
+    );
+    expect((await runCli(["record", "--ledger", ledger, "--completion", firstCompletion])).code).toBe(
+      0,
+    );
+    expect(
+      (await runCli(["record", "--ledger", ledger, "--completion", secondCompletion])).code,
+    ).toBe(0);
+    const before = await Bun.file(ledger).text();
+    const replay = await runCli(["record", "--ledger", ledger, "--completion", firstCompletion]);
+    expect(replay.code).toBe(3);
+    expect(replay.stderr).toContain(
+      "pending entry e1-demo is not newer than the record of w1-demo",
+    );
+    expect(await Bun.file(ledger).text()).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("D2: query output deep-equals the hand-computed expected file", async () => {
   const { dir, ledger } = sandbox();
   try {

@@ -84,7 +84,12 @@ test("mutating the usage after complete leaves the stored result unchanged", asy
     source: "provider-usage",
   });
   if (first.state === "finished" && first.usage !== null) {
-    first.usage.tokens[0]!.inputTokens = 999;
+    // Deliberate write through a mutable view: proves the stored result
+    // does not alias the objects handed to the caller.
+    const headToken = first.usage.tokens[0] as { inputTokens: number | null } | undefined;
+    if (headToken !== undefined) {
+      headToken.inputTokens = 999;
+    }
   }
   const second = await control.port.wait(ref, 1000, null);
   expect(second).toEqual(frozen);

@@ -306,15 +306,22 @@ async function linuxSecondsSinceInput(): Promise<number> {
     }
   }
   if (sessionIds.length === 0) return Number.NaN;
-  // Somebody is logged in when at least one session has class user and is
-  // not remote. Every Type counts, with or without a seat, active or not;
-  // only remote sessions are ignored. NaN means the query ran and found no
-  // such session. When somebody is logged in but has no active graphical
-  // session, activity is unknown (never idle).
+  // Somebody is logged in when at least one session has a local class
+  // matching ^user(-|$) and is not remote. Every Type counts, with or
+  // without a seat, active or not; only remote sessions are ignored. NaN
+  // means the query ran and found no such session. A session whose Class
+  // or Remote line is missing or empty cannot be parsed, which throws
+  // (unknown, never idle). When somebody is logged in but has no active
+  // graphical session, activity is unknown (never idle).
   const loggedInIds: string[] = [];
   for (const id of sessionIds) {
     const props = await showSessionProps(id, ["Class", "Remote"]);
-    if (props.get("Class") === "user" && props.get("Remote") !== "yes") {
+    const cls = props.get("Class");
+    const remote = props.get("Remote");
+    if (cls === undefined || cls === "" || remote === undefined || remote === "") {
+      throw new Error(`loginctl session ${id} has no Class or Remote`);
+    }
+    if (/^user(-|$)/.test(cls) && remote !== "yes") {
       loggedInIds.push(id);
     }
   }

@@ -161,6 +161,18 @@ async function installFakeGh(tree: CliTree, mode: "fail" | "ok"): Promise<void> 
       `  if [ "$(cat "$state/mode")" = "fail" ]; then echo "fake gh: pr comment failed" >&2; exit 1; fi\n` +
       `  exit 0\n` +
       `fi\n` +
+      // The fake pins the verify contract: an api call without
+      // --paginate --jq and the exact first-lines program exits 1.
+      `if [ "$1" = "api" ]; then\n` +
+      `  want='.[] | .body | split("\n")[0]';\n` +
+      `  got_paginate=""; got_jq=""; prev="";\n` +
+      `  for arg in "$@"; do\n` +
+      `    if [ "$arg" = "--paginate" ]; then got_paginate=1; fi;\n` +
+      `    if [ "$prev" = "--jq" ]; then got_jq="$arg"; fi;\n` +
+      `    prev="$arg";\n` +
+      `  done;\n` +
+      `  if [ "$got_paginate" != 1 ] || [ "$got_jq" != "$want" ]; then echo "fake gh: api needs --paginate --jq <program>" >&2; exit 1; fi\n` +
+      `fi\n` +
       `body=$(cat "$state/comment.md" 2>/dev/null || echo "")\n` +
       `first=$(printf '%s' "$body" | head -n 1)\n` +
       `if [ -f "$state/two-pages" ]; then printf 'unrelated first line\n%s\n' "$first"; else printf '%s\n' "$first"; fi\n`,

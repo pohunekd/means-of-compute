@@ -2,7 +2,12 @@ import type { TokenUsage } from "../../contracts/v1/types.js";
 
 export type PortState = "starting" | "running" | "finished" | "failed" | "lost" | "cancelled";
 export type TerminalState = "finished" | "failed" | "lost" | "cancelled";
-export const TERMINAL_STATES: readonly TerminalState[] = ["finished", "failed", "lost", "cancelled"];
+export const TERMINAL_STATES: readonly TerminalState[] = [
+  "finished",
+  "failed",
+  "lost",
+  "cancelled",
+];
 export type CancelReason = "stall" | "host-left" | "user-returned" | "operator";
 
 export interface ModelSelection {
@@ -36,7 +41,11 @@ export interface PortUsage {
 }
 
 export type WaitResult =
-  | { readonly state: "starting" | "running"; readonly sessionId: string; readonly cursor: string | null }
+  | {
+      readonly state: "starting" | "running";
+      readonly sessionId: string;
+      readonly cursor: string | null;
+    }
   | {
       readonly state: TerminalState;
       readonly sessionId: string;

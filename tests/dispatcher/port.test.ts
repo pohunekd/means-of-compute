@@ -61,7 +61,10 @@ test("D2: diff of a finished session returns the pushed change untruncated", asy
   const handle = await control.port.start(request());
   control.pushCommit("moc/demo-item", "sha1");
   control.complete(handle.sessionId, { state: "finished", usage: null, detail: "exited 0" });
-  const result = await control.port.diff({ sessionId: handle.sessionId, hostAlias: handle.hostAlias }, "origin/main");
+  const result = await control.port.diff(
+    { sessionId: handle.sessionId, hostAlias: handle.hostAlias },
+    "origin/main",
+  );
   expect(result.sessionId).toBe(handle.sessionId);
   expect(result.base).toBe("origin/main");
   expect(result.truncated).toBe(false);

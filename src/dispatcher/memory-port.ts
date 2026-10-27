@@ -17,7 +17,11 @@ export interface MemoryPortControl {
   pushCommit(branch: string, sha: string): void;
   complete(
     sessionId: string,
-    outcome: { readonly state: "finished" | "failed"; readonly usage: PortUsage | null; readonly detail: string },
+    outcome: {
+      readonly state: "finished" | "failed";
+      readonly usage: PortUsage | null;
+      readonly detail: string;
+    },
   ): void;
   loseHost(hostAlias: string): void;
   setUnreachable(hostAlias: string, unreachable: boolean): void;
@@ -34,10 +38,16 @@ interface MemorySession {
 }
 
 function terminalOf(session: MemorySession): Extract<WaitResult, { state: TerminalState }> | null {
-  if (session.state !== "finished" && session.state !== "failed" && session.state !== "lost" && session.state !== "cancelled") {
+  if (
+    session.state !== "finished" &&
+    session.state !== "failed" &&
+    session.state !== "lost" &&
+    session.state !== "cancelled"
+  ) {
     return null;
   }
-  const usage = session.terminalUsage === null ? null : { tokens: [...session.terminalUsage.tokens] };
+  const usage =
+    session.terminalUsage === null ? null : { tokens: [...session.terminalUsage.tokens] };
   return {
     state: session.state,
     sessionId: session.handle.sessionId,
@@ -77,7 +87,12 @@ export function createMemoryPort(): MemoryPortControl {
     return session;
   }
 
-  function settle(session: MemorySession, state: TerminalState, usage: PortUsage | null, detail: string): void {
+  function settle(
+    session: MemorySession,
+    state: TerminalState,
+    usage: PortUsage | null,
+    detail: string,
+  ): void {
     session.state = state;
     session.terminalUsage = usage;
     session.terminalDetail = detail;
@@ -89,7 +104,10 @@ export function createMemoryPort(): MemoryPortControl {
     if (existingId !== undefined) {
       const existing = sessions.get(existingId);
       if (existing === undefined) {
-        throw new PortRejectedError("request-duplicated", `duplicate session for ${request.requestId}`);
+        throw new PortRejectedError(
+          "request-duplicated",
+          `duplicate session for ${request.requestId}`,
+        );
       }
       if (Bun.deepEquals(existing.request, request)) {
         return existing.handle;
@@ -122,7 +140,14 @@ export function createMemoryPort(): MemoryPortControl {
       worktree: `/memory-worktrees/${request.hostAlias}/${sessionId}`,
       baseCommit,
     };
-    sessions.set(sessionId, { handle, request, state: "starting", cursor: null, terminalUsage: null, terminalDetail: null });
+    sessions.set(sessionId, {
+      handle,
+      request,
+      state: "starting",
+      cursor: null,
+      terminalUsage: null,
+      terminalDetail: null,
+    });
     sessionByRequest.set(request.requestId, sessionId);
     if (baseCommit !== null) {
       localTips.set(request.branch, baseCommit);
@@ -130,7 +155,11 @@ export function createMemoryPort(): MemoryPortControl {
     return handle;
   }
 
-  async function wait(ref: SessionRef, _timeoutMs: number, cursor: string | null): Promise<WaitResult> {
+  async function wait(
+    ref: SessionRef,
+    _timeoutMs: number,
+    cursor: string | null,
+  ): Promise<WaitResult> {
     const session = findSession(ref);
     checkReachable(session.handle.hostAlias);
     session.cursor = cursor;
@@ -151,7 +180,12 @@ export function createMemoryPort(): MemoryPortControl {
     for (const sha of commits) {
       lines.push(`+${sha}`);
     }
-    return { sessionId: session.handle.sessionId, base, unifiedDiff: `${lines.join("\n")}\n`, truncated: false };
+    return {
+      sessionId: session.handle.sessionId,
+      base,
+      unifiedDiff: `${lines.join("\n")}\n`,
+      truncated: false,
+    };
   }
 
   async function cancel(ref: SessionRef, reason: CancelReason): Promise<WaitResult> {
@@ -186,7 +220,11 @@ export function createMemoryPort(): MemoryPortControl {
 
   function complete(
     sessionId: string,
-    outcome: { readonly state: "finished" | "failed"; readonly usage: PortUsage | null; readonly detail: string },
+    outcome: {
+      readonly state: "finished" | "failed";
+      readonly usage: PortUsage | null;
+      readonly detail: string;
+    },
   ): void {
     const session = sessions.get(sessionId);
     if (session === undefined) {
@@ -215,7 +253,10 @@ export function createMemoryPort(): MemoryPortControl {
   }
 
   function list(): readonly { readonly handle: SessionHandle; readonly state: PortState }[] {
-    return [...sessions.values()].map((session) => ({ handle: session.handle, state: session.state }));
+    return [...sessions.values()].map((session) => ({
+      handle: session.handle,
+      state: session.state,
+    }));
   }
 
   return { port, pushCommit, complete, loseHost, setUnreachable, sessions: list };

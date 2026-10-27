@@ -28,7 +28,9 @@ async function lintRulesAt(relativePath: string): Promise<readonly (string | nul
 }
 
 function sdkRules(rules: readonly (string | null)[]): readonly (string | null)[] {
-  return rules.filter((rule) => rule === "no-restricted-imports" || rule === "no-restricted-syntax");
+  return rules.filter(
+    (rule) => rule === "no-restricted-imports" || rule === "no-restricted-syntax",
+  );
 }
 
 test("static and dynamic SDK imports are restricted outside the adapter", async () => {

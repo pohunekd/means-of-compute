@@ -107,17 +107,22 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
     const type = readFileIfExists(typePath);
     if (!type) continue;
     if (type === "Mains") {
+      const scope = readFileIfExists(`${base}/${entry}/scope`);
+      if (scope === "Device") continue;
       hasMains = true;
       const online = readFileIfExists(`${base}/${entry}/online`);
       if (online === "1") acPower = true;
     }
     if (type === "Battery") {
+      const scope = readFileIfExists(`${base}/${entry}/scope`);
+      if (scope === "Device") continue;
       hasBattery = true;
       const cap = readFileIfExists(`${base}/${entry}/capacity`);
-      if (cap) {
-        const n = Number(cap);
-        if (!Number.isNaN(n)) batteryPercent = n;
+      const n = cap ? Number(cap) : NaN;
+      if (cap === null || cap === "" || !Number.isFinite(n)) {
+        throw new Error(`power unknown: cannot read capacity of ${entry}`);
       }
+      batteryPercent = batteryPercent === null ? n : Math.min(batteryPercent, n);
     }
   }
   if (!hasMains && !hasBattery) {

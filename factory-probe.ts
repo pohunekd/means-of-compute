@@ -146,7 +146,17 @@ async function linuxGpu(): Promise<{
 }> {
   const base = "/sys/class/drm";
   try {
-    const entries = readdirSync(base).filter((e) => /^card\d+$/.test(e));
+    let entries: string[];
+    try {
+      entries = readdirSync(base).filter((e) => /^card\d+$/.test(e));
+    } catch (e) {
+      // A missing DRM class directory means the kernel loaded no DRM
+      // driver, so there is no DRM GPU. Other read errors fail the probe.
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      const nvidia = await nvidiaGpu();
+      if (nvidia) return nvidia;
+      return { present: false, name: null, freeMb: null };
+    }
     let best: { present: boolean; name: string | null; freeMb: number | null } | null = null;
     for (const card of entries) {
       const deviceDir = `${base}/${card}/device`;

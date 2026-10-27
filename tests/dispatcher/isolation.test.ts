@@ -6,8 +6,8 @@
 // no network.
 import { expect, test } from "bun:test";
 import { ESLint } from "eslint";
-import { mkdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 
 const STATIC_CODE =
   'import type { A } from "@pohunek/sdk";\n' +
@@ -86,6 +86,35 @@ test("a template-literal SDK import is restricted outside the adapter", async ()
     expect(outcome.fatal).toEqual([]);
     expect(outcome.rules).toContain("no-restricted-syntax");
   });
+});
+
+test("no tracked file outside the adapter names the SDK specifier", async () => {
+  // Second D4 check alongside the lint selectors: any loader spelling
+  // (import.meta.require, createRequire, global require) past the lint
+  // rules is caught by matching the specifier text itself.
+  const listed = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: process.cwd() });
+  expect(listed.exitCode).toBe(0);
+  const extensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
+  const allowListed = new Set(["eslint.config.js", "tests/dispatcher/isolation.test.ts"]);
+  const specifier = /@pohunek\/(sdk|protocol)\b/;
+  const paths = Buffer.from(listed.stdout).toString("utf8").split("\0").filter((p) => p.length > 0);
+  const hits: string[] = [];
+  for (const path of paths) {
+    if (path.startsWith("src/dispatcher/adapter/")) {
+      continue;
+    }
+    if (allowListed.has(path)) {
+      continue;
+    }
+    if (!extensions.has(extname(path))) {
+      continue;
+    }
+    const text = await readFile(join(process.cwd(), path), "utf8");
+    if (specifier.test(text)) {
+      hits.push(path);
+    }
+  }
+  expect(hits).toEqual([]);
 });
 
 test("the same SDK imports are allowed under the adapter path", async () => {

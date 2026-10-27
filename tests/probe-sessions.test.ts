@@ -1,0 +1,113 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const probe = join(repoRoot, "factory-probe.ts");
+const doubleBin = join(repoRoot, "tests/fixtures/loginctl/bin");
+
+type RunResult = { exitCode: number; stdout: string; stderr: string };
+
+async function runProbe(fixture: string, factsPath: string): Promise<RunResult> {
+  const proc = Bun.spawn(["bun", probe, "--facts", factsPath], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: `${doubleBin}:${process.env["PATH"] ?? ""}`,
+      MOC_LOGINCTL_FIXTURE: join(repoRoot, "tests/fixtures/loginctl", fixture),
+    },
+  });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode: proc.exitCode ?? 1, stdout, stderr };
+}
+
+async function withFacts(
+  facts: Record<string, unknown>,
+  fn: (factsPath: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "probe-facts-"));
+  try {
+    const factsPath = join(dir, "facts.json");
+    await Bun.write(factsPath, JSON.stringify(facts));
+    await fn(factsPath);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Power and the window are fixed by facts; the session rule under test is the
+// only thing the double decides.
+const sessionFacts = {
+  acPower: true,
+  cpuCores: 4,
+  cpuLoad1m: 0.1,
+  memoryTotalMb: 8192,
+  memoryFreeMb: 4096,
+  gpuPresent: false,
+  gpuName: null,
+  gpuFreeMb: null,
+  localModelsReachable: false,
+  localModels: [],
+  hostAlias: "desktop",
+  policyAllowedWindowStart: "00:00",
+  policyAllowedWindowEnd: "00:00",
+  timestamp: "2026-10-27T12:00:00.000Z",
+};
+
+describe("loginctl session rule", () => {
+  test("user-early on tty1 is logged in without a graphical session, not idle", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("user-early-tty", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as { idle: boolean; idleReason: string };
+      expect(doc.idle).toBe(false);
+      expect(doc.idleReason).toContain("logged in without an active graphical session");
+    });
+  });
+
+  test("missing Class line is unknown, not idle", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("missing-class", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as { idle: boolean; idleReason: string };
+      expect(doc.idle).toBe(false);
+      expect(doc.idleReason).toContain("has no Class or Remote");
+    });
+  });
+
+  test("greeter-only takes the logged-out path", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("greeter-only", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as {
+        idle: boolean;
+        idleReason: string;
+        secondsSinceInput: number;
+      };
+      expect(doc.idle).toBe(true);
+      expect(doc.idleReason).toBe("no user logged in, on AC power");
+      expect(doc.secondsSinceInput).toBeGreaterThan(3500);
+    });
+  });
+
+  test("ssh-only takes the logged-out path", async () => {
+    await withFacts({ ...sessionFacts }, async (p) => {
+      const r = await runProbe("ssh-only", p);
+      expect(r.exitCode).toBe(0);
+      const doc = JSON.parse(r.stdout) as {
+        idle: boolean;
+        idleReason: string;
+        secondsSinceInput: number;
+      };
+      expect(doc.idle).toBe(true);
+      expect(doc.idleReason).toBe("no user logged in, on AC power");
+      expect(doc.secondsSinceInput).toBeGreaterThan(3500);
+    });
+  });
+});

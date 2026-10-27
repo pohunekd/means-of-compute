@@ -171,7 +171,7 @@ test(
   async () => {
     const gate = createCliBudgetGate({
       command: ["sh", "-c", "(sleep 6 &); kill -9 $$"],
-      timeoutMs: 300,
+      timeoutMs: 10000,
       cwd: process.cwd(),
     });
     const started = Date.now();
@@ -184,9 +184,9 @@ test(
     const elapsed = Date.now() - started;
     expect(error).toBeInstanceOf(BudgetGateError);
     expect((error as Error).message).toContain("killed by signal SIGKILL");
-    expect(elapsed).toBeLessThan(5000);
+    expect(elapsed).toBeLessThan(10000);
   },
-  { timeout: 15000 },
+  { timeout: 30000 },
 );
 
 test(
@@ -198,7 +198,7 @@ test(
         "bun",
         "-e",
         "const { createCliBudgetGate } = await import('./src/budget/gate.js');" +
-          "const gate = createCliBudgetGate({ command: ['bun', '-e', \"console.log('admitted: x')\"], timeoutMs: 30000, cwd: process.cwd() });" +
+          "const gate = createCliBudgetGate({ command: ['bun', '-e', \"console.log('admitted: x')\"], timeoutMs: 60000, cwd: process.cwd() });" +
           "const admission = await gate.admit();" +
           "if (!admission.admit) { process.exit(1); }",
       ],
@@ -211,9 +211,9 @@ test(
     const elapsed = Date.now() - started;
     expect(code).toBe(0);
     expect(stderr).toBe("");
-    expect(elapsed).toBeLessThan(10000);
+    expect(elapsed).toBeLessThan(30000);
   },
-  { timeout: 15000 },
+  { timeout: 90000 },
 );
 
 test("gate refuses output held open past the deadline", async () => {

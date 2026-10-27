@@ -95,38 +95,47 @@ describe("loadConfig validation", () => {
     );
   });
 
-  test("relative sysfsRoot throws naming the key", async () => {
-    await withConfig(
-      (cfg) => {
-        cfg["sysfsRoot"] = "tests/fixtures/sysfs/type-unreadable";
-      },
-      (p) => {
-        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
-      },
-    );
-  });
+  test.skipIf(process.platform !== "linux")(
+    "relative sysfsRoot throws naming the key",
+    async () => {
+      await withConfig(
+        (cfg) => {
+          cfg["sysfsRoot"] = "tests/fixtures/sysfs/type-unreadable";
+        },
+        (p) => {
+          expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+        },
+      );
+    },
+  );
 
-  test("non-existent sysfsRoot throws naming the key", async () => {
-    await withConfig(
-      (cfg) => {
-        cfg["sysfsRoot"] = "/no-such-sysfs-root";
-      },
-      (p) => {
-        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
-      },
-    );
-  });
+  test.skipIf(process.platform !== "linux")(
+    "non-existent sysfsRoot throws naming the key",
+    async () => {
+      await withConfig(
+        (cfg) => {
+          cfg["sysfsRoot"] = "/no-such-sysfs-root";
+        },
+        (p) => {
+          expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+        },
+      );
+    },
+  );
 
-  test("directory without class/ throws naming the key", async () => {
-    await withConfig(
-      (cfg) => {
-        cfg["sysfsRoot"] = tmpdir();
-      },
-      (p) => {
-        expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
-      },
-    );
-  });
+  test.skipIf(process.platform !== "linux")(
+    "directory without class/ throws naming the key",
+    async () => {
+      await withConfig(
+        (cfg) => {
+          cfg["sysfsRoot"] = tmpdir();
+        },
+        (p) => {
+          expect(() => loadConfig(p)).toThrow("config probe.json: invalid sysfsRoot");
+        },
+      );
+    },
+  );
 
   test("allowedWindowStart 80:00 throws naming the key", async () => {
     await withConfig(

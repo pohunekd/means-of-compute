@@ -59,8 +59,9 @@ NVIDIA daily limit, `total` for the total cap (once regardless of the
 day), `spend-unknown:<UTC day>` for unknown spend (once per day while
 spend stays unknown). An event escalates only when its key is absent;
 keys are never dropped because the set grows by at most a few keys a day.
-The log line is
-line to `logs/budget-escalations.log` and prints one line on stderr. A second
+The log line is appended first, then the state is persisted. Each
+escalation appends one JSON line to `logs/budget-escalations.log` and
+prints one line on stderr. A second
 refusal for the same event writes nothing.
 
 ## CLI

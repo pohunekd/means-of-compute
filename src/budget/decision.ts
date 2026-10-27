@@ -5,8 +5,7 @@
 // Spend and caps are integer nano-USD compared as BigInt; floats never
 // decide.
 import type { BudgetConfig } from "./config.js";
-import { nanoUsdToDisplayDollars, type SpendSummary } from "./cost.js";
-import { NANO_PER_USD } from "./pricing.js";
+import { TOKENS_PER_1M, nanoUsdToDisplayDollars, type SpendSummary } from "./cost.js";
 
 export type RefusalReason =
   | "spend unknown"
@@ -36,21 +35,6 @@ function refused(reason: RefusalReason, summary: SpendSummary): BudgetDecision {
   };
 }
 
-/** Parses a configured USD cap into integer nano-USD for an exact comparison. */
-export function capUsdToNanoUsd(capUsd: number, field: string): bigint {
-  if (!Number.isFinite(capUsd) || capUsd < 0) {
-    throw new Error(`Budget config: invalid cap "${field}"`);
-  }
-  const text = capUsd.toString();
-  const match = /^(\d+)(?:\.(\d{1,9}))?$/.exec(text);
-  if (match === null) {
-    throw new Error(`Budget config: invalid cap "${field}"`);
-  }
-  const whole = BigInt(match[1] as string);
-  const frac = (match[2] ?? "").padEnd(9, "0");
-  return whole * NANO_PER_USD + BigInt(frac);
-}
-
 export function decideAdmission(
   summary: SpendSummary,
   config: BudgetConfig,
@@ -59,10 +43,10 @@ export function decideAdmission(
   if (summary.unknownWorkItemIds.length > 0) {
     return refused("spend unknown", summary);
   }
-  if (summary.spentTodayNanoUsd >= capUsdToNanoUsd(config.dayCapUsd, "dayCapUsd")) {
+  if (summary.spentTodayNanoTimes1M >= config.dayCapNanoUsd * TOKENS_PER_1M) {
     return refused("daily cap reached", summary);
   }
-  if (summary.spentTotalNanoUsd >= capUsdToNanoUsd(config.totalCapUsd, "totalCapUsd")) {
+  if (summary.spentTotalNanoTimes1M >= config.totalCapNanoUsd * TOKENS_PER_1M) {
     return refused("total cap reached", summary);
   }
   if (

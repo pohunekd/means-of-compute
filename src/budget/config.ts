@@ -2,12 +2,13 @@
 // fail at startup with a clear error instead of silently using a default cap.
 // A missing or unreadable file exits 2; the config may never be absent.
 import { readInputText, statInputPath } from "./fs.js";
+import { priceToNanoUsd } from "./money.js";
 export interface BudgetConfig {
   readonly ledgerPath: string;
   readonly statePath: string;
   readonly escalationLogPath: string;
-  readonly dayCapUsd: number;
-  readonly totalCapUsd: number;
+  readonly dayCapNanoUsd: bigint;
+  readonly totalCapNanoUsd: bigint;
   readonly nvidiaDailyRequestLimit: number;
   readonly nvidiaProviderId: string;
 }
@@ -22,12 +23,20 @@ function requiredString(record: Record<string, unknown>, field: string, path: st
   return value;
 }
 
-function requiredNumber(record: Record<string, unknown>, field: string, path: string): number {
+function requiredCount(record: Record<string, unknown>, field: string, path: string): number {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
   }
   return value;
+}
+
+function requiredCap(record: Record<string, unknown>, field: string, path: string): bigint {
+  const value = record[field];
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
+  }
+  return priceToNanoUsd(value, field, path);
 }
 
 export async function loadBudgetConfig(path: string = DEFAULT_CONFIG_PATH): Promise<BudgetConfig> {
@@ -50,9 +59,9 @@ export async function loadBudgetConfig(path: string = DEFAULT_CONFIG_PATH): Prom
     ledgerPath: requiredString(record, "ledgerPath", path),
     statePath: requiredString(record, "statePath", path),
     escalationLogPath: requiredString(record, "escalationLogPath", path),
-    dayCapUsd: requiredNumber(record, "dayCapUsd", path),
-    totalCapUsd: requiredNumber(record, "totalCapUsd", path),
-    nvidiaDailyRequestLimit: requiredNumber(record, "nvidiaDailyRequestLimit", path),
+    dayCapNanoUsd: requiredCap(record, "dayCapUsd", path),
+    totalCapNanoUsd: requiredCap(record, "totalCapUsd", path),
+    nvidiaDailyRequestLimit: requiredCount(record, "nvidiaDailyRequestLimit", path),
     nvidiaProviderId: requiredString(record, "nvidiaProviderId", path),
   };
 }

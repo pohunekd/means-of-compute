@@ -11,7 +11,7 @@ import type { UsageRecord } from "../../contracts/v1/types.js";
 import { readUsageLedger } from "../../src/budget/ledger.js";
 import { costOfRecord, summarizeSpend } from "../../src/budget/cost.js";
 import type { BudgetDecision } from "../../src/budget/decision.js";
-import { capUsdToNanoUsd, decideAdmission } from "../../src/budget/decision.js";
+import { decideAdmission } from "../../src/budget/decision.js";
 import type { BudgetConfig } from "../../src/budget/config.js";
 import { maybeEscalate } from "../../src/budget/escalation.js";
 import { loadDescriptor } from "../../src/budget/pricing.js";
@@ -32,8 +32,8 @@ const CONFIG: BudgetConfig = {
   ledgerPath: "logs/usage-ledger.jsonl",
   statePath: "logs/budget-state.json",
   escalationLogPath: "logs/budget-escalations.log",
-  dayCapUsd: 12,
-  totalCapUsd: 140,
+  dayCapNanoUsd: 12_000_000_000n,
+  totalCapNanoUsd: 140_000_000_000n,
   nvidiaDailyRequestLimit: 1000,
   nvidiaProviderId: "nvidia-build",
 };
@@ -152,7 +152,7 @@ test("M8: 120 records of 0.10 USD each refuse exactly at the day cap", () => {
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTodayNanoUsd).toBe(capUsdToNanoUsd(12, "dayCapUsd"));
+  expect(summary.spentTodayNanoUsd).toBe(12_000_000_000n);
   const decision = decideAdmission(summary, CONFIG, { route: ["meta-api", "nvidia-build"] });
   expect(decision.admit).toBe(false);
   expect(decision.reason).toBe("daily cap reached");
@@ -173,6 +173,38 @@ test("day is the UTC calendar day of finishedAt", () => {
   expect(summary.spentTodayNanoUsd).toBe(600_000_000n);
   expect(summary.spentTotalNanoUsd).toBe(900_000_000n);
   expect(summary.nvidiaRequestsToday).toBe(28);
+});
+
+test("sub-cent entries accumulate: two 0.0375 records reach a 0.075 cap", () => {
+  const pricing = new Map([["tiny-api", { inputNanoPer1M: 1_500_000_000n, outputNanoPer1M: 0n }]]);
+  const one = (id: string): UsageRecord =>
+    record({
+      workItemId: id,
+      tokens: [
+        {
+          provider: "tiny-api",
+          model: "m",
+          inputTokens: 25_000,
+          outputTokens: 0,
+          requests: 1,
+          source: "provider-usage",
+        },
+      ],
+    });
+  const summary = summarizeSpend(
+    [one("w-m9-a"), one("w-m9-b")],
+    pricing,
+    "nvidia-build",
+    new Date("2026-10-26T12:00:00.000Z"),
+  );
+  expect(summary.spentTodayNanoTimes1M).toBe(75_000_000_000_000n);
+  const decision = decideAdmission(
+    summary,
+    { ...CONFIG, dayCapNanoUsd: 75_000_000n, totalCapNanoUsd: 75_000_000n },
+    { route: ["tiny-api"] },
+  );
+  expect(decision.admit).toBe(false);
+  expect(decision.reason).toBe("daily cap reached");
 });
 
 test("D1: spend below both caps admits", () => {
@@ -206,7 +238,7 @@ test("D2: spend at the day cap refuses all routes", () => {
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTodayNanoUsd).toBe(capUsdToNanoUsd(12, "dayCapUsd"));
+  expect(summary.spentTodayNanoUsd).toBe(12_000_000_000n);
   for (const route of [["nvidia-build"], ["meta-api"], []]) {
     const decision = decideAdmission(summary, CONFIG, { route });
     expect(decision.admit).toBe(false);
@@ -227,7 +259,7 @@ test("total cap refuses every new session", () => {
     "nvidia-build",
     new Date("2026-10-26T12:00:00.000Z"),
   );
-  expect(summary.spentTotalNanoUsd).toBeGreaterThanOrEqual(capUsdToNanoUsd(140, "totalCapUsd"));
+  expect(summary.spentTotalNanoUsd).toBeGreaterThanOrEqual(140_000_000_000n);
   const decision = decideAdmission(summary, CONFIG, { route: ["meta-api"] });
   expect(decision.admit).toBe(false);
   expect(decision.reason).toBe("total cap reached");

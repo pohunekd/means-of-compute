@@ -9,7 +9,9 @@
 // log, it only prints `would escalate: <event key>` on stderr.
 import { loadBudgetConfig } from "./config.js";
 import { readInputText, statInputPath } from "./fs.js";
+import { TOKENS_PER_1M } from "./cost.js";
 import { readUsageLedger } from "./ledger.js";
+import { decimalToNanoUsd } from "./money.js";
 import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
 import { capKindOfReason, eventKeyString, maybeEscalate } from "./escalation.js";
@@ -17,9 +19,9 @@ import { loadPricingForIds } from "./pricing.js";
 import { summarizeSpend } from "./cost.js";
 
 interface CliArgs {
-  readonly spendTotal: number | null;
-  readonly dayCap: number | null;
-  readonly totalCap: number | null;
+  readonly spendTotal: string | null;
+  readonly dayCap: string | null;
+  readonly totalCap: string | null;
 }
 
 async function loadRoute(routePath = "config/providers/route.json"): Promise<string[]> {
@@ -61,7 +63,7 @@ async function loadRoute(routePath = "config/providers/route.json"): Promise<str
 
 const NUMBER_PATTERN = /^[0-9]+(\.[0-9]+)?$/;
 
-function parseOptionalNumber(args: string[], flag: string): number | null {
+function parseOptionalDecimal(args: string[], flag: string): string | null {
   const index = args.indexOf(flag);
   if (index === -1) {
     return null;
@@ -70,14 +72,14 @@ function parseOptionalNumber(args: string[], flag: string): number | null {
   if (raw === undefined || !NUMBER_PATTERN.test(raw)) {
     throw new Error(`budget:check: ${flag} needs a non-negative decimal number`);
   }
-  return Number(raw);
+  return raw;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
   const args = argv.slice(2);
-  const spendTotal = parseOptionalNumber(args, "--spend");
-  const dayCap = parseOptionalNumber(args, "--day-cap");
-  const totalCap = parseOptionalNumber(args, "--total-cap");
+  const spendTotal = parseOptionalDecimal(args, "--spend");
+  const dayCap = parseOptionalDecimal(args, "--day-cap");
+  const totalCap = parseOptionalDecimal(args, "--total-cap");
   return { spendTotal, dayCap, totalCap };
 }
 
@@ -148,21 +150,30 @@ async function run(): Promise<number> {
     ledgerEscalationLogPath = config.escalationLogPath;
     if (parsed.spendTotal !== null || parsed.dayCap !== null || parsed.totalCap !== null) {
       override = true;
-      const effective = {
-        ...config,
-        dayCapUsd: parsed.dayCap ?? config.dayCapUsd,
-        totalCapUsd: parsed.totalCap ?? config.totalCapUsd,
-      };
       const overrideTotal = parsed.spendTotal;
       if (overrideTotal === null) {
         throw new Error("budget:check: --spend needs a value");
       }
+      const effective = {
+        ...config,
+        dayCapNanoUsd:
+          parsed.dayCap === null
+            ? config.dayCapNanoUsd
+            : decimalToNanoUsd(parsed.dayCap, "day-cap", "budget:check"),
+        totalCapNanoUsd:
+          parsed.totalCap === null
+            ? config.totalCapNanoUsd
+            : decimalToNanoUsd(parsed.totalCap, "total-cap", "budget:check"),
+      };
       // The override never touches the ledger: it prices nothing.
       await loadPricingForIds("config/providers", [...route, config.nvidiaProviderId]);
+      const overrideNano = decimalToNanoUsd(overrideTotal, "spend", "budget:check");
       decision = decideAdmission(
         {
-          spentTodayNanoUsd: BigInt(Math.round(overrideTotal * 1_000_000_000)),
-          spentTotalNanoUsd: BigInt(Math.round(overrideTotal * 1_000_000_000)),
+          spentTodayNanoUsd: overrideNano,
+          spentTotalNanoUsd: overrideNano,
+          spentTodayNanoTimes1M: overrideNano * TOKENS_PER_1M,
+          spentTotalNanoTimes1M: overrideNano * TOKENS_PER_1M,
           nvidiaRequestsToday: 0,
           unknownWorkItemIds: [],
         },

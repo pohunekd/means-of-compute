@@ -10,6 +10,11 @@ import type { NanoPricing } from "./pricing.js";
 export interface SpendSummary {
   readonly spentTodayNanoUsd: bigint;
   readonly spentTotalNanoUsd: bigint;
+  /** Undivided scope sums: tokens * priceNanoPer1M. Decisions compare these
+      against capNano * 1_000_000n; the nano fields above divide once only
+      for display. */
+  readonly spentTodayNanoTimes1M: bigint;
+  readonly spentTotalNanoTimes1M: bigint;
   readonly nvidiaRequestsToday: number;
   readonly unknownWorkItemIds: readonly string[];
 }
@@ -23,7 +28,7 @@ export class SpendUnknownError extends Error {
   }
 }
 
-const TOKENS_PER_1M = 1_000_000n;
+export const TOKENS_PER_1M = 1_000_000n;
 
 export function isPriced(pricing: NanoPricing): boolean {
   return (
@@ -45,7 +50,15 @@ export function costOfRecord(
   record: UsageRecord,
   pricing: ReadonlyMap<string, NanoPricing>,
 ): bigint {
-  let cost = 0n;
+  return costOfRecordNanoTimes1M(record, pricing) / TOKENS_PER_1M;
+}
+
+/** Undivided record cost: tokens * priceNanoPer1M, for scope accumulation. */
+function costOfRecordNanoTimes1M(
+  record: UsageRecord,
+  pricing: ReadonlyMap<string, NanoPricing>,
+): bigint {
+  let costNanoTimes1M = 0n;
   for (const entry of record.tokens) {
     const providerPricing = pricing.get(entry.provider);
     if (providerPricing === undefined) {
@@ -59,12 +72,11 @@ export function costOfRecord(
     if (entry.inputTokens === null || entry.outputTokens === null) {
       throw new SpendUnknownError(record.workItemId);
     }
-    cost +=
-      (BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
-        BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M) /
-      TOKENS_PER_1M;
+    costNanoTimes1M +=
+      BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
+      BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M;
   }
-  return cost;
+  return costNanoTimes1M;
 }
 
 export function summarizeSpend(
@@ -74,8 +86,8 @@ export function summarizeSpend(
   now: Date,
 ): SpendSummary {
   const today = utcCalendarDay(now);
-  let spentTodayNanoUsd = 0n;
-  let spentTotalNanoUsd = 0n;
+  let spentTodayNanoTimes1M = 0n;
+  let spentTotalNanoTimes1M = 0n;
   let nvidiaRequestsToday = 0;
   const unknownWorkItemIds: string[] = [];
   for (const record of records) {
@@ -88,9 +100,9 @@ export function summarizeSpend(
         }
       }
     }
-    let cost: bigint;
+    let costNanoTimes1M: bigint;
     try {
-      cost = costOfRecord(record, pricing);
+      costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing);
     } catch (error: unknown) {
       if (error instanceof SpendUnknownError) {
         unknownWorkItemIds.push(record.workItemId);
@@ -98,12 +110,19 @@ export function summarizeSpend(
       }
       throw error;
     }
-    spentTotalNanoUsd += cost;
+    spentTotalNanoTimes1M += costNanoTimes1M;
     if (utcDayOfRecord(record) === today) {
-      spentTodayNanoUsd += cost;
+      spentTodayNanoTimes1M += costNanoTimes1M;
     }
   }
-  return { spentTodayNanoUsd, spentTotalNanoUsd, nvidiaRequestsToday, unknownWorkItemIds };
+  return {
+    spentTodayNanoUsd: spentTodayNanoTimes1M / TOKENS_PER_1M,
+    spentTotalNanoUsd: spentTotalNanoTimes1M / TOKENS_PER_1M,
+    spentTodayNanoTimes1M,
+    spentTotalNanoTimes1M,
+    nvidiaRequestsToday,
+    unknownWorkItemIds,
+  };
 }
 
 /** Float dollars for display only; decisions never use this value. */

@@ -14,6 +14,7 @@
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { readInputText, statInputPath } from "./fs.js";
+import { NANO_PER_USD, priceToNanoUsd } from "./money.js";
 import providerSchema from "../../config/providers/schema.json" with { type: "json" };
 
 export interface NanoPricing {
@@ -21,9 +22,6 @@ export interface NanoPricing {
   readonly outputNanoPer1M: bigint;
   readonly cachedInputNanoPer1M?: bigint;
 }
-
-export const NANO_PER_USD = 1_000_000_000n;
-const MAX_DECIMALS = 9;
 
 const ajv = new Ajv({ strict: true });
 addFormats(ajv);
@@ -40,20 +38,7 @@ interface ValidatedDescriptor {
   readonly pricing: ValidatedPricing;
 }
 
-/** Decimal string of a validated price to integer nano-USD per 1M tokens. */
-export function priceToNanoUsd(value: number, what: string, file: string): bigint {
-  const raw = value.toString();
-  if (raw.includes("e") || raw.includes("E")) {
-    throw new Error(`Budget pricing ${file}: invalid ${what} "${raw}"`);
-  }
-  const match = /^(\d+)(?:\.(\d{1,9}))?$/.exec(raw);
-  if (match === null) {
-    throw new Error(`Budget pricing ${file}: invalid ${what} "${raw}"`);
-  }
-  const whole = BigInt(match[1] as string);
-  const frac = (match[2] ?? "").padEnd(MAX_DECIMALS, "0");
-  return whole * NANO_PER_USD + BigInt(frac);
-}
+export { NANO_PER_USD };
 
 export async function loadDescriptor(dir: string, id: string): Promise<NanoPricing> {
   const label = "Budget pricing";

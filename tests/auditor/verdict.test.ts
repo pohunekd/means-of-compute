@@ -25,11 +25,6 @@ function loopbackEnv(port: number): void {
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(port)}`;
 }
 
-function clearLoopbackEnv(): void {
-  delete process.env.PROVIDER_META_API_BASE_URL;
-  delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
-}
-
 interface LibrarySetup {
   readonly repoDir: string;
   readonly verdictDir: string;
@@ -79,7 +74,6 @@ async function runCase(
   loopbackEnv(server.port);
   const cleanup = (): void => {
     void server.stop();
-    clearLoopbackEnv();
     restoreEnv();
     setup.cleanupFiles();
   };
@@ -178,7 +172,6 @@ async function runErrorCase(prefix: string, recording: string | null): Promise<E
     if (server !== null) {
       void server.stop();
     }
-    clearLoopbackEnv();
     restoreEnv();
     setup.cleanupFiles();
   };
@@ -331,7 +324,6 @@ test("200 with a reset body exits 4 with one billed entry (mutation: every TypeE
   process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(stub.port)}`;
   const cleanup = (): void => {
-    clearLoopbackEnv();
     restoreEnv();
     setup.cleanupFiles();
   };
@@ -383,7 +375,6 @@ test("a timed-out call exits 4 with one billed entry (mutation: 504, true become
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   const cleanup = (): void => {
     void server.stop();
-    clearLoopbackEnv();
     delete process.env.PROVIDER_META_API_TIMEOUT_MS;
     restoreEnv();
     setup.cleanupFiles();
@@ -476,7 +467,6 @@ test("second write at one sha conflicts (mutation: overwrite the stored verdict)
   loopbackEnv(server.port);
   const cleanup = (): void => {
     void server.stop();
-    clearLoopbackEnv();
     restoreEnv();
     setup.cleanupFiles();
   };

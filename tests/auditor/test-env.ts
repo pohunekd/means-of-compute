@@ -6,7 +6,13 @@
 import { createCliBudgetGate, type BudgetGate } from "../../src/budget/gate.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
 
-const KEYS = ["NVIDIA_API_KEY", "META_API_KEY", "LOCAL_MODEL_BASE_URL"] as const;
+const KEYS = [
+  "NVIDIA_API_KEY",
+  "META_API_KEY",
+  "LOCAL_MODEL_BASE_URL",
+  "PROVIDER_META_API_BASE_URL",
+  "PROVIDER_NVIDIA_BUILD_BASE_URL",
+] as const;
 
 export function applyTestEnv(): () => void {
   const before = new Map<string, string | undefined>();

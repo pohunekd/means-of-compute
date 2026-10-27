@@ -171,8 +171,6 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
     expect(await git(repo.dir, ["status", "--porcelain"])).toBe(statusBefore);
   } finally {
     void server.stop();
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
     restoreEnv();
     removeTempRepo(repo.dir);
     rmSync(workdir, { recursive: true, force: true });

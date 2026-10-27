@@ -41,6 +41,19 @@ async function setupGuardCase(prefix: string): Promise<{
   };
 }
 
+test("applyTestEnv restores a pre-set provider base URL (mutation: drop the name from KEYS)", () => {
+  process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:1/sentinel";
+  const restoreEnv = applyTestEnv();
+  try {
+    // A test overwrites the URL with its loopback stub, as the suite does.
+    process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:9/stub";
+  } finally {
+    restoreEnv();
+  }
+  expect(process.env.PROVIDER_META_API_BASE_URL).toBe("http://127.0.0.1:1/sentinel");
+  Reflect.deleteProperty(process.env, "PROVIDER_META_API_BASE_URL");
+});
+
 test("empty authorModels refuses 3 with zero model calls (mutation: authors.length < 0)", async () => {
   const setup = await setupGuardCase("auditor-noauthors-");
   const restoreEnv = applyTestEnv();
@@ -93,8 +106,6 @@ test("refused budget admits nothing and makes zero model calls (mutation: false 
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
   const cleanup = (): void => {
     void server.stop();
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
     restoreEnv();
     setup.cleanupFiles();
   };

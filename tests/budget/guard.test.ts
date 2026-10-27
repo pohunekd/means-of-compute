@@ -8,7 +8,7 @@ import { chmod, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageRecord } from "../../contracts/v1/types.js";
-import { readUsageLedger } from "../../src/budget/ledger.js";
+import { readLedger } from "../../src/ledger/read.js";
 import { costOfRecord, summarizeSpend } from "../../src/budget/cost.js";
 import type { BudgetDecision } from "../../src/budget/decision.js";
 import { decideAdmission } from "../../src/budget/decision.js";
@@ -324,8 +324,8 @@ test("NVIDIA daily request limit refuses only NVIDIA-led routes", () => {
 test("ledger: missing file means zero spend", async () => {
   const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"));
   try {
-    const records = await readUsageLedger(join(dir, "no-such-ledger.jsonl"));
-    expect(records).toEqual([]);
+    const contents = await readLedger("Budget ledger", join(dir, "no-such-ledger.jsonl"));
+    expect(contents).toEqual({ records: [], pending: [] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -334,7 +334,7 @@ test("ledger: missing file means zero spend", async () => {
 async function expectLedgerError(path: string, fragment: string): Promise<void> {
   let message = "";
   try {
-    await readUsageLedger(path);
+    await readLedger("Budget ledger", path);
   } catch (error: unknown) {
     message = error instanceof Error ? error.message : String(error);
   }
@@ -398,7 +398,7 @@ test("ledger: invalid line names the line number", async () => {
     );
     let message = "";
     try {
-      await readUsageLedger(path);
+      await readLedger("Budget ledger", path);
     } catch (error: unknown) {
       message = error instanceof Error ? error.message : String(error);
     }
@@ -813,6 +813,10 @@ async function makeCliSandbox(): Promise<CliSandbox> {
       nvidiaDailyRequestLimit: 1000,
       nvidiaProviderId: "nvidia-build",
     }),
+  );
+  await Bun.write(
+    join(configDir, "ledger.json"),
+    JSON.stringify({ ledgerPath: join(dir, "ledger.jsonl") }),
   );
   for (const name of [
     "meta-api.json",

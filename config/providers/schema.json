@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Provider descriptor",
+  "type": "object",
+  "required": ["id", "name", "baseUrl", "model"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "name": { "type": "string", "minLength": 1 },
+    "baseUrl": { "type": "string", "format": "uri" },
+    "baseUrlEnv": { "type": "string" },
+    "model": { "type": "string", "minLength": 1 },
+    "apiKeyEnv": { "type": "string" },
+    "timeoutMs": { "type": "integer", "minimum": 1 },
+    "pricing": {
+      "type": "object",
+      "required": ["inputPer1M", "outputPer1M"],
+      "additionalProperties": false,
+      "properties": {
+        "inputPer1M": { "type": "number", "minimum": 0 },
+        "cachedInputPer1M": { "type": "number", "minimum": 0 },
+        "outputPer1M": { "type": "number", "minimum": 0 }
+      }
+    },
+    "rateLimit": {
+      "type": "object",
+      "required": ["rpm"],
+      "additionalProperties": false,
+      "properties": { "rpm": { "type": "integer", "minimum": 1 } }
+    }
+  }
+}

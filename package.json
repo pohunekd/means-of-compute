@@ -5,6 +5,7 @@
   "packageManager": "bun@1.4.2",
   "scripts": {
     "contracts:check": "bun run scripts/contracts-check.ts",
+    "providers:check": "bun run scripts/providers-check.ts",
     "gates": "bun run scripts/gates.ts",
     "fmt": "prettier --write .",
     "lint": "eslint .",

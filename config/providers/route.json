@@ -1,0 +1,3 @@
+{
+  "providers": ["nvidia-build", "meta-api"]
+}

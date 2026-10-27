@@ -3,7 +3,7 @@
 // matches the real daemon's session_not_found answers.
 import { expect, test } from "bun:test";
 import { createFakeDaemon } from "../../../src/dispatcher/adapter/fake-daemon.js";
-import { MOC_METADATA } from "../../../src/dispatcher/adapter/map.js";
+import { isSessionNotFound, MOC_METADATA } from "../../../src/dispatcher/adapter/map.js";
 
 const START_PARAMS = {
   agent: "moc-worker",
@@ -134,7 +134,7 @@ test("wait_turn, inspect and diff answer session_not_found for unknown ids", asy
       } catch (error) {
         caught = error;
       }
-      expect(caught).toBeDefined();
+      expect(isSessionNotFound(caught)).toBe(true);
     }
   } finally {
     await fake.connector.close();

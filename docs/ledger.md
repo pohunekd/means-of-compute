@@ -66,7 +66,7 @@ A pending entry carries one session or audit report before finalize:
 
 ## Reader rules
 
-Reading rejects the file with exit 2, naming the label, path and line: a
+Reading rejects the file with exit 2, naming the label and path, and the line where one applies: a
 line that is not valid JSON, an empty line, a missing trailing newline, a
 line that fails either schema, a duplicate record `workItemId`, a duplicate
 pending `entryId`, or a record line whose `finishedAt` does not parse

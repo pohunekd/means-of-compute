@@ -37,13 +37,22 @@ the agent limit, and returns a `PlacementDecision` validated against its
 contract before use.
 
 Exclusions apply in order, each with its own reason: not idle (`excluded:
-not idle (<idleReason>)`), outside the policy window, or at the agent limit
-(`excluded: at agent limit (<n>/<max>)`). Eligible hosts score
+not idle (<idleReason>)`), not on AC power, battery at or below the floor
+(`excluded: battery at <n> percent, at or below the <floor> percent floor`),
+outside the policy window, or at the agent limit
+(`excluded: at agent limit (<n>/<max>)`). Battery, AC, and window exclusions
+repeat the probe rule on purpose, so placement never trusts `idle` alone.
+Eligible hosts score
 `round4(w.cpu * cpuFree + w.memory * memFree + w.gpu * gpuFree)` with weights
-from `config/placement.json` (validated at load: finite, 0..1, summing to 1).
-The winner has the highest score; ties break on lower CPU load, then on alias
-order. When every host is excluded the decision carries
-`chosenHostAlias: null`. The `place` script (`src/placement/cli.ts`) reads
+from `config/placement.json` (validated at load: finite, 0..1, summing to 1;
+`batteryFloorPercent` an integer 0..100; no other keys).
+The winner has the highest score; ties break on lower `load1m / cores`, then on
+alias order. When every host is excluded the decision carries
+`chosenHostAlias: null`. The candidate reason names the winning facts:
+`idle, on AC power, no battery` or `idle, on AC power, battery <n>%`, then
+`CPU <p>% free, memory <q>% free`, then `, GPU` when one is present.
+A host report with `memory.freeMb` above `memory.totalMb` is invalid input.
+The `place` script (`src/placement/cli.ts`) reads
 `--item`, `--hosts`, and `--running` through `src/fs/input.ts`, validates
 them against contracts-v1, and exits 0 on a chosen host, 3 on no eligible
 host, 2 on any input or config error.

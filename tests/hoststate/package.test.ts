@@ -73,7 +73,7 @@ describe("plugin package", () => {
 
   test("no file under src/probe/ derives paths from import.meta.url", () => {
     const probeDir = join(repoRoot, "src", "probe");
-    const files = readdirSync(probeDir)
+    const files = (readdirSync(probeDir, { recursive: true }) as string[])
       .filter((f) => f.endsWith(".ts"))
       .sort();
     expect(files.length).toBeGreaterThan(0);
@@ -99,11 +99,23 @@ describe("plugin package", () => {
         const missing = await run([bin, "--facts", factsPath], { env: { HOME: home } });
         expect(missing.exitCode).toBe(1);
         expect(missing.stdout).toBe("");
-        const lines = missing.stderr.split("\n").filter((l) => l !== "");
-        expect(lines.length).toBe(1);
-        expect(lines[0]?.startsWith("host file ")).toBe(true);
+        const hostPath = join(home, ".config", "means-of-compute", "host.json");
+        expect(missing.stderr).toBe(`host file ${hostPath}: ENOENT\n`);
         const hostDir = join(home, ".config", "means-of-compute");
         mkdirSync(hostDir, { recursive: true });
+        writeFileSync(join(hostDir, "host.json"), "{not json");
+        const unparsable = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        expect(unparsable.exitCode).toBe(1);
+        expect(unparsable.stdout).toBe("");
+        expect(unparsable.stderr).toBe(`host file ${hostPath}: invalid hostAlias\n`);
+        writeFileSync(
+          join(hostDir, "host.json"),
+          JSON.stringify({ hostAlias: "laptop-a", extra: true }),
+        );
+        const extra = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        expect(extra.exitCode).toBe(1);
+        expect(extra.stdout).toBe("");
+        expect(extra.stderr).toBe(`host file ${hostPath}: invalid hostAlias\n`);
         writeFileSync(join(hostDir, "host.json"), JSON.stringify({ hostAlias: "laptop-a" }));
         const present = await run([bin, "--facts", factsPath], { env: { HOME: home } });
         expect(present.exitCode).toBe(0);
@@ -141,4 +153,33 @@ describe("plugin package", () => {
     },
     buildTimeoutMs,
   );
+
+  test("plugin:digest exits 2 on an invalid config", async () => {
+    const dir = tempDir("hoststate-invalid-");
+    const configPath = join(repoRoot, "config", "host-state.json");
+    const backup = readFileSync(configPath, "utf-8");
+    const doc = JSON.parse(backup) as { package: Record<string, unknown> };
+    doc.package["version"] = "not-a-version";
+    try {
+      writeFileSync(configPath, JSON.stringify(doc));
+      const r = await run(["bun", "run", "plugin:digest"]);
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain("config host-state.json: invalid package.version");
+    } finally {
+      writeFileSync(configPath, backup);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("plugin:build exits 2 when --out is a file", async () => {
+    const dir = tempDir("hoststate-outfile-");
+    try {
+      const filePath = join(dir, "out");
+      writeFileSync(filePath, "taken");
+      const r = await run(["bun", "run", "plugin:build", "--target", "native", "--out", filePath]);
+      expect(r.exitCode).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

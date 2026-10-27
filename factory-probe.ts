@@ -366,9 +366,12 @@ async function queryLocalModels(
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/models`, {
       signal: controller.signal,
     });
-    clearTimeout(t);
-    if (!res.ok) return { reachable: false, models: [] };
+    if (!res.ok) {
+      clearTimeout(t);
+      return { reachable: false, models: [] };
+    }
     const data: unknown = await res.json();
+    clearTimeout(t);
     const items =
       typeof data === "object" && data !== null && Array.isArray((data as { data?: unknown }).data)
         ? (data as { data: unknown[] }).data

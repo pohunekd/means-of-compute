@@ -1,2 +1,5 @@
 #!/usr/bin/env bash
+# Resolve paths relative to this script so the probe works from any directory.
+ROOT="$(dirname "$(readlink -f "$0")")"
+cd "$ROOT"
 exec bun run factory-probe.ts "$@"

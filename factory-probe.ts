@@ -219,7 +219,8 @@ async function linuxGpu(sysfsRoot: string): Promise<{
     if (best) return best;
     return { present: false, name: null, freeMb: null };
   } catch (e) {
-    throw new Error(`gpu unknown: ${String(e)}`, { cause: e });
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`gpu unknown: ${msg}`, { cause: e });
   }
 }
 
@@ -270,7 +271,8 @@ async function macosGpu(): Promise<{
     if (cards.length === 0) return { present: false, name: null, freeMb: null };
     return { present: true, name: cards[0]?.sppci_model ?? null, freeMb: null };
   } catch (e) {
-    throw new Error(`gpu unknown: ${String(e)}`, { cause: e });
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`gpu unknown: ${msg}`, { cause: e });
   }
 }
 
@@ -443,7 +445,8 @@ async function macosHidIdle(): Promise<number> {
   try {
     return await macosSecondsSinceInput();
   } catch (e) {
-    throw new Error(`activity unknown after logout: ${String(e)}`, { cause: e });
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`activity unknown after logout: ${msg}`, { cause: e });
   }
 }
 
@@ -645,10 +648,13 @@ async function main(): Promise<void> {
             try {
               loggedOutSecs = linuxUptimeSecs();
             } catch (uptimeError) {
-              throw new Error(
-                `logged out but input time unreadable: ${String(managerError)}; ${String(uptimeError)}`,
-                { cause: uptimeError },
-              );
+              const managerMsg =
+                managerError instanceof Error ? managerError.message : String(managerError);
+              const uptimeMsg =
+                uptimeError instanceof Error ? uptimeError.message : String(uptimeError);
+              throw new Error(`logged out but input time unreadable: ${managerMsg}; ${uptimeMsg}`, {
+                cause: uptimeError,
+              });
             }
           }
         } else {
@@ -670,7 +676,7 @@ async function main(): Promise<void> {
       }
     } catch (e) {
       userActivityUnknown = true;
-      userActivityCause = String(e);
+      userActivityCause = e instanceof Error ? e.message : String(e);
       secondsSinceInput = 0;
     }
   }
@@ -682,7 +688,7 @@ async function main(): Promise<void> {
       if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
     } catch (e) {
       powerUnknown = true;
-      powerCause = String(e);
+      powerCause = e instanceof Error ? e.message : String(e);
       acPower = false;
     }
   }

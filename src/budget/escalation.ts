@@ -3,7 +3,7 @@
 // second refusal for the same event appends nothing and prints nothing. Each
 // escalation appends one JSON line to the escalation log and prints one line
 // on stderr for the coordinator's daily digest channel.
-import { mkdir } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { utcCalendarDay } from "./cost.js";
 import type { BudgetDecision } from "./decision.js";
@@ -106,7 +106,6 @@ export async function maybeEscalate(
   if (previous !== null && previous.capKind === key.capKind && previous.day === key.day) {
     return false;
   }
-  await writeState(options.statePath, key);
   const entry = {
     capKind: key.capKind,
     day: key.day,
@@ -117,10 +116,8 @@ export async function maybeEscalate(
     at: options.now.toISOString(),
   };
   await mkdir(dirname(options.escalationLogPath), { recursive: true });
-  const existing = (await Bun.file(options.escalationLogPath).exists())
-    ? await Bun.file(options.escalationLogPath).text()
-    : "";
-  await Bun.write(options.escalationLogPath, `${existing}${JSON.stringify(entry)}\n`);
+  await appendFile(options.escalationLogPath, `${JSON.stringify(entry)}\n`);
+  await writeState(options.statePath, key);
   if (options.stderr !== undefined) {
     options.stderr(`budget escalation: ${key.capKind} cap reached (${decision.reason})\n`);
   } else {

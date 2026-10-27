@@ -37,30 +37,21 @@ type Facts = Partial<{
   policyAllowedWindowEnd: string;
 }>;
 
-function readJson<T>(path: string): T | null {
+function readJson<T>(path: string): T {
+  if (!existsSync(path)) throw new Error(`file not found: ${path}`);
   try {
-    if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, "utf-8")) as T;
-    }
+    return JSON.parse(readFileSync(path, "utf-8")) as T;
   } catch {
-    // ignore
+    throw new Error(`parse error in ${path}`);
   }
-  return null;
 }
 
 function loadConfig(): ProbeConfig {
-  const raw = readJson<ProbeConfig>("config/probe.json");
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error("config/probe.json missing");
-  }
-  return raw;
+  return readJson<ProbeConfig>("config/probe.json");
 }
 
 function loadHostAlias(hostnameVal: string): string {
   const hostsRaw = readJson<HostMap>("config/hosts.json");
-  if (!hostsRaw || typeof hostsRaw !== "object") {
-    throw new Error("config/hosts.json missing or invalid");
-  }
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];
   if (typeof alias !== "string") {
     throw new Error(`host ${hostnameVal} not in config/hosts.json`);
@@ -101,33 +92,36 @@ function linuxPower(): { acPower: boolean; batteryPercent: number | null } {
   let batteryPercent: number | null = null;
   let hasMains = false;
   let hasBattery = false;
+  let entries: string[];
   try {
-    const entries = readdirSync(base);
-    for (const entry of entries) {
-      const typePath = `${base}/${entry}/type`;
-      const type = readFileIfExists(typePath);
-      if (!type) continue;
-      if (type === "Mains") {
-        hasMains = true;
-        const online = readFileIfExists(`${base}/${entry}/online`);
-        acPower = online === "1";
-      }
-      if (type === "Battery") {
-        hasBattery = true;
-        const cap = readFileIfExists(`${base}/${entry}/capacity`);
-        if (cap) {
-          const n = Number(cap);
-          if (!Number.isNaN(n)) batteryPercent = n;
-        }
+    entries = readdirSync(base);
+  } catch {
+    throw new Error("power unknown: cannot read power_supply");
+  }
+  for (const entry of entries) {
+    const typePath = `${base}/${entry}/type`;
+    const type = readFileIfExists(typePath);
+    if (!type) continue;
+    if (type === "Mains") {
+      hasMains = true;
+      const online = readFileIfExists(`${base}/${entry}/online`);
+      if (online === "1") acPower = true;
+    }
+    if (type === "Battery") {
+      hasBattery = true;
+      const cap = readFileIfExists(`${base}/${entry}/capacity`);
+      if (cap) {
+        const n = Number(cap);
+        if (!Number.isNaN(n)) batteryPercent = n;
       }
     }
-  } catch {
-    // ignore
   }
   if (!hasMains && !hasBattery) {
     return { acPower: true, batteryPercent: null };
   }
-  if (!hasMains) acPower = true;
+  if (hasBattery && !hasMains) {
+    throw new Error("power unknown: battery present without mains");
+  }
   return { acPower, batteryPercent };
 }
 
@@ -167,14 +161,20 @@ async function linuxSecondsSinceInput(): Promise<number> {
     }
   }
   if (!sessionId) throw new Error("no session for user");
-  const showProc = Bun.spawn(["loginctl", "show-session", sessionId, "-p", "IdleSinceHint"], {
-    stdout: "pipe",
-  });
+  const showProc = Bun.spawn(
+    ["loginctl", "show-session", sessionId, "-p", "IdleHint", "-p", "IdleSinceHint"],
+    {
+      stdout: "pipe",
+    },
+  );
   const showOut = await new Response(showProc.stdout).text();
-  const m = /IdleSinceHint=(\d+)/.exec(showOut);
-  if (!m || !m[1]) throw new Error("IdleSinceHint missing");
-  const idleSinceUs = Number(m[1]);
-  if (!Number.isFinite(idleSinceUs)) throw new Error("invalid IdleSinceHint");
+  const hintMatch = /IdleHint=(yes|no)/.exec(showOut);
+  const sinceMatch = /IdleSinceHint=(\d+)/.exec(showOut);
+  const idleHint = hintMatch?.[1];
+  if (idleHint !== "yes") return 0;
+  if (!sinceMatch || !sinceMatch[1]) throw new Error("IdleSinceHint missing");
+  const idleSinceUs = Number(sinceMatch[1]);
+  if (!Number.isFinite(idleSinceUs) || idleSinceUs === 0) return 0;
   const idleSinceMs = idleSinceUs / 1000;
   const nowMs = Date.now();
   const secs = Math.max(0, Math.floor((nowMs - idleSinceMs) / 1000));
@@ -260,6 +260,9 @@ function deriveIdle(
   powerUnknown = false,
   powerCause = "",
 ): { idle: boolean; reason: string } {
+  if (secondsSinceInput < 0) {
+    return { idle: false, reason: `user activity unknown: simulated failure` };
+  }
   if (userActivityUnknown) {
     return { idle: false, reason: `user activity unknown: ${userActivityCause || "unavailable"}` };
   }
@@ -307,17 +310,11 @@ async function main(): Promise<void> {
   let facts: Facts = {};
   if (factsPath) {
     if (!existsSync(factsPath)) throw new Error(`facts file not found: ${factsPath}`);
-    const raw = readJson<Facts>(factsPath);
-    if (typeof raw !== "object" || raw === null)
-      throw new Error(`facts file invalid: ${factsPath}`);
-    facts = raw;
+    facts = readJson<Facts>(factsPath);
   } else if (scenario) {
     const mapped = `config/scenarios/${scenario}.json`;
     if (!existsSync(mapped)) throw new Error(`scenario not found: ${scenario}`);
-    const raw = readJson<Facts>(mapped);
-    if (typeof raw !== "object" || raw === null)
-      throw new Error(`scenario file invalid: ${scenario}`);
-    facts = raw;
+    facts = readJson<Facts>(mapped);
   }
 
   const cfg = loadConfig();
@@ -404,7 +401,7 @@ async function main(): Promise<void> {
         cpuLoad1m = cpu.load1m;
       }
     } else {
-      secondsSinceInput = 3600;
+      throw new Error("unsupported platform");
     }
   }
 

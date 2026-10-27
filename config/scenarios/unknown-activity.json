@@ -1,5 +1,5 @@
 {
-  "secondsSinceInput": 0,
+  "secondsSinceInput": -1,
   "acPower": true,
   "batteryPercent": null,
   "cpuCores": 4,
@@ -11,7 +11,5 @@
   "gpuFreeMb": null,
   "localModelsReachable": false,
   "localModels": [],
-  "hostAlias": "desktop",
-  "policyAllowedWindowStart": "08:00",
-  "policyAllowedWindowEnd": "22:00"
+  "hostAlias": "desktop"
 }

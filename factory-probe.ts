@@ -431,20 +431,18 @@ async function queryLocalModels(
   timeoutMs: number,
 ): Promise<{ reachable: boolean; models: string[] }> {
   if (!baseUrl) return { reachable: false, models: [] };
+  const controller = new AbortController();
+  const t = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
   try {
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/models`, {
       signal: controller.signal,
     });
     if (!res.ok) {
-      clearTimeout(t);
       return { reachable: false, models: [] };
     }
     const data: unknown = await res.json();
-    clearTimeout(t);
     const items =
       typeof data === "object" && data !== null && Array.isArray((data as { data?: unknown }).data)
         ? (data as { data: unknown[] }).data
@@ -462,6 +460,8 @@ async function queryLocalModels(
     return { reachable: true, models };
   } catch {
     return { reachable: false, models: [] };
+  } finally {
+    clearTimeout(t);
   }
 }
 

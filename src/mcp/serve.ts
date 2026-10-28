@@ -250,6 +250,10 @@ async function serve(caller: string, configPath: string): Promise<number> {
     },
   );
   process.stdin.setEncoding("utf8");
+  // A signal aborts the protocol even when stdin already ended: resolve()
+  // is a no-op then, but the abort still drops every queued line and the
+  // stop reason below still becomes "signal".
+  let sawSignal = false;
   const done = new Promise<string>((resolve) => {
     process.stdin.on("data", (chunk: string) => {
       splitter.push(chunk);
@@ -259,12 +263,13 @@ async function serve(caller: string, configPath: string): Promise<number> {
       splitter.flush();
       resolve("eof");
     });
-    process.on("SIGTERM", () => {
+    const onSignal = () => {
+      sawSignal = true;
+      protocol.abort();
       resolve("signal");
-    });
-    process.on("SIGINT", () => {
-      resolve("signal");
-    });
+    };
+    process.on("SIGTERM", onSignal);
+    process.on("SIGINT", onSignal);
     process.stdout.on("error", () => {
       resolve("stdout-closed");
     });
@@ -272,19 +277,25 @@ async function serve(caller: string, configPath: string): Promise<number> {
   const reason = await done;
   // A signal or a closed stdout drops lines that have not started, so no
   // call-start line is written for them; the message in flight finishes
-  // first (T3.4).
+  // first (T3.4). The reason is read after the drain below: a signal can
+  // arrive after stdin already ended, while a large write is still
+  // blocked, and it must still win over "eof".
   if (reason === "signal" || reason === "stdout-closed") {
     protocol.abort();
   }
   await protocol.drain();
   await transportTail;
+  const stopReason = sawSignal ? "signal" : reason;
+  if (stopReason === "signal" || stopReason === "stdout-closed") {
+    protocol.abort();
+  }
   process.stdin.destroy();
   // transportFailed is only assigned inside the serialized queue, so by
   // this await its value is final; a failure skips server-stop (L1) and
   // only sets the exit code.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!transportFailed) {
-    await stop(reason === "stdout-closed" ? "stdout-closed" : reason);
+    await stop(stopReason === "stdout-closed" ? "stdout-closed" : stopReason);
   }
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (transportFailed) {
@@ -293,7 +304,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
   }
   // On EOF and on signal the server ends stdout and waits for its finish,
   // so the last buffered bytes reach the client before the process exits.
-  if (reason === "eof" || reason === "signal") {
+  if (stopReason === "eof" || stopReason === "signal") {
     await endStdoutAndWait();
   }
   process.exitCode = 0;

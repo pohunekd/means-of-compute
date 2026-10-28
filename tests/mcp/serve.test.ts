@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMcpTestEnv, writeTestFile } from "../../tests/mcp/env.js";
+import { createMcpTestEnv, writeTestFile, type McpTestEnv } from "../../tests/mcp/env.js";
 
 function initLine(id: number): string {
   return JSON.stringify({
@@ -62,6 +62,42 @@ async function spawnServer(input: string, extraArgs: readonly string[] = []): Pr
     new Response(proc.stderr).text(),
   ]);
   return { code, stdout: out, stderr: err };
+}
+
+async function writeLargeRegistry(env: McpTestEnv): Promise<void> {
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
+  const sessions: Record<string, unknown>[] = [];
+  for (let n = 0; n < 6000; n += 1) {
+    const id = `w${String(n)}`;
+    sessions.push({
+      requestId: `${id}:0`,
+      workItemId: id,
+      repo: "example/demo",
+      hostAlias: `host-${String(n).padStart(5, "0")}`,
+      branch: `moc/${id}`,
+      baseRef: "origin/main",
+      resume: false,
+      model: { providerId: "meta-api", model: "muse-spark-1.3-contributor" },
+      briefSha256: "a".repeat(64),
+      sessionId: null,
+      worktree: null,
+      baseCommit: null,
+      startedAt: "2026-10-27T10:00:00.000Z",
+      cursor: null,
+      unreachableCount: 0,
+      lastSeenState: "starting",
+      lastSeenAt: "2026-10-27T10:00:00.000Z",
+      cancelReason: null,
+      terminal: null,
+      revision: 0,
+    });
+  }
+  await writeTestFile(env.registryPath, { sessions });
 }
 
 test("SV1 stdout carries only JSON-RPC responses (SV1, D1)", async () => {
@@ -145,39 +181,7 @@ test("F1 a final call line without a newline is answered (F1, T3.2)", async () =
 
 test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   const env = await createMcpTestEnv("mcp-f2-");
-  await writeTestFile(env.storePath, {
-    schemaVersion: "v1",
-    revision: 0,
-    items: [],
-    submissions: [],
-  });
-  const sessions: Record<string, unknown>[] = [];
-  for (let n = 0; n < 6000; n += 1) {
-    const id = `w${String(n)}`;
-    sessions.push({
-      requestId: `${id}:0`,
-      workItemId: id,
-      repo: "example/demo",
-      hostAlias: `host-${String(n).padStart(5, "0")}`,
-      branch: `moc/${id}`,
-      baseRef: "origin/main",
-      resume: false,
-      model: { providerId: "meta-api", model: "muse-spark-1.3-contributor" },
-      briefSha256: "a".repeat(64),
-      sessionId: null,
-      worktree: null,
-      baseCommit: null,
-      startedAt: "2026-10-27T10:00:00.000Z",
-      cursor: null,
-      unreachableCount: 0,
-      lastSeenState: "starting",
-      lastSeenAt: "2026-10-27T10:00:00.000Z",
-      cancelReason: null,
-      terminal: null,
-      revision: 0,
-    });
-  }
-  await writeTestFile(env.registryPath, { sessions });
+  await writeLargeRegistry(env);
   // The pipe reader sleeps before draining, so the server must keep the
   // whole response buffered until stdout accepts it; exiting early or
   // resolving the write without its callback truncates the response.
@@ -217,6 +221,96 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   expect(call.result.structuredContent.ok).toBe(true);
   expect(call.result.structuredContent.hosts.length).toBe(6000);
   expect(stdout.length).toBeGreaterThan(300000);
+});
+
+test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
+  const env = await createMcpTestEnv("mcp-h2-");
+  await writeLargeRegistry(env);
+  // Stdout through (sleep 2; cat) fills the pipe, so the first large
+  // response stays in flight while the rest queue behind it. The server
+  // pid comes from its own server-start line, so SIGTERM hits the server
+  // alone, not the reader. Stdin closes at once (EOF), then SIGTERM
+  // arrives once the call log shows the first call-start.
+  const queuedCmd =
+    `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 2; cat)`;
+  const proc = Bun.spawn(["sh", "-c", queuedCmd], {
+    cwd: process.cwd(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const sink = proc.stdin as unknown as {
+    write(chunk: string): void;
+    end(): void;
+  };
+  sink.write(`${initLine(1)}\n${callLine(2)}\n${callLine(3)}\n${callLine(4)}\n${callLine(5)}\n`);
+  sink.end();
+  let serverPid = 0;
+  let finishedFirstCall = false;
+  for (let n = 0; n < 400 && (serverPid === 0 || !finishedFirstCall); n += 1) {
+    const logText = await Bun.file(env.callLogPath).text().catch(() => "");
+    const pidMatch = /"event":"server-start"[^}]*"pid":(\d+)/.exec(logText);
+    if (pidMatch?.[1] !== undefined) {
+      const parsed = Number.parseInt(pidMatch[1], 10);
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
+        serverPid = parsed;
+      }
+    }
+    if (logText.includes('"event":"call-end"')) {
+      finishedFirstCall = true;
+    }
+    if (serverPid === 0 || !finishedFirstCall) {
+      await Bun.sleep(25);
+    }
+  }
+  expect(serverPid).toBeGreaterThan(0);
+  expect(finishedFirstCall).toBe(true);
+  process.kill(serverPid, "SIGTERM");
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(stderr).not.toContain("{");
+  expect(code).toBe(0);
+  const logText = await Bun.file(env.callLogPath).text();
+  const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
+  expect(starts.length).toBeLessThan(4);
+  expect(logText).toContain('"event":"server-stop"');
+  expect(logText).toContain('"reason":"signal"');
+});
+
+test("a too-large line over stdio is answered in order and logged (H4, P1)", async () => {
+  const env = await createMcpTestEnv("mcp-h4-");
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
+  await writeTestFile(env.registryPath, { sessions: [] });
+  // Init, one call, then an oversized line in a single write: the
+  // responses must arrive in order and the call log must hold exactly one
+  // protocol-error with jsonrpcCode -32600.
+  const oversized = `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"padding":"${"x".repeat(1048576)}"}}`;
+  const result = await spawnServer(`${initLine(1)}\n${callLine(2)}\n${oversized}\n`, [
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(result.code).toBe(0);
+  const lines = result.stdout.split("\n").filter((line) => line.length > 0);
+  expect(lines.length).toBe(3);
+  const ids = lines.map((line) => (JSON.parse(line) as { id: number | null }).id);
+  expect(ids).toEqual([1, 2, null]);
+  const tooLarge = JSON.parse(lines[2] as string) as {
+    error: { code: number; message: string };
+  };
+  expect(tooLarge.error.code).toBe(-32600);
+  expect(tooLarge.error.message).toBe("message too large");
+  const logText = await Bun.file(env.callLogPath).text();
+  const errors = logText.split("\n").filter((line) => line.includes('"event":"protocol-error"'));
+  expect(errors.length).toBe(1);
+  expect(errors[0]).toContain('"jsonrpcCode":-32600');
 });
 
 test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {

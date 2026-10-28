@@ -83,8 +83,10 @@ const record = {
   envKeys: Object.keys(process.env).sort(),
   tokenMatches: process.env["GH_TOKEN"] === config.token,
   bodyFile,
+  pid: process.pid,
 };
 await appendFile(join(configDir, "fake-gh-calls.jsonl"), `${JSON.stringify(record)}\n`, "utf8");
+await writeFile(join(configDir, "fake-gh-pid"), String(process.pid), "utf8");
 
 let chosen = -1;
 config.replies.forEach((reply, index) => {

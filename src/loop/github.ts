@@ -92,6 +92,12 @@ function redact(token: string, value: string): string {
   return token.length === 0 ? value : value.split(token).join("[redacted]");
 }
 
+// E2 keeps the first 300 bytes of stderr after redacting the token.
+function stderrPrefix(token: string, stderr: string): string {
+  const clean = redact(token, stderr);
+  return Buffer.from(clean, "utf8").subarray(0, 300).toString("utf8");
+}
+
 async function runGh(
   config: LoopGithubConfig,
   env: GhEnv,
@@ -133,7 +139,7 @@ async function runGh(
       throw new GitHubError("unavailable", step, `${step}: timed out`);
     }
     if (rc !== 0) {
-      const detail = redact(env.token, stderr.slice(0, 300));
+      const detail = stderrPrefix(env.token, stderr);
       throw new GitHubError("rejected", step, `${step}: gh exited ${String(rc)}`, detail);
     }
     return { stdout, stderr };
@@ -255,6 +261,23 @@ function toCommentFirstLine(value: unknown, step: string): CommentFirstLine {
   };
 }
 
+// Real `gh pr list --json author` rows carry the gh author shape; the
+// port maps only `login` and rejects any other key.
+const PULL_AUTHOR_KEYS = ["id", "is_bot", "login", "name"];
+
+function toPullAuthorLogin(value: unknown, step: string): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new GitHubError("invalid-output", step, `${step}: pull author is not an object`);
+  }
+  const author = value as Record<string, unknown>;
+  for (const key of Object.keys(author)) {
+    if (!PULL_AUTHOR_KEYS.includes(key)) {
+      throw new GitHubError("invalid-output", step, `${step}: pull author fields differ`);
+    }
+  }
+  return asString(author["login"], step, "pull author login");
+}
+
 export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
   function requireFactoryLogin(step: string): string {
     const login = config.factoryLogin;
@@ -267,11 +290,14 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
   async function viewerLogin(): Promise<string> {
     const step = "viewerLogin";
     const { stdout } = await runGh(config, env, step, ["api", "user", "--jq", ".login"]);
-    const lines = nonEmptyLines(stdout);
-    if (lines.length === 0 || (lines[0] as string).trim().length === 0) {
-      throw new GitHubError("invalid-output", step, `${step}: no login line`);
+    const trimmed = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    if (trimmed.length !== 1) {
+      throw new GitHubError("invalid-output", step, `${step}: expected one login line`);
     }
-    return lines[0] as string;
+    return trimmed[0] as string;
   }
 
   async function checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]> {
@@ -319,7 +345,8 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
       if (lines.length !== 1) {
         throw new GitHubError("invalid-output", step, `${step}: expected one id line`);
       }
-      asInteger(JSON.parse(lines[0] as string) as unknown, step, "comment id");
+      const posted: unknown = parseJsonValue(lines[0] as string, step);
+      asInteger(posted, step, "comment id");
     });
     const first = body.split("\n")[0] as string;
     const rows = await commentFirstLines(repo, number);
@@ -340,7 +367,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     if (state !== "OPEN" && state !== "CLOSED" && state !== "MERGED") {
       throw new GitHubError("invalid-output", step, `${step}: unknown pull state`);
     }
-    const author = requireFields(record["author"], ["login"], step, "pull author");
+    const authorLogin = toPullAuthorLogin(record["author"], step);
     return {
       number: asInteger(record["number"], step, "pull number"),
       state,
@@ -348,7 +375,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
       baseRefName: asString(record["baseRefName"], step, "pull base"),
       isDraft: asBoolean(record["isDraft"], step, "pull draft"),
       isCrossRepository: asBoolean(record["isCrossRepository"], step, "pull cross repo"),
-      authorLogin: asString(author["login"], step, "pull author login"),
+      authorLogin,
     };
   }
 

@@ -437,10 +437,6 @@ test("P9 fleet_status counts running items and open sessions (P9, R1)", async ()
     };
   };
   const payload = parsed.result.structuredContent;
-  if (payload.hosts === undefined) {
-    console.log(`DEBUG-P9 payload: ${JSON.stringify(payload).slice(0, 500)}`);
-    console.log(`DEBUG-P9 log: ${JSON.stringify(entries).slice(0, 1500)}`);
-  }
   expect(payload.hosts).toEqual([{ hostAlias: "desktop", runningItems: 1, openSessions: 1 }]);
   expect(payload.work.counts["running"]).toBe(1);
   expect(payload.work.counts["queued"]).toBe(1);

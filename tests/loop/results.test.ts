@@ -40,7 +40,11 @@ function item(): WorkItem {
   };
 }
 
-function line(round: number, outcome: ResultLine["outcome"], routing: ResultLine["routingResult"]): ResultLine {
+function line(
+  round: number,
+  outcome: ResultLine["outcome"],
+  routing: ResultLine["routingResult"],
+): ResultLine {
   return {
     schemaVersion: "v1",
     key: `demo-c:${String(round)}`,

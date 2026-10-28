@@ -161,10 +161,23 @@ export function chooseModel(
     if (fallback === undefined) {
       throw new LoopPolicyError("fallback-missing");
     }
-    return { model: fallback, providerId: providerOf(routing, fallback), fallbackUsed: true, steered: null };
+    return {
+      model: fallback,
+      providerId: providerOf(routing, fallback),
+      fallbackUsed: true,
+      steered: null,
+    };
   }
-  if (fallback !== undefined && (loopItem.failures[preferred] ?? 0) >= routing.fallbackAfterFailures) {
-    return { model: fallback, providerId: providerOf(routing, fallback), fallbackUsed: true, steered: null };
+  if (
+    fallback !== undefined &&
+    (loopItem.failures[preferred] ?? 0) >= routing.fallbackAfterFailures
+  ) {
+    return {
+      model: fallback,
+      providerId: providerOf(routing, fallback),
+      fallbackUsed: true,
+      steered: null,
+    };
   }
   if (fallback !== undefined && loopItem.rounds.every((record) => record.model !== preferred)) {
     const lines = results
@@ -181,7 +194,12 @@ export function chooseModel(
       };
     }
   }
-  return { model: preferred, providerId: providerOf(routing, preferred), fallbackUsed: false, steered: null };
+  return {
+    model: preferred,
+    providerId: providerOf(routing, preferred),
+    fallbackUsed: false,
+    steered: null,
+  };
 }
 
 // Rounds on the preferred model plus the started one when it matches.

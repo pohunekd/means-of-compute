@@ -82,7 +82,10 @@ test("a full brief matches the fixture byte for byte (L13, B5)", () => {
   if (result.kind !== "ok") {
     throw new Error("expected an ok brief");
   }
-  const expected = readFileSync(join(import.meta.dir, "..", "fixtures", "loop", "brief-expected.txt"), "utf8");
+  const expected = readFileSync(
+    join(import.meta.dir, "..", "fixtures", "loop", "brief-expected.txt"),
+    "utf8",
+  );
   expect(result.brief).toBe(expected);
   expect(result.omittedFindings).toBe(0);
 });
@@ -95,7 +98,14 @@ test("a tight limit drops findings from the end with an omission line (L13b, B5)
     scenario: "read the code",
     fixDirection: "update the comment",
   }));
-  const input: BriefInput = { ...fullInput(), previous: { outcome: "red-ci", failingChecks: [], findings: { headSha: "0123456789abcdef0123456789abcdef01234567", list: findings } } };
+  const input: BriefInput = {
+    ...fullInput(),
+    previous: {
+      outcome: "red-ci",
+      failingChecks: [],
+      findings: { headSha: "0123456789abcdef0123456789abcdef01234567", list: findings },
+    },
+  };
   const smallest = buildBrief(input, 0);
   expect(smallest.kind).toBe("too-large");
   if (smallest.kind !== "too-large") {
@@ -128,5 +138,11 @@ test("a goal larger than the limit is too large (L13c, B5)", () => {
   const input: BriefInput = { ...fullInput(), previous: null };
   const over = { ...input, item: { ...input.item, goal: "g".repeat(70000) } };
   const result = buildBrief(over, 65536);
-  expect(result).toEqual({ kind: "too-large", bytes: Buffer.byteLength((buildBrief(over, 1 << 30) as { kind: "ok"; brief: string }).brief, "utf8") });
+  expect(result).toEqual({
+    kind: "too-large",
+    bytes: Buffer.byteLength(
+      (buildBrief(over, 1 << 30) as { kind: "ok"; brief: string }).brief,
+      "utf8",
+    ),
+  });
 });

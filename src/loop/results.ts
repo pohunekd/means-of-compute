@@ -49,9 +49,7 @@ function checkLineShape(value: unknown): asserts value is ResultLine {
     const first = errors[0] as { instancePath?: string; keyword?: string } | undefined;
     const where =
       first?.instancePath === "" || first?.instancePath === undefined ? "/" : first.instancePath;
-    throw new LoopResultsDataError(
-      `invalid shape at ${where} (${String(first?.keyword)})`,
-    );
+    throw new LoopResultsDataError(`invalid shape at ${where} (${String(first?.keyword)})`);
   }
 }
 
@@ -153,7 +151,10 @@ function errnoOf(error: unknown): string {
   return String((error as NodeJS.ErrnoException).code);
 }
 
-async function appendOnce(path: string, line: ResultLine): Promise<{ readonly truncatedBytes: number }> {
+async function appendOnce(
+  path: string,
+  line: ResultLine,
+): Promise<{ readonly truncatedBytes: number }> {
   let truncatedBytes = 0;
   try {
     const raw = await readFile(path);
@@ -185,10 +186,9 @@ async function appendOnce(path: string, line: ResultLine): Promise<{ readonly tr
       try {
         await handle.close();
       } catch (error: unknown) {
-        throw new LoopResultsWriteError(
-          `loop results ${path}: cannot close (${errnoOf(error)})`,
-          { cause: error },
-        );
+        throw new LoopResultsWriteError(`loop results ${path}: cannot close (${errnoOf(error)})`, {
+          cause: error,
+        });
       }
     }
   }

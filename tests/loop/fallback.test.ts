@@ -69,7 +69,11 @@ function record(model: string, outcome: RoundOutcome): RoundRecord {
   };
 }
 
-function line(model: string, routingResult: "success" | "failure" | "excluded", round: number): ResultLine {
+function line(
+  model: string,
+  routingResult: "success" | "failure" | "excluded",
+  round: number,
+): ResultLine {
   return {
     schemaVersion: "v1",
     key: `demo-b:${String(round)}`,
@@ -150,7 +154,8 @@ test("a bad success rate steers away from the preferred model (L11, O5)", () => 
     fallbackUsed: true,
     steered: { successes: 1, samples: 5 },
   });
-  const short = results.slice(0, 4);  expect(chooseModel(item, { failures: {}, rounds: [] }, short, ROUTING)).toEqual({
+  const short = results.slice(0, 4);
+  expect(chooseModel(item, { failures: {}, rounds: [] }, short, ROUTING)).toEqual({
     model: PREFERRED,
     providerId: "nvidia-build",
     fallbackUsed: false,

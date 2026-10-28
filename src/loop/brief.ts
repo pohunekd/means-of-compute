@@ -25,11 +25,7 @@ export type BriefResult =
   | { readonly kind: "ok"; readonly brief: string; readonly omittedFindings: number }
   | { readonly kind: "too-large"; readonly bytes: number };
 
-export function briefBranchOf(
-  itemBranch: string | null,
-  branchPrefix: string,
-  id: string,
-): string {
+export function briefBranchOf(itemBranch: string | null, branchPrefix: string, id: string): string {
   return itemBranch ?? `${branchPrefix}${id}`;
 }
 

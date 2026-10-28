@@ -131,15 +131,14 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
       const resp = await post(meter, token, chatBody());
       expect(resp.status).toBe(500);
       // The whole body stalls behind the gate: nothing reaches the
-      // caller yet. The idle timer armed at the headers; the 4001ms
-      // timer must be pending before advancing.
+      // caller. The drain timer decides the abort: the settle queues
+      // the grant-close, then the drain aborts the stalled non-2xx
+      // call on the 777 ms budget. All other timeouts stay above 777,
+      // so only the drain fires.
       await loopback.waitHeld(1);
-      await timers.waitForTimer(4001);
-      // M3: settle queues the grant-close, then the drain aborts the
-      // stalled non-2xx call. The drain budget is 777.
       const settling = meter.settle(sessionId, "finished");
       await timers.waitForTimer(777);
-      timers.advance(4001);
+      timers.advance(777);
       const usage = await settling;
       // The grant carried no billed call, so the join has one zero row.
       expect(usage?.tokens).toEqual([
@@ -154,13 +153,21 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
       ]);
       const lines8500 = await readLogLines(logPath);
       const end8500 = readEnd(lines8500);
+      // F2: a non-2xx end is upstream-status, unbilled, with null
+      // counts, whatever happened to the body. The manual clock ran
+      // only to the drain, so ms is 777.
       expect(end8500.outcome).toBe("upstream-status");
       expect(end8500.billed).toBe(false);
       expect(end8500.status).toBe(500);
+      expect(end8500.inputTokens).toBeNull();
+      expect(end8500.outputTokens).toBeNull();
+      expect(end8500.ms).toBe(777);
+      const aborted = await waitForEvent((e) => e.event === "drain-abort");
+      expect(aborted).toMatchObject({ count: 1 });
       await waitForEvent((e) => e.event === "call-finished");
       await meter.close();
     },
-    { config: { idleTimeoutMs: 4001, firstByteTimeoutMs: 60001, drainTimeoutMs: 777 } },
+    { config: { idleTimeoutMs: 60001, firstByteTimeoutMs: 60001, totalTimeoutMs: 60001, drainTimeoutMs: 777 } },
   );
 });
 

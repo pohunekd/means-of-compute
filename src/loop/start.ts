@@ -348,10 +348,7 @@ async function classifyWatch(ctx: StartContext, item: WorkItem, li: LoopItem): P
 
 // On drift, cancel every live session of the item before the park.
 // A provisional entry holds no session, so it is never cancelled and
-// R6 reports it as an orphan. MeterUnavailableError is fatal;
-// PortUnreachableError keeps L at starting with the intent so the next
-// driveStart repeats the pre-check and the cancel; any other cancel
-// error skips that entry while the park still runs.
+// R6 reports it as an orphan.
 async function cancelLiveSessions(ctx: StartContext, item: WorkItem): Promise<void> {
   const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
   for (const entry of entries) {
@@ -372,7 +369,14 @@ async function cancelLiveSessions(ctx: StartContext, item: WorkItem): Promise<vo
 }
 
 async function parkDrift(ctx: StartContext, item: WorkItem): Promise<StartStep> {
-  await cancelLiveSessions(ctx, item);
+  try {
+    await cancelLiveSessions(ctx, item);
+  } catch (error: unknown) {
+    if (!(error instanceof PortUnreachableError)) {
+      throw error;
+    }
+    return "idle";
+  }
   await parkOperator(ctx, item, "request-drift");
   return "parked";
 }
@@ -416,18 +420,6 @@ export async function driveStart(ctx: StartContext, item: WorkItem): Promise<Sta
       throw error;
     }
     if (error instanceof PortUnreachableError) {
-      try {
-        await cancelLiveSessions(ctx, item);
-      } catch (cancelError: unknown) {
-        if (cancelError instanceof MeterUnavailableError) {
-          throw cancelError;
-        }
-        if (!(cancelError instanceof PortUnreachableError)) {
-          throw cancelError;
-        }
-        await ctx.sleep(ctx.unreachableRetryMs);
-        return driveStart(ctx, item);
-      }
       await ctx.sleep(ctx.unreachableRetryMs);
       return driveStart(ctx, item);
     }

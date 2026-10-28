@@ -143,7 +143,7 @@ test("F1 a final call line without a newline is answered (F1, T3.2)", async () =
   expect(logText).toContain('"event":"call-end"');
 });
 
-test("F2 a large response is written whole before exit (F2, T3.2)", async () => {
+test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   const env = await createMcpTestEnv("mcp-f2-");
   await writeTestFile(env.storePath, {
     schemaVersion: "v1",
@@ -178,14 +178,31 @@ test("F2 a large response is written whole before exit (F2, T3.2)", async () => 
     });
   }
   await writeTestFile(env.registryPath, { sessions });
-  // Stdin closes right after the call; stdout is read only after the
-  // child has exited, so any truncation fails the parse below.
-  const result = await spawnServer(`${initLine(1)}\n${callLine(2)}\n`, [
-    "--config",
-    env.mcpConfigPath,
+  // The pipe reader sleeps before draining, so the server must keep the
+  // whole response buffered until stdout accepts it; exiting early or
+  // resolving the write without its callback truncates the response.
+  const slowReaderCmd =
+    `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 1; cat)`;
+  const proc = Bun.spawn(["sh", "-c", slowReaderCmd], {
+    cwd: process.cwd(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const sink = proc.stdin as unknown as {
+    write(chunk: string): void;
+    end(): void;
+  };
+  sink.write(`${initLine(1)}\n${callLine(2)}\n`);
+  sink.end();
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
   ]);
-  expect(result.code).toBe(0);
-  const lines = result.stdout.split("\n").filter((line) => line.length > 0);
+  expect(stderr).not.toContain("{");
+  expect(code).toBe(0);
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
   expect(lines.length).toBe(2);
   const call = JSON.parse(lines[1] as string) as {
     id: number;
@@ -199,7 +216,7 @@ test("F2 a large response is written whole before exit (F2, T3.2)", async () => 
   expect(call.id).toBe(2);
   expect(call.result.structuredContent.ok).toBe(true);
   expect(call.result.structuredContent.hosts.length).toBe(6000);
-  expect(result.stdout.length).toBeGreaterThan(300000);
+  expect(stdout.length).toBeGreaterThan(300000);
 });
 
 test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {

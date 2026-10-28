@@ -414,10 +414,9 @@ export function buildReport(input: ReportInput): Report {
     okSnapshot === null ? null : scopeItems(okSnapshot, input.idPrefix);
   const unresolved: readonly string[] | null =
     okSnapshot === null ? null : openFollowups(input.consumed, okSnapshot);
-  const finalSnapshot: ReportSnapshot =
-    input.finalSnapshot.ok
-      ? { ok: true, revision: input.finalSnapshot.snapshot.revision }
-      : { ok: false, code: input.finalSnapshot.code };
+  const finalSnapshot: ReportSnapshot = input.finalSnapshot.ok
+    ? { ok: true, revision: input.finalSnapshot.snapshot.revision }
+    : { ok: false, code: input.finalSnapshot.code };
   return {
     schemaVersion: "v1",
     runId: input.runId,

@@ -301,11 +301,6 @@ export async function isAncestor(
   );
 }
 
-interface TrialCallDeps {
-  readonly deps: GitDeps;
-  readonly timeoutMs: number;
-}
-
 class TrialTimeout extends Error {
   constructor() {
     super("trialMerge: deadline hit");
@@ -391,10 +386,6 @@ function deadlineTimeout(deadline: number): number {
   return Math.max(0, deadline - Date.now());
 }
 
-function trialGitDeps(input: TrialInput, timeoutMs: number): TrialCallDeps {
-  return { deps: { PATH: input.PATH, timeoutMs }, timeoutMs };
-}
-
 export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   const step = "trialMerge";
   // Join without normalization so the J2 guard sees a bad id.
@@ -404,16 +395,14 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   // One deadline, set at entry, covers steps 1 to 5.
   const deadline = Date.now() + input.timeoutMs;
   let cleanupFailed = false;
-  // Step 6 cleanup gets its own budget after the step 1-5 deadline.
-  const cleanupDeps: GitDeps = { PATH: input.PATH, timeoutMs: input.timeoutMs };
 
   async function checkedRunGit(
     dir: string,
-    call: TrialCallDeps,
+    timeoutMs: number,
     args: readonly string[],
   ): Promise<GitOutput> {
     try {
-      return await runGit(dir, call.deps, step, args);
+      return await runGit(dir, { PATH: input.PATH, timeoutMs }, step, args);
     } catch (error: unknown) {
       if (error instanceof GitError && error.kind === "timeout") {
         throw new TrialTimeout();
@@ -423,14 +412,15 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   }
 
   async function mergeCall(): Promise<GitOutput> {
+    const budget = deadlineTimeout(deadline);
     try {
       return await runGitAt(
         ["-c", "user.name=moc-trial", "-c", "user.email=trial@example.invalid"],
         wt,
-        trialGitDeps(input, deadlineTimeout(deadline)).deps,
+        { PATH: input.PATH, timeoutMs: budget },
         step,
         ["merge", "--no-ff", "--no-edit", input.headSha],
-        deadlineTimeout(deadline),
+        budget,
       );
     } catch (error: unknown) {
       if (error instanceof GitError && error.kind === "timeout") {
@@ -440,52 +430,62 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
     }
   }
 
-  // Leftover recovery before any other work.
-  checkWorktreePath(wt, input.scratchDir, input.id);
-  if (await pathExists(wt)) {
-    const leftover = await checkedRunGit(
-      input.dir,
-      trialGitDeps(input, deadlineTimeout(deadline)),
-      ["worktree", "remove", "--force", wt],
-    );
-    if (leftover.rc !== 0 && leftover.rc !== 128) {
-      throw new GitError(
-        "failed",
-        step,
-        `${step}: leftover remove exited ${String(leftover.rc)}`,
-        leftover.rc,
-        detailOf(leftover.stderr),
+  // Step 1 (leftover recovery and the absent-path prune) runs on the main
+  // deadline: a deadline hit resolves to the timeout result, never a throw.
+  async function step1(): Promise<{ readonly timeout: true } | { readonly timeout: false }> {
+    checkWorktreePath(wt, input.scratchDir, input.id);
+    if (await pathExists(wt)) {
+      const leftover = await checkedRunGit(
+        input.dir,
+        deadlineTimeout(deadline),
+        ["worktree", "remove", "--force", wt],
       );
+      if (leftover.rc !== 0 && leftover.rc !== 128) {
+        throw new GitError(
+          "failed",
+          step,
+          `${step}: leftover remove exited ${String(leftover.rc)}`,
+          leftover.rc,
+          detailOf(leftover.stderr),
+        );
+      }
+      await removePath(wt, input.scratchDir, input.id);
+      const pruned = await checkedRunGit(input.dir, deadlineTimeout(deadline), [
+        "worktree",
+        "prune",
+      ]);
+      if (pruned.rc !== 0) {
+        throw new GitError(
+          "failed",
+          step,
+          `${step}: worktree prune exited ${String(pruned.rc)}`,
+          pruned.rc,
+          detailOf(pruned.stderr),
+        );
+      }
+    } else {
+      const pruned = await checkedRunGit(input.dir, deadlineTimeout(deadline), [
+        "worktree",
+        "prune",
+      ]);
+      if (pruned.rc !== 0) {
+        cleanupFailed = true;
+      }
     }
-    await removePath(wt, input.scratchDir, input.id);
-    const pruned = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
-      "worktree",
-      "prune",
-    ]);
-    if (pruned.rc !== 0) {
-      throw new GitError(
-        "failed",
-        step,
-        `${step}: worktree prune exited ${String(pruned.rc)}`,
-        pruned.rc,
-        detailOf(pruned.stderr),
-      );
-    }
-  } else {
-    const pruned = await runGit(input.dir, cleanupDeps, step, ["worktree", "prune"]);
-    if (pruned.rc !== 0) {
-      cleanupFailed = true;
-    }
+    return { timeout: false };
   }
 
-  async function cleanupWorktree(): Promise<void> {
+  async function step6(started: number): Promise<void> {
+    // Step 6 cleanup shares one budget that starts when step 6 starts.
+    const cleanupDeadline = started + input.timeoutMs;
+    const budget = (): number => deadlineTimeout(cleanupDeadline);
     try {
-      const removed = await runGit(input.dir, cleanupDeps, step, [
-        "worktree",
-        "remove",
-        "--force",
-        wt,
-      ]);
+      const removed = await runGit(
+        input.dir,
+        { PATH: input.PATH, timeoutMs: budget() },
+        step,
+        ["worktree", "remove", "--force", wt],
+      );
       if (removed.rc !== 0) {
         cleanupFailed = true;
       }
@@ -495,7 +495,12 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
     try {
       if (await pathExists(wt)) {
         await removePath(wt, input.scratchDir, input.id);
-        const pruned = await runGit(input.dir, cleanupDeps, step, ["worktree", "prune"]);
+        const pruned = await runGit(
+          input.dir,
+          { PATH: input.PATH, timeoutMs: budget() },
+          step,
+          ["worktree", "prune"],
+        );
         if (pruned.rc !== 0) {
           cleanupFailed = true;
         }
@@ -505,79 +510,123 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
     }
   }
 
-  // Steps 2 to 5 run inside one try; step 6 cleanup runs in its finally.
+  async function step2(): Promise<
+    | { readonly kind: "added-failed"; readonly addedRc: number; readonly addedStderr: string }
+    | { readonly kind: "merged"; readonly merged: GitOutput }
+    | { readonly kind: "timeout" }
+  > {
+    const revDeps: GitDeps = { PATH: input.PATH, timeoutMs: deadlineTimeout(deadline) };
+    try {
+      await revParse(input.dir, revDeps, input.headSha);
+    } catch (error: unknown) {
+      if (error instanceof GitError && error.kind === "timeout") {
+        return { kind: "timeout" };
+      }
+      throw error;
+    }
+    const added = await checkedRunGit(
+      input.dir,
+      deadlineTimeout(deadline),
+      ["worktree", "add", "--detach", wt, input.baseSha],
+    );
+    if (added.rc !== 0) {
+      return { kind: "added-failed", addedRc: added.rc, addedStderr: added.stderr };
+    }
+    return { kind: "merged", merged: await mergeCall() };
+  }
+
+  type TrialOutcome =
+    | { readonly passed: true }
+    | {
+        readonly passed: false;
+        readonly reason: "conflict" | "step-failed" | "timeout";
+        readonly step: number | null;
+        readonly rc: number | null;
+      };
+
+  // Steps 1 to 5 run inside one try; step 6 cleanup runs after and the
+  // result is built last so the cleanup flag reaches the caller (N1).
+  let outcome: TrialOutcome;
   try {
     // A bad head ref fails here, before the merge (H4).
-    await revParse(input.dir, trialGitDeps(input, deadlineTimeout(deadline)).deps, input.headSha);
-    const added = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
-      "worktree",
-      "add",
-      "--detach",
-      wt,
-      input.baseSha,
-    ]);
-    if (added.rc !== 0) {
-      throw new GitError(
-        "failed",
-        step,
-        `${step}: worktree add exited ${String(added.rc)}`,
-        added.rc,
-        detailOf(added.stderr),
-      );
-    }
-    const merged = await mergeCall();
-    if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
-      return {
-        passed: false,
-        reason: "conflict",
-        step: null,
-        rc: merged.rc,
-        cleanupFailed,
-      };
-    }
-    if (merged.rc !== 0) {
-      throw new GitError(
-        "failed",
-        step,
-        `${step}: merge exited ${String(merged.rc)}`,
-        merged.rc,
-        detailOf(merged.stderr),
-      );
-    }
-    for (let index = 0; index < input.steps.length; index += 1) {
-      const argv = input.steps[index];
-      if (argv === undefined) {
-        continue;
+    const first = await step1();
+    if (first.timeout) {
+      outcome = { passed: false, reason: "timeout", step: null, rc: null };
+    } else {
+      const second = await step2();
+      if (second.kind === "timeout") {
+        outcome = { passed: false, reason: "timeout", step: null, rc: null };
+      } else if (second.kind === "added-failed") {
+        throw new GitError(
+          "failed",
+          step,
+          `${step}: worktree add exited ${String(second.addedRc)}`,
+          second.addedRc,
+          detailOf(second.addedStderr),
+        );
+      } else {
+        const merged = second.merged;
+        if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
+          outcome = {
+            passed: false,
+            reason: "conflict",
+            step: null,
+            rc: merged.rc,
+          };
+        } else if (merged.rc !== 0) {
+          throw new GitError(
+            "failed",
+            step,
+            `${step}: merge exited ${String(merged.rc)}`,
+            merged.rc,
+            detailOf(merged.stderr),
+          );
+        } else {
+          let stepOutcome: TrialOutcome = { passed: true };
+          for (let index = 0; index < input.steps.length; index += 1) {
+            const argv = input.steps[index];
+            if (argv === undefined) {
+              continue;
+            }
+            const ran = await runTrialStep(
+              argv,
+              wt,
+              { PATH: input.PATH, HOME: input.HOME },
+              deadlineTimeout(deadline),
+            );
+            if (ran.type === "timeout") {
+              stepOutcome = { passed: false, reason: "timeout", step: index, rc: null };
+              break;
+            }
+            if (ran.rc === -2) {
+              stepOutcome = { passed: false, reason: "step-failed", step: index, rc: null };
+              break;
+            }
+            if (ran.rc !== 0) {
+              stepOutcome = {
+                passed: false,
+                reason: "step-failed",
+                step: index,
+                rc: ran.rc,
+              };
+              break;
+            }
+          }
+          outcome = stepOutcome;
+        }
       }
-      const outcome = await runTrialStep(
-        argv,
-        wt,
-        { PATH: input.PATH, HOME: input.HOME },
-        deadlineTimeout(deadline),
-      );
-      if (outcome.type === "timeout") {
-        return { passed: false, reason: "timeout", step: index, rc: null, cleanupFailed };
-      }
-      if (outcome.rc === -2) {
-        return { passed: false, reason: "step-failed", step: index, rc: null, cleanupFailed };
-      }
-      if (outcome.rc !== 0) {
-        return {
-          passed: false,
-          reason: "step-failed",
-          step: index,
-          rc: outcome.rc,
-          cleanupFailed,
-        };
-      }
     }
-    return { passed: true as const, cleanupFailed };
   } catch (error: unknown) {
     if (error instanceof TrialTimeout) {
-      return { passed: false, reason: "timeout", step: null, rc: null, cleanupFailed };
+      outcome = { passed: false, reason: "timeout", step: null, rc: null };
+    } else {
+      await step6(Date.now());
+      throw error;
     }
-    throw error;
-  } finally {
-    await cleanupWorktree();
   }
+  await step6(Date.now());
+  if (outcome.passed) {
+    return { passed: true, cleanupFailed };
+  }
+  return { ...outcome, cleanupFailed };
 }

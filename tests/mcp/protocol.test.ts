@@ -4,7 +4,8 @@ import { expect, test } from "bun:test";
 import { createMcpTestEnv, writeTestFile } from "./env.js";
 import { createTools } from "../../src/mcp/tools.ts";
 import { createProtocol } from "../../src/mcp/protocol.ts";
-import type { CallLog, Protocol, ToolDefinition, ToolOutcome } from "../../src/mcp/protocol.ts";
+import type { CallLog } from "../../src/mcp/call-log.ts";
+import type { Protocol, ToolDefinition, ToolOutcome } from "../../src/mcp/protocol.ts";
 
 interface LogEntry {
   readonly event: string;

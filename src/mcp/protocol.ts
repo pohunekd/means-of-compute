@@ -2,6 +2,8 @@
 // Framing lives in serve.ts; this module owns message semantics and the
 // in-process serialization (T4). Tool results never carry exception text.
 import { canonicalJson, sha256Hex } from "../work/canonical.js";
+import type { CallLog } from "./call-log.js";
+import type { McpServerInfo } from "./config.js";
 
 export const SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = [
   "2025-11-25",
@@ -46,15 +48,6 @@ export interface ToolDefinition {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly validate: (args: unknown) => { readonly path: string; readonly keyword: string } | null;
   run(args: unknown, ctx: ToolContext): Promise<ToolOutcome>;
-}
-
-export interface McpServerInfo {
-  readonly name: string;
-  readonly version: string;
-}
-
-export interface CallLog {
-  append(entry: Record<string, unknown>): Promise<void>;
 }
 
 export interface ProtocolDeps {
@@ -565,7 +558,9 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
 
   return {
     handleTooLarge(): Promise<string> {
-      const task = queue.then(() => (aborted ? jsonError(null, -32600, "message too large") : handleTooLarge()));
+      const task = queue.then(() =>
+        aborted ? jsonError(null, -32600, "message too large") : handleTooLarge(),
+      );
       queue = task.then(
         () => undefined,
         () => undefined,

@@ -24,12 +24,7 @@ export function okPayload(fields: Record<string, unknown>): ToolPayload {
   return { ok: true, ...fields };
 }
 
-export function errorPayload(code: string, message: string, retryable: boolean): ToolPayload {
-  const error: ToolError = { code, message, retryable };
-  return { ok: false, error };
-}
-
-export function errorPayloadWith(
+function errorPayloadWith(
   code: string,
   message: string,
   retryable: boolean,
@@ -159,45 +154,4 @@ export function createFleetStatusTool(paths: ToolPaths): ToolDefinition {
 
 export function createTools(paths: ToolPaths): readonly ToolDefinition[] {
   return [createFleetStatusTool(paths)];
-}
-
-export function advertisedTools(
-  tools: readonly ToolDefinition[],
-): readonly Record<string, unknown>[] {
-  return tools.map((tool) => ({
-    name: tool.name,
-    title: tool.title,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-    annotations:
-      tool.toolClass === "read"
-        ? { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-        : {
-            readOnlyHint: false,
-            destructiveHint: false,
-            idempotentHint: true,
-            openWorldHint: false,
-          },
-  }));
-}
-
-export function toolResultBody(payload: ToolPayload): Record<string, unknown> {
-  const failed = !payload.ok;
-  return {
-    content: [{ type: "text", text: JSON.stringify(payload) }],
-    structuredContent: payload,
-    isError: failed,
-  };
-}
-
-export function argumentFailure(first: {
-  readonly path: string;
-  readonly keyword: string;
-}): ToolPayload {
-  return errorPayloadWith(
-    "invalid-arguments",
-    `invalid arguments at ${first.path} (${first.keyword})`,
-    false,
-    { path: first.path, keyword: first.keyword },
-  );
 }

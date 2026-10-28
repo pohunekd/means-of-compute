@@ -8,9 +8,9 @@
 // Stdout carries only JSON-RPC messages; diagnostics go to stderr.
 import { randomUUID } from "node:crypto";
 import { createLineSplitter, createProtocol } from "./protocol.js";
-import { loadMcpConfig } from "./config.js";
+import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { openCallLog } from "./call-log.js";
-import type { CallLog } from "./protocol.js";
+import type { CallLog } from "./call-log.js";
 import { createTools } from "./tools.js";
 import { loadWorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
@@ -21,7 +21,7 @@ import { requireWritableTarget } from "../fs/write.js";
 
 function parseArgs(args: readonly string[]): { caller: string; configPath: string } {
   let caller: string | null = null;
-  let configPath = "config/mcp.json";
+  let configPath = MCP_CONFIG_PATH;
   let configSeen = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] as string;

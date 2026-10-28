@@ -6,7 +6,7 @@ import { createMcpTestEnv } from "../../tests/mcp/env.js";
 import { openCallLog } from "../../src/mcp/call-log.ts";
 import { createTools } from "../../src/mcp/tools.ts";
 import { createProtocol } from "../../src/mcp/protocol.ts";
-import type { CallLog } from "../../src/mcp/protocol.ts";
+import type { CallLog } from "../../src/mcp/call-log.ts";
 
 interface LogEntry {
   readonly event: string;

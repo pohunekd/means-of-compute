@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { StartRequest } from "../../src/dispatcher/port.js";
-import { PortRejectedError } from "../../src/dispatcher/port.js";
+import { PortRejectedError, PortUnreachableError } from "../../src/dispatcher/port.js";
 
 function request(overrides: Partial<StartRequest> = {}): StartRequest {
   return {
@@ -171,5 +171,88 @@ test("D2: diff of a finished session returns the pushed changes untruncated", as
   expect(result.truncated).toBe(false);
   expect(result.unifiedDiff).toContain("\n+sha1\n");
   expect(result.unifiedDiff).toContain("\n+sha2\n");
+  await control.port.close();
+});
+
+test("release with nothing bound returns []", async () => {
+  const control = createMemoryPort();
+  const result = await control.port.release({
+    requestId: "demo-item:0",
+    hostAlias: "laptop-a",
+    sessionId: null,
+  });
+  expect(result).toEqual({ sessionIds: [] });
+  expect(control.sessions()).toEqual([]);
+  await control.port.close();
+});
+
+test("release stops and unbinds the bound session", async () => {
+  const control = createMemoryPort();
+  const req = request();
+  const handle = await control.port.start(req);
+  const result = await control.port.release({
+    requestId: req.requestId,
+    hostAlias: req.hostAlias,
+    sessionId: null,
+  });
+  expect(result).toEqual({ sessionIds: ["mem-1"] });
+  expect(control.sessions().map((entry) => entry.state)).toEqual(["cancelled"]);
+  const again = await control.port.start(req);
+  expect(again.sessionId).toBe("mem-2");
+  expect(handle.sessionId).toBe("mem-1");
+  await control.port.close();
+});
+
+test("release stops a known session that is no longer bound", async () => {
+  const control = createMemoryPort();
+  const handle = await control.port.start(request());
+  await control.port.release({
+    requestId: handle.requestId,
+    hostAlias: handle.hostAlias,
+    sessionId: null,
+  });
+  const result = await control.port.release({
+    requestId: handle.requestId,
+    hostAlias: handle.hostAlias,
+    sessionId: "mem-1",
+  });
+  expect(result).toEqual({ sessionIds: ["mem-1"] });
+  await control.port.close();
+});
+
+test("refused and unreachable release change nothing", async () => {
+  const control = createMemoryPort();
+  const req = request();
+  await control.port.start(req);
+  control.refuseRelease("laptop-a", "void-incomplete");
+  let refused: unknown;
+  try {
+    await control.port.release({
+      requestId: req.requestId,
+      hostAlias: req.hostAlias,
+      sessionId: null,
+    });
+  } catch (error) {
+    refused = error;
+  }
+  expect(refused).toBeInstanceOf(PortRejectedError);
+  expect((refused as PortRejectedError).code).toBe("void-incomplete");
+  control.refuseRelease("laptop-a", null);
+  control.setUnreachable("laptop-a", true);
+  let unreachable: unknown;
+  try {
+    await control.port.release({
+      requestId: req.requestId,
+      hostAlias: req.hostAlias,
+      sessionId: null,
+    });
+  } catch (error) {
+    unreachable = error;
+  }
+  expect(unreachable).toBeInstanceOf(PortUnreachableError);
+  control.setUnreachable("laptop-a", false);
+  expect(control.sessions().map((entry) => entry.state)).toEqual(["starting"]);
+  const bound = await control.port.start(req);
+  expect(bound.sessionId).toBe("mem-1");
   await control.port.close();
 });

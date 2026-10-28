@@ -36,19 +36,22 @@ test("the checked-in production config loads (L1 valid case)", async () => {
   expect(config.repos[0]?.idPrefix).toBe("moc");
 });
 
-test("a missing stall.maxRetries fails naming the key (L1)", async () => {
+test("a missing stall.maxRetries throws the exact LoopConfigError (L1, F9)", async () => {
   await withTempDir(async (dir) => {
     const base = await productionBase();
     const stall = { ...(base["stall"] as Record<string, unknown>) };
     delete stall["maxRetries"];
     const path = await writeConfig(dir, { ...base, stall });
-    let message = "";
+    let error: unknown;
     try {
       await loadLoopConfig(path, "production");
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
+    } catch (thrown: unknown) {
+      error = thrown;
     }
-    expect(message).toContain("stall.maxRetries");
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toBe(
+      `Loop config ${path}: missing required key "stall.maxRetries"`,
+    );
   });
 });
 
@@ -154,7 +157,7 @@ test("a written path outside the stub sandbox is rejected naming the key (F1)", 
   }
 });
 
-test("the checked-in production config has no stub section (L2 valid case)", async () => {
+test("an unknown stub section in production mode is an unexpected key (L2, F9)", async () => {
   const base = await productionBase();
   await withTempDir(async (dir) => {
     const path = await writeConfig(dir, { ...base, stub: { foo: 1 } });
@@ -165,6 +168,7 @@ test("the checked-in production config has no stub section (L2 valid case)", asy
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toBe(`Loop config ${path}: unexpected key "stub"`);
   });
 });
 
@@ -253,38 +257,17 @@ test("a missing config file throws LoopConfigError (F7)", async () => {
   }
 });
 
-test("stub present in production mode is an error (L2)", async () => {
-  await withTempDir(async (dir) => {
-    const base = await productionBase();
-    const path = await writeConfig(dir, {
-      ...base,
-      stub: {
-        sandboxDir: "logs/loop-demo",
-        demoRepoDir: "tests/fixtures/loop/demo-repo",
-        observationsPath: "tests/fixtures/loop/hosts.json",
-        recordingsPath: "tests/fixtures/loop/recordings.json",
-      },
-    });
-    let message = "";
-    try {
-      await loadLoopConfig(path, "production");
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    expect(message).toContain('"stub"');
-  });
-});
-
-test("absent stub in stub mode is an error (L2)", async () => {
+test("absent stub in stub mode throws the exact LoopConfigError (L2, F9)", async () => {
   await withTempDir(async (dir) => {
     const base = await productionBase();
     const path = await writeConfig(dir, base);
-    let message = "";
+    let error: unknown;
     try {
       await loadLoopConfig(path, "stub");
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
+    } catch (thrown: unknown) {
+      error = thrown;
     }
-    expect(message).toContain('"stub"');
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toBe(`Loop config ${path}: missing required key "stub"`);
   });
 });

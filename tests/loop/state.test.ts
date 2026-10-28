@@ -83,9 +83,10 @@ async function waitForLine(proc: { stdout: unknown }, line: string): Promise<voi
   }
 }
 
-test("an update writes revision n+1 and a re-read is deep-equal (L3)", async () => {
+test("an update writes revision n+1 and the re-read matches the fold (L3, F5)", async () => {
   await withTempDir(async (dir) => {
     const path = join(dir, "loop-state.json");
+    let written = emptyState();
     await updateLoopState(path, () =>
       Promise.resolve({
         next: { ...emptyState(), items: { "gh-moc-5": idleItem() } },
@@ -94,23 +95,21 @@ test("an update writes revision n+1 and a re-read is deep-equal (L3)", async () 
     );
     const first = await readLoopState(path);
     expect(first.revision).toBe(1);
-    await updateLoopState(path, (state) =>
-      Promise.resolve({
-        next: {
-          items: state.items,
-          resolvedApprovals: [...state.resolvedApprovals, "approval-1"],
-          mergeHold: state.mergeHold,
-          lastDigestDay: "2026-10-28",
-        },
-        value: undefined,
-      }),
-    );
+    await updateLoopState(path, (state) => {
+      const next = {
+        items: state.items,
+        resolvedApprovals: [...state.resolvedApprovals, "approval-1"],
+        mergeHold: state.mergeHold,
+        lastDigestDay: "2026-10-28",
+      };
+      written = { schemaVersion: "v1", revision: state.revision + 1, ...next };
+      return Promise.resolve({ next, value: undefined });
+    });
     const second = await readLoopState(path);
+    expect(second).toEqual(written);
     expect(second.revision).toBe(2);
-    expect(second.resolvedApprovals).toEqual(["approval-1"]);
-    expect(second.lastDigestDay).toBe("2026-10-28");
-    const reread = await readLoopState(path);
-    expect(reread).toEqual(second);
+    expect(second.schemaVersion).toBe("v1");
+    expect(second.items["gh-moc-5"]).toEqual(idleItem());
   });
 });
 

@@ -1,9 +1,9 @@
 # Host state plugin
 
 The host probe (`src/probe/`) ships to fleet hosts as a bundled plugin package.
-A Pohunek release with a host-state extension point (PR 3) will run the plugin
-on each host and carry its `HostCapacity` output back to the coordinator, where
-the collector validates it before placement sees it.
+A Pohunek daemon from 0.38.1 on runs the plugin as a package command
+(`package-commands-v1`) on each host and carries its `HostCapacity` output back
+to the coordinator, where the collector validates it before placement sees it.
 
 ## Collector
 
@@ -67,7 +67,10 @@ Every fleet host carries its alias in `/etc/means-of-compute/host.json`:
 
 The fleet-wide path lives in the package as `config/plugin.json`; the host file
 itself stays outside the package, outside `HOME`, and outside the
-digest-pinned inputs. Writing it needs `sudo` once on every host. The plugin
+digest-pinned inputs. Writing it needs `sudo` once on every host. The launch
+`PATH` the daemon gives the plugin must provide `bun`, because the bundle
+starts with `#!/usr/bin/env bun`; on macOS that `PATH` must also contain
+`/usr/sbin`, which holds the system tools the probe calls. The plugin
 reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
@@ -76,7 +79,11 @@ which the collector reports as `plugin-failed`.
 
 Built packages are never committed (`dist/` is gitignored) and never published
 from this repository. The owner builds once per version and installs that one
-directory on every host with `pohunek plugin link`, by its sha256. A rebuild
+directory on every host with `pohunek plugin link`. Vouch first by digest: run
+`pohunek plugin link <dir>` without `--yes` on the first host, record the
+printed digest, and repeat the dry run on every other host to compare before
+running `--yes`. Copy the directory with modes preserved: `bin/moc-host-state`
+must keep `0755`, or the link fails. A rebuild
 is a new artifact with a new digest.
 
 ## Causes
@@ -84,40 +91,45 @@ is a new artifact with a new digest.
 Every failure maps to one `unavailable` observation with a cause; placement
 records it as an excluded candidate. No failure yields a `reported` host.
 
-| Input or condition                                                                        | Cause                                             |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `config/host-state.json` missing, unreadable, invalid, extra key, or a failed cross-check | throw naming the key; no default                  |
-| `config/probe.json` missing in the package                                                | `plugin-failed`                                   |
-| host file missing or invalid                                                              | `plugin-failed`                                   |
-| unknown plugin argument                                                                   | `plugin-failed`                                   |
-| host or daemon unreachable, overlay down                                                  | `host-unreachable`                                |
-| daemon older than the extension point                                                     | `daemon-unsupported`                              |
-| protocol version mismatch or translation failure                                          | `daemon-rejected` with code                       |
-| package not installed, or no host-state program                                           | `plugin-missing`                                  |
-| package disabled                                                                          | `plugin-disabled`                                 |
-| concurrency limit                                                                         | `plugin-busy`                                     |
-| plugin exit non-zero or signal                                                            | `plugin-failed`                                   |
-| plugin past `pluginTimeoutMs`                                                             | `plugin-timeout`                                  |
-| SDK deadline passed                                                                       | `request-timeout`                                 |
-| adapter never settles                                                                     | `request-timeout` from the guard                  |
-| stdout over the cap (daemon or collector)                                                 | `output-too-large`                                |
-| stdout not UTF-8                                                                          | `output-invalid`                                  |
-| other package id in the reply                                                             | `package-mismatch`                                |
-| version not accepted                                                                      | `version-not-accepted`                            |
-| not JSON, or more than one document                                                       | `not-json`                                        |
-| not a `HostCapacity`, `freeMb > totalMb`, or an unparseable timestamp                     | `contract-invalid`                                |
-| reported alias differs from the asked alias                                               | `alias-mismatch`                                  |
-| timestamp too old                                                                         | `stale`                                           |
-| timestamp too far ahead                                                                   | `future-timestamp`                                |
-| non-port error from the adapter                                                           | `collect()` rejects; nothing is placed this round |
+| Input or condition                                                                                                                         | Cause                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `config/host-state.json` missing, unreadable, invalid, extra key, or a failed cross-check                                                  | throw naming the key; no default                  |
+| `config/probe.json` missing in the package                                                                                                 | `plugin-failed`                                   |
+| host file missing or invalid                                                                                                               | `plugin-failed`                                   |
+| unknown plugin argument                                                                                                                    | `plugin-failed`                                   |
+| host or daemon unreachable, overlay down                                                                                                   | `host-unreachable`                                |
+| daemon older than the extension point, without `command.run`                                                                               | `daemon-unsupported (command_unsupported)`        |
+| protocol version mismatch or translation failure                                                                                           | `daemon-rejected` with code                       |
+| package not installed, no version selected, or no such command                                                                             | `plugin-missing (<code>)`                         |
+| package disabled                                                                                                                           | `plugin-disabled`                                 |
+| concurrency limit                                                                                                                          | `plugin-busy`                                     |
+| plugin exit or signal (`process_exit`)                                                                                                     | `plugin-failed (exit-<n>)` or (`signal-<n>`)      |
+| plugin past `pluginTimeoutMs`                                                                                                              | `plugin-timeout`                                  |
+| SDK deadline passed                                                                                                                        | `request-timeout`                                 |
+| adapter never settles                                                                                                                      | `request-timeout` from the guard                  |
+| stdout over the cap (daemon or collector)                                                                                                  | `output-too-large`                                |
+| stdout not UTF-8                                                                                                                           | `output-invalid`                                  |
+| other package id in the reply                                                                                                              | `package-mismatch`                                |
+| the reply is missing a field                                                                                                               | `daemon-rejected (reply-incomplete)`              |
+| the daemon cannot run the command (shutdown, unreadable registry, failed root verification, or a failed spawn such as a missing `#!` line) | `daemon-rejected (command_unavailable)`           |
+| the command is declared `local` only                                                                                                       | `daemon-rejected (command_not_exposed)`           |
+| version not accepted                                                                                                                       | `version-not-accepted`                            |
+| not JSON, or more than one document                                                                                                        | `not-json`                                        |
+| not a `HostCapacity`, `freeMb > totalMb`, or an unparseable timestamp                                                                      | `contract-invalid`                                |
+| reported alias differs from the asked alias                                                                                                | `alias-mismatch`                                  |
+| timestamp too old                                                                                                                          | `stale`                                           |
+| timestamp too far ahead                                                                                                                    | `future-timestamp`                                |
+| `PortRejectedError`, any other error                                                                                                       | `collect()` rejects; nothing is placed this round |
 
 ## Deadlines
 
 With `c = config.collector`:
 
 - `pluginTimeoutMs` (`10000`): the daemon kills the plugin at this deadline.
-- `requestTimeoutMs` (`pluginTimeoutMs + transportMarginMs`): passed to the
-  daemon as the call deadline; the adapter sets no timer of its own.
+- `requestTimeoutMs` (`pluginTimeoutMs + transportMarginMs`): never sent to the
+  daemon. The SDK's own deadline ends a stuck run with `request-timeout`, the
+  adapter sets no timer of its own, and the collector guard below ends a call
+  that hangs past that.
 - `guardMs` (`pluginTimeoutMs + 2 * transportMarginMs`): the collector's own
   bound through `deps.sleep`, for an adapter that never settles.
 - `maxOutputBytes` (`16384`): passed to the daemon and re-checked by the

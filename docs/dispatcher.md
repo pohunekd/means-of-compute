@@ -33,7 +33,7 @@ on the `DispatcherPort` interface, never on the adapter.
 ## The port and its implementations
 
 `DispatcherPort` (`src/dispatcher/port.ts` `DispatcherPort`) is the only seam to the
-session daemon: `start`, `wait`, `diff`, `cancel`, `close`, with
+session daemon: `start`, `wait`, `diff`, `cancel`, `release`, `close`, with
 `PortUnreachableError` for transport failures and `PortRejectedError` (with
 a kebab-case `code`) for daemon refusals. Two implementations exist:
 
@@ -44,6 +44,18 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
   (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`; `start` writes the token into `moc.meterToken`; a `null` port refuses `start` with `no-meter`; a voided start clears the key. It is the only code that
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
+
+`release` (`src/dispatcher/port.ts` `ReleaseRef`) stops every session on the host
+that is either the known `sessionId` or bound to the `requestId` and removes
+the binding of each bound one. It returns the sessions found and stopped, the known
+id first then the bound ones in daemon order with no duplicates, or `[]` when
+none was there. It never creates a session and never sends input. A refused
+`session.list` or connector call gives `PortRejectedError(code)` with that
+call's code; a refused stop or unbind gives
+`PortRejectedError("void-incomplete")`; a transport failure gives
+`PortUnreachableError`; sessions stopped and unbound before the failure stay
+so. This trusts that the binding metadata survives a daemon
+restart: an empty `session.list` reading means nothing is bound.
 
 ## Adapter configuration
 

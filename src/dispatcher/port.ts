@@ -66,11 +66,20 @@ export interface SessionRef {
   readonly hostAlias: string;
 }
 
+export interface ReleaseRef {
+  readonly requestId: string;
+  readonly hostAlias: string;
+  readonly sessionId: string | null;
+}
+export interface ReleaseResult {
+  readonly sessionIds: readonly string[];
+}
 export interface DispatcherPort {
   start(request: StartRequest): Promise<SessionHandle>;
   wait(ref: SessionRef, timeoutMs: number, cursor: string | null): Promise<WaitResult>;
   diff(ref: SessionRef, base: string): Promise<DiffResult>;
   cancel(ref: SessionRef, reason: CancelReason): Promise<WaitResult>;
+  release(ref: ReleaseRef): Promise<ReleaseResult>;
   close(): Promise<void>;
 }
 

@@ -5,6 +5,8 @@ import type {
   CancelReason,
   DiffResult,
   DispatcherPort,
+  ReleaseRef,
+  ReleaseResult,
   SessionHandle,
   SessionRef,
   StartRequest,
@@ -98,5 +100,9 @@ export function createMeteredPort(
     await inner.close();
   }
 
-  return { start, wait, diff, cancel, close };
+  function release(ref: ReleaseRef): Promise<ReleaseResult> {
+    return inner.release(ref);
+  }
+
+  return { start, wait, diff, cancel, release, close };
 }

@@ -10,6 +10,7 @@ import { runDiffCommand } from "../../src/dispatcher/diff-command.js";
 import {
   PortRejectedError,
   type DispatcherPort,
+  type ReleaseResult,
   type SessionRef,
 } from "../../src/dispatcher/port.js";
 
@@ -210,6 +211,7 @@ test("a rejected diff prints the code, not the message", async () => {
     wait: () => Promise.reject(new Error("unused")),
     diff: () => Promise.reject(new PortRejectedError("session-not-found", "unknown session x")),
     cancel: () => Promise.reject(new Error("unused")),
+    release: (): Promise<ReleaseResult> => Promise.reject(new Error("unused")),
     close: () => {
       closes += 1;
       return Promise.resolve();

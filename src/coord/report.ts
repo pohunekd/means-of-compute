@@ -77,34 +77,34 @@ export interface ReportItem {
   readonly stranded: boolean;
 }
 
-export interface ReportCalls {
+interface ReportCalls {
   readonly ok: number;
   readonly refused: number;
   readonly error: number;
 }
 
-export interface ReportSubmission {
+interface ReportSubmission {
   readonly submissionId: string;
   readonly itemIds: readonly string[];
   readonly replayed: boolean;
 }
 
-export interface ReportRefusal {
+interface ReportRefusal {
   readonly tool: string;
   readonly code: string;
 }
 
-export interface ReportRequest {
+interface ReportRequest {
   readonly requestId: string;
   readonly outcome: string;
 }
 
-export interface ReportSnapshotRef {
+interface ReportSnapshotRef {
   readonly ok: true;
   readonly revision: number;
 }
 
-export type ReportSnapshot = ReportSnapshotRef | { readonly ok: false; readonly code: string };
+type ReportSnapshot = ReportSnapshotRef | { readonly ok: false; readonly code: string };
 
 export interface Report {
   readonly schemaVersion: "v1";
@@ -401,65 +401,23 @@ export function buildReport(input: ReportInput): Report {
       requests.push(parseRequestSummary(call));
     }
     if (call.outcome === "refused" || call.outcome === "error") {
-      refusals.push({ tool: call.tool, code: call.code ?? "unknown" });
+      if (call.code === null) {
+        throw new ReportDataError(
+          `Report: call ${call.run}/${String(call.callId)} has an invalid ${call.tool} summary`,
+        );
+      }
+      refusals.push({ tool: call.tool, code: call.code });
     }
   }
-  if (input.finalSnapshot.ok) {
-    const snapshot = input.finalSnapshot.snapshot;
-    const stranded = strandedIds(snapshot.items);
-    const byId = new Map<string, ListRow>();
-    for (const row of snapshot.items) {
-      byId.set(row.id, row);
-    }
-    const items: ReportItem[] = [];
-    for (const row of snapshot.items) {
-      if (!row.id.startsWith(`${input.idPrefix}-`)) {
-        continue;
-      }
-      items.push({
-        id: row.id,
-        status: row.status,
-        statusReason: row.statusReason,
-        dod: { done: row.dod.done, total: row.dod.total },
-        pullNumber: row.pullNumber,
-        retryCount: row.retryCount,
-        stranded: stranded.has(row.id),
-      });
-    }
-    const unresolved: string[] = [];
-    for (const key of input.consumed) {
-      if (!key.startsWith("followup:")) {
-        continue;
-      }
-      const base = key.slice("followup:".length);
-      if (byId.get(`${base}-fu`) === undefined) {
-        unresolved.push(key);
-      }
-    }
-    return {
-      schemaVersion: "v1",
-      runId: input.runId,
-      goalId: input.goalId,
-      repo: input.repo,
-      phase: input.phase,
-      stop: input.stop,
-      startedAt: input.startedAt,
-      endedAt: input.endedAt,
-      configPath: input.configPath,
-      configSha256: input.configSha256,
-      gates: [...input.gates],
-      sessions: [...input.sessions],
-      calls,
-      submissions,
-      refusals,
-      requests,
-      items,
-      followups,
-      unresolved,
-      outOfScope,
-      finalSnapshot: { ok: true, revision: snapshot.revision },
-    };
-  }
+  const okSnapshot = input.finalSnapshot.ok ? input.finalSnapshot.snapshot : null;
+  const items: readonly ReportItem[] | null =
+    okSnapshot === null ? null : scopeItems(okSnapshot, input.idPrefix);
+  const unresolved: readonly string[] | null =
+    okSnapshot === null ? null : openFollowups(input.consumed, okSnapshot);
+  const finalSnapshot: ReportSnapshot =
+    input.finalSnapshot.ok
+      ? { ok: true, revision: input.finalSnapshot.snapshot.revision }
+      : { ok: false, code: input.finalSnapshot.code };
   return {
     schemaVersion: "v1",
     runId: input.runId,
@@ -477,12 +435,50 @@ export function buildReport(input: ReportInput): Report {
     submissions,
     refusals,
     requests,
-    items: null,
+    items,
     followups,
-    unresolved: null,
+    unresolved,
     outOfScope,
-    finalSnapshot: { ok: false, code: input.finalSnapshot.code },
+    finalSnapshot,
   };
+}
+
+function scopeItems(snapshot: ListSnapshot, idPrefix: string): ReportItem[] {
+  const stranded = strandedIds(snapshot.items);
+  const items: ReportItem[] = [];
+  for (const row of snapshot.items) {
+    if (!row.id.startsWith(`${idPrefix}-`)) {
+      continue;
+    }
+    items.push({
+      id: row.id,
+      status: row.status,
+      statusReason: row.statusReason,
+      dod: { done: row.dod.done, total: row.dod.total },
+      pullNumber: row.pullNumber,
+      retryCount: row.retryCount,
+      stranded: stranded.has(row.id),
+    });
+  }
+  return items;
+}
+
+function openFollowups(consumed: readonly string[], snapshot: ListSnapshot): string[] {
+  const byId = new Set<string>();
+  for (const row of snapshot.items) {
+    byId.add(row.id);
+  }
+  const unresolved: string[] = [];
+  for (const key of consumed) {
+    if (!key.startsWith("followup:")) {
+      continue;
+    }
+    const base = key.slice("followup:".length);
+    if (!byId.has(`${base}-fu`)) {
+      unresolved.push(key);
+    }
+  }
+  return unresolved;
 }
 
 function cellText(value: string): string {
@@ -490,10 +486,14 @@ function cellText(value: string): string {
 }
 
 function cell(value: string | null): string {
-  if (value === null || value === "") {
+  if (value === null) {
     return "-";
   }
   return cellText(value);
+}
+
+function dash(value: string | null): string {
+  return value === null ? "-" : cellText(value);
 }
 
 function outcomeText(outcome: SessionOutcome): string {
@@ -533,12 +533,12 @@ export function renderReportMd(report: Report): string {
     ...table(
       "| # | Kind | Session | Outcome | Duration (s) | Export |",
       report.sessions.map((session) => [
-        String(session.k),
-        session.kind,
-        session.sessionId,
-        outcomeText(session.outcome),
-        (session.durationMs / 1000).toFixed(1),
-        session.exportOk ? "yes" : "no",
+        cellText(String(session.k)),
+        cellText(session.kind),
+        cellText(session.sessionId),
+        cellText(outcomeText(session.outcome)),
+        cellText((session.durationMs / 1000).toFixed(1)),
+        cellText(session.exportOk ? "yes" : "no"),
       ]),
     ),
     "",
@@ -547,9 +547,9 @@ export function renderReportMd(report: Report): string {
     ...table(
       "| Submission | Items | Replayed |",
       report.submissions.map((entry) => [
-        entry.submissionId,
-        entry.itemIds.join(", "),
-        entry.replayed ? "yes" : "no",
+        cellText(entry.submissionId),
+        cellText(entry.itemIds.join(", ")),
+        cellText(entry.replayed ? "yes" : "no"),
       ]),
     ),
     "",
@@ -561,7 +561,7 @@ export function renderReportMd(report: Report): string {
     "",
     ...table(
       "| Request | Outcome |",
-      report.requests.map((entry) => [entry.requestId, entry.outcome]),
+      report.requests.map((entry) => [cellText(entry.requestId), cellText(entry.outcome)]),
     ),
     "",
     "## Items",
@@ -592,26 +592,30 @@ function refusalLines(report: Report): string[] {
   }
   return table(
     "| Tool | Code | Count |",
-    [...counts.values()].map((entry) => [entry.tool, entry.code, String(entry.count)]),
+    [...counts.values()].map((entry) => [
+      cellText(entry.tool),
+      cellText(entry.code),
+      cellText(String(entry.count)),
+    ]),
   );
 }
 
 function itemsLines(report: Report): string[] {
   if (report.items === null) {
     const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? "unknown" : snapshot.code;
-    return [`Items: unavailable (${code})`];
+    const code = snapshot.ok ? snapshot.revision : snapshot.code;
+    return [`Items: unavailable (${String(code)})`];
   }
   return table(
     "| Item | Status | Reason | DoD | Pull | Retries | Stranded |",
     report.items.map((item) => [
-      item.id,
-      item.status,
+      cellText(item.id),
+      cellText(item.status),
       cell(item.statusReason),
-      `${String(item.dod.done)}/${String(item.dod.total)}`,
-      item.pullNumber === null ? "-" : String(item.pullNumber),
-      String(item.retryCount),
-      item.stranded ? "yes" : "no",
+      cellText(`${String(item.dod.done)}/${String(item.dod.total)}`),
+      dash(item.pullNumber === null ? null : String(item.pullNumber)),
+      cellText(String(item.retryCount)),
+      cellText(item.stranded ? "yes" : "no"),
     ]),
   );
 }
@@ -619,8 +623,8 @@ function itemsLines(report: Report): string[] {
 function unresolvedLines(report: Report): string[] {
   if (report.unresolved === null) {
     const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? "unknown" : snapshot.code;
-    return [`Unresolved: unavailable (${code})`];
+    const code = snapshot.ok ? snapshot.revision : snapshot.code;
+    return [`Unresolved: unavailable (${String(code)})`];
   }
   if (report.unresolved.length === 0) {
     return ["None."];

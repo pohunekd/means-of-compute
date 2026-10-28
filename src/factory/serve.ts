@@ -1,8 +1,9 @@
-// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>].
+// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>].
 // Startup parses the flags, pins the clock when asked, loads every config,
 // binds the loopback listener and serves until SIGINT or SIGTERM. Any
 // startup failure prints "factory: <message>" and exits 2; signals exit 0.
 import { loadAuditorConfig } from "../auditor/config.js";
+import { loadDispatcherConfig } from "../dispatcher/config.js";
 import { loadBudgetConfig } from "../budget/config.js";
 import { loadPricingForIds } from "../budget/pricing.js";
 import {
@@ -21,11 +22,14 @@ import { loadProviderRoute } from "../providers/route.js";
 function parseServeArgs(argv: readonly string[]): {
   ledger: string | null;
   verdicts: string | null;
+  registry: string | null;
 } {
   let ledger: string | null = null;
   let verdicts: string | null = null;
+  let registry: string | null = null;
   let seenLedger = false;
   let seenVerdicts = false;
+  let seenRegistry = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] as string;
     if (arg === "--ledger") {
@@ -56,17 +60,31 @@ function parseServeArgs(argv: readonly string[]): {
         throw new Error("--verdicts needs a value");
       }
       verdicts = value;
+    } else if (arg === "--registry") {
+      if (seenRegistry) {
+        throw new Error("--registry given twice");
+      }
+      seenRegistry = true;
+      const value = argv[index + 1];
+      index += 1;
+      if (value === undefined || value === "") {
+        throw new Error("--registry needs a value");
+      }
+      if (value.startsWith("--")) {
+        throw new Error("--registry needs a value");
+      }
+      registry = value;
     } else if (arg.startsWith("--")) {
       throw new Error(`unknown flag ${arg}`);
     } else {
       throw new Error(`unexpected argument ${arg}`);
     }
   }
-  return { ledger, verdicts };
+  return { ledger, verdicts, registry };
 }
 
 async function serve(): Promise<number> {
-  let flags: { ledger: string | null; verdicts: string | null };
+  let flags: { ledger: string | null; verdicts: string | null; registry: string | null };
   try {
     flags = parseServeArgs(Bun.argv.slice(2));
   } catch (error: unknown) {
@@ -108,6 +126,7 @@ async function serve(): Promise<number> {
   }
   let ledgerPath: string;
   let verdictDir: string;
+  let registryPath: string;
   let fixed: {
     budget: Awaited<ReturnType<typeof loadBudgetConfig>>;
     route: readonly string[];
@@ -126,6 +145,7 @@ async function serve(): Promise<number> {
     await loadPricingForIds(PROVIDERS_DIR, [...route, budget.nvidiaProviderId]);
     ledgerPath = flags.ledger ?? (await loadLedgerConfig()).ledgerPath;
     verdictDir = flags.verdicts ?? (await loadAuditorConfig()).verdictDir;
+    registryPath = flags.registry ?? (await loadDispatcherConfig()).registryPath;
     fixed = {
       budget,
       route,
@@ -143,7 +163,7 @@ async function serve(): Promise<number> {
       config,
       listen,
       fixed,
-      sources: { ledgerPath, verdictDir, hostState: null, registryPath: "" },
+      sources: { ledgerPath, verdictDir, hostState: null, registryPath },
       now: pinned === null ? () => new Date() : () => pinned,
       log,
     });

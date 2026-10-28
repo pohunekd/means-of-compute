@@ -22,6 +22,8 @@ import {
 } from "./money.js";
 import type { Baselines } from "./config.js";
 import type { DashboardInputs, InputErrorCode, InputFailure } from "./inputs.js";
+import { sessionsOf } from "../dispatcher/registry.js";
+import { latestOpenSession, latestSession, openSessionCount } from "./sessions.js";
 import type { HostObservation } from "../hoststate/collector.js";
 import type { UnavailableCause } from "../hoststate/collector.js";
 
@@ -169,6 +171,11 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
       }
     }
   }
+  if (inputs.registry.ok) {
+    for (const entry of inputs.registry.value) {
+      aliases.add(entry.hostAlias);
+    }
+  }
   const ordered = [...aliases].sort();
   const byAlias = new Map<string, HostObservation>();
   if (inputs.hosts.ok) {
@@ -176,21 +183,36 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
       byAlias.set(observation.hostAlias, observation);
     }
   }
-  const running = noDataCell("dispatcher registry not wired");
+  const runningFor = (alias: string, maxConcurrentAgents: number | null): Cell => {
+    if (!inputs.registry.ok) {
+      return failureCell(inputs.registry.failure);
+    }
+    const count = groupDigits(openSessionCount(inputs.registry.value, alias));
+    return maxConcurrentAgents === null
+      ? textCell(count)
+      : textCell(`${count} of ${groupDigits(maxConcurrentAgents)}`);
+  };
   const rows = ordered.map((alias): readonly Cell[] => {
     const observation = byAlias.get(alias);
     if (!inputs.hosts.ok) {
       const failure = failureCell(inputs.hosts.failure);
-      return [aliasesCell([alias]), failure, failure, running, failure];
+      return [aliasesCell([alias]), failure, failure, runningFor(alias, null), failure];
     }
     if (observation === undefined) {
       const missing = noDataCell("not in this collector round");
-      return [aliasesCell([alias]), missing, missing, running, missing];
+      return [aliasesCell([alias]), missing, missing, runningFor(alias, null), missing];
     }
     if (observation.kind === "unavailable") {
       const state = textCell(`unavailable: ${CAUSE_LABELS[observation.cause]}`);
-      return [aliasesCell([alias]), state, state, running, textCell(observation.observedAt)];
+      return [
+        aliasesCell([alias]),
+        state,
+        state,
+        runningFor(alias, null),
+        textCell(observation.observedAt),
+      ];
     }
+    const running = runningFor(alias, observation.capacity.policy.maxConcurrentAgents);
     const state = observation.capacity.idle
       ? textCell("idle")
       : textCell(`not idle: ${observation.capacity.idleReason}`);
@@ -246,27 +268,42 @@ function pendingFor(inputs: DashboardInputs, id: string): readonly PendingUsage[
   return inputs.ledger.value.pending.filter((entry) => entry.workItemId === id);
 }
 
-function activityOf(inputs: DashboardInputs, id: string): number | null {
-  if (!inputs.ledger.ok) {
-    return null;
-  }
+function activityOf(inputs: Omit<DashboardInputs, "verdicts">, id: string): number | null {
   let latest: number | null = null;
-  for (const record of inputs.ledger.value.records) {
-    if (record.workItemId !== id) {
-      continue;
+  if (inputs.ledger.ok) {
+    for (const record of inputs.ledger.value.records) {
+      if (record.workItemId !== id) {
+        continue;
+      }
+      const at = Date.parse(record.finishedAt);
+      if (latest === null || at > latest) {
+        latest = at;
+      }
     }
-    const at = Date.parse(record.finishedAt);
-    if (latest === null || at > latest) {
-      latest = at;
+    for (const entry of inputs.ledger.value.pending) {
+      if (entry.workItemId !== id) {
+        continue;
+      }
+      const at = Date.parse(entry.finishedAt);
+      if (latest === null || at > latest) {
+        latest = at;
+      }
     }
   }
-  for (const entry of inputs.ledger.value.pending) {
-    if (entry.workItemId !== id) {
-      continue;
-    }
-    const at = Date.parse(entry.finishedAt);
-    if (latest === null || at > latest) {
-      latest = at;
+  if (inputs.registry.ok) {
+    for (const entry of sessionsOf(inputs.registry.value, id)) {
+      for (const stamp of [entry.startedAt, entry.lastSeenAt]) {
+        const at = Date.parse(stamp);
+        if (latest === null || at > latest) {
+          latest = at;
+        }
+      }
+      if (entry.terminal !== null) {
+        const at = Date.parse(entry.terminal.observedAt);
+        if (latest === null || at > latest) {
+          latest = at;
+        }
+      }
     }
   }
   return latest;
@@ -300,36 +337,47 @@ function verdictCell(inputs: DashboardInputs, id: string): Cell {
   return textCell(parts.join("; "));
 }
 
+function workStatus(inputs: DashboardInputs, id: string): Cell {
+  const record = recordFor(inputs, id);
+  const pending = pendingFor(inputs, id);
+  if (inputs.workItems !== null) {
+    const item = inputs.workItems.find((candidate) => candidate.id === id);
+    if (item !== undefined) {
+      return item.statusReason === null
+        ? textCell(item.status)
+        : textCell(`${item.status} (${item.statusReason})`);
+    }
+  }
+  if (inputs.registry.ok) {
+    const open = latestOpenSession(inputs.registry.value, id);
+    if (open !== null) {
+      return textCell(open.lastSeenState);
+    }
+  }
+  if (record !== null) {
+    return textCell(record.result === "success" ? "done" : "blocked");
+  }
+  if (inputs.registry.ok) {
+    const sessions = sessionsOf(inputs.registry.value, id);
+    if (sessions.length > 0 && latestOpenSession(inputs.registry.value, id) === null) {
+      const terminal = latestSession(inputs.registry.value, id)?.terminal;
+      if (terminal !== null && terminal !== undefined) {
+        return textCell(`session ${terminal.state}`);
+      }
+    }
+  }
+  if (pending.length > 0) {
+    return textCell("session ended, not finalized");
+  }
+  return inputs.ledger.ok ? noDataCell("no ledger entry") : failureCell(inputs.ledger.failure);
+}
+
 function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total: number): Panel {
   const rows = shown.map((id): readonly Cell[] => {
     const record = recordFor(inputs, id);
     const pending = pendingFor(inputs, id);
-    let status: Cell;
-    if (inputs.workItems !== null) {
-      const item = inputs.workItems.find((candidate) => candidate.id === id);
-      if (item !== undefined) {
-        status =
-          item.statusReason === null
-            ? textCell(item.status)
-            : textCell(`${item.status} (${item.statusReason})`);
-      } else if (record !== null) {
-        status = textCell(record.result === "success" ? "done" : "blocked");
-      } else if (pending.length > 0) {
-        status = textCell("session ended, not finalized");
-      } else {
-        status = inputs.ledger.ok
-          ? noDataCell("no ledger entry")
-          : failureCell(inputs.ledger.failure);
-      }
-    } else if (record !== null) {
-      status = textCell(record.result === "success" ? "done" : "blocked");
-    } else if (pending.length > 0) {
-      status = textCell("session ended, not finalized");
-    } else {
-      status = inputs.ledger.ok
-        ? noDataCell("no ledger entry")
-        : failureCell(inputs.ledger.failure);
-    }
+    const latest = inputs.registry.ok ? latestSession(inputs.registry.value, id) : null;
+    const status = workStatus(inputs, id);
     const sessionHosts = new Set<string>();
     if (record !== null) {
       for (const session of record.sessionSeconds) {
@@ -342,23 +390,34 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
       }
     }
     const host: Cell =
-      sessionHosts.size > 0
-        ? aliasesCell([...sessionHosts])
-        : inputs.ledger.ok
-          ? noDataCell("no session")
-          : failureCell(inputs.ledger.failure);
+      latest !== null
+        ? aliasesCell([latest.hostAlias])
+        : sessionHosts.size > 0
+          ? aliasesCell([...sessionHosts])
+          : inputs.ledger.ok
+            ? noDataCell("no session")
+            : failureCell(inputs.ledger.failure);
     let branch: Cell;
-    if (inputs.workItems !== null) {
+    if (latest !== null) {
+      branch = textCell(latest.branch);
+    } else if (inputs.workItems !== null) {
       const item = inputs.workItems.find((candidate) => candidate.id === id);
       if (item !== undefined && item.branch !== null) {
         branch = textCell(item.branch);
       } else {
-        branch = noDataCell("dispatcher registry not wired");
+        branch = inputs.registry.ok
+          ? noDataCell("no session")
+          : failureCell(inputs.registry.failure);
       }
     } else {
-      branch = noDataCell("dispatcher registry not wired");
+      branch = inputs.registry.ok ? noDataCell("no session") : failureCell(inputs.registry.failure);
     }
-    const model = noDataCell("dispatcher registry not wired");
+    const model: Cell =
+      latest !== null
+        ? textCell(`${latest.model.providerId}/${latest.model.model}`)
+        : inputs.registry.ok
+          ? noDataCell("no session")
+          : failureCell(inputs.registry.failure);
     const verdicts = verdictCell(inputs, id);
     const activity = activityOf(inputs, id);
     const lastActivity =
@@ -1000,9 +1059,10 @@ export function buildDashboard(inputs: DashboardInputs): DashboardModel {
 }
 
 // Row selection for the Work table (rule 5.2.1). The ids are the union of
-// ledger record and pending workItemIds plus work item ids when a source
-// exists. Activity is the newest finishedAt across the item's records and
-// pending entries; rows sort by activity descending with null last, then by
+// ledger record and pending workItemIds, registry workItemIds when the
+// registry is ok, and work item ids when a source exists. Activity is the
+// newest finishedAt across the item's records, pending entries, and
+// registry times; rows sort by activity descending with null last, then by
 // id ascending. gatherInputs reads verdicts only for the shown ids.
 export function workRows(inputs: Omit<DashboardInputs, "verdicts">): {
   readonly shown: readonly string[];
@@ -1022,34 +1082,15 @@ export function workRows(inputs: Omit<DashboardInputs, "verdicts">): {
       ids.add(item.id);
     }
   }
-  const activityOf = (id: string): number | null => {
-    if (!inputs.ledger.ok) {
-      return null;
+  if (inputs.registry.ok) {
+    for (const entry of inputs.registry.value) {
+      ids.add(entry.workItemId);
     }
-    let latest: number | null = null;
-    for (const record of inputs.ledger.value.records) {
-      if (record.workItemId !== id) {
-        continue;
-      }
-      const at = Date.parse(record.finishedAt);
-      if (latest === null || at > latest) {
-        latest = at;
-      }
-    }
-    for (const entry of inputs.ledger.value.pending) {
-      if (entry.workItemId !== id) {
-        continue;
-      }
-      const at = Date.parse(entry.finishedAt);
-      if (latest === null || at > latest) {
-        latest = at;
-      }
-    }
-    return latest;
-  };
+  }
+  const activityFor = (id: string): number | null => activityOf(inputs, id);
   const ordered = [...ids].sort((a, b) => {
-    const activityA = activityOf(a);
-    const activityB = activityOf(b);
+    const activityA = activityFor(a);
+    const activityB = activityFor(b);
     if (activityA !== null && activityB !== null && activityA !== activityB) {
       return activityB - activityA;
     }

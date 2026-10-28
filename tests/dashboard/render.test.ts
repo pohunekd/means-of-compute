@@ -60,7 +60,7 @@ describe("dashboard markup shape (mutation: client JS, auto-refresh or external 
 
   test("no data and error cells use the exact 4.4 texts", async () => {
     const page = await renderFixture();
-    expect(page).toContain("no data (dispatcher registry not wired)");
+    expect(page).toContain("no data (host state not wired)");
     expect(page).not.toContain("no-data");
   });
 });

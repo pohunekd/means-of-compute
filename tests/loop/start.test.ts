@@ -550,7 +550,9 @@ test("driveStart on a failing gate logs budget-gate-error (U5)", async () => {
     const li = await readItem(ctx.statePath);
     expect(li.backoffUntil).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
     expect(events.some((line) => line.startsWith("budget-refused:budget-gate-error:"))).toBe(true);
-    expect(events.filter((line) => line.startsWith("budget-refused:budget-gate-error:"))).toHaveLength(1);
+    expect(
+      events.filter((line) => line.startsWith("budget-refused:budget-gate-error:")),
+    ).toHaveLength(1);
     expect(await readRegistry(registryPath)).toHaveLength(0);
   });
 });

@@ -1,0 +1,53 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/src/loop/results.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LoopResults",
+  "description": "One line per closed loop round, appended to logs/loop-results.jsonl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "key",
+    "at",
+    "workItemId",
+    "repo",
+    "round",
+    "retry",
+    "model",
+    "providerId",
+    "hostAlias",
+    "outcome",
+    "routingResult"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}:(0|[1-9][0-9]*)$" },
+    "at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" },
+    "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "round": { "type": "integer", "minimum": 0 },
+    "retry": { "type": "integer", "minimum": 0 },
+    "model": { "type": "string", "minLength": 1 },
+    "providerId": { "type": "string", "minLength": 1 },
+    "hostAlias": {
+      "anyOf": [{ "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" }, { "type": "null" }]
+    },
+    "outcome": {
+      "enum": [
+        "merged",
+        "findings",
+        "red-ci",
+        "no-push",
+        "no-new-commit",
+        "empty-diff",
+        "diff-too-large",
+        "session-failed",
+        "ci-timeout",
+        "trial-failed",
+        "lost",
+        "start-rejected"
+      ]
+    },
+    "routingResult": { "enum": ["success", "failure", "excluded"] }
+  }
+}

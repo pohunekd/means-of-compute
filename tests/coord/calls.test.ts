@@ -35,10 +35,7 @@ test("coordinator call-ends survive filtering with a torn tail (L1)", async () =
       OTHER_SERVER_START,
       OTHER_CALL_END,
     ];
-    await Bun.write(
-      path,
-      `${lines.join("\n")}\n{"ts":"2026-10-28T10:00:03.000Z","event":"call-`,
-    );
+    await Bun.write(path, `${lines.join("\n")}\n{"ts":"2026-10-28T10:00:03.000Z","event":"call-`);
     const result = await readCoordCalls(path);
     expect(result).not.toBeNull();
     expect(result?.length).toBe(1);

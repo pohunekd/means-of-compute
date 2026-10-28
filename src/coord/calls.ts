@@ -53,42 +53,82 @@ function parseCallEnd(value: Record<string, unknown>): CoordCallEnd | null {
       return null;
     }
   }
-  if (
-    typeof value["ts"] !== "string" ||
-    value["event"] !== "call-end" ||
-    typeof value["run"] !== "string" ||
-    typeof value["callId"] !== "number" ||
-    !Number.isInteger(value["callId"]) ||
-    (value["callId"] as number) < 1 ||
-    typeof value["caller"] !== "string" ||
-    (value["caller"] as string).length === 0 ||
-    typeof value["tool"] !== "string" ||
-    (value["tool"] as string).length === 0 ||
-    (value["class"] !== "read" && value["class"] !== "write" && value["class"] !== "sensitive") ||
-    (value["outcome"] !== "ok" && value["outcome"] !== "refused" && value["outcome"] !== "error") ||
-    (value["code"] !== null && typeof value["code"] !== "string") ||
-    typeof value["durationMs"] !== "number" ||
-    !Number.isInteger(value["durationMs"]) ||
-    (value["durationMs"] as number) < 0 ||
-    (value["summary"] !== null &&
-      (typeof value["summary"] !== "object" || Array.isArray(value["summary"]))) ||
-    (value["detail"] !== null && typeof value["detail"] !== "string")
-  ) {
+  const ts: unknown = value["ts"];
+  const run: unknown = value["run"];
+  const callId: unknown = value["callId"];
+  const caller: unknown = value["caller"];
+  const tool: unknown = value["tool"];
+  const toolClass: unknown = value["class"];
+  const outcome: unknown = value["outcome"];
+  const code: unknown = value["code"];
+  const durationMs: unknown = value["durationMs"];
+  const summary: unknown = value["summary"];
+  const detail: unknown = value["detail"];
+  if (typeof ts !== "string") {
     return null;
   }
+  if (value["event"] !== "call-end") {
+    return null;
+  }
+  if (typeof run !== "string") {
+    return null;
+  }
+  if (typeof callId !== "number" || !Number.isInteger(callId) || callId < 1) {
+    return null;
+  }
+  if (typeof caller !== "string" || caller.length === 0) {
+    return null;
+  }
+  if (typeof tool !== "string" || tool.length === 0) {
+    return null;
+  }
+  if (toolClass !== "read" && toolClass !== "write" && toolClass !== "sensitive") {
+    return null;
+  }
+  if (outcome !== "ok" && outcome !== "refused" && outcome !== "error") {
+    return null;
+  }
+  if (code !== null && typeof code !== "string") {
+    return null;
+  }
+  if (typeof durationMs !== "number" || !Number.isInteger(durationMs) || durationMs < 0) {
+    return null;
+  }
+  if (summary !== null && (typeof summary !== "object" || Array.isArray(summary))) {
+    return null;
+  }
+  let summaryRecord: Readonly<Record<string, unknown>> | null = null;
+  if (summary !== null) {
+    if (typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    const entries = Object.entries(summary);
+    const rebuilt: Record<string, unknown> = {};
+    for (const [key, entry] of entries) {
+      rebuilt[key] = entry;
+    }
+    summaryRecord = rebuilt;
+  }
+  let detailText: string | null = null;
+  if (detail !== null) {
+    if (typeof detail !== "string") {
+      return null;
+    }
+    detailText = detail;
+  }
   return {
-    ts: value["ts"] as string,
+    ts,
     event: "call-end",
-    run: value["run"] as string,
-    callId: value["callId"] as number,
-    caller: value["caller"] as string,
-    tool: value["tool"] as string,
-    class: value["class"] as ToolClass,
-    outcome: value["outcome"] as "ok" | "refused" | "error",
-    code: value["code"] as string | null,
-    durationMs: value["durationMs"] as number,
-    summary: value["summary"] as Readonly<Record<string, unknown>> | null,
-    detail: value["detail"] as string | null,
+    run,
+    callId,
+    caller,
+    tool,
+    class: toolClass,
+    outcome,
+    code,
+    durationMs,
+    summary: summaryRecord,
+    detail: detailText,
   };
 }
 

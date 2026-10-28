@@ -6,11 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  CoordConfigError,
-  loadCoordConfig,
-  type CoordConfig,
-} from "../../src/coord/config.js";
+import { CoordConfigError, loadCoordConfig, type CoordConfig } from "../../src/coord/config.js";
 
 const COMMITTED = "config/coordinator.json";
 

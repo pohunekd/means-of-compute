@@ -16,14 +16,7 @@ export const COORD_PROVIDER_ID = "meta-api";
 export const COORD_MODEL = "muse-spark-1.3-contributor";
 
 export type ReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+  "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type ApprovalMode = "untrusted" | "on-request" | "never";
 
@@ -321,7 +314,12 @@ function requiredEnvPassthrough(
 
 function parsePlan(value: unknown, path: string): CoordPlanConfig {
   const record = asRecord(value, path, "plan");
-  checkKeys(record, ["reasoningEffort", "maxModelSteps", "maxSubmitAttempts", "timeoutMs"], path, "plan");
+  checkKeys(
+    record,
+    ["reasoningEffort", "maxModelSteps", "maxSubmitAttempts", "timeoutMs"],
+    path,
+    "plan",
+  );
   return {
     reasoningEffort: requiredReasoningEffort(record, path, "plan"),
     maxModelSteps: requiredInteger(record, path, "plan", "maxModelSteps", 1, 200),
@@ -446,7 +444,10 @@ export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> 
     throw invalid(path, "contributorMode");
   }
   const approvalMode = record["approvalMode"];
-  if (typeof approvalMode !== "string" || !(APPROVALS as readonly string[]).includes(approvalMode)) {
+  if (
+    typeof approvalMode !== "string" ||
+    !(APPROVALS as readonly string[]).includes(approvalMode)
+  ) {
     throw invalid(path, "approvalMode");
   }
   const apiKeyEnv = await readDescriptorApiKeyEnv(path);

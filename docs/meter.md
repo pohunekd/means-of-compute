@@ -5,9 +5,7 @@ All model traffic from fleet sessions flows through the metering proxy
 its caller token through session metadata, and the token is valid only
 while its grant is open, and the proxy records
 per-session
-token usage into an append-only log. PR A delivers the proxy itself; the
-dispatcher port wiring, the usage CLI, and the host token helper land in
-later PRs of issue #35.
+token usage into an append-only log. `createMeteredPort` and the `meter:usage` CLI exist; the host token helper is planned in #35.
 
 ## Proxy
 
@@ -179,18 +177,11 @@ the committed names. Every error names the variable, never its value.
 Generate the secret and store it without printing it:
 
 ```sh
-: "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"
-install -d -m 0700 "$XDG_RUNTIME_DIR/moc"
-chmod 0700 "$XDG_RUNTIME_DIR/moc"
-( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" )
-chmod 0600 "$XDG_RUNTIME_DIR/moc/meter-secret"
-export MOC_METER_SECRET="$(cat "$XDG_RUNTIME_DIR/moc/meter-secret")"
-test -n "$MOC_METER_SECRET" && echo set
+( set -eu; : "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"; install -d -m 0700 "$XDG_RUNTIME_DIR/moc"; chmod 0700 "$XDG_RUNTIME_DIR/moc"; ( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" ); chmod 0600 "$XDG_RUNTIME_DIR/moc/meter-secret" ) && export MOC_METER_SECRET="$(cat "$XDG_RUNTIME_DIR/moc/meter-secret")" && test -n "$MOC_METER_SECRET" && echo set
 ```
 
-The explicit `chmod`s make the modes hold even when the directory or the
-file already exists; `XDG_RUNTIME_DIR` must be set, and the command fails
-loudly when it is not. The secret file lives outside the repository,
+The file is created in a subshell with `set -eu`, so an unset `XDG_RUNTIME_DIR` stops it, also when pasted; the `&&` chain then skips the export; the export runs in the current shell. The explicit `chmod`s make the modes hold even when the directory or the
+file already exists. The secret file lives outside the repository,
 never under `logs/`.
 
 ## Usage-log format
@@ -270,15 +261,32 @@ The factory (later the metered dispatcher port) drives each session's grant:
 3. Calls flow while the grant is open. A call joins the live set inside
    its `call-start` chain step, when the guard passes and before the
    write, and leaves when its `call-end` append settles.
-4. `settle(sessionId, state)` — appends `grant-close` (refusing later
-   calls), snapshots the live calls, waits up to `drainTimeoutMs` with
-   an injected timer, aborts the rest with `closed-abort` (one
-   `drain-abort` log when any), awaits every end unconditionally, then
-   returns one `PortUsage`. A `closed-abort` is billed: with the seen
-   counts, else null. Settle is memoized per request id and deterministic
-   across restarts: after the close and the drain, the join is stable
-   through replays and repeated calls.
+4. `settle(sessionId, state)` finds the grant by session and delegates to `settleRequest(requestId)`, which owns one memoized `Promise<PortUsage | null>` per request id. After the close and the drain, the join is stable through replays and repeated calls.
+5. `settleRequest(requestId, state)` owns one memoized `Promise<PortUsage | null>` per request id: it finds the grant by request id (grant-close never names a session,
+   so the stranded billing of a lost session survives) and joins its calls. An unbound grant (opened, never bound) closes here and
+   joins its calls: the first settle step in the design. An unknown
+   request id returns `null` and logs `unknown-grant`.
 
-`close()` stops the listener, aborts in-flight calls with `closed-abort`,
-awaits each `call-end` append, and closes the log handle. Grants survive a
-restart because they are durable.
+## Metered port
+
+`createMeteredPort(inner, meter, log)` wraps a `DispatcherPort`. `start` opens the grant, then calls `inner.start`, then binds the grant to the session.
+
+Open fails with `grant-closed`: the port throws `PortUnreachableError` and logs `grant-closed-on-start`. Any other grant code: `PortRejectedError` with code `meter-<code>`. `MeterUnavailableError` and errors of `inner.start` pass through unchanged.
+
+Bind fails with `session-conflict`: `PortRejectedError` `request-conflict`, which the dispatcher turns into `DispatchStateError` `port-binding-conflict` and keeps the entry. `unknown-request`: `meter-unknown-request`; the dispatcher removes the entry and logs `start-rejected`, as for every other rejected start.
+
+Every terminal result of `wait` and `cancel` gets `usage` from `meter.settle(sessionId)`. A non-null usage from the inner port is dropped and logged as `port-usage-ignored`. A `null` join gives `usage: null`, which the dispatcher stores as `usage-unreported`.
+
+A latched meter rethrows `MeterUnavailableError`.
+
+`diff` and `close` delegate to the inner port; `close` does not close the meter.
+
+The provisional lost path runs only when `port.start` is unreachable; there `lostUsage(requestId)` gives the measured join, a zero row when no call ran. A bound session that ends lost on the watch path gets its join through the same hook.
+
+## Lost usage
+
+`createDispatcher` takes a required `lostUsage(requestId)` hook: the first step of `finishLost`, before the first registry write, reads back the durable usage through this hook. The factory sets `lostUsage` to `meter.settleRequest`, so the meter settles before the terminal exists. An invalid row stores `null` (`usage-invalid` event, `usage-invalid` token source) instead of the fabricated counts, and the budget guard refuses unknown spend — never a measured zero.
+
+## Usage CLI
+
+`bun run meter:usage -- --log <path> --request <id>` prints the `joinUsage` row of one request as one JSON line (exit 0). The CLI replays the log read-only; a torn tail is ignored and the file is never modified. A request without a grant prints `meter: no grant for <id>` on stderr (exit 3). A usage error (bad flags, missing values, a repeated or unknown flag, a validation failure) or no log file prints one `meter:` line on stderr (exit 2).

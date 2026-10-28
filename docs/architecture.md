@@ -154,8 +154,19 @@ Join: one `PortUsage`, with one token per (provider, model), over the
 replayed-plus-appended index. A `call-start` without an end counts as one
 request with null counts.
 
-`settle` closes the grant, waits up to `drainTimeoutMs`, aborts the
-rest, awaits every end, then joins.
+`settle(sessionId, state)` finds the grant by session and delegates to `settleRequest(requestId)`, which owns one memoized `Promise<PortUsage | null>` per request id. After the close and the drain, the join is stable through replays and repeated calls. An unbound grant (opened, never bound) closes in `settleRequest`, so the
+stranded billing of a lost session survives.
+
+The dispatcher carries a required `lostUsage(requestId)` hook: the
+first step of `finishLost`, before the first registry write, settles
+the meter grant through this hook, which the factory wires to
+`meter.settleRequest`. An invalid row is stored as `null`, never as a
+fabricated zero, and the budget guard refuses unknown spend.
+
+`createMeteredPort(inner, meter, log)` adapts a dispatcher port so
+fleet sessions run behind the proxy: it opens the grant before the
+inner start, binds it after, replaces the terminal port usage with the
+metered join, and revokes the caller token through `grant-close`.
 
 The component list and the rules behind these boundaries are in
 [.agents/instructions/project.md](../.agents/instructions/project.md).

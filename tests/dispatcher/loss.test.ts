@@ -86,6 +86,8 @@ async function withHarness(body: (h: Harness) => Promise<void>): Promise<void> {
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, config, control, dispatcher, clock, dir });
   } finally {
@@ -186,6 +188,8 @@ test("unreachable: miss, miss, running, miss recovers as finished", async () => 
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -244,6 +248,8 @@ test("unreachable: two misses recover, the third is lost", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -286,6 +292,8 @@ test("unreachable: two misses recover, the third is lost", async () => {
       },
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started2 = await dispatcher2.start(
       queuedItem() as never,
@@ -341,6 +349,8 @@ test("watch replay after a failed appendPending writes exactly one pending entry
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -402,6 +412,8 @@ test("replay after a crash between append and write returns unchanged", async ()
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -498,6 +510,8 @@ test("a start on an unappended terminal asks for watch first", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -642,4 +656,165 @@ test("no replay after finalize: watch returns unchanged and skips the ledger", a
     expect(contents.pending).toHaveLength(0);
     expect(contents.records).toHaveLength(1);
   });
+});
+
+test("lost calls lostUsage before the registry write", async () => {
+  // The hook reads the registry inside itself through a fresh instance:
+  // the terminal is still null while the hook runs, so the meter
+  // settles before the first registry write.
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-lost-hook-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 3,
+      unreachableBackoffMs: 0,
+      registryPath: join(dir, "registry.json"),
+    };
+    const control = createMemoryPort();
+    const { readRegistry } = await import("../../src/dispatcher/registry.js");
+    let terminalAtHook: unknown = "not-called";
+    let revisionAtHook = -1;
+    let hookRequestId = "";
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      lostUsage: async (requestId: string) => {
+        hookRequestId = requestId;
+        const entries = await readRegistry(join(dir, "registry.json"));
+        const seen = entries.find((e) => e.requestId === requestId);
+        terminalAtHook = seen?.terminal ?? null;
+        revisionAtHook = seen?.revision ?? -1;
+        return null;
+      },
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    expect(hookRequestId).toBe("");
+    control.setUnreachable("laptop-a", true);
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("lost");
+    expect(hookRequestId).toBe(started.request.requestId);
+    // The first registry write of the terminal bumps the revision by
+    // one from the last persisted value, so a hook that runs before it
+    // still sees the old revision with no terminal.
+    expect(terminalAtHook).toBeNull();
+    expect(revisionAtHook).toBe(3);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a provisional lost calls lostUsage with its requestId", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-lost-prov-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 1,
+      unreachableBackoffMs: 0,
+      registryPath: join(dir, "registry.json"),
+    };
+    const control = createMemoryPort();
+    control.setUnreachable("laptop-a", true);
+    const seen: string[] = [];
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      lostUsage: (requestId: string) => {
+        seen.push(requestId);
+        return Promise.resolve(null);
+      },
+    });
+    const outcome = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (outcome.kind !== "lost") {
+      throw new Error("expected a lost start");
+    }
+    expect(seen).toEqual(["demo-item:0"]);
+    const contents = await readLedger("Test ledger", ledgerPath);
+    expect(contents.pending).toHaveLength(1);
+    expect(contents.pending[0]?.entryId).toBe("demo-item:demo-item:0");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid lost usage is stored as null", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-lost-invalid-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const config: DispatcherConfig = {
+      baseBranch: "main",
+      branchPrefix: "moc/",
+      waitTimeoutMs: 1000,
+      lostAfterUnreachable: 1,
+      unreachableBackoffMs: 0,
+      registryPath: join(dir, "registry.json"),
+    };
+    const control = createMemoryPort();
+    control.setUnreachable("laptop-a", true);
+    const events: Array<Record<string, unknown>> = [];
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: (event) => {
+        events.push(event as unknown as Record<string, unknown>);
+      },
+      lostUsage: () => Promise.resolve({ tokens: [] }),
+    });
+    const outcome = await dispatcher.start(
+      queuedItem() as never,
+      decision("laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (outcome.kind !== "lost") {
+      throw new Error("expected a lost start");
+    }
+    const contents = await readLedger("Test ledger", ledgerPath);
+    expect(contents.pending).toHaveLength(1);
+    expect(contents.pending[0]?.tokens).toEqual([
+      {
+        provider: "nvidia-build",
+        model: "meta/muse-glimmer-30b",
+        inputTokens: null,
+        outputTokens: null,
+        requests: null,
+        source: "usage-invalid",
+      },
+    ]);
+    expect(events.filter((e) => e["event"] === "usage-invalid")).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

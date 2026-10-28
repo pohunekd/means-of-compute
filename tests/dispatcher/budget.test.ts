@@ -82,6 +82,8 @@ test("refusal blocks new starts but a running item still finishes", async () => 
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const startedA = await dispatcher.start(
       queuedItem("item-a") as never,
@@ -116,6 +118,8 @@ test("refusal blocks new starts but a running item still finishes", async () => 
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     control.complete(startedA.handle.sessionId, {
       state: "finished",
@@ -182,6 +186,8 @@ test("a gate error throws BudgetGateError with no port session", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     let error: unknown;
     try {

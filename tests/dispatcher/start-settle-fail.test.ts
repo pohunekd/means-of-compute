@@ -92,6 +92,8 @@ async function withHarness(body: (h: SettleHarness) => Promise<void>): Promise<v
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     await body({ dir, ledgerPath, registryPath, control, starts, gate, dispatcher });
   } finally {

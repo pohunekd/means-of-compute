@@ -44,6 +44,8 @@ function dispatcherAt(registryPath: string, ledgerPath: string, ticks: { now: Da
     },
     sleep: () => Promise.resolve(),
     log: () => undefined,
+
+    lostUsage: () => Promise.resolve(null),
   });
   return { control, waits, gate, config, dispatcher };
 }
@@ -111,6 +113,8 @@ async function withHarness(
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, registryPath, config, control, dispatcher, dir });
   } finally {
@@ -236,6 +240,8 @@ test("two concurrent watches on one completed session append exactly once", asyn
       },
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       item("item-a") as never,
@@ -303,6 +309,8 @@ test("I1: two pending watches append once", async () => {
       },
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       item("item-a") as never,
@@ -695,6 +703,8 @@ test("I9b: two dispatcher instances on one registry make one session", async () 
         now: clock,
         sleep: () => Promise.resolve(),
         log: () => undefined,
+
+        lostUsage: () => Promise.resolve(null),
       });
     const a = makeDispatcher();
     const b = makeDispatcher();
@@ -755,6 +765,8 @@ test("I10: a second placement conflicts", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const first = dispatcher.start(
       item("item-a") as never,

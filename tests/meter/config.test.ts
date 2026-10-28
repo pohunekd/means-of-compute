@@ -224,7 +224,8 @@ test("unset host-file env var refused", async () => {
 });
 
 test("non-object host file refused", async () => {
-  // The host file holds a JSON object: an array is refused.
+  // The host file holds a JSON object: an array is refused, and the
+  // error names the env var that holds the path.
   const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
   const file = join(dir, "hosts.json");
   await Bun.write(file, JSON.stringify(["127.0.0.1"]));
@@ -235,6 +236,7 @@ test("non-object host file refused", async () => {
     } catch (error: unknown) {
       message = (error as Error).message;
     }
+    expect(message).toContain("MOC_METER_HOST_ADDRESSES_FILE");
     expect(message).toContain("must be a JSON object");
   } finally {
     rmSync(dir, { recursive: true, force: true });

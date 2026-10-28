@@ -90,6 +90,8 @@ function testDispatcher(ledgerPath: string): ReturnType<typeof createDispatcher>
     now: () => new Date("2026-10-27T10:00:00.000Z"),
     sleep: () => Promise.resolve(),
     log: () => undefined,
+
+    lostUsage: () => Promise.resolve(null),
   });
 }
 
@@ -221,6 +223,8 @@ test("cancel of a terminal entry never calls the port", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -252,6 +256,8 @@ test("cancel of a terminal entry never calls the port", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const outcome = await terminalOnly.cancel(started.request.requestId, "host-left");
     expect(outcome.result.state).toBe("finished");
@@ -277,6 +283,8 @@ test("invalid port usage is stored as null and stays readable", async () => {
       log: (event) => {
         events.push(event as unknown as Record<string, unknown>);
       },
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -348,6 +356,8 @@ test("replaceRegistryEntry rejects a stale revision", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -394,6 +404,8 @@ test("an empty detail keeps the registry readable", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -449,6 +461,8 @@ test("a stored worktree and base commit survive a replayed start", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const first = await dispatcher.start(
       queuedItem() as never,
@@ -513,6 +527,8 @@ test("unknown usage becomes an unknown-requests pending token, never zero", asyn
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,

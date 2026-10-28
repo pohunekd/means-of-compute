@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "v1",
+  "goalId": "notes",
+  "idPrefix": "notes",
+  "repo": "example/demo-repo",
+  "title": "Notes module for the demo repo",
+  "outcome": "The demo repo has a notes module: src/notes/parse.ts parses \"# title\" plus body text into a Note, src/notes/store.ts appends notes to a JSONL file and lists them in order, and src/notes/cli.ts adds and lists notes. Each part has its own test file under tests/notes/ and bun test passes.",
+  "constraints": ["Do not change package.json.", "No new dependencies."],
+  "issues": [],
+  "maxItems": 5,
+  "preferredModel": "meta/muse-glimmer-30b"
+}

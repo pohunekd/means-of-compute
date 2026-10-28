@@ -618,6 +618,25 @@ test("a marked live session is stopped and finished (WC2)", async () => {
   }
 });
 
+test("a failed terminal stop logs the kebab code (L1)", async () => {
+  const { fake, log, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    fake.failNext("laptop-a", "session.stop", {
+      error: fakeErrors.hostUnreachable("peer.example-route"),
+      apply: false,
+    });
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toMatchObject({ state: "finished", detail: "turn completed" });
+    const logged = log.find((entry) => entry.event === "adapter-stop-failed");
+    expect(logged?.code).toBe("host-unreachable");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("a terminal whose decision has stop false sends no session.stop", async () => {
   const { fake, port } = setup();
   try {

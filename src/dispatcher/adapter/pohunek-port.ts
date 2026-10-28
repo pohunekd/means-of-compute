@@ -419,6 +419,21 @@ function lostTerminal(
   });
 }
 
+// Kebab code for a failed terminal stop (L1): the kebab code from
+// portErrorOf(error, alias), or "unknown" when that gives null. Never the
+// message.
+function stopFailedCode(alias: string, error: unknown): string {
+  const mapped = portErrorOf(error, alias);
+  if (mapped instanceof PortRejectedError) {
+    return mapped.code;
+  }
+  if (mapped instanceof PortUnreachableError) {
+    const code = mapped.message.slice(alias.length + 2);
+    return code.replaceAll("_", "-");
+  }
+  return "unknown";
+}
+
 // W5 mark then stop (rows with mark): if the cache already holds a terminal,
 // return it. Else write the marker (session_not_found: lost / session
 // missing), then stop; any stop error is logged as adapter-stop-failed with
@@ -455,7 +470,7 @@ async function markThenStop(
       event: "adapter-stop-failed",
       hostAlias: alias,
       sessionId: id,
-      code: error instanceof Error ? error.constructor.name : "unknown",
+      code: stopFailedCode(alias, error),
       detail,
     });
   }
@@ -489,7 +504,7 @@ async function stopThenStoreTerminal(
       event: "adapter-stop-failed",
       hostAlias: alias,
       sessionId: id,
-      code: error instanceof Error ? error.constructor.name : "unknown",
+      code: stopFailedCode(alias, error),
       detail,
     });
   }

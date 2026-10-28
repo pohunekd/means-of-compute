@@ -250,11 +250,11 @@ test("close race: concurrent calls are either counted or refused", async () => {
       const pendings = Array.from({ length: 10 }, () => post(meter, token, chatBody()));
       await loopback.waitHeld(10);
       const timerArmed = timers.waitForTimer(999);
-      // The settle below queues the grant-close and arms the 999 ms
-      // drain timer; the close is durable at that point.
+      // When settle() returns, the grant-close is queued in the append
+      // chain. It becomes durable before the drain timer arms, and the
+      // late calls queue behind that pending close: each is refused
+      // 403 grant-closed, and none reaches the upstream.
       const settling = meter.settle(sessionId, "finished");
-      // Ten more calls race the durable close: each is 403 grant-closed,
-      // and none reaches the upstream.
       const late = await Promise.all(
         Array.from({ length: 10 }, () => post(meter, token, chatBody())),
       );
@@ -466,6 +466,24 @@ test("a taken port fails with the alias and the code only", async () => {
   const hostsFile = join(dir, "hosts.json");
   await Bun.write(hostsFile, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
   resetProvidersCache();
+  const savedPortEnv: Record<string, string | undefined> = {
+    META_API_KEY: process.env.META_API_KEY,
+    NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    LOCAL_MODEL_BASE_URL: process.env.LOCAL_MODEL_BASE_URL,
+    PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
+    PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+  };
+  const restorePortEnv = (): void => {
+    for (const key of Object.keys(savedPortEnv)) {
+      const value = savedPortEnv[key];
+      if (value === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
   process.env.META_API_KEY = "test-meta-key";
   process.env.NVIDIA_API_KEY = "test-nvidia-key";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
@@ -531,14 +549,12 @@ test("a taken port fails with the alias and the code only", async () => {
       await meter.close().catch(() => {});
     }
     resetProvidersCache();
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
-    delete process.env.META_API_KEY;
-    delete process.env.NVIDIA_API_KEY;
-    delete process.env.LOCAL_MODEL_BASE_URL;
+    restorePortEnv();
     rmSync(dir, { recursive: true, force: true });
   }
-  expect(events.length).toBeGreaterThanOrEqual(0);
+  expect(events.filter((e) => e.event === "listening")).toEqual([
+    { level: "info", event: "listening", hostAlias: "factory" },
+  ]);
 });
 
 test("determinism: settle twice, restart, settle again", async () => {
@@ -550,6 +566,24 @@ test("determinism: settle twice, restart, settle again", async () => {
   await Bun.write(hostsFile, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
   const loopback = await startLoopback("tests/meter/recordings/stream-ok.json");
   resetProvidersCache();
+  const savedRestartEnv: Record<string, string | undefined> = {
+    META_API_KEY: process.env.META_API_KEY,
+    NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    LOCAL_MODEL_BASE_URL: process.env.LOCAL_MODEL_BASE_URL,
+    PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
+    PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+  };
+  const restoreRestartEnv = (): void => {
+    for (const key of Object.keys(savedRestartEnv)) {
+      const value = savedRestartEnv[key];
+      if (value === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
   process.env.META_API_KEY = "test-meta-key";
   process.env.NVIDIA_API_KEY = "test-nvidia-key";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
@@ -599,11 +633,7 @@ test("determinism: settle twice, restart, settle again", async () => {
   } finally {
     await loopback.stop();
     resetProvidersCache();
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
-    delete process.env.META_API_KEY;
-    delete process.env.NVIDIA_API_KEY;
-    delete process.env.LOCAL_MODEL_BASE_URL;
+    restoreRestartEnv();
     rmSync(dir, { recursive: true, force: true });
   }
 });

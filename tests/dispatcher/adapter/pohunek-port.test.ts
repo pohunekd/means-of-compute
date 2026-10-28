@@ -176,9 +176,7 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
     const cancelled = await port.cancel(ref, "operator");
     expect(cancelled).toMatchObject({ state: "cancelled", sessionId: handle.sessionId });
     expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
-    expect(
-      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
-    ).toHaveLength(1);
+    expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(1);
     const observed = await port.wait(ref, 1000, null);
     expect(observed).toEqual(cancelled);
     const startError: unknown = await port.start(request()).then(
@@ -552,9 +550,7 @@ test("each S5 failure leaves the session stopped and unbound, and a replay creat
     const { fake, log, port } = setup();
     try {
       fake.onNew("laptop-a", reply);
-      const error = await port
-        .start(request())
-        .catch((cause: unknown) => cause);
+      const error = await port.start(request()).catch((cause: unknown) => cause);
       expect(error, name).toBeInstanceOf(PortRejectedError);
       expect(error, name).toMatchObject({ code: code });
       const sessions = fake.sessions("laptop-a");
@@ -689,9 +685,7 @@ test("a marked live session is stopped and finished (WC2)", async () => {
     const second = await port.wait(ref, 1000, "cursor-1");
     expect(second).toMatchObject({ state: "finished", detail: "turn completed" });
     expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
-    expect(
-      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
-    ).toHaveLength(1);
+    expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(1);
   } finally {
     await teardown(fake, port);
   }
@@ -725,9 +719,7 @@ test("a terminal whose decision has stop false sends no session.stop", async () 
     fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
     const result = await port.wait(ref, 1000, null);
     expect(result).toMatchObject({ state: "finished", detail: "exited 0" });
-    expect(
-      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
-    ).toHaveLength(0);
+    expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(0);
   } finally {
     await teardown(fake, port);
   }

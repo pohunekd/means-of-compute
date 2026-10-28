@@ -234,6 +234,7 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
     const config = await loadDispatcherConfig();
     const adapterConfig = await loadPohunekAdapterConfig();
     const ledgerConfig = await loadLedgerConfig();
+    mkdirSync(dirname(config.registryPath), { recursive: true });
     return await withFileLock("Dispatcher registry", config.registryPath, async () => {
       const log =
         (source: string) =>

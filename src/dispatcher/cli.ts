@@ -244,14 +244,28 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
       throw new Error(`resolve log: ${code}`, { cause: error });
     }
     return await withFileLock("Dispatcher registry", config.registryPath, async () => {
+      let logFailed = false;
       const log =
         (source: string) =>
         (event: object): void => {
-          mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
-          appendFileSync(
-            adapterConfig.resolveLogPath,
-            `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
-          );
+          try {
+            mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
+            appendFileSync(
+              adapterConfig.resolveLogPath,
+              `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
+            );
+          } catch (error: unknown) {
+            // The resolve log is best effort: the entry point
+            // guarantees it exists, so a failure here names the errno
+            // code once per run and drops later failures silently.
+            if (logFailed) {
+              return;
+            }
+            logFailed = true;
+            const raw = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+            const code = typeof raw === "string" && /^E[A-Z]+$/.test(raw) ? raw : "unwritable";
+            console.error(`dispatch: resolve log: ${code}`);
+          }
         };
       const dispatcherLog = log("dispatcher");
       const adapterLog = log("adapter");

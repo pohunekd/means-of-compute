@@ -1,8 +1,6 @@
 // dispatch:resolve command (53c): parse --request, run resolve through
-// the runtime, print the outcome as one JSON line. Flag and precondition
-// errors exit 2 without opening the runtime; port and state failures exit
-// 3 with one line. The command never opens the port, the meter, or the
-// adapter itself: the cli composition owns the runtime.
+// the runtime, print the outcome as one JSON line. Flag errors exit 2
+// without opening the runtime; precondition errors exit 2.
 import { FileLockError } from "../fs/lock.js";
 import {
   DispatchPreconditionError,

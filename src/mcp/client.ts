@@ -147,23 +147,17 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
     } catch {
       // The server may already have exited; closing stdin adds nothing.
     }
-    let exited = false;
-    try {
-      await Promise.race([
-        proc.exited.then(() => {
-          exited = true;
-        }),
-        new Promise<void>((resolve) => {
-          setTimeout(() => {
-            resolve();
-          }, 1000);
-        }),
-      ]);
-    } catch {
-      // Waiting for the child adds no new failure mode.
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (!exited) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      proc.exited.then(() => "exited" as const),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => {
+          resolve("timeout");
+        }, options.clientTimeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (outcome === "timeout") {
       try {
         proc.kill("SIGKILL");
       } catch {

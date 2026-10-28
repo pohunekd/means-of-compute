@@ -113,13 +113,12 @@ export function checkApprovals(value: unknown, path: string): ApprovalsDocument 
         `${label}: request id "${request.requestId}" does not match seq ${String(request.seq)}`,
       );
     }
-    if (request.state === "pending" !== (request.decision === null)) {
+    if ((request.state === "pending") !== (request.decision === null)) {
       throw new ApprovalsDataError(
         `${label}: request "${request.requestId}" state "${request.state}" disagrees with its decision`,
       );
     }
-    const seqs =
-      request.decision === null ? [request.seq] : [request.seq, request.decision.seq];
+    const seqs = request.decision === null ? [request.seq] : [request.seq, request.decision.seq];
     for (const seq of seqs) {
       if (seen.has(seq)) {
         throw new ApprovalsDataError(`${label}: duplicate seq ${String(seq)}`);

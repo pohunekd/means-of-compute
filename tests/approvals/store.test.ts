@@ -2,7 +2,7 @@
 // the pending cap, the no-change rule, pause ordering by decision seq,
 // rejected pause and the merge match on all three fields.
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -131,14 +131,14 @@ function approvedDoc(): ApprovalsDocument {
 
 test("an older approved resume with a higher decision seq wins (A5)", async () => {
   const path = requestsPath();
-  Bun.write(path, JSON.stringify(approvedDoc()));
+  writeFileSync(path, JSON.stringify(approvedDoc()));
   const doc = await readApprovals(path);
   expect(fleetPause(doc)).toEqual({ paused: false, pausedBy: null });
 });
 
 test("a rejected pause leaves the fleet running (A6)", async () => {
   const path = requestsPath();
-  Bun.write(
+  writeFileSync(
     path,
     JSON.stringify({
       schemaVersion: "v1",
@@ -164,7 +164,7 @@ test("a rejected pause leaves the fleet running (A6)", async () => {
 
 test("approvedMerge with another headSha is null (A7)", async () => {
   const path = requestsPath();
-  Bun.write(
+  writeFileSync(
     path,
     JSON.stringify({
       schemaVersion: "v1",

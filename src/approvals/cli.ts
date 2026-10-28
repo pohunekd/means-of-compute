@@ -3,11 +3,7 @@
 // only main opens /dev/tty (AM3-4), after resolving the request line the
 // terminal prints.
 import { open } from "node:fs/promises";
-import {
-  APPROVALS_CONFIG_PATH,
-  loadApprovalsConfig,
-  type ApprovalsConfig,
-} from "./config.js";
+import { APPROVALS_CONFIG_PATH, loadApprovalsConfig, type ApprovalsConfig } from "./config.js";
 import { decideRequest } from "./decide.js";
 import {
   ApprovalsBusyError,
@@ -19,22 +15,10 @@ import {
 } from "./store.js";
 
 export interface ApprovalsCliDeps {
-  confirm(prompt: string): Promise<string>;
-  now(): Date;
-  out(line: string): void;
-  err(line: string): void;
-}
-
-function flagValue(args: readonly string[], flag: string): string | null {
-  const index = args.indexOf(flag);
-  if (index === -1) {
-    return null;
-  }
-  const raw = args[index + 1];
-  if (raw === undefined || raw.startsWith("--")) {
-    throw new Error(`approvals: ${flag} needs a value`);
-  }
-  return raw;
+  readonly confirm: (prompt: string) => Promise<string>;
+  readonly now: () => Date;
+  readonly out: (line: string) => void;
+  readonly err: (line: string) => void;
 }
 
 function lineOf(request: ApprovalRequest): string {
@@ -215,7 +199,7 @@ async function confirmFromTty(requestLine: string, prompt: string): Promise<stri
   }
 }
 
-async function requestLineFor(argv: readonly string[]): Promise<string> {
+export async function requestLineFor(argv: readonly string[]): Promise<string> {
   const parsed = parseDecide(argv);
   const config = await loadApprovalsConfig(parsed.configPath);
   const doc = await readApprovals(config.requestsPath);
@@ -226,8 +210,7 @@ async function requestLineFor(argv: readonly string[]): Promise<string> {
   return lineOf(request);
 }
 
-async function main(): Promise<number> {
-  const argv = Bun.argv.slice(2);
+export async function runApprovalsMain(argv: readonly string[]): Promise<number> {
   const shell: Omit<ApprovalsCliDeps, "confirm"> = {
     now: () => new Date(),
     out: (line: string): void => {
@@ -238,12 +221,9 @@ async function main(): Promise<number> {
     },
   };
   if (argv[0] !== "decide") {
-    return runApprovalsCli(argv, {
-      ...shell,
-      confirm: async (): Promise<string> => {
-        throw new Error("approvals: confirm is unavailable for this command");
-      },
-    });
+    const unavailable = (): Promise<string> =>
+      Promise.reject(new Error("approvals: confirm is unavailable for this command"));
+    return runApprovalsCli(argv, { ...shell, confirm: unavailable });
   }
   let requestLine: string;
   try {
@@ -253,10 +233,10 @@ async function main(): Promise<number> {
     console.error(message.startsWith("approvals") ? message : `approvals: ${message}`);
     return 2;
   }
-  return runApprovalsCli(argv, {
-    ...shell,
-    confirm: (prompt: string): Promise<string> => confirmFromTty(requestLine, prompt),
-  });
+  const ttyConfirm = (prompt: string): Promise<string> => confirmFromTty(requestLine, prompt);
+  return runApprovalsCli(argv, { ...shell, confirm: ttyConfirm });
 }
 
-process.exitCode = await main();
+if (import.meta.main) {
+  process.exitCode = await runApprovalsMain(Bun.argv.slice(2));
+}

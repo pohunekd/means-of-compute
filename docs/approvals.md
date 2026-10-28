@@ -42,8 +42,8 @@ code, message}`:
 1. A pending request with the same `tool` and
    `argsSha256 = sha256Hex(canonicalJson(args))` exists: return `existing`.
 2. `tool === "pause_fleet"` and `fleetPause(doc).paused === (args.action ===
-   "pause")`: return `no-change`, message `"fleet is already
-   <paused|running>"`.
+"pause")`: return `no-change`, message `"fleet is already
+<paused|running>"`.
 3. The pending count is at least `maxPending`: return `too-many-pending`,
    message `"<n> requests already pending"`.
 4. Otherwise append `{seq: nextSeq, state:"pending", decision:null}`, then
@@ -70,7 +70,7 @@ request whose state is `approved` and whose `args` match all three, else
   pending request: `{requestId, tool, args, caller, requestedAt}`. The
   human's terminal shows the reason here and nowhere else. Exit 0.
 - `bun run approvals:decide <requestId> (--approve|--reject) --author
-  <handle> [--config <path>]`: exactly one of `--approve` and `--reject`
+<handle> [--config <path>]`: exactly one of `--approve` and `--reject`
   is required; `--author` must be in `operators`; the request must exist;
   the request prints to `/dev/tty`, then one line is read from `/dev/tty`
   after the prompt `Type <requestId> to <approve|reject>: `. Without a
@@ -81,7 +81,7 @@ request whose state is `approved` and whose `args` match all three, else
   `refused unknown-request`; an already decided request with the same state
   and author is `unchanged`, otherwise `refused already-decided`; a
   pending request becomes `decided` with `decision {seq: nextSeq, author,
-  decidedAt}`, then `nextSeq + 1`.
+decidedAt}`, then `nextSeq + 1`.
 - Exit codes: 0 decided or unchanged; 2 for usage, config, `/dev/tty`
   unavailable, unknown request, a data error or a write failure; 3 for a
   mismatched confirmation, an already-decided request, or a busy lock.

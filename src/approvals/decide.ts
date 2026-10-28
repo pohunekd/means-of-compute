@@ -46,10 +46,7 @@ export async function decideRequest(
       }
       const current = doc.requests[index] as ApprovalRequest;
       if (current.state !== "pending") {
-        if (
-          current.state === input.decision &&
-          current.decision?.author === input.author
-        ) {
+        if (current.state === input.decision && current.decision?.author === input.author) {
           return { kind: "unchanged", request: current };
         }
         return { kind: "refused", code: "already-decided" };

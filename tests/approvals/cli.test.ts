@@ -64,9 +64,10 @@ function deps(confirm: (prompt: string) => Promise<string>): {
 } {
   const out: string[] = [];
   const err: string[] = [];
+  const answer = (prompt: string): Promise<string> => confirm(prompt);
   return {
     deps: {
-      confirm,
+      confirm: answer,
       now: fixedNow(),
       out: (line: string): void => {
         out.push(line);
@@ -121,7 +122,7 @@ test("list prints one JSON line per pending request", async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);
-    const seen = deps(async () => requestId);
+    const seen = deps(() => Promise.resolve(requestId));
     const rc = await runApprovalsCli(["list", "--config", harness.config], seen.deps);
     expect(rc).toBe(0);
     expect(seen.out).toHaveLength(1);
@@ -144,7 +145,7 @@ test("decide with a matching confirmation approves the request", async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);
-    const seen = deps(async () => requestId);
+    const seen = deps(() => Promise.resolve(requestId));
     const rc = await runApprovalsCli(
       ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
       seen.deps,
@@ -165,7 +166,7 @@ test("confirm returns another text: exit 3, file bytes unchanged (A9)", async ()
   try {
     const requestId = await recordedId(harness);
     const before = await readFile(harness.requests, "utf8");
-    const seen = deps(async () => "req-009999");
+    const seen = deps(() => Promise.resolve("req-009999"));
     const rc = await runApprovalsCli(
       ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
       seen.deps,
@@ -193,7 +194,7 @@ test("--author intruder: exit 2 (A10)", async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);
-    const seen = deps(async () => requestId);
+    const seen = deps(() => Promise.resolve(requestId));
     const rc = await runApprovalsCli(
       ["decide", requestId, "--approve", "--author", "intruder", "--config", harness.config],
       seen.deps,
@@ -240,7 +241,7 @@ test("lock held by a subprocess: exit 3 (A11)", async () => {
     });
     try {
       await waitForLine(child, "holder ready");
-      const seen = deps(async () => requestId);
+      const seen = deps(() => Promise.resolve(requestId));
       const rc = await runApprovalsCli(
         ["decide", requestId, "--approve", "--author", "owner", "--config", config],
         seen.deps,
@@ -261,7 +262,7 @@ test("usage without --approve or --reject exits 2", async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);
-    const seen = deps(async () => requestId);
+    const seen = deps(() => Promise.resolve(requestId));
     const rc = await runApprovalsCli(
       ["decide", requestId, "--author", "owner", "--config", harness.config],
       seen.deps,
@@ -277,7 +278,7 @@ test("an unknown request id exits 2", async () => {
   const harness = await writeHarness();
   try {
     await recordedId(harness);
-    const seen = deps(async () => "req-009999");
+    const seen = deps(() => Promise.resolve("req-009999"));
     const rc = await runApprovalsCli(
       ["decide", "req-009999", "--approve", "--author", "owner", "--config", harness.config],
       seen.deps,

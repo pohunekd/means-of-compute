@@ -451,3 +451,58 @@ test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
   expect(logText).toContain('"event":"server-stop"');
   expect(logText).toContain('"reason":"stdout-closed"');
 });
+
+test("closing stdout stops queued calls with stdin open (I3)", async () => {
+  const env = await createMcpTestEnv("mcp-h5-open-");
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
+  await writeTestFile(env.registryPath, { sessions: [] });
+  // Stdout through `head -c 1` closes after one byte while stdin stays
+  // open, so the queued calls never start. The brace group records the
+  // server's own exit status: the pipeline rc alone only covers the head
+  // reader. The failure branch resolves `done`, so the server exits even
+  // though no EOF arrives; the wait below only bounds the test.
+  const rcfile = join(env.dir, "server.rc");
+  const closingCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | head -c 1`;
+  const proc = Bun.spawn(["sh", "-c", closingCmd], {
+    cwd: process.cwd(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const sink = proc.stdin as unknown as {
+    write(chunk: string): void;
+    end(): void;
+  };
+  let input = `${initLine(1)}\n`;
+  for (let id = 2; id <= 21; id += 1) {
+    input += `${callLine(id)}\n`;
+  }
+  sink.write(input);
+  // stdin stays open: the server must exit through the stdout error path
+  // alone. The wait bounds the test; the exit assertion proves the
+  // server did not hang on the open pipe.
+  const exited = await Promise.race([
+    proc.exited.then(() => true),
+    Bun.sleep(5000).then(() => false),
+  ]);
+  sink.end();
+  const [code, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stderr).text(),
+  ]);
+  await new Response(proc.stdout).text();
+  expect(exited).toBe(true);
+  expect(code).toBe(0);
+  const openServerRc = (await Bun.file(rcfile).text()).trim();
+  expect(openServerRc).toBe("0");
+  const logText = await Bun.file(env.callLogPath).text();
+  const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
+  expect(starts.length).toBeLessThanOrEqual(1);
+  expect(logText).toContain('"event":"server-stop"');
+  expect(logText).toContain('"reason":"stdout-closed"');
+});

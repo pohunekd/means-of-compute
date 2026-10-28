@@ -26,6 +26,7 @@ README.
    that package's output and validates it before placement sees it.
 3. The **dispatcher** starts a session on the chosen host through `DispatcherPort`,
    watches it, and reschedules the item when the host leaves or the session is lost.
+   See [dispatcher.md](dispatcher.md).
 4. The **auditor** checks the resulting branch against the item's DoD and posts a
    verdict bound to the commit SHA.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before

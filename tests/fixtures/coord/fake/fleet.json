@@ -1,1 +1,6 @@
-{"calls":[{"tool":"fleet_status","arguments":{}}],"exit":0,"hang":false,"exportFails":false}
+{
+  "calls": [{ "tool": "fleet_status", "arguments": {} }],
+  "exit": 0,
+  "hang": false,
+  "exportFails": false
+}

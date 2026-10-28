@@ -20,6 +20,9 @@ on the `DispatcherPort` interface, never on the adapter.
 - `cancel` (`src/dispatcher/dispatcher.ts` `cancel`) stops the session with a
   reason (`stall`, `host-left`, `user-returned`, `operator`) and returns the
   terminal result.
+- `resolve` (`src/dispatcher/dispatcher.ts` `resolve`) finishes a stuck request:
+  a provisional entry left behind by a transport failure, or a terminal entry
+  whose ledger line was never appended. See "Resolving a stuck request".
 - Lost detection: after `lostAfterUnreachable` (`config/dispatcher.json`
   `lostAfterUnreachable`) consecutive `wait` misses the
   dispatcher reports `lost` with detail `unreachable <n> times`
@@ -107,6 +110,36 @@ error exits 2 with one line `dispatch: <message>`
 (`src/dispatcher/cli.ts` `runDiff`). Every adapter event appends one JSON line
 `{"at": <ISO time>, ...event}` to `diffLogPath`, creating the parent
 directory; nothing from the adapter log reaches stdout or stderr.
+
+## Resolving a stuck request
+
+`resolve` finishes one request that neither `watch` nor `cancel` can move: a
+provisional entry left behind by a transport failure, or a terminal entry
+whose own ledger line was never appended. It runs under the item lock, so a
+concurrent `start`, `watch`, `cancel` or `resolve` waits for it. The outcome
+names which case ran:
+
+| First match | Port | Registry | Ledger | Returns |
+| --- | --- | --- | --- | --- |
+| `resolvedAt !== null` (already handled) | none | replays the unappended terminal line, if any | that replay's outcome, else none | `already-resolved` |
+| Provisional with nothing bound and nothing to release | none | keeps the entry | none | `resolved`, `from: "provisional"`, `state: "lost"` |
+| Terminal entry (K2/K4) | `release` over the request's host, then one write | marks `resolvedAt` | replays the unappended line first, if any | `resolved`, `from: "terminal"` |
+| Provisional otherwise (K1/K3) | `release`, then the meter closes the grant | exactly one new `lost` terminal with `resolvedAt` | exactly one new line, `entryId` `<item>:<requestId>` | `resolved`, `from: "provisional"`, `state: "lost"` |
+
+`resolvedAt` (`src/dispatcher/registry.ts` `RegistryEntryBase`) is `null` until
+`resolve` marks the entry, and stays set afterwards, so a second run is a
+no-op that never touches the port. A settled active entry is refused with
+`request-active`: `resolve` only handles entries `watch` cannot move. An
+unreachable host or a refused `release` keeps the entry: nothing is marked,
+nothing is appended, and the next run retries. A meter failure after the port
+was released is the same: the host is already clean, the next run finds
+nothing bound and appends the line.
+
+A refused `release` with `void-incomplete` leaves the sessions bound and the
+entry unresolved. That is the daemon refusing `stop` or `unbind`; the entry
+is safe to retry, but repeated `void-incomplete` needs the operator: clear
+the stuck sessions on the host out of band, then run `resolve` again, which
+finds nothing bound and finishes the entry.
 
 ## Host precondition
 

@@ -222,21 +222,33 @@ test("duplicate item id names rule (c) (S5)", () => {
   expect(message).toContain("rule (c)");
 });
 
-test("update with next bumps the revision and re-reads equal (S6)", async () => {
+test("update with next bumps the revision and re-reads equal (S6, L1)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "work-store-"));
   try {
     const path = join(dir, "work-items.json");
     await writeJson(path, { schemaVersion: "v1", revision: 0, items: [], submissions: [] });
     const before = await readWorkStore(path);
-    await updateWorkStore(path, (store) =>
+    const written = [item("a")];
+    const writtenSubmissions = [
+      {
+        submissionId: "sub-0123456789abcdef",
+        digest: `sha256:${"0".repeat(64)}`,
+        itemIds: ["a"],
+        caller: "coordinator",
+        submittedAt: "2026-10-28T00:00:00.000Z",
+      },
+    ];
+    await updateWorkStore(path, () =>
       Promise.resolve({
-        next: { items: [item("a")], submissions: store.submissions },
+        next: { items: written, submissions: writtenSubmissions },
         value: undefined,
       }),
     );
     const after = await readWorkStore(path);
     expect(after.revision).toBe(before.revision + 1);
     expect(after.items.map((entry) => entry.id)).toEqual(["a"]);
+    expect(after.items).toEqual(written);
+    expect(after.submissions).toEqual(writtenSubmissions);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

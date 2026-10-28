@@ -1,9 +1,9 @@
 {
   "id": "local",
-  "name": "Local OpenAI-compatible",
+  "name": "Local Meta open-weights model",
   "baseUrl": "http://localhost:11434/v1",
   "baseUrlEnv": "LOCAL_MODEL_BASE_URL",
-  "model": "local-model",
+  "model": "muse-glimmer-30b",
   "timeoutMs": 10000,
   "pricing": {
     "inputPer1M": 0,

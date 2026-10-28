@@ -26,6 +26,7 @@ import { loadDispatcherConfig } from "./config.js";
 import { loadPohunekAdapterConfig } from "./adapter/config.js";
 import { openPohunekPort, type AdapterLogEvent } from "./adapter/pohunek-port.js";
 import { runDiffCommand } from "./diff-command.js";
+import { runThenClose } from "./run-then-close.js";
 import { runResolveCommand } from "./resolve-command.js";
 import { createDispatcher, type ResolveOutcome } from "./dispatcher.js";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -270,37 +271,44 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
       const dispatcherLog = log("dispatcher");
       const adapterLog = log("adapter");
       const meterLog = log("meter");
+      const warn = (line: string): void => {
+        console.error(line);
+      };
       const port = await openPohunekPort(adapterConfig, adapterLog, process.env, null);
-      try {
-        const meter = await startMeter({
-          config: meterConfig,
-          env: meterEnv,
-          providers,
-          now: () => new Date(),
-          log: meterLog,
-          timers: systemTimers,
-          logIo: systemUsageLogIo,
-        });
-        try {
-          const dispatcher = createDispatcher({
-            port,
-            budget: {
-              admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
-            },
-            ledgerPath: ledgerConfig.ledgerPath,
-            config,
+      return await runThenClose(
+        async () => {
+          const meter = await startMeter({
+            config: meterConfig,
+            env: meterEnv,
+            providers,
             now: () => new Date(),
-            sleep: (ms) => Bun.sleep(ms),
-            log: dispatcherLog,
-            lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+            log: meterLog,
+            timers: systemTimers,
+            logIo: systemUsageLogIo,
           });
-          return await use((requestId) => dispatcher.resolve(requestId));
-        } finally {
-          await meter.close();
-        }
-      } finally {
-        await port.close();
-      }
+          return await runThenClose(
+            async () => {
+              const dispatcher = createDispatcher({
+                port,
+                budget: {
+                  admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
+                },
+                ledgerPath: ledgerConfig.ledgerPath,
+                config,
+                now: () => new Date(),
+                sleep: (ms) => Bun.sleep(ms),
+                log: dispatcherLog,
+                lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+              });
+              return await use((requestId) => dispatcher.resolve(requestId));
+            },
+            [{ name: "meter", close: () => meter.close() }],
+            warn,
+          );
+        },
+        [{ name: "port", close: () => port.close() }],
+        warn,
+      );
     });
   };
   try {

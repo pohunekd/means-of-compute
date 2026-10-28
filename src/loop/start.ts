@@ -76,7 +76,7 @@ async function writeLoopItem(statePath: string, id: string, next: LoopItem): Pro
 
 // The step the caller reports for a stored item: parked wins, then the
 // two live session phases, otherwise the item is idle to the scheduler.
-export function stepOf(li: LoopItem): StartStep {
+function stepOf(li: LoopItem): StartStep {
   if (li.park !== null) {
     return "parked";
   }
@@ -346,6 +346,37 @@ async function classifyWatch(ctx: StartContext, item: WorkItem, li: LoopItem): P
   return applyTerminal(ctx, item, stored, rid, o);
 }
 
+// On drift, cancel every live session of the item before the park.
+// A provisional entry holds no session, so it is never cancelled and
+// R6 reports it as an orphan. MeterUnavailableError is fatal;
+// PortUnreachableError keeps L at starting with the intent so the next
+// driveStart repeats the pre-check and the cancel; any other cancel
+// error skips that entry while the park still runs.
+async function cancelLiveSessions(ctx: StartContext, item: WorkItem): Promise<void> {
+  const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
+  for (const entry of entries) {
+    if (entry.workItemId !== item.id || entry.terminal !== null || entry.sessionId === null) {
+      continue;
+    }
+    try {
+      await ctx.dispatcher.cancel(entry.requestId, "operator");
+    } catch (error: unknown) {
+      if (error instanceof MeterUnavailableError) {
+        throw error;
+      }
+      if (error instanceof PortUnreachableError) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function parkDrift(ctx: StartContext, item: WorkItem): Promise<StartStep> {
+  await cancelLiveSessions(ctx, item);
+  await parkOperator(ctx, item, "request-drift");
+  return "parked";
+}
+
 // S2: drive one start for a starting item. On started with the stored
 // requestId the T3 write runs (S3); any other result follows D2, and the
 // A3 classifier replays drifted or unappended entries.
@@ -360,6 +391,18 @@ export async function driveStart(ctx: StartContext, item: WorkItem): Promise<Sta
   if (found !== undefined && found.terminal !== null) {
     return classifyWatch(ctx, item, li);
   }
+  const contents = await readLedger("Loop ledger", ctx.ledgerPath);
+  const derived = deriveStartRequest(
+    { ...item, status: "queued", branch: start.itemBranch },
+    start.decision,
+    { providerId: start.model.providerId, model: start.model.model },
+    start.brief,
+    ctx.dispatcherConfig,
+    contents,
+  );
+  if (derived.requestId !== start.requestId) {
+    return parkDrift(ctx, item);
+  }
   let outcome: Awaited<ReturnType<StartDispatcher["start"]>>;
   try {
     outcome = await ctx.dispatcher.start(
@@ -373,6 +416,18 @@ export async function driveStart(ctx: StartContext, item: WorkItem): Promise<Sta
       throw error;
     }
     if (error instanceof PortUnreachableError) {
+      try {
+        await cancelLiveSessions(ctx, item);
+      } catch (cancelError: unknown) {
+        if (cancelError instanceof MeterUnavailableError) {
+          throw cancelError;
+        }
+        if (!(cancelError instanceof PortUnreachableError)) {
+          throw cancelError;
+        }
+        await ctx.sleep(ctx.unreachableRetryMs);
+        return driveStart(ctx, item);
+      }
       await ctx.sleep(ctx.unreachableRetryMs);
       return driveStart(ctx, item);
     }
@@ -387,11 +442,11 @@ export async function driveStart(ctx: StartContext, item: WorkItem): Promise<Sta
       if (error.code === "request-unappended") {
         return classifyWatch(ctx, item, li);
       }
-      await parkStartError(ctx, item, error.code);
+      await parkOperator(ctx, item, error.code);
       return "parked";
     }
     if (error instanceof DispatchPreconditionError || error instanceof DispatchClockError) {
-      await parkStartError(
+      await parkOperator(
         ctx,
         item,
         error instanceof DispatchPreconditionError ? "precondition" : "clock",
@@ -415,8 +470,7 @@ export async function driveStart(ctx: StartContext, item: WorkItem): Promise<Sta
     });
   }
   if (outcome.request.requestId !== start.requestId) {
-    await parkStartError(ctx, item, "request-drift");
-    return "parked";
+    return parkDrift(ctx, item);
   }
   await applyStarted(ctx, item, li);
   return "running";
@@ -447,11 +501,6 @@ async function rejectStart(
     providerId: start.model.providerId,
     hostAlias: start.decision.chosenHostAlias,
   });
-}
-
-// The D2 operator path: one T12 with the dispatcher error code.
-async function parkStartError(ctx: StartContext, item: WorkItem, code: string): Promise<void> {
-  await parkOperator(ctx, item, code);
 }
 
 // S6: watch the running session. The guard drops the result when another

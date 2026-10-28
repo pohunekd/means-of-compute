@@ -107,16 +107,12 @@ test("a failed write latches and later logs write nothing and do not throw (C3)"
     });
     expect(log.failed()).toBe(false);
     log.log({ event: "ci", workItemId: "gh-moc-5" });
+    log.log({ event: "merged", workItemId: "gh-moc-6" });
     // Awaiting close drains the chain, so the latch is set with no
-    // wall-clock wait; the failed write rejects the chain, which close
-    // settles before reporting through failed().
+    // wall-clock wait: the second queued event must never reach the
+    // seam, because the latch tripped on the first write.
     await log.close();
     expect(log.failed()).toBe(true);
-    expect(seam.written()).toBe(1);
-    log.log({ event: "merged", workItemId: "gh-moc-6" });
-    // The second log ran through the drained chain with no new write:
-    // after the latch every later call writes nothing.
-    await log.close();
     expect(seam.written()).toBe(1);
     const { readFile } = await import("node:fs/promises");
     expect(await readFile(path, "utf8")).toBe("");

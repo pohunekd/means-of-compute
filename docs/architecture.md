@@ -41,10 +41,11 @@ README. At runtime every model call goes to a Meta model: the provider schema al
 The factory process runs a second `Bun.serve` listener for the
 operator dashboard: a loopback-only HTTP page rendered server-side from a
 pure model. Inputs are the ledger file, the verdict store, config prices
-and caps, the baseline config, and host observations from a
-`HostStateCollector` round of this request (`null` in PR 1, so Fleet state
-stays no-data). No probe, meter, placement, registry, or host-map module
-runs behind the page; nothing under `src/dashboard/` reads `hosts.json` or
+and caps, the baseline config, the dispatcher registry file (read-only,
+through `readRegistry`), and host observations from a `HostStateCollector`
+round of this request (`null` until a host-state adapter is wired, so Fleet
+state stays no-data). No probe, meter, placement, or host-map module runs
+behind the page; nothing under `src/dashboard/` reads `hosts.json` or
 `process.env`. The model is pure (no clock, no I/O) and the renderer
 emits static HTML: no client JavaScript, no auto-refresh, no external
 resource, no inline style (one hashed `<style>` block under a

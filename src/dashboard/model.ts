@@ -22,7 +22,6 @@ import {
 } from "./money.js";
 import type { Baselines } from "./config.js";
 import type { DashboardInputs, InputErrorCode, InputFailure } from "./inputs.js";
-import type { RegistryEntry } from "../dispatcher/registry.js";
 import { sessionsOf } from "../dispatcher/registry.js";
 import { latestOpenSession, latestSession, openSessionCount } from "./sessions.js";
 import type { HostObservation } from "../hoststate/collector.js";
@@ -214,10 +213,7 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
         textCell(observation.observedAt),
       ];
     }
-    const running =
-      observation.kind === "reported"
-        ? runningReportedFor(alias, observation.capacity.policy.maxConcurrentAgents)
-        : runningFor(alias);
+    const running = runningReportedFor(alias, observation.capacity.policy.maxConcurrentAgents);
     const state = observation.capacity.idle
       ? textCell("idle")
       : textCell(`not idle: ${observation.capacity.idleReason}`);

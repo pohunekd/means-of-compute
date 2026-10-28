@@ -6,8 +6,24 @@
   "idleTimeoutSec": 10,
   "workRowLimit": 50,
   "baselines": {
-    "frontierTokens": null,
-    "cloudSandboxHour": null,
-    "ownedHostHour": null
+    "frontierTokens": {
+      "label": "Claude Opus 5.5 list price (coordinator estimate)",
+      "inputPer1M": 4,
+      "outputPer1M": 20,
+      "source": "https://claude.com/pricing read 2026-10-28; standard tier, no cache or batch discount",
+      "asOf": "2026-10-28"
+    },
+    "cloudSandboxHour": {
+      "label": "GitHub Codespaces 4-core, compute only (coordinator estimate)",
+      "perHour": 0.36,
+      "source": "https://docs.github.com/en/billing/concepts/product-billing/github-codespaces read 2026-10-28; 0.09 USD per core-hour x 4 cores",
+      "asOf": "2026-10-28"
+    },
+    "ownedHostHour": {
+      "label": "Electricity at 140 W, upper bound (coordinator estimate)",
+      "perHour": 0.045,
+      "source": "140 W x 0.3211 USD/kWh, no hardware depreciation; Eurostat nrg_pc_204, Czechia band DC, 2026-S1, 0.2884 EUR/kWh incl. taxes; ECB 2026-10-28, 1 EUR = 1.1133 USD; Mac mini (M4 Pro) max 140 W, https://support.apple.com/en-us/103253 read 2026-10-28",
+      "asOf": "2026-10-28"
+    }
   }
 }

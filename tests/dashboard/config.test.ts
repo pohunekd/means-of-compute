@@ -92,12 +92,23 @@ describe("dashboard listen bind rule", () => {
 });
 
 describe("dashboard config keys", () => {
-  test("loads the committed config with null baselines", async () => {
+  test("loads the committed coordinator-estimate baselines", async () => {
     const config = await loadDashboardConfig();
     expect(config.listenEnv).toBe("MOC_DASHBOARD_LISTEN");
-    expect(config.baselines.frontierTokens).toBeNull();
-    expect(config.baselines.cloudSandboxHour).toBeNull();
-    expect(config.baselines.ownedHostHour).toBeNull();
+    expect(config.baselines.frontierTokens?.inputNanoPer1M).toBe(4_000_000_000n);
+    expect(config.baselines.frontierTokens?.outputNanoPer1M).toBe(20_000_000_000n);
+    expect(config.baselines.cloudSandboxHour?.nanoPerHour).toBe(360_000_000n);
+    expect(config.baselines.ownedHostHour?.nanoPerHour).toBe(45_000_000n);
+    for (const baseline of [
+      config.baselines.frontierTokens,
+      config.baselines.cloudSandboxHour,
+      config.baselines.ownedHostHour,
+    ]) {
+      expect(baseline?.asOf).toBe("2026-10-28");
+      expect(baseline?.label).toContain("coordinator estimate");
+      expect(baseline?.source).toContain("https://");
+      expect(baseline?.source).toContain("2026-10-28");
+    }
   });
 
   test("missing key throws naming the key (mutation: default a missing key)", async () => {

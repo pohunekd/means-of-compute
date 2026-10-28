@@ -10,13 +10,18 @@ import { loadProviderRoute } from "../../src/providers/route.js";
 import { providerDescriptorExists } from "../../src/providers/config.js";
 import { isWorkItem } from "../../contracts/v1/validate.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
-import { gatherInputs, type DashboardInputs } from "../../src/dashboard/inputs.js";
+import {
+  gatherInputs,
+  type DashboardInputs,
+  type InputErrorCode,
+} from "../../src/dashboard/inputs.js";
 import { buildDashboard, type Figure } from "../../src/dashboard/model.js";
 import { createCollector, type HostStateCollector } from "../../src/hoststate/collector.js";
 import { loadHostStateConfig } from "../../src/hoststate/config.js";
 import { createMemoryHostStatePort } from "../../src/hoststate/memory-port.js";
 
 const FIXTURE = "tests/fixtures/dashboard/ledger.jsonl";
+const REGISTRY = "tests/fixtures/dashboard/registry.json";
 const UNKNOWN = "tests/fixtures/dashboard/ledger-unknown.jsonl";
 const INVALID = "tests/fixtures/dashboard/ledger-invalid.jsonl";
 const VERDICTS = "tests/fixtures/dashboard/verdicts";
@@ -32,14 +37,16 @@ async function loadInputs(
   now = new Date("2026-10-27T12:00:00.000Z"),
   hostState: HostStateCollector | null = null,
   workRowLimit = 50,
+  registryPath = "",
+  log: (e: { input: string; code: InputErrorCode; message: string }) => void = () => {},
 ): Promise<DashboardInputs> {
   const budget = await loadBudgetConfig();
   const route = await loadProviderRoute("config/providers/route.json", providerDescriptorExists);
   const inputs = await gatherInputs(
-    { ledgerPath, verdictDir, hostState, registryPath: "" },
+    { ledgerPath, verdictDir, hostState, registryPath },
     { budget, route, baselines, workRowLimit, logPath: "logs/dashboard.jsonl" },
     now,
-    () => {},
+    log,
   );
   return inputs;
 }
@@ -248,6 +255,289 @@ describe("dashboard autonomy and work order 10.2 (mutation: sort by id; invented
       ["meta/muse-glimmer-30b", "4", "1", "0.2500"],
       ["muse-spark-1.3-contributor", "1", "1", "1.0000"],
     ]);
+  });
+
+  test("registry Work: d5-epsilon runs on desktop, d1-alpha picks the highest n (mutation: first entry; rule 4 before rule 3; registry activity ignored)", async () => {
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        REGISTRY,
+      ),
+    );
+    const work = model.panels[1] as (typeof model.panels)[number];
+    const table = work.tables[0] as (typeof work.tables)[number];
+    const ids = table.rows.map((cells) => (cells[0] as { text?: string }).text);
+    expect(ids).toEqual(["d5-epsilon", "d4-delta", "d3-gamma", "d1-alpha", "d2-beta"]);
+    expect(table.note).toBe("showing 5 of 5 items");
+    const byId = new Map(
+      table.rows.map((cells) => [(cells[0] as { text?: string }).text ?? "", cells]),
+    );
+    const cellText = (row: readonly { kind: string; text?: string }[], column: number): string => {
+      const cell = row[column];
+      if (cell === undefined || cell.kind !== "text") {
+        throw new Error(`work cell ${String(column)} is not text`);
+      }
+      return cell.text ?? "";
+    };
+    const epsilon = byId.get("d5-epsilon");
+    if (epsilon === undefined) {
+      throw new Error("missing d5-epsilon row");
+    }
+    expect(cellText(epsilon as never, 1)).toBe("running");
+    expect(epsilon[2]).toEqual({ kind: "aliases", aliases: ["desktop"] });
+    expect(cellText(epsilon as never, 3)).toBe("moc/d5-epsilon");
+    expect(cellText(epsilon as never, 4)).toBe("nvidia-build/meta/muse-glimmer-30b");
+    expect(cellText(epsilon as never, 5)).toBe("none");
+    expect(cellText(epsilon as never, 6)).toBe("2026-10-27T11:55:00.000Z");
+    const alpha = byId.get("d1-alpha");
+    if (alpha === undefined) {
+      throw new Error("missing d1-alpha row");
+    }
+    expect(cellText(alpha as never, 1)).toBe("done");
+    expect(alpha[2]).toEqual({ kind: "aliases", aliases: ["laptop-a"] });
+    expect(cellText(alpha as never, 3)).toBe("moc/d1-alpha");
+    expect(cellText(alpha as never, 4)).toBe("meta-api/muse-spark-1.3-contributor");
+    const delta = byId.get("d4-delta");
+    if (delta === undefined) {
+      throw new Error("missing d4-delta row");
+    }
+    expect(delta[3]).toEqual({ kind: "no-data", reason: "no session" });
+    expect(delta[4]).toEqual({ kind: "no-data", reason: "no session" });
+  });
+
+  async function writeRegistry(dir: string, sessions: unknown[]): Promise<string> {
+    await mkdir(dir, { recursive: true });
+    const path = `${dir}/registry.json`;
+    await writeFile(path, JSON.stringify({ sessions }), "utf8");
+    return path;
+  }
+
+  async function fixtureSessions(): Promise<unknown[]> {
+    return (JSON.parse(await Bun.file(REGISTRY).text()) as { sessions: unknown[] }).sessions;
+  }
+
+  test("registry rules 2 and 4: starting beats a record, failed picks laptop-c, provisional counts (mutation: rule order; n as strings; skipped aliases or provisional)", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-registry-rules-");
+    try {
+      const sessions = await fixtureSessions();
+      const e2 = { ...(sessions[2] as Record<string, unknown>) };
+      const a = {
+        ...e2,
+        requestId: "d3-gamma:2",
+        workItemId: "d3-gamma",
+        hostAlias: "laptop-b",
+        branch: "moc/d3-gamma",
+        sessionId: null,
+        worktree: null,
+        cursor: null,
+        lastSeenState: "starting",
+        startedAt: "2026-10-27T11:40:00.000Z",
+        lastSeenAt: "2026-10-27T11:40:00.000Z",
+        revision: 0,
+      };
+      const e0 = sessions[0] as Record<string, unknown>;
+      const b = {
+        ...(sessions[2] as Record<string, unknown>),
+        requestId: "d6-zeta:9",
+        workItemId: "d6-zeta",
+        hostAlias: "laptop-b",
+        branch: "moc/d6-zeta",
+        sessionId: "sentinel-session-9",
+        cancelReason: "operator",
+        startedAt: "2026-10-27T06:00:00.000Z",
+        lastSeenAt: "2026-10-27T06:10:00.000Z",
+        terminal: {
+          ...(e0["terminal"] as Record<string, unknown>),
+          state: "cancelled",
+          observedAt: "2026-10-27T06:30:00.000Z",
+        },
+      };
+      const c = {
+        ...b,
+        requestId: "d6-zeta:10",
+        hostAlias: "laptop-c",
+        sessionId: "sentinel-session-10",
+        cancelReason: null,
+        startedAt: "2026-10-27T07:00:00.000Z",
+        lastSeenAt: "2026-10-27T07:10:00.000Z",
+        terminal: {
+          ...(e0["terminal"] as Record<string, unknown>),
+          state: "failed",
+          observedAt: "2026-10-27T07:30:00.000Z",
+        },
+      };
+      const registryPath = await writeRegistry(dir, [...sessions, a, b, c]);
+      const model = buildDashboard(
+        await loadInputs(
+          FIXTURE,
+          VERDICTS,
+          {
+            frontierTokens: null,
+            cloudSandboxHour: null,
+            ownedHostHour: null,
+          },
+          new Date("2026-10-27T12:00:00.000Z"),
+          null,
+          50,
+          registryPath,
+        ),
+      );
+      const work = model.panels[1] as (typeof model.panels)[number];
+      const table = work.tables[0] as (typeof work.tables)[number];
+      const byId = new Map(
+        table.rows.map((cells) => [(cells[0] as { text?: string }).text ?? "", cells]),
+      );
+      const gamma = byId.get("d3-gamma");
+      if (gamma === undefined) {
+        throw new Error("missing d3-gamma row");
+      }
+      expect((gamma[1] as { text?: string }).text).toBe("starting");
+      const zeta = byId.get("d6-zeta");
+      if (zeta === undefined) {
+        throw new Error("missing d6-zeta row");
+      }
+      expect((zeta[1] as { text?: string }).text).toBe("session failed");
+      expect(zeta[2]).toEqual({ kind: "aliases", aliases: ["laptop-c"] });
+      const fleet = model.panels[0] as (typeof model.panels)[number];
+      const fleetTable = fleet.tables[0] as (typeof fleet.tables)[number];
+      const running = new Map(
+        fleetTable.rows.map((cells) => [
+          (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
+          cells[3],
+        ]),
+      );
+      expect(running.get("laptop-b")).toEqual({ kind: "text", text: "1" });
+      expect(running.get("laptop-c")).toEqual({ kind: "text", text: "0" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("registry leading zero: every running cell errors and d1-alpha keeps the ledger (mutation: accept 01; no session on failure)", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-registry-zero-");
+    try {
+      const sessions = await fixtureSessions();
+      const entries = sessions.map((entry) => ({ ...(entry as Record<string, unknown>) }));
+      const e1 = entries[1] as Record<string, unknown>;
+      e1["requestId"] = "d1-alpha:01";
+      const registryPath = await writeRegistry(dir, entries);
+      const logs: { input: string; code: InputErrorCode; message: string }[] = [];
+      const inputs = await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        registryPath,
+        (e) => {
+          logs.push(e);
+        },
+      );
+      expect(inputs.registry.ok).toBe(false);
+      expect(logs.length).toBe(1);
+      expect(logs[0]?.input).toBe("registry");
+      expect(logs[0]?.code).toBe("registry-invalid");
+      expect(logs[0]?.message).toContain("d1-alpha:01");
+      const model = buildDashboard(inputs);
+      const fleet = model.panels[0] as (typeof model.panels)[number];
+      const fleetTable = fleet.tables[0] as (typeof fleet.tables)[number];
+      for (const row of fleetTable.rows) {
+        expect(row[3]).toEqual({ kind: "error", code: "registry-invalid" });
+      }
+      const work = model.panels[1] as (typeof model.panels)[number];
+      const table = work.tables[0] as (typeof work.tables)[number];
+      expect(table.note).toBe("showing 4 of 4 items");
+      const row = table.rows.find((cells) => (cells[0] as { text?: string }).text === "d1-alpha");
+      if (row === undefined) {
+        throw new Error("missing d1-alpha row");
+      }
+      expect((row[1] as { text?: string }).text).toBe("done");
+      expect(row[2]).toEqual({ kind: "aliases", aliases: ["laptop-a"] });
+      expect(row[3]).toEqual({ kind: "error", code: "registry-invalid" });
+      expect(row[4]).toEqual({ kind: "error", code: "registry-invalid" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("registry id mismatch: group 1 must equal workItemId (mutation: skip the check)", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-registry-mismatch-");
+    try {
+      const sessions = await fixtureSessions();
+      const entries = sessions.map((entry) => ({ ...(entry as Record<string, unknown>) }));
+      (entries[2] as Record<string, unknown>)["workItemId"] = "d1-alpha";
+      const registryPath = await writeRegistry(dir, entries);
+      const inputs = await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        registryPath,
+      );
+      expect(inputs.registry.ok).toBe(false);
+      if (inputs.registry.ok) {
+        throw new Error("expected a registry failure");
+      }
+      expect(inputs.registry.failure).toEqual({ kind: "error", code: "registry-invalid" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("registry unreadable and invalid files map to one code each (mutation: one code for every Error)", async () => {
+    const dir = await mkdtemp("/tmp/dashboard-registry-codes-");
+    try {
+      const logs: { input: string; code: InputErrorCode; message: string }[] = [];
+      const missing = await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        `${dir}/missing/registry.json`,
+        (e) => {
+          logs.push(e);
+        },
+      );
+      expect(missing.registry.ok).toBe(false);
+      if (missing.registry.ok) {
+        throw new Error("expected a registry failure");
+      }
+      expect(missing.registry.failure).toEqual({ kind: "error", code: "registry-unreadable" });
+      expect(logs.length).toBe(1);
+      expect(logs[0]?.input).toBe("registry");
+      const badPath = `${dir}/registry.json`;
+      await writeFile(badPath, "{}", "utf8");
+      const bad = await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        { frontierTokens: null, cloudSandboxHour: null, ownedHostHour: null },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        badPath,
+      );
+      expect(bad.registry.ok).toBe(false);
+      if (bad.registry.ok) {
+        throw new Error("expected a registry failure");
+      }
+      expect(bad.registry.failure).toEqual({ kind: "error", code: "registry-invalid" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("Work rows are in 10.2 activity order with verdict texts", async () => {
@@ -579,17 +869,146 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
       throw new Error("missing laptop-mac row");
     }
     expect(asText(unreachable[1] as never)).toBe("unavailable: unreachable");
-    // PR 1 running column: every row carries the dispatcher-registry
-    // no-data, including the missing (laptop-b) and unavailable
-    // (laptop-mac) branches (mutation: running copies missing or state).
-    for (const cells of rows.values()) {
-      expect(cells[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
-    }
+    // Empty registry path reads no entries: every reported row shows zero
+    // against its own capacity, so desktop shows "0 of 2". The missing
+    // (laptop-b) and unavailable (laptop-mac) branches show plain "0"
+    // (mutation: running copies missing or state).
+    expect(rows.get("desktop")?.[3]).toEqual({ kind: "text", text: "0 of 2" });
+    expect(rows.get("laptop-a")?.[3]).toEqual({ kind: "text", text: "0 of 1" });
+    expect(rows.get("laptop-b")?.[3]).toEqual({ kind: "text", text: "0" });
+    expect(rows.get("laptop-mac")?.[3]).toEqual({ kind: "text", text: "0" });
     // Every state goes through CAUSE_LABELS, never as the raw cause enum.
     expect(JSON.stringify(model)).not.toContain("host-unreachable");
   });
 
-  test("running stays no-data when the collector fails (mutation: running copies the failure)", async () => {
+  test("collector test with REGISTRY: running desktop 1 of 2, laptop-a 0 of 1, laptop-b 0, laptop-mac 0 (mutation: count terminal entries; ignore maxConcurrentAgents)", async () => {
+    const config = loadHostStateConfig("config/host-state.json");
+    const control = createMemoryHostStatePort(["desktop", "laptop-a", "laptop-mac"]);
+    const now = new Date("2026-10-27T12:00:00.000Z");
+    const desktop = JSON.parse(
+      (await Bun.file("contracts/v1/fixtures/host-capacity.json").text()).replace(
+        /"timestamp": "[^"]*"/,
+        `"timestamp": "${now.toISOString()}"`,
+      ),
+    ) as unknown;
+    const busy = JSON.parse(
+      (await Bun.file("contracts/v1/fixtures/host-capacity-busy.json").text()).replace(
+        /"timestamp": "[^"]*"/,
+        `"timestamp": "${now.toISOString()}"`,
+      ),
+    ) as unknown;
+    const identity = {
+      packageId: "moc.host-state",
+      version: "0.1.0",
+      digest: config.package.sourceDigest,
+    };
+    control.set("desktop", { kind: "reply", reply: { identity, stdout: JSON.stringify(desktop) } });
+    control.set("laptop-a", { kind: "reply", reply: { identity, stdout: JSON.stringify(busy) } });
+    control.set("laptop-mac", { kind: "fail", failure: "host-unreachable", code: null });
+    const collector = createCollector({
+      port: control.port,
+      config,
+      now: () => new Date(now.getTime()),
+      sleep: () => new Promise<void>(() => {}),
+      log: () => {},
+    });
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        now,
+        collector,
+        50,
+        REGISTRY,
+      ),
+    );
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const table = fleet.tables[0] as (typeof fleet.tables)[number];
+    const running = new Map(
+      table.rows.map((cells) => [
+        (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
+        cells[3],
+      ]),
+    );
+    expect(running.get("desktop")).toEqual({ kind: "text", text: "1 of 2" });
+    expect(running.get("laptop-a")).toEqual({ kind: "text", text: "0 of 1" });
+    expect(running.get("laptop-b")).toEqual({ kind: "text", text: "0" });
+    expect(running.get("laptop-mac")).toEqual({ kind: "text", text: "0" });
+  });
+
+  test("failing collector with REGISTRY: running desktop 1, every other row 0 (mutation: running copies the hosts failure)", async () => {
+    const failing: HostStateCollector = {
+      collect: () => Promise.reject(new Error("boom")),
+    };
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        new Date("2026-10-27T12:00:00.000Z"),
+        failing,
+        50,
+        REGISTRY,
+      ),
+    );
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const table = fleet.tables[0] as (typeof fleet.tables)[number];
+    const running = new Map(
+      table.rows.map((cells) => [
+        (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
+        cells[3],
+      ]),
+    );
+    expect(running.get("desktop")).toEqual({ kind: "text", text: "1" });
+    for (const [alias, cell] of running) {
+      if (alias !== "desktop") {
+        expect(cell).toEqual({ kind: "text", text: "0" });
+      }
+    }
+  });
+
+  test("hostState null with REGISTRY: running desktop 1, every other row 0 (mutation: running copies the missing state)", async () => {
+    const model = buildDashboard(
+      await loadInputs(
+        FIXTURE,
+        VERDICTS,
+        {
+          frontierTokens: null,
+          cloudSandboxHour: null,
+          ownedHostHour: null,
+        },
+        new Date("2026-10-27T12:00:00.000Z"),
+        null,
+        50,
+        REGISTRY,
+      ),
+    );
+    const fleet = model.panels[0] as (typeof model.panels)[number];
+    const table = fleet.tables[0] as (typeof fleet.tables)[number];
+    const running = new Map(
+      table.rows.map((cells) => [
+        (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
+        cells[3],
+      ]),
+    );
+    expect(running.get("desktop")).toEqual({ kind: "text", text: "1" });
+    for (const [alias, cell] of running) {
+      if (alias !== "desktop") {
+        expect(cell).toEqual({ kind: "text", text: "0" });
+      }
+    }
+  });
+
+  test("empty registry reports zero running when the collector fails (mutation: running copies the failure)", async () => {
     const failing: HostStateCollector = {
       collect: () => Promise.reject(new Error("boom")),
     };
@@ -609,16 +1028,16 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
     const fleet = model.panels[0] as (typeof model.panels)[number];
     const table = fleet.tables[0] as (typeof fleet.tables)[number];
     for (const row of table.rows) {
-      expect(row[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
+      expect(row[3]).toEqual({ kind: "text", text: "0" });
     }
   });
 
-  test("running stays no-data with hostState null (mutation: running copies the missing state)", async () => {
+  test("empty registry reports zero running with hostState null (mutation: running copies the missing state)", async () => {
     const model = buildDashboard(await loadInputs(FIXTURE));
     const fleet = model.panels[0] as (typeof model.panels)[number];
     const table = fleet.tables[0] as (typeof fleet.tables)[number];
     for (const row of table.rows) {
-      expect(row[3]).toEqual({ kind: "no-data", reason: "dispatcher registry not wired" });
+      expect(row[3]).toEqual({ kind: "text", text: "0" });
     }
   });
 

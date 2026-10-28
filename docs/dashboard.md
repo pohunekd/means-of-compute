@@ -16,12 +16,13 @@ dashboard in this issue.
 ## Run
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>]
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>]
 MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
 ```
 
 - `--ledger` defaults to the `ledgerPath` of `config/ledger.json`.
 - `--verdicts` defaults to the `verdictDir` of `config/auditor.json`.
+- `--registry` defaults to the `registryPath` of `config/dispatcher.json`.
 - Each flag is optional and allowed at most once; the value is the next
   argument and must exist and not start with `--`. A repeat, an unknown
   flag, a positional argument or a missing value exits 2.
@@ -70,12 +71,12 @@ inside `baselines`; any failure exits 2 naming the key.
 
 ## Baselines
 
-The committed baselines are `null`. No number is invented: until the owner
-supplies values, Savings shows "no data" with the source
-`config/dashboard.json baselines.<key>` and the reason
-`no <key> baseline in config/dashboard.json`. Each set baseline must carry
-a `label`, a `source` the owner can re-check, and an `asOf` date; the
-rendered citation repeats all three with the exact price.
+The committed baselines are coordinator estimates (ruling 6478327690). Each
+entry carries a `label`, a `source` the owner can re-check, and an `asOf`
+date; the rendered citation repeats all three with the exact price. A `null`
+baseline still gives `no data (no <key> baseline in
+config/dashboard.json)` with the source `config/dashboard.json
+baselines.<key>`.
 
 ## Panels
 
@@ -106,7 +107,11 @@ unavailable host (labels: `unreachable`, `request timed out`,
 `free capacity` (reported hosts only): `CPU <n>% free, memory <free> of
 <total> MB free, <gpu>`, where `<gpu>` is `no GPU`,
 `GPU free memory unknown`, or `GPU <n> MB free`.
-`running`: `no data (dispatcher registry not wired)` in this issue.
+`running`: the `registry-invalid` or `registry-unreadable` failure when the
+registry input fails; otherwise `n`, the number of registry entries with
+`terminal === null` for that alias. With a `reported` capacity the cell is
+`` `<n> of <capacity.policy.maxConcurrentAgents>` `` with grouped digits,
+otherwise `` `<n>` ``.
 `observed`: the observation time, or the same failure/no-data as `state`.
 
 ### Work
@@ -115,21 +120,37 @@ One table, caption `Work`, columns
 `item, status, host, branch, model, verdicts, last activity`.
 Source: `work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md`.
 
-Rows are the union of ledger record and pending `workItemId`s, sorted by
-latest activity (ISO `finishedAt`) descending, then id ascending, truncated
-to `workRowLimit`.
+Rows are the union of ledger record and pending `workItemId`s plus registry
+`workItemId`s when the registry is ok, sorted by latest activity descending,
+then id ascending, truncated to `workRowLimit`. Activity is the maximum
+`Date.parse` over the item's record `finishedAt`, pending `finishedAt`
+and, when the registry is ok, registry `startedAt`, `lastSeenAt` and
+`terminal.observedAt`; it is `null` when none exists.
 
 ### Status rule (Work)
 
 1. A known work item shows its status (plus reason when set).
-2. Otherwise the ledger decides: `done` for a `success` record, `blocked`
-   for a `blocked` record, else `session ended, not finalized` for pending
-   entries.
+2. A registry entry for the id has `terminal === null`: the value is that
+   entry's `lastSeenState` (`starting` or `running`), taken from the open
+   entry with the highest `n`.
+3. A ledger record exists: `done` when `result === "success"`, `blocked`
+   when `result === "blocked"`.
+4. Registry entries exist and all are terminal: `` `session
+<terminal.state>` `` of the entry with the highest `n`.
+5. Pending entries exist: `session ended, not finalized`.
 
-`host` lists the item's session aliases, or `no data (no session)`.
-`branch` shows `WorkItem.branch` when set, else
-`no data (dispatcher registry not wired)`. `model` is
-`no data (dispatcher registry not wired)` in this issue. `verdicts` lists
+When none matches, the row came only from a failed source and the cell is
+that failure. Rules 2 and 4 apply only when the registry is ok; registry
+aliases and work item ids are skipped when the registry fails.
+
+`host` is the `aliases` cell of the highest-`n` registry entry's
+`hostAlias`, else the sorted unique aliases of the item's record
+`sessionSeconds` and pending sessions, or `no data (no session)`. `branch`
+is the highest-`n` entry's `branch`, else the non-null `WorkItem.branch`,
+else `no data (no session)` when the registry is ok, else the registry
+failure. `model` is `` `<providerId>/<model>` `` of the highest-`n` entry,
+else `no data (no session)` when the registry is ok, else the registry
+failure. `verdicts` lists
 every verdict in store order as
 `<sha12> by <auditor>: high <h>, medium <m>, low <l>`, or
 `<sha12>: invalid (counts disagree)` when the counts disagree;
@@ -226,6 +247,7 @@ Never a partial sum.
 | `logPath` parent missing or not writable                                                     | exit 2                                           | none                                                                     |
 | `config/budget.json`, route, route or NVIDIA descriptors                                     | exit 2 (existing loader texts)                   | none                                                                     |
 | `config/ledger.json`, `config/auditor.json` (no flag given)                                  | exit 2                                           | none                                                                     |
+| `config/dispatcher.json` (no `--registry` given)                                             | exit 2                                           | none                                                                     |
 | ledger absent with parent present                                                            | empty contents                                   | counts 0, spend `$0.0000`                                                |
 | ledger parent missing, unreadable, or not a file                                             | `error ledger-unreadable`, logged                | every ledger cell `error (ledger-unreadable)`                            |
 | ledger line invalid, duplicate, unterminated                                                 | `error ledger-invalid`, logged                   | every ledger cell `error (ledger-invalid)`                               |
@@ -237,9 +259,12 @@ Never a partial sum.
 | verdict file unreadable or invalid                                                           | `error verdicts-unreadable` for that row, logged | that row only                                                            |
 | verdict counts disagree with the findings                                                    | that verdict part                                | `<sha12>: invalid (counts disagree)`                                     |
 | `hostState === null`                                                                         | no-data                                          | `no data (host state not wired)`                                         |
-| `collect()` rejects with an `Error`                                                          | `error fleet-round-failed`, logged               | Fleet state, capacity and observed cells (`running` stays no-data)       |
+| `collect()` rejects with an `Error`                                                          | `error fleet-round-failed`, logged               | Fleet state, capacity and observed cells (`running` from the registry)   |
 | one host unavailable                                                                         | its observation                                  | `unavailable: <label>`                                                   |
-| alias seen only in ledger                                                                    | no observation                                   | `no data (not in this collector round)`                                  |
+| alias seen only in ledger or registry                                                        | no observation                                   | `no data (not in this collector round)`                                  |
+| registry absent with parent present                                                          | empty contents                                   | `running` `0`                                                            |
+| registry invalid or a bad `requestId`                                                        | `error registry-invalid`, logged                 | `error (registry-invalid)`, logged, registry cells                       |
+| registry unreadable                                                                          | `error registry-unreadable`, logged              | `error (registry-unreadable)`                                            |
 | work items                                                                                   | `null`                                           | `no data (no work item source (#15, #17))`                               |
 | Host header not allowed or missing                                                           | 421                                              | none                                                                     |
 | method not `GET`                                                                             | 405                                              | none                                                                     |
@@ -251,5 +276,6 @@ Never a partial sum.
 ## Privacy
 
 Hosts appear by alias only, never by hostname or address. The page carries
-no sentinel text, address fragment, or fixed `host-` prefix. The verdict
+no sentinel text, address fragment, or fixed `host-` prefix. Registry
+paths, session ids, cursors, details and repo are never shown. The verdict
 list shows counts per head SHA, never finding texts.

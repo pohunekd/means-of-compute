@@ -13,6 +13,7 @@ const REPO_ROOT = join(import.meta.dir, "..", "..");
 const SERVE_SCRIPT = join(REPO_ROOT, "src", "factory", "serve.ts");
 const LEDGER_FIXTURE = join(REPO_ROOT, "tests", "fixtures", "dashboard", "ledger.jsonl");
 const VERDICTS_FIXTURE = join(REPO_ROOT, "tests", "fixtures", "dashboard", "verdicts");
+const REGISTRY_FIXTURE = join(REPO_ROOT, "tests", "fixtures", "dashboard", "registry.json");
 const READY = /^factory: dashboard listening \(dashboard\) port (\d+)$/;
 const PINNED_NOW = "2026-10-27T12:00:00.000Z";
 
@@ -117,7 +118,16 @@ describe("dashboard serve D1 (mutation: bind the wildcard; print the address in 
   test("serves the five panels with the 10.2 values, then exits 0 on SIGTERM", async () => {
     const dir = await makeSandbox();
     const proc = Bun.spawn(
-      ["bun", SERVE_SCRIPT, "--ledger", LEDGER_FIXTURE, "--verdicts", VERDICTS_FIXTURE],
+      [
+        "bun",
+        SERVE_SCRIPT,
+        "--ledger",
+        LEDGER_FIXTURE,
+        "--verdicts",
+        VERDICTS_FIXTURE,
+        "--registry",
+        REGISTRY_FIXTURE,
+      ],
       { cwd: dir, stdout: "pipe", stderr: "pipe", env: serveEnv(dir, {}) },
     );
     try {
@@ -150,20 +160,28 @@ describe("dashboard serve D1 (mutation: bind the wildcard; print the address in 
         "d3-gamma",
         "d1-alpha",
         "d2-beta",
-        "showing 4 of 4 items",
+        "showing 5 of 5 items",
         "no data (host state not wired)",
-        "no data (dispatcher registry not wired)",
+        "moc/d5-epsilon",
+        "nvidia-build/meta/muse-glimmer-30b",
+        "meta-api/muse-spark-1.3-contributor",
       ]) {
         expect(page).toContain(value);
       }
+      expect(page).not.toContain("showing 4 of 4 items");
+      const d5 = page.indexOf("d5-epsilon");
       const d4 = page.indexOf("d4-delta");
       const d3 = page.indexOf("d3-gamma");
       const d1 = page.indexOf("d1-alpha");
       const d2 = page.indexOf("d2-beta");
-      expect(d4).toBeGreaterThan(-1);
+      expect(d5).toBeGreaterThan(-1);
+      expect(d4).toBeGreaterThan(d5);
       expect(d3).toBeGreaterThan(d4);
       expect(d1).toBeGreaterThan(d3);
       expect(d2).toBeGreaterThan(d1);
+      expect(page).toMatch(
+        /<td class="value">desktop<\/td><td class="nodata">no data \(host state not wired\)<\/td><td class="nodata">no data \(host state not wired\)<\/td><td class="value">1<\/td>/,
+      );
       proc.kill("SIGTERM");
       expect(await proc.exited).toBe(0);
       expect(await new Response(proc.stderr as ReadableStream).text()).toContain(
@@ -225,13 +243,36 @@ describe("dashboard serve D1 (mutation: bind the wildcard; print the address in 
         ["bun", SERVE_SCRIPT, "--ledger", LEDGER_FIXTURE, "--ledger", LEDGER_FIXTURE],
         { cwd: dir, stdout: "pipe", stderr: "pipe", env: serveEnv(dir, {}) },
       );
-      const [stderr, code] = await Promise.all([
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout as ReadableStream).text(),
         new Response(proc.stderr as ReadableStream).text(),
         proc.exited,
       ]);
       expect(code).toBe(2);
+      expect(stdout).toBe("");
       expect(stderr).toContain("factory: ");
       expect(stderr).toContain("--ledger given twice");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  test("repeated --registry exits 2 with factory: (mutation: last flag wins)", async () => {
+    const dir = await makeSandbox();
+    try {
+      const proc = Bun.spawn(
+        ["bun", SERVE_SCRIPT, "--registry", REGISTRY_FIXTURE, "--registry", REGISTRY_FIXTURE],
+        { cwd: dir, stdout: "pipe", stderr: "pipe", env: serveEnv(dir, {}) },
+      );
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout as ReadableStream).text(),
+        new Response(proc.stderr as ReadableStream).text(),
+        proc.exited,
+      ]);
+      expect(code).toBe(2);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("factory: ");
+      expect(stderr).toContain("--registry given twice");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -289,7 +330,16 @@ describe("dashboard serve D2 (mutation: money figure without a price citation)",
   test("every $ figure cites per 1M, per hour or config/budget.json", async () => {
     const dir = await makeSandbox();
     const proc = Bun.spawn(
-      ["bun", SERVE_SCRIPT, "--ledger", LEDGER_FIXTURE, "--verdicts", VERDICTS_FIXTURE],
+      [
+        "bun",
+        SERVE_SCRIPT,
+        "--ledger",
+        LEDGER_FIXTURE,
+        "--verdicts",
+        VERDICTS_FIXTURE,
+        "--registry",
+        REGISTRY_FIXTURE,
+      ],
       { cwd: dir, stdout: "pipe", stderr: "pipe", env: serveEnv(dir, {}) },
     );
     try {
@@ -324,7 +374,16 @@ describe("dashboard serve D3 (mutation: alias, address or finding text reaches t
   test("the served page is clean of host-, addresses and sentinel texts", async () => {
     const dir = await makeSandbox();
     const proc = Bun.spawn(
-      ["bun", SERVE_SCRIPT, "--ledger", LEDGER_FIXTURE, "--verdicts", VERDICTS_FIXTURE],
+      [
+        "bun",
+        SERVE_SCRIPT,
+        "--ledger",
+        LEDGER_FIXTURE,
+        "--verdicts",
+        VERDICTS_FIXTURE,
+        "--registry",
+        REGISTRY_FIXTURE,
+      ],
       { cwd: dir, stdout: "pipe", stderr: "pipe", env: serveEnv(dir, {}) },
     );
     try {

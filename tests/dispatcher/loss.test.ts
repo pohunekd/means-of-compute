@@ -664,7 +664,7 @@ test("no replay after finalize: watch returns unchanged and skips the ledger", a
   });
 });
 
-test("lost calls lostUsage before the registry write", async () => {
+test("lost calls settleUsage before the registry write", async () => {
   // The hook reads the registry inside itself through a fresh instance:
   // the terminal is still null while the hook runs, so the meter
   // settles before the first registry write.
@@ -726,7 +726,7 @@ test("lost calls lostUsage before the registry write", async () => {
   }
 });
 
-test("a provisional lost calls lostUsage with its requestId", async () => {
+test("a provisional lost calls settleUsage with its requestId", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-lost-prov-"));
   try {
     const ledgerPath = join(dir, "ledger.jsonl");

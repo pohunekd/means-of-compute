@@ -72,7 +72,7 @@ interface Harness {
   readonly config: DispatcherConfig;
   readonly control: ReturnType<typeof createMemoryPort>;
   readonly dispatcher: ReturnType<typeof createDispatcher>;
-  readonly lostUsageCalls: UsageCall[];
+  readonly settleUsageCalls: UsageCall[];
   readonly dir: string;
   readonly clock: { now: Date };
 }
@@ -102,7 +102,7 @@ async function withHarness(
     };
     const control = createMemoryPort();
     const clock = { now: new Date("2026-10-27T10:00:00.000Z") };
-    const lostUsageCalls: UsageCall[] = [];
+    const settleUsageCalls: UsageCall[] = [];
     let failLostUsage: Error | null = options.failLostUsageOnce ?? null;
     const dispatcher = createDispatcher({
       port: options.port ?? control.port,
@@ -113,7 +113,7 @@ async function withHarness(
       sleep: () => Promise.resolve(),
       log: () => undefined,
       settleUsage: (requestId: string): Promise<PortUsage | null> => {
-        lostUsageCalls.push({ requestId });
+        settleUsageCalls.push({ requestId });
         if (failLostUsage !== null) {
           const error = failLostUsage;
           failLostUsage = null;
@@ -129,7 +129,7 @@ async function withHarness(
         return Promise.resolve(null);
       },
     });
-    await body({ ledgerPath, config, control, dispatcher, lostUsageCalls, dir, clock });
+    await body({ ledgerPath, config, control, dispatcher, settleUsageCalls, dir, clock });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -171,7 +171,7 @@ function failUnreachableFirst(control: ReturnType<typeof createMemoryPort>): {
 test("R1 a provisional with nothing bound ends lost with one line", async () => {
   await withHarness(
     { advanceClockInLostUsageMs: 1000 },
-    async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
+    async ({ control, dispatcher, ledgerPath, settleUsageCalls, clock }) => {
       control.setUnreachable("laptop-a", true);
       let startError: unknown = null;
       try {
@@ -261,7 +261,7 @@ test("R1 a provisional with nothing bound ends lost with one line", async () => 
           result: "lost",
         },
       });
-      expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+      expect(settleUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
     },
   );
 });
@@ -271,7 +271,7 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
   const { port } = failUnreachableFirst(control);
   await withHarness(
     { port, advanceClockInLostUsageMs: 1000 },
-    async ({ dispatcher, ledgerPath, lostUsageCalls, dir, clock }) => {
+    async ({ dispatcher, ledgerPath, settleUsageCalls, dir, clock }) => {
       let startError: unknown = null;
       try {
         await dispatcher.start(
@@ -315,7 +315,7 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
       expect(lines).toHaveLength(1);
       expect((lines[0] as { entryId: string }).entryId).toBe("demo-item:demo-item:0");
       expect((lines[0] as { session: { result: string } }).session.result).toBe("lost");
-      expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+      expect(settleUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
       const retry = await dispatcher.start(
         queuedItem("demo-item") as never,
         decision("demo-item", "laptop-a") as never,
@@ -332,7 +332,7 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
 });
 
 test("R3 a watch-path lost is stopped with no second line", async () => {
-  await withHarness({}, async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
+  await withHarness({}, async ({ control, dispatcher, ledgerPath, settleUsageCalls, clock }) => {
     const started = await dispatcher.start(
       queuedItem("demo-item") as never,
       decision("demo-item", "laptop-a") as never,
@@ -376,7 +376,7 @@ test("R3 a watch-path lost is stopped with no second line", async () => {
     expect(afterEntry.terminal).toEqual(beforeEntry.terminal);
     expect(afterEntry.resolvedAt).toBe("2026-10-27T10:05:00.000Z");
     expect(afterEntry.revision).toBe(beforeEntry.revision + 1);
-    expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+    expect(settleUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
   });
 });
 
@@ -385,7 +385,7 @@ test("R4 a start-path lost releases its bound session", async () => {
   const { port } = failUnreachableFirst(control);
   await withHarness(
     { lostAfterUnreachable: 1, port },
-    async ({ dispatcher, ledgerPath, lostUsageCalls }) => {
+    async ({ dispatcher, ledgerPath, settleUsageCalls }) => {
       const started = await dispatcher.start(
         queuedItem("demo-item") as never,
         decision("demo-item", "laptop-a") as never,
@@ -405,7 +405,7 @@ test("R4 a start-path lost releases its bound session", async () => {
       });
       const lines = await readPending(ledgerPath);
       expect(lines).toHaveLength(1);
-      expect(lostUsageCalls).toHaveLength(1);
+      expect(settleUsageCalls).toHaveLength(1);
     },
   );
 });
@@ -413,7 +413,7 @@ test("R4 a start-path lost releases its bound session", async () => {
 test("R5 void-incomplete keeps the entry, then resolves", async () => {
   const control = createMemoryPort();
   const { port } = failUnreachableFirst(control);
-  await withHarness({ port }, async ({ dispatcher, ledgerPath, lostUsageCalls, dir }) => {
+  await withHarness({ port }, async ({ dispatcher, ledgerPath, settleUsageCalls, dir }) => {
     let startError: unknown = null;
     try {
       await dispatcher.start(
@@ -439,7 +439,7 @@ test("R5 void-incomplete keeps the entry, then resolves", async () => {
     const kept = await readRegistry(join(dir, "registry.json"));
     expect(kept).toEqual(before);
     expect(await readPending(ledgerPath)).toEqual([]);
-    expect(lostUsageCalls).toEqual([]);
+    expect(settleUsageCalls).toEqual([]);
     control.refuseRelease("laptop-a", null);
     const outcome = await dispatcher.resolve("demo-item:0");
     expect(outcome.outcome).toBe("resolved");
@@ -452,7 +452,7 @@ test("R5 void-incomplete keeps the entry, then resolves", async () => {
 });
 
 test("R6 an unreachable host keeps the entry", async () => {
-  await withHarness({}, async ({ control, dispatcher, ledgerPath, lostUsageCalls, dir }) => {
+  await withHarness({}, async ({ control, dispatcher, ledgerPath, settleUsageCalls, dir }) => {
     control.setUnreachable("laptop-a", true);
     let startError: unknown = null;
     try {
@@ -476,7 +476,7 @@ test("R6 an unreachable host keeps the entry", async () => {
     expect(thrown).toBeInstanceOf(PortUnreachableError);
     expect(await readRegistry(join(dir, "registry.json"))).toEqual(before);
     expect(await readPending(ledgerPath)).toEqual([]);
-    expect(lostUsageCalls).toEqual([]);
+    expect(settleUsageCalls).toEqual([]);
   });
 });
 

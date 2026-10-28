@@ -72,3 +72,11 @@ body files under the config dir, and `mergePull` pins the merge with
 `markerMatches`, `m1`, `mergeStep`, and `baseCheck`. They encode repo
 rules 1, 2, and 4: green checks, valid audit verdicts with matching
 markers, and pinned merges; rule 3 stays in PR 5.
+
+## Driver core (PR 5)
+
+`LoopItem` carries `retry`, `park`, `session` and `fallbackUsed`; rule (f) keeps parks on `idle` or `final` and ties a `blocked` park to a `blocked` finalize.
+`src/loop/log.ts` appends one JSON line per event through one chain and latches `failed()` on the first failed write.
+`src/loop/project.ts` projects every store field from the loop item and `reconcile` rewrites a differing item, reports `busy` on a held lock, and throws the rule (a) text on an unknown id. Rounds whose outcome routing is `excluded` never count toward `modelRouting.attempts`.
+`src/loop/rounds.ts` appends the round record, then the result line, logs `round-closed`, and returns the stall decision; `appendMissingResults` backfills missing lines.
+`src/loop/approvals-view.ts` re-reads the requests file on every call and reports the pause state and the merge triple match.

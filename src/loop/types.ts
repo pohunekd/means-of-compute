@@ -99,6 +99,18 @@ export interface LoopItem {
     | "finalizing"
     | "final";
   readonly round: number;
+  readonly retry: number;
+  readonly park: {
+    readonly kind: "stall" | "lost" | "operator" | "blocked";
+    readonly reason: string;
+    readonly code: string | null;
+  } | null;
+  readonly session: {
+    readonly hostAlias: string;
+    readonly providerId: string;
+    readonly model: string;
+  } | null;
+  readonly fallbackUsed: boolean;
   readonly start: StartIntent | null;
   readonly requestId: string | null;
   readonly pull: {

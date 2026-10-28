@@ -1,6 +1,6 @@
 // Loop state: the durable journal of the loop runner. Every write takes
 // the state lock, reads the file, applies the fold, checks the id shape
-// plus rules (b) to (e), and persists with one atomic write. Rule (a)
+// plus rules (b) to (f), and persists with one atomic write. Rule (a)
 // membership in the work store is checked by the later recovery slice.
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
@@ -154,6 +154,22 @@ function checkItemRules(state: LoopState, path: string): void {
           `${label}: rule (d): item "${id}" rounds are not strictly increasing`,
         );
       }
+    }
+    // Rule (f): a park means the item is idle or final, and blocked parks
+    // only land on items whose finalize result is blocked.
+    const park = record["park"] as { kind: "stall" | "lost" | "operator" | "blocked" } | null;
+    const finalize = record["finalize"] as { result: "success" | "blocked" } | null;
+    if (park !== null && phase !== "idle" && phase !== "final") {
+      throw new LoopStateDataError(
+        `${label}: rule (f): item "${id}" has phase "${phase}" with a park`,
+      );
+    }
+    const blockedPark = park !== null && park.kind === "blocked";
+    const blockedFinalize = finalize !== null && finalize.result === "blocked";
+    if (blockedPark !== blockedFinalize) {
+      throw new LoopStateDataError(
+        `${label}: rule (f): item "${id}" has park kind "${park === null ? String(park) : park.kind}" with finalize result "${finalize === null ? String(finalize) : finalize.result}"`,
+      );
     }
   }
 }

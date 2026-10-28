@@ -10,7 +10,7 @@ import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { DispatcherPort, StartRequest } from "../../src/dispatcher/port.js";
-import { PortRejectedError } from "../../src/dispatcher/port.js";
+import { PortRejectedError, PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import type { RegistryEntry } from "../../src/dispatcher/registry.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
@@ -514,6 +514,7 @@ test("driveStart on a refusing gate idles with a backoff (U5)", async () => {
     expect(li.backoffUntil).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
     expect(li.rounds).toHaveLength(0);
     expect(events.some((line) => line.startsWith("budget-refused:refused:spend"))).toBe(true);
+    expect(events.filter((line) => line.startsWith("budget-refused:refused:"))).toHaveLength(1);
   });
 });
 
@@ -549,6 +550,7 @@ test("driveStart on a failing gate logs budget-gate-error (U5)", async () => {
     const li = await readItem(ctx.statePath);
     expect(li.backoffUntil).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
     expect(events.some((line) => line.startsWith("budget-refused:budget-gate-error:"))).toBe(true);
+    expect(events.filter((line) => line.startsWith("budget-refused:budget-gate-error:"))).toHaveLength(1);
     expect(await readRegistry(registryPath)).toHaveLength(0);
   });
 });
@@ -883,8 +885,16 @@ test("a post-start drift cancels the started session (U9c)", async () => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
     const control = createMemoryPort();
+    let starts = 0;
+    const counting: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
     const inner = createDispatcher({
-      port: control.port,
+      port: counting,
       budget: GATE,
       ledgerPath,
       config: configOf(registryPath),
@@ -908,6 +918,7 @@ test("a post-start drift cancels the started session (U9c)", async () => {
     await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
     const step = await driveStart(ctx, item());
     expect(step).toBe("parked");
+    expect(starts).toBe(1);
     const li = await readItem(ctx.statePath);
     expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
     const entries = await readRegistry(registryPath);
@@ -976,6 +987,82 @@ test("a drifted cancel before a crash parks with no live entry (U9d)", async () 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ requestId: "gh-demo-1:1" });
     expect(entries[0]?.terminal?.state).toBe("cancelled");
+  });
+});
+
+// U9e: the U9b setup with a port whose first cancel rejects with
+// PortUnreachableError. The first driveStart returns "idle" and keeps L
+// starting with the same intent; the next driveStart cancels the live
+// entry and parks with request-drift.
+test("an unreachable drift cancel idles and the retry parks (U9e)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    let starts = 0;
+    let cancels = 0;
+    const flaky: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+      async cancel(ref, reason) {
+        cancels += 1;
+        if (cancels === 1) {
+          return Promise.reject(new PortUnreachableError("host host-a unreachable"));
+        }
+        return control.port.cancel(ref, reason);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: flaky,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const { ctx } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const stashed = await readItem(ctx.statePath);
+    const intent = stashed.start;
+    if (intent === null) {
+      throw new Error("U9e setup lost the start intent");
+    }
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+    const seeded = await dispatcher.start(
+      { ...item(), status: "queued", branch: null },
+      intent.decision,
+      intent.model,
+      intent.brief,
+    );
+    if (seeded.kind !== "started") {
+      throw new Error("U9e setup did not start a session");
+    }
+    expect(seeded.request.requestId).toBe("gh-demo-1:1");
+    await writeLoopState(ctx.statePath, { ...stashed, phase: "starting" });
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("idle");
+    const kept = await readItem(ctx.statePath);
+    expect(kept.phase).toBe("starting");
+    expect(kept.start?.requestId).toBe("gh-demo-1:0");
+    expect(kept.park).toBeNull();
+    const parked = await driveStart(ctx, item());
+    expect(parked).toBe("parked");
+    const li = await readItem(ctx.statePath);
+    expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
+    const entries = await readRegistry(registryPath);
+    const live = entries.find((entry) => entry.requestId === "gh-demo-1:1");
+    expect(live?.terminal?.state).toBe("cancelled");
+    expect(live?.cancelReason).toBe("operator");
+    expect(starts).toBe(1);
   });
 });
 
@@ -1147,7 +1234,7 @@ test("C19 replays the ledgered terminal without a port start (L52)", async () =>
   });
 });
 
-test("an unflagged ledgered replay appends one pending line (U15)", async () => {
+test("an unflagged ledgered replay keeps one pending line (U15)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
@@ -1193,8 +1280,9 @@ test("an unflagged ledgered replay appends one pending line (U15)", async () => 
   });
 });
 
-// Rows U10 to U13: the watcher terminal table, the timeout bound, the
-// rejected watch, and the S6 guard through the real dispatcher.
+// Rows U10 to U13 and U16: the watcher terminal table, the timeout
+// bound, the rejected watch, the S6 guard, and the unreachable retry
+// over a live orphan through the real dispatcher.
 test("watchSession publishes a finished session and closes a lost host (U10)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -1414,5 +1502,89 @@ test("watchSession drops a stale result under the S6 guard (U13)", async () => {
     expect(li.phase).toBe("idle");
     expect(li.park).toMatchObject({ kind: "operator", code: "pull-closed" });
     expect(li.rounds).toHaveLength(0);
+  });
+});
+
+// U16: a live orphan that no loop item names survives an unreachable T2.
+// The retry with the same intent starts normally; the orphan keeps
+// terminal null and no cancel reason, and the sleep ran once.
+test("an unreachable retry over a live orphan starts the same intent (U16)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const { briefSha256Of } = await import("../../src/dispatcher/dispatcher.js");
+    const { insertRegistryEntry } = await import("../../src/dispatcher/registry.js");
+    await insertRegistryEntry(registryPath, {
+      requestId: "gh-demo-1:0",
+      workItemId: "gh-demo-1",
+      repo: "example/demo",
+      hostAlias: "host-a",
+      branch: "moc/gh-demo-1",
+      baseRef: "origin/main",
+      resume: false,
+      model: { providerId: PROVIDER, model: PREFERRED },
+      briefSha256: briefSha256Of("Another brief."),
+      sessionId: "mem-orphan",
+      worktree: "/memory-worktrees/host-a/mem-orphan",
+      baseCommit: null,
+      startedAt: NOW,
+      cursor: null,
+      unreachableCount: 0,
+      lastSeenState: "starting",
+      lastSeenAt: NOW,
+      cancelReason: null,
+      terminal: null,
+      resolvedAt: null,
+      revision: 0,
+    });
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+    const control = createMemoryPort();
+    let starts = 0;
+    const flaky: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        if (starts === 1) {
+          return Promise.reject(new PortUnreachableError("host host-a unreachable"));
+        }
+        return control.port.start(request);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: flaky,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const sleeps: number[] = [];
+    const { ctx } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+      sleep: (ms: number) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const claimed = await readItem(ctx.statePath);
+    expect(claimed.start?.requestId).toBe("gh-demo-1:1");
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("running");
+    const li = await readItem(ctx.statePath);
+    expect(li.phase).toBe("running");
+    expect(li.requestId).toBe("gh-demo-1:1");
+    const entries = await readRegistry(registryPath);
+    const started = entries.find((entry) => entry.requestId === "gh-demo-1:1");
+    expect(started?.terminal).toBeNull();
+    expect(started?.sessionId).not.toBeNull();
+    const orphan = entries.find((entry) => entry.requestId === "gh-demo-1:0");
+    expect(orphan?.terminal).toBeNull();
+    expect(orphan?.cancelReason).toBeNull();
+    expect(sleeps).toEqual([5_000]);
   });
 });

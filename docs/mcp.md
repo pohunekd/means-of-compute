@@ -15,9 +15,10 @@ after call-end 1).
 
 Startup: parse args (`--caller` exactly once, `--config` at most once,
 default `config/mcp.json`), load the MCP config, require the caller in
-`callers`, load the work and dispatcher configs plus factory specs,
-`requireWritableTarget` for the call log and store paths,
-`requireInputDir` for the verdict dir, open the call log, append
+`callers`, load the work, dispatcher and approvals configs plus factory
+specs, `requireWritableTarget` for the call log, store and approval
+requests paths, `requireInputDir` for the verdict dir, open the call log,
+append
 `server-start`, print `mcp: serving as <caller>` to stderr. Any failure
 exits 2 with empty stdout. Stdout carries only JSON-RPC messages;
 diagnostics go to stderr; no `console.log` runs in a server file.
@@ -177,9 +178,12 @@ error it is `null`, because the call-end line already carries `code`.
 1. The sensitive handlers call only `recordRequest`. That function can
    create `pending` entries only and has no parameter for `state`.
 2. `decideRequest` lives in its own module, `src/approvals/decide.ts`.
-   Test X4 fails if any file under `src/mcp/` contains the text
-   `approvals/decide` or `writeFileAtomic`. The existing ESLint rule
-   already rejects a non-literal dynamic `import()`.
+   Test X4 collects the static and dynamic imports of every file under
+   `src/mcp/`, follows them transitively within `src/`, and fails if
+   `src/approvals/decide.ts` or `src/approvals/cli.ts` is reachable;
+   it also fails if any file under `src/mcp/` contains the text
+   `writeFileAtomic`. The existing ESLint rule already rejects a
+   non-literal dynamic `import()`.
 3. No tool reads `/dev/tty`, and there is no MCP method that decides.
 
 Residual gap, stated honestly. The requests file and the CLI belong to

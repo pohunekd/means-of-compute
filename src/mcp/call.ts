@@ -20,8 +20,21 @@ function flagValue(args: readonly string[], flag: string): string | null {
 }
 
 async function readArgsFile(path: string): Promise<unknown> {
-  if ((await statInputPath("mcp:call file", path)) === "absent") {
-    throw new ClientError(2, `mcp:call file ${path}: file is missing`);
+  try {
+    if ((await statInputPath("mcp:call file", path)) === "absent") {
+      throw new ClientError(2, `mcp:call file ${path}: file is missing`);
+    }
+  } catch (error: unknown) {
+    if (error instanceof ClientError) {
+      throw error;
+    }
+    throw new ClientError(
+      2,
+      `mcp:call file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
   let text: string;
   try {

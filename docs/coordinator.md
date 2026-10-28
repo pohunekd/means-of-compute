@@ -27,3 +27,19 @@ are exactly `JSON.stringify` with two-space indent. `.prettierignore`
 excludes `tests/fixtures/coord/prompt-*-expected.md`, so Prettier never
 rewrites the committed prompts; any new byte-exact `.md` fixture needs
 its own ignore line.
+
+## Launcher config and Muse argv
+
+`loadCoordConfig` reads `config/coordinator.json` with 19 required keys:
+`museCommand`, `providerId`, `model`, `contributorMode`, `approvalMode`,
+`envPassthrough`, `mcpConfigPath`, `budgetGateConfigPath`, `skillDir`,
+`runsDir`, `maxRunsPerDay`, `maxOutcomeChars`, `maxToolOutputBytes`,
+`killGraceMs`, `exportTimeoutMs`, `plan`, `react`, `watch` and `seed`.
+The provider and model stay pinned to `meta-api` and
+`muse-spark-1.3-contributor`. The config names the key variable only:
+`apiKeyEnv` comes from the provider descriptor and its value is never
+read. `envPassthrough` excludes `HOME`, `XDG_*` and the key variable.
+`museArgv` builds the `exec` command from the plan or react phase.
+`factoryEntry` runs `src/mcp/serve.ts` under bun with the coordinator
+caller. `exportArgv` builds the redacted `export` command. `readCoordCalls`
+returns null for an absent log, otherwise the coordinator call-ends.

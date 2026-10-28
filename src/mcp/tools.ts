@@ -5,6 +5,7 @@ import { loadDispatcherConfig } from "../dispatcher/config.js";
 import { readRegistry } from "../dispatcher/registry.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
+import { createAuditResultsTool, createListWorkTool } from "./read-tools.js";
 import type {
   ToolContext,
   ToolDefinition,
@@ -18,6 +19,7 @@ export type { ToolContext, ToolDefinition, ToolError, ToolOutcome, ToolPayload }
 export interface ToolPaths {
   readonly workConfigPath: string;
   readonly dispatcherConfigPath: string;
+  readonly auditorConfigPath?: string;
 }
 
 export function okPayload(fields: Record<string, unknown>): ToolPayload {
@@ -153,5 +155,5 @@ export function createFleetStatusTool(paths: ToolPaths): ToolDefinition {
 }
 
 export function createTools(paths: ToolPaths): readonly ToolDefinition[] {
-  return [createFleetStatusTool(paths)];
+  return [createFleetStatusTool(paths), createListWorkTool(paths), createAuditResultsTool(paths)];
 }

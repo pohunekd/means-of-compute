@@ -119,12 +119,12 @@ whose own ledger line was never appended. It runs under the item lock, so a
 concurrent `start`, `watch`, `cancel` or `resolve` waits for it. The outcome
 names which case ran:
 
-| First match | Port | Registry | Ledger | Returns |
-| --- | --- | --- | --- | --- |
-| `resolvedAt !== null` (already handled) | none | replays the unappended terminal line, if any | that replay's outcome, else none | `already-resolved` |
-| Provisional with nothing bound and nothing to release | none | keeps the entry | none | `resolved`, `from: "provisional"`, `state: "lost"` |
-| Terminal entry (K2/K4) | `release` over the request's host, then one write | marks `resolvedAt` | replays the unappended line first, if any | `resolved`, `from: "terminal"` |
-| Provisional otherwise (K1/K3) | `release`, then the meter closes the grant | exactly one new `lost` terminal with `resolvedAt` | exactly one new line, `entryId` `<item>:<requestId>` | `resolved`, `from: "provisional"`, `state: "lost"` |
+| First match                                           | Port                                              | Registry                                          | Ledger                                               | Returns                                            |
+| ----------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------- |
+| `resolvedAt !== null` (already handled)               | none                                              | replays the unappended terminal line, if any      | that replay's outcome, else none                     | `already-resolved`                                 |
+| Provisional with nothing bound and nothing to release | none                                              | keeps the entry                                   | none                                                 | `resolved`, `from: "provisional"`, `state: "lost"` |
+| Terminal entry (K2/K4)                                | `release` over the request's host, then one write | marks `resolvedAt`                                | replays the unappended line first, if any            | `resolved`, `from: "terminal"`                     |
+| Provisional otherwise (K1/K3)                         | `release`, then the meter closes the grant        | exactly one new `lost` terminal with `resolvedAt` | exactly one new line, `entryId` `<item>:<requestId>` | `resolved`, `from: "provisional"`, `state: "lost"` |
 
 `resolvedAt` (`src/dispatcher/registry.ts` `RegistryEntryBase`) is `null` until
 `resolve` marks the entry, and stays set afterwards, so a second run is a

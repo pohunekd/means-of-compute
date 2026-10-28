@@ -826,7 +826,12 @@ export function createDispatcher(deps: DispatcherDeps): {
             });
             throw error;
           }
-          const lost = await finishLost(provisional, count, `unreachable ${String(count)} times`, false);
+          const lost = await finishLost(
+            provisional,
+            count,
+            `unreachable ${String(count)} times`,
+            false,
+          );
           return { kind: "lost", requestId: request.requestId, ledger: lost.ledger };
         }
         if (error instanceof PortRejectedError) {
@@ -938,7 +943,15 @@ export function createDispatcher(deps: DispatcherDeps): {
         if (miss) {
           const count = current.unreachableCount + 1;
           if (count >= deps.config.lostAfterUnreachable) {
-            return { kind: "outcome" as const, outcome: await finishLost(current, count, `unreachable ${String(count)} times`, false) };
+            return {
+              kind: "outcome" as const,
+              outcome: await finishLost(
+                current,
+                count,
+                `unreachable ${String(count)} times`,
+                false,
+              ),
+            };
           }
           const persisted: RegistryEntry = {
             ...current,

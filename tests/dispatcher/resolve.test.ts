@@ -81,7 +81,10 @@ interface HarnessOptions {
   readonly port?: DispatcherPort;
 }
 
-async function withHarness(options: HarnessOptions, body: (h: Harness) => Promise<void>): Promise<void> {
+async function withHarness(
+  options: HarnessOptions,
+  body: (h: Harness) => Promise<void>,
+): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-resolve-"));
   try {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -134,9 +137,10 @@ async function readPending(ledgerPath: string): Promise<readonly PendingUsage[]>
   }
 }
 
-function failUnreachableFirst(
-  control: ReturnType<typeof createMemoryPort>,
-): { port: DispatcherPort; calls: { start: number } } {
+function failUnreachableFirst(control: ReturnType<typeof createMemoryPort>): {
+  port: DispatcherPort;
+  calls: { start: number };
+} {
   const calls = { start: 0 };
   const port: DispatcherPort = {
     ...control.port,
@@ -293,51 +297,52 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
 });
 
 test("R3 a watch-path lost is stopped with no second line", async () => {
-  await withHarness(
-    {},
-    async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
-      const started = await dispatcher.start(
-        queuedItem("demo-item") as never,
-        decision("demo-item", "laptop-a") as never,
-        MODEL,
-        "Do the work.",
-      );
-      if (started.kind !== "started") {
-        throw new Error("expected a started session");
-      }
-      control.setUnreachable("laptop-a", true);
-      clock.now = new Date("2026-10-27T10:05:00.000Z");
-      const lost = await dispatcher.watch("demo-item:0");
-      expect(lost.result.state).toBe("lost");
-      expect(lost.ledger).toBe("appended");
-      control.setUnreachable("laptop-a", false);
-      const before = await readRegistry(join(ledgerPath, "..", "registry.json"));
-      const linesBefore = await readPending(ledgerPath);
-      const outcome = await dispatcher.resolve("demo-item:0");
-      expect(outcome).toEqual({
-        requestId: "demo-item:0",
-        hostAlias: "laptop-a",
-        outcome: "resolved",
-        from: "terminal",
-        state: "lost",
-        stopped: ["mem-1"],
-        ledger: "none",
-      });
-      const linesAfter = await readPending(ledgerPath);
-      expect(linesAfter).toEqual(linesBefore);
-      const after = await readRegistry(join(ledgerPath, "..", "registry.json"));
-      expect(after).toHaveLength(1);
-      const beforeEntry = before[0];
-      const afterEntry = after[0];
-      if (beforeEntry?.terminal === null || beforeEntry?.terminal === undefined) {
-        throw new Error("expected a terminal before resolve");
-      }
-      expect(afterEntry?.terminal).toEqual(beforeEntry?.terminal);
-      expect(afterEntry?.resolvedAt).toBe("2026-10-27T10:05:00.000Z");
-      expect(afterEntry?.revision).toBe((beforeEntry?.revision ?? 0) + 1);
-      expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
-    },
-  );
+  await withHarness({}, async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
+    const started = await dispatcher.start(
+      queuedItem("demo-item") as never,
+      decision("demo-item", "laptop-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    control.setUnreachable("laptop-a", true);
+    clock.now = new Date("2026-10-27T10:05:00.000Z");
+    const lost = await dispatcher.watch("demo-item:0");
+    expect(lost.result.state).toBe("lost");
+    expect(lost.ledger).toBe("appended");
+    control.setUnreachable("laptop-a", false);
+    const before = await readRegistry(join(ledgerPath, "..", "registry.json"));
+    const linesBefore = await readPending(ledgerPath);
+    const outcome = await dispatcher.resolve("demo-item:0");
+    expect(outcome).toEqual({
+      requestId: "demo-item:0",
+      hostAlias: "laptop-a",
+      outcome: "resolved",
+      from: "terminal",
+      state: "lost",
+      stopped: ["mem-1"],
+      ledger: "none",
+    });
+    const linesAfter = await readPending(ledgerPath);
+    expect(linesAfter).toEqual(linesBefore);
+    const after = await readRegistry(join(ledgerPath, "..", "registry.json"));
+    expect(after).toHaveLength(1);
+    const beforeEntry = before[0];
+    const afterEntry = after[0];
+    if (
+      beforeEntry?.terminal === null ||
+      beforeEntry?.terminal === undefined ||
+      afterEntry?.terminal === undefined
+    ) {
+      throw new Error("expected terminals before and after resolve");
+    }
+    expect(afterEntry.terminal).toEqual(beforeEntry.terminal);
+    expect(afterEntry.resolvedAt).toBe("2026-10-27T10:05:00.000Z");
+    expect(afterEntry.revision).toBe(beforeEntry.revision + 1);
+    expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+  });
 });
 
 test("R4 a start-path lost releases its bound session", async () => {
@@ -441,7 +446,7 @@ test("R6 an unreachable host keeps the entry", async () => {
 });
 
 test("R7 a settled active entry is refused", async () => {
-  await withHarness({}, async ({ control, dispatcher, dir, ledgerPath }) => {
+  await withGatedHarness(new Set(["release"]), async ({ control, gate, dispatcher, dir }) => {
     const started = await dispatcher.start(
       queuedItem("demo-item") as never,
       decision("demo-item", "laptop-a") as never,
@@ -451,26 +456,6 @@ test("R7 a settled active entry is refused", async () => {
     if (started.kind !== "started") {
       throw new Error("expected a started session");
     }
-    const gate = gatePort(control.port, new Set(["release"]));
-    const clock = { now: new Date("2026-10-27T10:00:00.000Z") };
-    const gated = createDispatcher({
-      port: gate.port,
-      budget: GATE,
-      ledgerPath,
-      config: {
-        baseBranch: "main",
-        branchPrefix: "moc/",
-        waitTimeoutMs: 1000,
-        lostAfterUnreachable: 3,
-        unreachableBackoffMs: 0,
-        nonTerminalPauseMs: 0,
-        registryPath: join(dir, "registry.json"),
-      },
-      now: () => clock.now,
-      sleep: () => Promise.resolve(),
-      log: () => undefined,
-      lostUsage: () => Promise.resolve(null),
-    });
     const before = await readRegistry(join(dir, "registry.json"));
     let thrown: unknown = null;
     try {
@@ -685,11 +670,11 @@ test.each(["provisional-empty", "provisional-bound", "terminal"] as const)(
       const registryBefore = await readFile(registryPath, "utf8");
       const ledgerBefore = await readFile(ledgerPath, "utf8").catch(() => "");
       const gate = gatePort(control.port, new Set(["release"]));
-      const gated = makeDispatcher(gate.port);
+      const gatedDispatcher = makeDispatcher(gate.port);
       // The host stays unreachable: Q1 never touches the port, so the
       // second run is a no-op even with no host to talk to.
       control.setUnreachable("laptop-a", true);
-      const second = await gated.resolve("demo-item:0");
+      const second = await gatedDispatcher.resolve("demo-item:0");
       control.setUnreachable("laptop-a", false);
       expect(second.outcome).toBe("already-resolved");
       if (second.outcome !== "already-resolved") {
@@ -818,59 +803,60 @@ async function withGatedHarness(
 }
 
 test("J1 a start replay waits while resolve holds the lock across release", async () => {
-  await withGatedHarness(new Set(["release", "start"]), async ({ gate, dispatcher, ledgerPath }) => {
-    // The parked start runs the inner port (the session is bound), then
-    // the reply is dropped: the dispatcher keeps a provisional with a
-    // bound session, so resolve parks in port.release.
-    const setupStart = dispatcher.start(
-      queuedItem("demo-item") as never,
-      decision("demo-item", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    const parkedSetupStart = await gate.next("start");
-    await parkedSetupStart.releaseThenFail(
-      new PortUnreachableError("host laptop-a unreachable"),
-    );
-    let startError: unknown = null;
-    try {
-      await setupStart;
-    } catch (error: unknown) {
-      startError = error;
-    }
-    expect(startError).toBeInstanceOf(PortUnreachableError);
-    const resolvePromise = dispatcher.resolve("demo-item:0");
-    const parkedRelease = await gate.next("release");
-    const startsBefore = gate.calls("start");
-    const replayPromise = dispatcher.start(
-      queuedItem("demo-item") as never,
-      decision("demo-item", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    await Bun.sleep(10);
-    // The replay is parked on the item lock: no port.start runs while
-    // the release call is parked.
-    expect(gate.calls("start")).toBe(startsBefore);
-    await parkedRelease.release();
-    const parkedStart = await gate.next("start");
-    await parkedStart.release();
-    const resolved = await resolvePromise;
-    expect(resolved.outcome).toBe("resolved");
-    if (resolved.outcome !== "resolved") {
-      throw new Error("expected a resolved outcome");
-    }
-    expect(resolved.from).toBe("provisional");
-    const replayed = await replayPromise;
-    expect(replayed.kind).toBe("started");
-    if (replayed.kind !== "started") {
-      throw new Error("expected a started replay");
-    }
-    expect(replayed.request.requestId).toBe("demo-item:1");
-    const pending = await readPending(ledgerPath);
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.entryId).toBe("demo-item:demo-item:0");
-  });
+  await withGatedHarness(
+    new Set(["release", "start"]),
+    async ({ gate, dispatcher, ledgerPath }) => {
+      // The parked start runs the inner port (the session is bound), then
+      // the reply is dropped: the dispatcher keeps a provisional with a
+      // bound session, so resolve parks in port.release.
+      const setupStart = dispatcher.start(
+        queuedItem("demo-item") as never,
+        decision("demo-item", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+      const parkedSetupStart = await gate.next("start");
+      await parkedSetupStart.releaseThenFail(new PortUnreachableError("host laptop-a unreachable"));
+      let startError: unknown = null;
+      try {
+        await setupStart;
+      } catch (error: unknown) {
+        startError = error;
+      }
+      expect(startError).toBeInstanceOf(PortUnreachableError);
+      const resolvePromise = dispatcher.resolve("demo-item:0");
+      const parkedRelease = await gate.next("release");
+      const startsBefore = gate.calls("start");
+      const replayPromise = dispatcher.start(
+        queuedItem("demo-item") as never,
+        decision("demo-item", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+      await Bun.sleep(10);
+      // The replay is parked on the item lock: no port.start runs while
+      // the release call is parked.
+      expect(gate.calls("start")).toBe(startsBefore);
+      await parkedRelease.release();
+      const parkedStart = await gate.next("start");
+      await parkedStart.release();
+      const resolved = await resolvePromise;
+      expect(resolved.outcome).toBe("resolved");
+      if (resolved.outcome !== "resolved") {
+        throw new Error("expected a resolved outcome");
+      }
+      expect(resolved.from).toBe("provisional");
+      const replayed = await replayPromise;
+      expect(replayed.kind).toBe("started");
+      if (replayed.kind !== "started") {
+        throw new Error("expected a started replay");
+      }
+      expect(replayed.request.requestId).toBe("demo-item:1");
+      const pending = await readPending(ledgerPath);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.entryId).toBe("demo-item:demo-item:0");
+    },
+  );
 });
 
 test("J2 resolve waits while a start holds the lock across port.start", async () => {
@@ -902,37 +888,38 @@ test("J2 resolve waits while a start holds the lock across port.start", async ()
 });
 
 test("J3 two racing resolves give one resolved and one already-resolved", async () => {
-  await withGatedHarness(new Set(["release", "start"]), async ({ gate, dispatcher, ledgerPath }) => {
-    const setupStart = dispatcher.start(
-      queuedItem("demo-item") as never,
-      decision("demo-item", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    const parkedSetupStart = await gate.next("start");
-    await parkedSetupStart.releaseThenFail(
-      new PortUnreachableError("host laptop-a unreachable"),
-    );
-    let startError: unknown = null;
-    try {
-      await setupStart;
-    } catch (error: unknown) {
-      startError = error;
-    }
-    expect(startError).toBeInstanceOf(PortUnreachableError);
-    const firstPromise = dispatcher.resolve("demo-item:0");
-    const parkedFirst = await gate.next("release");
-    const secondPromise = dispatcher.resolve("demo-item:0");
-    await Bun.sleep(10);
-    // The second resolve waits on the item lock; only one release runs.
-    expect(gate.calls("release")).toBe(1);
-    await parkedFirst.release();
-    const first = await firstPromise;
-    const second = await secondPromise;
-    expect(first.outcome).toBe("resolved");
-    expect(second.outcome).toBe("already-resolved");
-    expect(await readPending(ledgerPath)).toHaveLength(1);
-  });
+  await withGatedHarness(
+    new Set(["release", "start"]),
+    async ({ gate, dispatcher, ledgerPath }) => {
+      const setupStart = dispatcher.start(
+        queuedItem("demo-item") as never,
+        decision("demo-item", "laptop-a") as never,
+        MODEL,
+        "Do the work.",
+      );
+      const parkedSetupStart = await gate.next("start");
+      await parkedSetupStart.releaseThenFail(new PortUnreachableError("host laptop-a unreachable"));
+      let startError: unknown = null;
+      try {
+        await setupStart;
+      } catch (error: unknown) {
+        startError = error;
+      }
+      expect(startError).toBeInstanceOf(PortUnreachableError);
+      const firstPromise = dispatcher.resolve("demo-item:0");
+      const parkedFirst = await gate.next("release");
+      const secondPromise = dispatcher.resolve("demo-item:0");
+      await Bun.sleep(10);
+      // The second resolve waits on the item lock; only one release runs.
+      expect(gate.calls("release")).toBe(1);
+      await parkedFirst.release();
+      const first = await firstPromise;
+      const second = await secondPromise;
+      expect(first.outcome).toBe("resolved");
+      expect(second.outcome).toBe("already-resolved");
+      expect(await readPending(ledgerPath)).toHaveLength(1);
+    },
+  );
 });
 
 test("J4 watch before and after resolve returns the same result", async () => {

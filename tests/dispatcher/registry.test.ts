@@ -87,7 +87,9 @@ test("resolvedAt is required", async () => {
   const dir = mkdtempSync(join(tmpdir(), "registry-schema-"));
   try {
     const path = join(dir, "registry.json");
-    const { resolvedAt: _omitted, ...withoutMarker } = provisionalEntry();
+    const { resolvedAt: _unused, ...withoutMarker } = provisionalEntry();
+    expect(_unused).toBeNull();
+    expect(withoutMarker).not.toHaveProperty("resolvedAt");
     let missingMessage = "";
     try {
       await insertRegistryEntry(path, withoutMarker as never);
@@ -106,7 +108,10 @@ test("resolvedAt is required", async () => {
     await insertRegistryEntry(nullPath, provisionalEntry({ resolvedAt: null }) as never);
     expect(await readRegistry(nullPath)).toHaveLength(1);
     const isoPath = join(dir, "registry-iso.json");
-    await insertRegistryEntry(isoPath, provisionalEntry({ resolvedAt: "2026-10-27T10:00:00.000Z" }) as never);
+    await insertRegistryEntry(
+      isoPath,
+      provisionalEntry({ resolvedAt: "2026-10-27T10:00:00.000Z" }) as never,
+    );
     expect(await readRegistry(isoPath)).toHaveLength(1);
   } finally {
     rmSync(dir, { recursive: true, force: true });

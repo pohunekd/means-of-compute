@@ -4,6 +4,8 @@ import type {
   DispatcherPort,
   PortState,
   PortUsage,
+  ReleaseRef,
+  ReleaseResult,
   SessionHandle,
   SessionRef,
   StartRequest,
@@ -14,6 +16,7 @@ import { PortRejectedError, PortUnreachableError } from "./port.js";
 
 export interface MemoryPortControl {
   readonly port: DispatcherPort;
+  refuseRelease(hostAlias: string, code: string | null): void;
   pushCommit(branch: string, sha: string): void;
   complete(
     sessionId: string,
@@ -222,7 +225,51 @@ export function createMemoryPort(): MemoryPortControl {
     return Promise.resolve();
   }
 
-  const port: DispatcherPort = { start, wait, diff, cancel, close };
+  const refusals = new Map<string, string>();
+
+  function refuseRelease(hostAlias: string, code: string | null): void {
+    if (code === null) {
+      refusals.delete(hostAlias);
+    } else {
+      refusals.set(hostAlias, code);
+    }
+  }
+
+  function releaseNow(ref: ReleaseRef): ReleaseResult {
+    checkReachable(ref.hostAlias);
+    const refused = refusals.get(ref.hostAlias);
+    if (refused !== undefined) {
+      throw new PortRejectedError(refused);
+    }
+    const ids: string[] = [];
+    const known = ref.sessionId === null ? undefined : sessions.get(ref.sessionId);
+    if (known !== undefined && known.handle.hostAlias === ref.hostAlias) {
+      ids.push(known.handle.sessionId);
+    }
+    const boundId = sessionByRequest.get(ref.requestId);
+    if (boundId !== undefined && !ids.includes(boundId)) {
+      const bound = sessions.get(boundId);
+      if (bound !== undefined && bound.handle.hostAlias === ref.hostAlias) {
+        ids.push(boundId);
+      }
+    }
+    for (const id of ids) {
+      const session = sessions.get(id);
+      if (session !== undefined && terminalOf(session) === null) {
+        settle(session, "cancelled", null, "released");
+      }
+    }
+    if (boundId !== undefined && ids.includes(boundId)) {
+      sessionByRequest.delete(ref.requestId);
+    }
+    return { sessionIds: ids };
+  }
+
+  function release(ref: ReleaseRef): Promise<ReleaseResult> {
+    return Promise.resolve().then(() => releaseNow(ref));
+  }
+
+  const port: DispatcherPort = { start, wait, diff, cancel, release, close };
 
   function pushCommit(branch: string, sha: string): void {
     // A push originates from a session worktree, so both the origin history
@@ -274,5 +321,5 @@ export function createMemoryPort(): MemoryPortControl {
     }));
   }
 
-  return { port, pushCommit, complete, loseHost, setUnreachable, sessions: list };
+  return { port, pushCommit, complete, loseHost, refuseRelease, setUnreachable, sessions: list };
 }

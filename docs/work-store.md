@@ -22,7 +22,8 @@ passes `isWorkItem`, item ids are unique, `submissionId`s are unique, every
 is a store item id, and `findCycle` is null. Items are never removed, so
 dependencies stay valid for later submissions. Writes also enforce rule
 (h), append-only: every stored item id stays present and every stored
-submission stays byte-equal at its index, checked on every write.
+submission stays equal under `canonicalJson` at its index (key order may
+change on disk), checked on every write.
 
 An absent file with an existing parent reads as revision 0 with no items.
 A missing parent, a non-file path, or an I/O error is a `WorkStoreDataError`.

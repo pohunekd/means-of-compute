@@ -3,6 +3,7 @@
     { "providerId": "meta-api", "model": "muse-spark-1.3-contributor" },
     { "providerId": "nvidia-build", "model": "meta/muse-glimmer-30b" }
   ],
+  "mergeAuditor": { "providerId": "meta-wonder", "model": "muse-wonder-1.0" },
   "verdictDir": "logs/verdicts",
   "maxDiffBytes": 200000,
   "maxFindings": 50,

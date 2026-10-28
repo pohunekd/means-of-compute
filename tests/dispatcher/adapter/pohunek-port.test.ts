@@ -232,6 +232,21 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
   }
 });
 
+test("the host preflight runs once per client (S1, R3-L1)", async () => {
+  const { fake, port } = setup();
+  try {
+    const first = await port.start(request());
+    expect(first.sessionId).toBe("fake-1");
+    const second = await port.start(request({ requestId: "req-2", branch: "moc/item-2" }));
+    expect(second.sessionId).toBe("fake-2");
+    expect(
+      methodNames(fake, "laptop-a").filter((method) => method === "host.inspect"),
+    ).toHaveLength(1);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("a thrown non-Error value rejects unchanged (L2)", async () => {
   const { fake, port } = setup();
   const throwing = {

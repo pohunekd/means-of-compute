@@ -158,6 +158,9 @@ test("a metered session records real counts", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: { code: string } }).error.code).toBe(
+        "grant-closed",
+      );
       expect(loopback.requests().length).toBe(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -215,6 +218,9 @@ test("a lost session gets metered usage and is revoked", async () => {
         },
       ];
       expect(outcome.result.usage?.tokens).toEqual(expected);
+      const contents = await readLedger("Test ledger", ledgerPath);
+      expect(contents.pending).toHaveLength(1);
+      expect(contents.pending[0]?.tokens).toEqual(expected);
       const refused = await fetch(meterUrl(meter), {
         method: "POST",
         headers: {
@@ -224,6 +230,9 @@ test("a lost session gets metered usage and is revoked", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: { code: string } }).error.code).toBe(
+        "grant-closed",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

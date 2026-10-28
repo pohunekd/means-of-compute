@@ -42,7 +42,9 @@ test("P1 replay opens twice and binds once", async () => {
     expect(second).toEqual(first);
     const lines = await readLogLines(logPath);
     expect(lines.filter((line) => line.includes('"kind":"grant-open"'))).toHaveLength(2);
-    expect(lines.filter((line) => line.includes('"kind":"grant-bind"'))).toHaveLength(1);
+    const binds = lines.filter((line) => line.includes('"kind":"grant-bind"'));
+    expect(binds).toHaveLength(1);
+    expect(JSON.parse(binds[0] as string).sessionId).toBe(first.sessionId);
     expect(control.sessions()).toHaveLength(1);
   });
 });
@@ -56,7 +58,18 @@ test("a terminal wait replaces the inner usage", async () => {
     const handle = await port.start(startReq());
     control.complete(handle.sessionId, {
       state: "finished",
-      usage: { tokens: [{ provider: "x", model: "y", inputTokens: 1 }] } as never,
+      usage: {
+        tokens: [
+          {
+            provider: "test-provider",
+            model: "test-model",
+            inputTokens: 5,
+            outputTokens: 6,
+            requests: 2,
+            source: "test-port",
+          },
+        ],
+      },
       detail: "x",
     });
     const result = await port.wait(

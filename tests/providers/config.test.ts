@@ -66,6 +66,16 @@ test("config: timeout override 600001 throws (mutation: larger literal)", async 
   }
 });
 
+test("config: descriptor with a non-allow-listed model throws naming the path and model (mutation: drop the enum)", async () => {
+  const result = await withDescriptor((descriptor) => {
+    descriptor["model"] = "other-vendor-model";
+  });
+  expect(result.code).toBe(1);
+  expect(result.output.trim()).toBe(
+    "Provider descriptor config/providers/meta-api.json: data/model must be equal to one of the allowed values",
+  );
+});
+
 test("config: valid descriptors load", async () => {
   const dir = await makeTempConfig();
   try {

@@ -108,7 +108,7 @@ test("a metered session records real counts", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+        settleUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       const started = await dispatcher.start(
         item() as never,
@@ -194,7 +194,7 @@ test("a lost session gets metered usage and is revoked", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+        settleUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       const started = await dispatcher.start(
         item() as never,
@@ -267,7 +267,7 @@ test("a provisional lost gets the measured zero row", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+        settleUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       const outcome = await dispatcher.start(
         item() as never,
@@ -322,7 +322,7 @@ test("a crash after settle replays to the same lost usage", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+        settleUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       let firstError: unknown;
       let requestId = "";

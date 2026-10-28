@@ -100,7 +100,7 @@ async function withHarness(body: (h: SettleHarness) => Promise<void>): Promise<v
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     await body({ dir, ledgerPath, registryPath, control, starts, gate, dispatcher });
   } finally {

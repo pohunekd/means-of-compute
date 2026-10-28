@@ -96,7 +96,7 @@ async function withCommandHarness(
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const stdout: string[] = [];
     const stderr: string[] = [];

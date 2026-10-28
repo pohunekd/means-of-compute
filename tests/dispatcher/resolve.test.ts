@@ -112,7 +112,7 @@ async function withHarness(
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: (requestId: string): Promise<PortUsage | null> => {
+      settleUsage: (requestId: string): Promise<PortUsage | null> => {
         lostUsageCalls.push({ requestId });
         if (failLostUsage !== null) {
           const error = failLostUsage;
@@ -574,7 +574,7 @@ test("R9 a lost entry with its line unappended is completed first", async () => 
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem("demo-item") as never,
@@ -696,7 +696,7 @@ test.each(["provisional-empty", "provisional-bound", "terminal"] as const)(
           now: () => clock.now,
           sleep: () => Promise.resolve(),
           log: () => undefined,
-          lostUsage: () => Promise.resolve(null),
+          settleUsage: () => Promise.resolve(null),
         });
       const control = createMemoryPort();
       const starter =
@@ -751,7 +751,7 @@ test("R11 a run after a crash before the append completes it", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     control.setUnreachable("laptop-a", true);
     let startError: unknown = null;
@@ -847,7 +847,7 @@ async function withGatedHarness(
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, registryPath, control, gate, dispatcher, clock, dir });
   } finally {

@@ -244,9 +244,9 @@ describe("stub github", () => {
       await pushEmpty(sandbox.seed, "moc/demo-f");
       await stub.createPull("factory/demo", "moc/demo-f", "main", "t", "b");
       const unknownSha = "0123456789012345678901234567890123456789";
-      const runs = await stub.checkRuns("factory/demo", unknownSha).catch(
-        (error: unknown) => error,
-      );
+      const runs = await stub
+        .checkRuns("factory/demo", unknownSha)
+        .catch((error: unknown) => error);
       expect(runs).toBeInstanceOf(GitHubError);
       expect((runs as GitHubError).kind).toBe("rejected");
       await git(sandbox.seed, ["push", "origin", ":refs/heads/moc/demo-f"]);
@@ -266,7 +266,10 @@ describe("stub github", () => {
     try {
       let failed: unknown = null;
       try {
-        createStubGitHub({ ...stubOptions(sandbox.origin, sandbox.scratchDir), scratchDir: "scratch/x" });
+        createStubGitHub({
+          ...stubOptions(sandbox.origin, sandbox.scratchDir),
+          scratchDir: "scratch/x",
+        });
       } catch (error: unknown) {
         failed = error;
       }

@@ -43,16 +43,16 @@ async function waitGone(pid: number): Promise<boolean> {
   }
 }
 
-// A fake git on PATH execs the real git except for one faked subcommand.
+// A fake git on PATH execs the real git except for the faked subcommand
+// named inside the script; the name argument only documents the test.
 async function fakeGitDir(
   realPath: string,
   subcommand: string,
   script: string,
 ): Promise<{ dir: string; fakePath: string }> {
-  const dir = await mkdtemp(join(tmpdir(), "fake-git-"));
+  const dir = await mkdtemp(join(tmpdir(), `fake-git-${subcommand}-`));
   await writeFile(join(dir, "git"), `#!/bin/sh\nREAL_GIT="${realPath}/git"\n${script}\n`, "utf8");
   await chmod(join(dir, "git"), 0o755);
-  void subcommand;
   return { dir, fakePath: `${dir}:${realPath}` };
 }
 
@@ -385,17 +385,23 @@ describe("git runner", () => {
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");
       const pidFile = join(repos.root, "step.pid");
-      const grandFile = join(repos.root, "grand.pid");
       const result = await trialMerge(
-        baseTrial(repos.factory, repos.root, base, head, [
+        baseTrial(
+          repos.factory,
+          repos.root,
+          base,
+          head,
           [
-            process.execPath,
-            "-e",
-            `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));` +
-              `require("node:child_process").spawn("sleep", ["30"], {detached: true, stdio: "ignore"}).unref();` +
-              `setInterval(() => {}, 1000)`,
+            [
+              process.execPath,
+              "-e",
+              `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));` +
+                `require("node:child_process").spawn("sleep", ["30"], {detached: true, stdio: "ignore"}).unref();` +
+                `setInterval(() => {}, 1000)`,
+            ],
           ],
-        ], { id: "demo-slow", timeoutMs: 3000 }),
+          { id: "demo-slow", timeoutMs: 3000 },
+        ),
       );
       expect(result.passed).toBe(false);
       if (!result.passed) {
@@ -406,7 +412,6 @@ describe("git runner", () => {
       trackedPids.push(pid);
       expect(await waitGone(pid)).toBe(true);
       expect(await worktreeCount(repos.factory)).toBe(1);
-      void grandFile;
     } finally {
       await repos.cleanup();
     }
@@ -466,9 +471,7 @@ describe("git runner", () => {
     const repos = await makeRepos();
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");
-      const trial = baseTrial(repos.factory, repos.root, base, head, [
-        ["moc-no-such-binary", "x"],
-      ]);
+      const trial = baseTrial(repos.factory, repos.root, base, head, [["moc-no-such-binary", "x"]]);
       const result = await trialMerge(trial);
       expect(result).toEqual({
         passed: false,
@@ -496,9 +499,14 @@ describe("git runner", () => {
     );
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");
-      const trial = baseTrial(repos.factory, repos.root, base, head, [
-        [process.execPath, "-e", "process.exit(0)"],
-      ], { id: "demo-deadline", timeoutMs: 1000, PATH: fake.fakePath });
+      const trial = baseTrial(
+        repos.factory,
+        repos.root,
+        base,
+        head,
+        [[process.execPath, "-e", "process.exit(0)"]],
+        { id: "demo-deadline", timeoutMs: 1000, PATH: fake.fakePath },
+      );
       const result = await trialMerge(trial);
       expect(result).toEqual({
         passed: false,
@@ -507,9 +515,7 @@ describe("git runner", () => {
         rc: null,
         cleanupFailed: false,
       });
-      const gone = await stat(join(trial.scratchDir, trial.id)).catch(
-        (error: unknown) => error,
-      );
+      const gone = await stat(join(trial.scratchDir, trial.id)).catch((error: unknown) => error);
       expect((gone as NodeJS.ErrnoException).code).toBe("ENOENT");
       expect(await worktreeCount(repos.factory)).toBe(1);
     } finally {

@@ -115,71 +115,60 @@ async function runStubGit(
     stderr: "pipe",
     detached: true,
   });
-  const outReader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-  const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-  const outText = (async (): Promise<string> => {
-    const chunks: Uint8Array[] = [];
-    try {
-      for (;;) {
-        const next = await outReader.read();
-        if (next.done) {
-          break;
-        }
-        if (next.value) {
-          chunks.push(next.value);
-        }
-      }
-    } finally {
-      outReader.releaseLock();
-    }
-    return Buffer.concat(chunks).toString("utf8");
-  })();
-  const errText = (async (): Promise<string> => {
-    const chunks: Uint8Array[] = [];
-    try {
-      for (;;) {
-        const next = await errReader.read();
-        if (next.done) {
-          break;
-        }
-        if (next.value) {
-          chunks.push(next.value);
-        }
-      }
-    } finally {
-      errReader.releaseLock();
-    }
-    return Buffer.concat(chunks).toString("utf8");
-  })();
-  let timedOut = false;
+  const outStream = proc.stdout as ReadableStream<Uint8Array>;
+  const errStream = proc.stderr as ReadableStream<Uint8Array>;
+  const outReader = outStream.getReader();
+  const errReader = errStream.getReader();
+  const outText = collectStubReader(outReader);
+  const errText = collectStubReader(errReader);
+  const state = { timedOut: false };
   const timer = setTimeout(() => {
-    timedOut = true;
+    state.timedOut = true;
     try {
       process.kill(-proc.pid, "SIGKILL");
     } catch {
       // The child already exited; the timeout error below carries the failure.
     }
-    try {
-      void outReader.cancel();
-    } catch {
+    void outReader.cancel().catch(() => {
       // The pipe already closed; the collected chunks carry the output.
-    }
-    try {
-      void errReader.cancel();
-    } catch {
+    });
+    void errReader.cancel().catch(() => {
       // The pipe already closed; the collected chunks carry the output.
-    }
+    });
   }, deps.timeoutMs);
   try {
     const rc = await proc.exited;
+    const timedOut = state.timedOut;
+    const [stdout, stderr] = timedOut ? ["", ""] : await Promise.all([outText, errText]);
     if (timedOut) {
       throw new GitHubError("unavailable", step, `${step}: timed out`);
     }
-    const [stdout, stderr] = await Promise.all([outText, errText]);
     return { rc, stdout, stderr };
   } finally {
     clearTimeout(timer);
   }
+}
+
+type ReaderResult =
+  { done: false; value: Uint8Array } | { done: true; value: Uint8Array | undefined };
+
+async function collectStubReader(reader: {
+  read(): Promise<ReaderResult>;
+  releaseLock(): void;
+}): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -218,7 +207,12 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
   snapshot(): StubGitHubSnapshot;
 } {
   if (!isAbsolute(options.originDir)) {
-    throw new GitError("failed", "createStubGitHub", "createStubGitHub: originDir must be absolute", null);
+    throw new GitError(
+      "failed",
+      "createStubGitHub",
+      "createStubGitHub: originDir must be absolute",
+      null,
+    );
   }
   if (!isAbsolute(options.scratchDir)) {
     throw new GitError(
@@ -314,6 +308,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     number: number,
   ): Promise<readonly CommentFirstLine[]> {
     requireRepo("commentFirstLines", repo);
+    await Promise.resolve();
     if (!pulls.has(number) && !issues.has(number)) {
       throw new GitHubError("rejected", "commentFirstLines", "commentFirstLines: unknown number");
     }
@@ -325,6 +320,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
 
   async function postComment(repo: string, number: number, body: string): Promise<void> {
     requireRepo("postComment", repo);
+    await Promise.resolve();
     if (!pulls.has(number) && !issues.has(number)) {
       throw new GitHubError("rejected", "postComment", "postComment: unknown number");
     }
@@ -349,7 +345,9 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
         continue;
       }
       const headRefOid =
-        pull.state === "MERGED" ? (pull.mergedHead as string) : await liveHead("pullsForBranch", branch);
+        pull.state === "MERGED"
+          ? (pull.mergedHead as string)
+          : await liveHead("pullsForBranch", branch);
       rows.push({
         number: pull.number,
         state: pull.state,
@@ -511,6 +509,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     labels: readonly string[],
   ): Promise<number> {
     requireRepo("createIssue", repo);
+    await Promise.resolve();
     const number = next;
     next += 1;
     issues.set(number, { number, title, body, labels: [...labels] });
@@ -519,6 +518,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
 
   async function factoryIssues(repo: string, label: string): Promise<readonly IssueFirstLine[]> {
     requireRepo("factoryIssues", repo);
+    await Promise.resolve();
     return [...issues.values()]
       .filter((issue) => issue.labels.includes(label))
       .sort((a, b) => a.number - b.number)
@@ -535,6 +535,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     remove: readonly string[],
   ): Promise<void> {
     requireRepo("editIssueLabels", repo);
+    await Promise.resolve();
     const row = requireIssue("editIssueLabels", issue);
     for (const label of add) {
       if (!row.labels.includes(label)) {

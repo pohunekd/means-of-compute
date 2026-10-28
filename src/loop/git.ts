@@ -100,9 +100,13 @@ function requireAbsoluteDir(field: string, step: string, value: string): void {
   }
 }
 
-async function collectReader(
-  reader: { read(): Promise<{ done: boolean; value?: Uint8Array }>; releaseLock(): void },
-): Promise<string> {
+type ReaderResult =
+  { done: false; value: Uint8Array } | { done: true; value: Uint8Array | undefined };
+
+async function collectReader(reader: {
+  read(): Promise<ReaderResult>;
+  releaseLock(): void;
+}): Promise<string> {
   const chunks: Uint8Array[] = [];
   try {
     for (;;) {
@@ -110,9 +114,7 @@ async function collectReader(
       if (next.done) {
         break;
       }
-      if (next.value) {
-        chunks.push(next.value);
-      }
+      chunks.push(next.value);
     }
   } finally {
     reader.releaseLock();
@@ -149,31 +151,28 @@ async function runGitAt(
   const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
   const outText = collectReader(outReader);
   const errText = collectReader(errReader);
-  let timedOut = false;
+  const state = { timedOut: false };
   const timer = setTimeout(() => {
-    timedOut = true;
+    state.timedOut = true;
     try {
       process.kill(-proc.pid, "SIGKILL");
     } catch {
       // The child already exited; the timeout error below carries the failure.
     }
-    try {
-      void outReader.cancel();
-    } catch {
+    void outReader.cancel().catch(() => {
       // The pipe already closed; the collected chunks carry the output.
-    }
-    try {
-      void errReader.cancel();
-    } catch {
+    });
+    void errReader.cancel().catch(() => {
       // The pipe already closed; the collected chunks carry the output.
-    }
+    });
   }, timeoutMs);
   try {
     const rc = await proc.exited;
+    const timedOut = state.timedOut;
+    const [stdout, stderr] = timedOut ? ["", ""] : await Promise.all([outText, errText]);
     if (timedOut) {
       throw new GitError("timeout", step, `${step}: timed out`, null);
     }
-    const [stdout, stderr] = await Promise.all([outText, errText]);
     return { rc, stdout, stderr };
   } finally {
     clearTimeout(timer);
@@ -444,12 +443,11 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   // Leftover recovery before any other work.
   checkWorktreePath(wt, input.scratchDir, input.id);
   if (await pathExists(wt)) {
-    const leftover = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
-      "worktree",
-      "remove",
-      "--force",
-      wt,
-    ]);
+    const leftover = await checkedRunGit(
+      input.dir,
+      trialGitDeps(input, deadlineTimeout(deadline)),
+      ["worktree", "remove", "--force", wt],
+    );
     if (leftover.rc !== 0 && leftover.rc !== 128) {
       throw new GitError(
         "failed",
@@ -511,11 +509,13 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   try {
     // A bad head ref fails here, before the merge (H4).
     await revParse(input.dir, trialGitDeps(input, deadlineTimeout(deadline)).deps, input.headSha);
-    const added = await checkedRunGit(
-      input.dir,
-      trialGitDeps(input, deadlineTimeout(deadline)),
-      ["worktree", "add", "--detach", wt, input.baseSha],
-    );
+    const added = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
+      "worktree",
+      "add",
+      "--detach",
+      wt,
+      input.baseSha,
+    ]);
     if (added.rc !== 0) {
       throw new GitError(
         "failed",

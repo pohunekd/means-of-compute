@@ -229,6 +229,9 @@ test("release stops a known session that is no longer bound", async () => {
     sessionId: "mem-1",
   });
   expect(result).toEqual({ sessionIds: ["mem-1"] });
+  // The first release removed the binding, so the request starts fresh.
+  const fresh = await control.port.start(request());
+  expect(fresh.sessionId).toBe("mem-2");
   await control.port.close();
 });
 

@@ -133,18 +133,24 @@ async function mappedError(
   throw error;
 }
 
-// Client for the start path: host.inspect runs once per Client instance
-// with the per-Client preflight cache kept (S1, H2); a dropped client is
-// inspected again on next use.
+// Client for the start path (S0): the connector resolves the route, then
+// S2 and S3 run (listBound, lookupDecision). Only the create branch runs
+// the host preflight (S1) before S4 (decision R2-H1). The per-Client
+// preflight cache is kept; a dropped client is inspected again on next use.
 async function startClientFor(port: PortInternals, alias: string): Promise<Client> {
-  let client: Client;
   try {
-    client = await port.connector.client(alias);
+    return await port.connector.client(alias);
   } catch (error) {
     throw await mappedError(port, alias, error);
   }
+}
+
+// S1 host preflight on the create branch: host.inspect runs once per Client
+// instance. A failing host throws PortRejectedError("host-unsupported") with
+// no session.new on the create path.
+async function startPreflight(port: PortInternals, alias: string, client: Client): Promise<void> {
   if (port.inspected.get(alias) === client) {
-    return client;
+    return;
   }
   let capabilities: HostCapabilities;
   try {
@@ -163,7 +169,6 @@ async function startClientFor(port: PortInternals, alias: string): Promise<Clien
     throw new PortRejectedError("host-unsupported");
   }
   port.inspected.set(alias, client);
-  return client;
 }
 
 // Client for wait, cancel and diff (H2): no preflight, so these paths work
@@ -339,6 +344,7 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   if (decision.kind === "void") {
     await voidSession(port, client, alias, decision.session, req, "start-unconfirmed");
   }
+  await startPreflight(port, alias, client);
   let created: SessionNewResult;
   try {
     created = await client.call("session.new", sessionNewParams(req, port.config, digest));

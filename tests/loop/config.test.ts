@@ -1,7 +1,9 @@
 // Loop config tests (matrix rows L1-L2, decision F1): a missing
 // stall.maxRetries names the key, the stub section is rejected in
-// production but required in stub mode, and the demo config resolves in
-// stub mode. The valid cases load the checked-in production config.
+// production but required in stub mode, and a copy of the demo config
+// with only the work config swapped to a temp fixture resolves in stub
+// mode (the direct load waits for the demo fixtures of a later slice).
+// The valid cases load the checked-in production config.
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -55,14 +57,14 @@ test("a missing stall.maxRetries throws the exact LoopConfigError (L1, F9)", asy
   });
 });
 
-test("the demo config resolves in stub mode with a stub work setup (F1)", async () => {
+test("a copy of the demo config with only the work config swapped resolves (F1, A1)", async () => {
   const demo = JSON.parse(await readFile("config/loop-demo.json", "utf8")) as Record<
     string,
     unknown
   >;
-  const sandbox = await mkdtemp(join(tmpdir(), "loop-demo-"));
-  // Input fixtures live outside the sandbox (stub step 4 clears it), as in
-  // the committed demo config.
+  // Only workConfigPath is swapped to a temp fixture; the committed
+  // written paths and the committed stub.sandboxDir stay as they are.
+  // The direct load waits for the demo fixtures of a later slice.
   const fixtureDir = await mkdtemp(join(tmpdir(), "loop-demo-input-"));
   try {
     const workPath = join(fixtureDir, "work.json");
@@ -81,35 +83,14 @@ test("the demo config resolves in stub mode with a stub work setup (F1)", async 
       join(fixtureDir, "factory-specs.json"),
       JSON.stringify([{ schemaVersion: "v1", repo: "example/demo-repo", mergeMode: "by-rule" }]),
     );
-    const sandboxDemo = {
-      ...demo,
-      statePath: join(sandbox, "loop-state.json"),
-      logPath: join(sandbox, "loop.jsonl"),
-      resultsPath: join(sandbox, "loop-results.jsonl"),
-      workConfigPath: workPath,
-      github: {
-        ...(demo["github"] as Record<string, unknown>),
-        configDir: join(sandbox, "gh-config"),
-      },
-      digest: { dir: join(sandbox, "digest"), onExit: true },
-      trialMerge: {
-        ...(demo["trialMerge"] as Record<string, unknown>),
-        scratchDir: join(sandbox, "trial"),
-      },
-      repos: [
-        { repo: "example/demo-repo", checkoutDir: join(sandbox, "checkout"), idPrefix: "demo" },
-      ],
-      stub: {
-        ...(demo["stub"] as Record<string, unknown>),
-        sandboxDir: sandbox,
-      },
-    };
-    const path = await writeConfig(sandbox, sandboxDemo);
-    const config = await loadLoopConfig(path, "stub");
-    expect(config.stub?.sandboxDir).toBe(sandbox);
-    expect(config.statePath).toBe(join(sandbox, "loop-state.json"));
+    const sandboxDemo = { ...demo, workConfigPath: workPath };
+    await withTempDir(async (dir) => {
+      const path = await writeConfig(dir, sandboxDemo);
+      const config = await loadLoopConfig(path, "stub");
+      expect(config.stub?.sandboxDir).toBe("logs/loop-demo");
+      expect(config.statePath).toBe("logs/loop-demo/loop-state.json");
+    });
   } finally {
-    await rm(sandbox, { recursive: true, force: true });
     await rm(fixtureDir, { recursive: true, force: true });
   }
 });
@@ -155,6 +136,29 @@ test("a written path outside the stub sandbox is rejected naming the key (F1)", 
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }
+});
+
+test("a well-formed stub section in production mode is an error (L2, A3)", async () => {
+  await withTempDir(async (dir) => {
+    const base = await productionBase();
+    const path = await writeConfig(dir, {
+      ...base,
+      stub: {
+        sandboxDir: "logs/loop-demo",
+        demoRepoDir: "tests/fixtures/loop/demo-repo",
+        observationsPath: "tests/fixtures/loop/hosts.json",
+        recordingsPath: "tests/fixtures/loop/recordings.json",
+      },
+    });
+    let error: unknown;
+    try {
+      await loadLoopConfig(path, "production");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toBe(`Loop config ${path}: unexpected key "stub"`);
+  });
 });
 
 test("an unknown stub section in production mode is an unexpected key (L2, F9)", async () => {

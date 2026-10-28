@@ -462,6 +462,7 @@ test("too-deep arguments are refused and the server keeps serving (K1)", async (
   expect(errors[0]).toContain('"tool":"fleet_status"');
   const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
   expect(starts.length).toBe(2);
+  expect(starts.map((line) => (JSON.parse(line) as { callId: number }).callId)).toEqual([1, 2]);
   const ends = logText.split("\n").filter((line) => line.includes('"event":"call-end"'));
   expect(ends.length).toBe(2);
 }, 20000);

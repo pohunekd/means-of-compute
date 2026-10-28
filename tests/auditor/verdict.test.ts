@@ -86,6 +86,7 @@ async function runCase(
         ref: branch,
         baseRef: "main",
         pullNumber: 99,
+        phaseCritical: false,
         authorModels: ["meta/muse-glimmer-30b"],
       },
       {
@@ -186,6 +187,7 @@ async function runErrorCase(prefix: string, recording: string | null): Promise<E
           ref: "demo-good",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {
@@ -338,6 +340,7 @@ test("200 with a reset body exits 4 with one billed entry (mutation: every TypeE
           ref: "demo-good",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {
@@ -389,6 +392,7 @@ test("a timed-out call exits 4 with one billed entry (mutation: 504, true become
           ref: "demo-good",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {
@@ -437,6 +441,7 @@ test("work item without DoD exits 2: the library and the CLI share isWorkItem", 
           ref: "demo-good",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {
@@ -477,6 +482,7 @@ test("second write at one sha conflicts (mutation: overwrite the stored verdict)
       ref: "demo-good",
       baseRef: "main",
       pullNumber: 99,
+      phaseCritical: false,
       authorModels: ["meta/muse-glimmer-30b"],
     };
     const deps = {

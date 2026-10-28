@@ -14,7 +14,7 @@ import type { AuditDeps, AuditInput } from "./audit-types.js";
 import { buildVerdict, recount, renderComment } from "./verdict.js";
 import { AuditModelError, parseReply } from "./reply.js";
 import { buildPrompt } from "./prompt.js";
-import { NoEligibleAuditorError, selectAuditor } from "./select.js";
+import { NoEligibleAuditorError, selectAuditor, selectMergeAuditor } from "./select.js";
 import { readVerdicts, VerdictConflictError, writeVerdict } from "./store.js";
 import { ProviderCallError, ProviderError } from "../providers/router.js";
 import { BudgetGateError } from "../budget/gate.js";
@@ -108,6 +108,12 @@ async function recordAuditUsage(
 }
 
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
+  if (typeof input.phaseCritical !== "boolean") {
+    throw new Error(`invalid phaseCritical ${JSON.stringify(input.phaseCritical)}`);
+  }
+  if (input.phaseCritical && input.pullNumber === null) {
+    throw new Error("phase-critical audit needs a pull request");
+  }
   if (!isWorkItem(input.item)) {
     throw new Error(`invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`);
   }
@@ -155,7 +161,9 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
   }
   let auditor: { providerId: string; model: string };
   try {
-    auditor = selectAuditor(deps.config.auditors, authors, input.item.id);
+    auditor = input.phaseCritical
+      ? selectMergeAuditor(deps.config.mergeAuditor, authors, input.item.id)
+      : selectAuditor(deps.config.auditors, authors, input.item.id);
   } catch (error: unknown) {
     if (error instanceof NoEligibleAuditorError) {
       return refused(error.message);

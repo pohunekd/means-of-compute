@@ -12,6 +12,10 @@ export interface AuditInput {
   readonly ref: string;
   readonly baseRef: string;
   readonly pullNumber: number | null;
+  // Set only by the coordinator on the merge audit of a phase-critical
+  // PR, through --phase-critical yes. Never inferred from labels, size,
+  // branch names or authors.
+  readonly phaseCritical: boolean;
   readonly authorModels: readonly string[];
 }
 

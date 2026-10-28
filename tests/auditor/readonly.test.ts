@@ -148,6 +148,7 @@ test("reply with an extra run key exits 4 and leaves the repo unchanged", async 
       ref: "demo-good",
       baseRef: "main",
       pullNumber: 99,
+      phaseCritical: false,
       authorModels: ["meta/muse-glimmer-30b"],
     };
     let code = 0;

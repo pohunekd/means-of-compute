@@ -101,6 +101,56 @@ function cellTextOf(figure: Figure): string {
   return cell.text;
 }
 
+async function writeRegistry(dir: string, sessions: unknown[]): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const path = `${dir}/registry.json`;
+  await writeFile(path, JSON.stringify({ sessions }), "utf8");
+  return path;
+}
+
+async function fixtureSessions(): Promise<unknown[]> {
+  return (JSON.parse(await Bun.file(REGISTRY).text()) as { sessions: unknown[] }).sessions;
+}
+
+type CollectorFixture = {
+  collector: HostStateCollector;
+  now: Date;
+};
+
+async function loadCollectorFixture(): Promise<CollectorFixture> {
+  const config = loadHostStateConfig("config/host-state.json");
+  const control = createMemoryHostStatePort(["desktop", "laptop-a", "laptop-mac"]);
+  const now = new Date("2026-10-27T12:00:00.000Z");
+  const desktop = JSON.parse(
+    (await Bun.file("contracts/v1/fixtures/host-capacity.json").text()).replace(
+      /"timestamp": "[^"]*"/,
+      `"timestamp": "${now.toISOString()}"`,
+    ),
+  ) as unknown;
+  const busy = JSON.parse(
+    (await Bun.file("contracts/v1/fixtures/host-capacity-busy.json").text()).replace(
+      /"timestamp": "[^"]*"/,
+      `"timestamp": "${now.toISOString()}"`,
+    ),
+  ) as unknown;
+  const identity = {
+    packageId: "moc.host-state",
+    version: "0.1.0",
+    digest: config.package.sourceDigest,
+  };
+  control.set("desktop", { kind: "reply", reply: { identity, stdout: JSON.stringify(desktop) } });
+  control.set("laptop-a", { kind: "reply", reply: { identity, stdout: JSON.stringify(busy) } });
+  control.set("laptop-mac", { kind: "fail", failure: "host-unreachable", code: null });
+  const collector = createCollector({
+    port: control.port,
+    config,
+    now: () => new Date(now.getTime()),
+    sleep: () => new Promise<void>(() => {}),
+    log: () => {},
+  });
+  return { collector, now };
+}
+
 describe("dashboard panels exist (mutation: missing one of the five sections)", () => {
   test("all five panels render in PanelId order", async () => {
     const model = buildDashboard(await loadInputs(FIXTURE));
@@ -313,17 +363,6 @@ describe("dashboard autonomy and work order 10.2 (mutation: sort by id; invented
     expect(delta[3]).toEqual({ kind: "no-data", reason: "no session" });
     expect(delta[4]).toEqual({ kind: "no-data", reason: "no session" });
   });
-
-  async function writeRegistry(dir: string, sessions: unknown[]): Promise<string> {
-    await mkdir(dir, { recursive: true });
-    const path = `${dir}/registry.json`;
-    await writeFile(path, JSON.stringify({ sessions }), "utf8");
-    return path;
-  }
-
-  async function fixtureSessions(): Promise<unknown[]> {
-    return (JSON.parse(await Bun.file(REGISTRY).text()) as { sessions: unknown[] }).sessions;
-  }
 
   test("registry rules 2 and 4: starting beats a record, failed picks laptop-c, provisional counts (mutation: rule order; n as strings; skipped aliases or provisional)", async () => {
     const dir = await mkdtemp("/tmp/dashboard-registry-rules-");
@@ -784,36 +823,7 @@ describe("dashboard baselines null (mutation: treat null as 0)", () => {
 
 describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied from idle)", () => {
   test("the real collector feeds the 10.2 rows", async () => {
-    const config = loadHostStateConfig("config/host-state.json");
-    const control = createMemoryHostStatePort(["desktop", "laptop-a", "laptop-mac"]);
-    const now = new Date("2026-10-27T12:00:00.000Z");
-    const desktop = JSON.parse(
-      (await Bun.file("contracts/v1/fixtures/host-capacity.json").text()).replace(
-        /"timestamp": "[^"]*"/,
-        `"timestamp": "${now.toISOString()}"`,
-      ),
-    ) as unknown;
-    const busy = JSON.parse(
-      (await Bun.file("contracts/v1/fixtures/host-capacity-busy.json").text()).replace(
-        /"timestamp": "[^"]*"/,
-        `"timestamp": "${now.toISOString()}"`,
-      ),
-    ) as unknown;
-    const identity = {
-      packageId: "moc.host-state",
-      version: "0.1.0",
-      digest: config.package.sourceDigest,
-    };
-    control.set("desktop", { kind: "reply", reply: { identity, stdout: JSON.stringify(desktop) } });
-    control.set("laptop-a", { kind: "reply", reply: { identity, stdout: JSON.stringify(busy) } });
-    control.set("laptop-mac", { kind: "fail", failure: "host-unreachable", code: null });
-    const collector = createCollector({
-      port: control.port,
-      config,
-      now: () => new Date(now.getTime()),
-      sleep: () => new Promise<void>(() => {}),
-      log: () => {},
-    });
+    const { collector, now } = await loadCollectorFixture();
     const inputs = await loadInputs(
       FIXTURE,
       VERDICTS,
@@ -869,76 +879,109 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
       throw new Error("missing laptop-mac row");
     }
     expect(asText(unreachable[1] as never)).toBe("unavailable: unreachable");
-    // Empty registry path reads no entries: every reported row shows zero
-    // against its own capacity, so desktop shows "0 of 2". The missing
-    // (laptop-b) and unavailable (laptop-mac) branches show plain "0"
-    // (mutation: running copies missing or state).
-    expect(rows.get("desktop")?.[3]).toEqual({ kind: "text", text: "0 of 2" });
-    expect(rows.get("laptop-a")?.[3]).toEqual({ kind: "text", text: "0 of 1" });
-    expect(rows.get("laptop-b")?.[3]).toEqual({ kind: "text", text: "0" });
-    expect(rows.get("laptop-mac")?.[3]).toEqual({ kind: "text", text: "0" });
     // Every state goes through CAUSE_LABELS, never as the raw cause enum.
     expect(JSON.stringify(model)).not.toContain("host-unreachable");
   });
 
-  test("collector test with REGISTRY: running desktop 1 of 2, laptop-a 0 of 1, laptop-b 0, laptop-mac 0 (mutation: count terminal entries; ignore maxConcurrentAgents)", async () => {
-    const config = loadHostStateConfig("config/host-state.json");
-    const control = createMemoryHostStatePort(["desktop", "laptop-a", "laptop-mac"]);
-    const now = new Date("2026-10-27T12:00:00.000Z");
-    const desktop = JSON.parse(
-      (await Bun.file("contracts/v1/fixtures/host-capacity.json").text()).replace(
-        /"timestamp": "[^"]*"/,
-        `"timestamp": "${now.toISOString()}"`,
-      ),
-    ) as unknown;
-    const busy = JSON.parse(
-      (await Bun.file("contracts/v1/fixtures/host-capacity-busy.json").text()).replace(
-        /"timestamp": "[^"]*"/,
-        `"timestamp": "${now.toISOString()}"`,
-      ),
-    ) as unknown;
-    const identity = {
-      packageId: "moc.host-state",
-      version: "0.1.0",
-      digest: config.package.sourceDigest,
+  test("collector test with REGISTRY: running desktop 1 of 2, laptop-a 0 of 1, laptop-b 1, laptop-mac 0 (mutation: count terminal entries; ignore maxConcurrentAgents)", async () => {
+    const { collector, now } = await loadCollectorFixture();
+    const dir = await mkdtemp("/tmp/dashboard-registry-t7-cap-");
+    const sessions = (await fixtureSessions()).map((entry) => ({
+      ...(entry as Record<string, unknown>),
+    }));
+    const open = {
+      ...(sessions[2] as Record<string, unknown>),
+      requestId: "d3-gamma:0",
+      workItemId: "d3-gamma",
+      hostAlias: "laptop-b",
+      branch: "moc/d3-gamma",
+      baseRef: "origin/main",
+      resume: false,
+      sessionId: null,
+      worktree: null,
+      baseCommit: null,
+      lastSeenState: "starting",
+      terminal: null,
+      startedAt: "2026-10-27T11:40:00.000Z",
+      lastSeenAt: "2026-10-27T11:40:00.000Z",
+      revision: 0,
     };
-    control.set("desktop", { kind: "reply", reply: { identity, stdout: JSON.stringify(desktop) } });
-    control.set("laptop-a", { kind: "reply", reply: { identity, stdout: JSON.stringify(busy) } });
-    control.set("laptop-mac", { kind: "fail", failure: "host-unreachable", code: null });
-    const collector = createCollector({
-      port: control.port,
-      config,
-      now: () => new Date(now.getTime()),
-      sleep: () => new Promise<void>(() => {}),
-      log: () => {},
-    });
-    const model = buildDashboard(
-      await loadInputs(
-        FIXTURE,
-        VERDICTS,
-        {
-          frontierTokens: null,
-          cloudSandboxHour: null,
-          ownedHostHour: null,
-        },
-        now,
-        collector,
-        50,
-        REGISTRY,
-      ),
-    );
-    const fleet = model.panels[0] as (typeof model.panels)[number];
-    const table = fleet.tables[0] as (typeof fleet.tables)[number];
-    const running = new Map(
-      table.rows.map((cells) => [
-        (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
-        cells[3],
-      ]),
-    );
-    expect(running.get("desktop")).toEqual({ kind: "text", text: "1 of 2" });
-    expect(running.get("laptop-a")).toEqual({ kind: "text", text: "0 of 1" });
-    expect(running.get("laptop-b")).toEqual({ kind: "text", text: "0" });
-    expect(running.get("laptop-mac")).toEqual({ kind: "text", text: "0" });
+    const registryPath = await writeRegistry(dir, [...sessions, open]);
+    try {
+      const model = buildDashboard(
+        await loadInputs(
+          FIXTURE,
+          VERDICTS,
+          {
+            frontierTokens: null,
+            cloudSandboxHour: null,
+            ownedHostHour: null,
+          },
+          now,
+          collector,
+          50,
+          registryPath,
+        ),
+      );
+      const fleet = model.panels[0] as (typeof model.panels)[number];
+      const table = fleet.tables[0] as (typeof fleet.tables)[number];
+      const running = new Map(
+        table.rows.map((cells) => [
+          (cells[0] as { aliases?: readonly string[] }).aliases?.join(",") ?? "",
+          cells[3],
+        ]),
+      );
+      expect(running.get("desktop")).toEqual({ kind: "text", text: "1 of 2" });
+      expect(running.get("laptop-a")).toEqual({ kind: "text", text: "0 of 1" });
+      expect(running.get("laptop-b")).toEqual({ kind: "text", text: "1" });
+      expect(running.get("laptop-mac")).toEqual({ kind: "text", text: "0" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("collector with an invalid registry: every running cell errors (mutation: 0 or 0 of max on a registry failure in the reported branch)", async () => {
+    const { collector } = await loadCollectorFixture();
+    const dir = await mkdtemp("/tmp/dashboard-registry-t7-invalid-");
+    try {
+      const sessions = (await fixtureSessions()).map((entry) => ({
+        ...(entry as Record<string, unknown>),
+      }));
+      const first = sessions[1] as Record<string, unknown>;
+      first["requestId"] = "d1-alpha:01";
+      const registryPath = await writeRegistry(dir, sessions);
+      const logged: { input: string; code: InputErrorCode; message: string }[] = [];
+      const model = buildDashboard(
+        await loadInputs(
+          FIXTURE,
+          VERDICTS,
+          {
+            frontierTokens: null,
+            cloudSandboxHour: null,
+            ownedHostHour: null,
+          },
+          new Date("2026-10-27T12:00:00.000Z"),
+          collector,
+          50,
+          registryPath,
+          (event) => {
+            logged.push(event);
+          },
+        ),
+      );
+      const fleet = model.panels[0] as (typeof model.panels)[number];
+      const table = fleet.tables[0] as (typeof fleet.tables)[number];
+      for (const row of table.rows) {
+        expect(row[3]).toEqual({ kind: "error", code: "registry-invalid" });
+      }
+      expect(table.rows.length).toBeGreaterThan(0);
+      expect(
+        logged.filter((event) => event.input === "registry" && event.code === "registry-invalid")
+          .length,
+      ).toBe(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("failing collector with REGISTRY: running desktop 1, every other row 0 (mutation: running copies the hosts failure)", async () => {
@@ -1005,39 +1048,6 @@ describe("dashboard fleet (mutation: raw cause in a cell; free capacity copied f
       if (alias !== "desktop") {
         expect(cell).toEqual({ kind: "text", text: "0" });
       }
-    }
-  });
-
-  test("empty registry reports zero running when the collector fails (mutation: running copies the failure)", async () => {
-    const failing: HostStateCollector = {
-      collect: () => Promise.reject(new Error("boom")),
-    };
-    const model = buildDashboard(
-      await loadInputs(
-        FIXTURE,
-        VERDICTS,
-        {
-          frontierTokens: null,
-          cloudSandboxHour: null,
-          ownedHostHour: null,
-        },
-        new Date("2026-10-27T12:00:00.000Z"),
-        failing,
-      ),
-    );
-    const fleet = model.panels[0] as (typeof model.panels)[number];
-    const table = fleet.tables[0] as (typeof fleet.tables)[number];
-    for (const row of table.rows) {
-      expect(row[3]).toEqual({ kind: "text", text: "0" });
-    }
-  });
-
-  test("empty registry reports zero running with hostState null (mutation: running copies the missing state)", async () => {
-    const model = buildDashboard(await loadInputs(FIXTURE));
-    const fleet = model.panels[0] as (typeof model.panels)[number];
-    const table = fleet.tables[0] as (typeof fleet.tables)[number];
-    for (const row of table.rows) {
-      expect(row[3]).toEqual({ kind: "text", text: "0" });
     }
   });
 

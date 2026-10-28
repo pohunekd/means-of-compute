@@ -1,0 +1,40 @@
+{
+  "museCommand": ["muse"],
+  "providerId": "meta-api",
+  "model": "muse-spark-1.3-contributor",
+  "contributorMode": "on",
+  "approvalMode": "never",
+  "envPassthrough": ["PATH"],
+  "mcpConfigPath": "config/mcp.json",
+  "budgetGateConfigPath": "config/budget-gate.json",
+  "skillDir": ".agents/skills/factory-coord",
+  "runsDir": "logs/coord-runs",
+  "maxRunsPerDay": 4,
+  "maxOutcomeChars": 8000,
+  "maxToolOutputBytes": 65536,
+  "killGraceMs": 10000,
+  "exportTimeoutMs": 60000,
+  "plan": {
+    "reasoningEffort": "high",
+    "maxModelSteps": 40,
+    "maxSubmitAttempts": 4,
+    "timeoutMs": 1200000
+  },
+  "react": {
+    "reasoningEffort": "medium",
+    "maxModelSteps": 20,
+    "maxSubmitPerEntry": 2,
+    "maxEntries": 3,
+    "timeoutMs": 600000
+  },
+  "watch": {
+    "pollMs": 60000,
+    "deadlineMs": 28800000,
+    "maxReactSessions": 8,
+    "maxFailedSessions": 2,
+    "maxPollErrors": 5,
+    "maxFollowupsPerRun": 6,
+    "pauseRequestBlockedItems": 3
+  },
+  "seed": null
+}

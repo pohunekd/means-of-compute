@@ -459,7 +459,7 @@ describe("git runner", () => {
     const fake = await fakeGitDir(
       realDir,
       "fetch",
-      `for a in "$@"; do\n  if [ "$a" = "fetch" ]; then\n    sleep 30 > /dev/null 2>&1 &\n    echo $! > ${pidFile}\n    setsid sleep 30 &\n    echo $! > ${gcFile}\n    wait\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+      `for a in "$@"; do\n  if [ "$a" = "fetch" ]; then\n    sleep 30 > /dev/null 2>&1 &\n    echo $! > ${pidFile}\n    setsid sleep 5 &\n    echo $! > ${gcFile}\n    wait\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
     );
     try {
       const start = Date.now();
@@ -608,10 +608,12 @@ describe("git runner", () => {
   test("L23o: a hanging merge ends within two budgets", async () => {
     const repos = await makeRepos();
     const realDir = await realGitPath();
+    // The first prune (step 1) runs at full speed so the trial reaches the
+    // merge; later prune and remove calls hang, as does the merge.
     const fake = await fakeGitDir(
       realDir,
       "worktree-merge",
-      `for a in "$@"; do\n  if [ "$a" = "merge" ]; then\n    sleep 10\n  elif [ "$a" = "remove" ] || [ "$a" = "prune" ]; then\n    sleep 5\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+      `MARKER="$(dirname "$0")/spent"\nfor a in "$@"; do\n  if [ "$a" = "merge" ]; then\n    sleep 10\n  elif [ "$a" = "remove" ]; then\n    sleep 5\n  elif [ "$a" = "prune" ] && [ -e "$MARKER" ]; then\n    sleep 5\n  fi\ndone\ntouch "$MARKER"\nexec "$REAL_GIT" "$@"`,
     );
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");

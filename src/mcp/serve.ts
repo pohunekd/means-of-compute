@@ -237,7 +237,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
     },
     () => {
       enqueueTransport(async () => {
-        let response: string;
+        let response: string | null;
         try {
           response = await protocol.handleTooLarge();
         } catch (error: unknown) {
@@ -245,7 +245,11 @@ async function serve(caller: string, configPath: string): Promise<number> {
           transportFailed = true;
           return;
         }
-        stdoutOk = await writeStdout(response);
+        // An aborted protocol answers no too-large line, as it answers
+        // no other line (H8, R2-7): serve writes nothing for null.
+        if (response !== null) {
+          stdoutOk = await writeStdout(response);
+        }
       });
     },
   );

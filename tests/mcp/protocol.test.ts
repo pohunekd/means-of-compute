@@ -332,6 +332,23 @@ test("F3 a too-large line is answered in order and logged (F3, T4, L1)", async (
   expect(errors[0]?.["jsonrpcCode"]).toBe(-32600);
 });
 
+test("an aborted protocol answers no too-large line (H8, R2-7)", async () => {
+  const entries: LogEntry[] = [];
+  const env = await createMcpTestEnv("mcp-h8-");
+  const protocol = await protocolWithTools(
+    entries,
+    createTools({
+      workConfigPath: env.workConfigPath,
+      dispatcherConfigPath: env.dispatcherConfigPath,
+    }),
+  );
+  protocol.abort();
+  expect(await protocol.handleLine(initLine())).toBeNull();
+  expect(await protocol.handleTooLarge()).toBeNull();
+  await protocol.drain();
+  expect(entries.filter((entry) => entry.event === "protocol-error").length).toBe(0);
+});
+
 test("P8 oversized line is rejected and the next line is answered (P8)", async () => {
   const entries: LogEntry[] = [];
   const env = await createMcpTestEnv("mcp-p8-");

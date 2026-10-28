@@ -128,10 +128,11 @@ test("loaderUse allows plain property reads and identifiers (X4 Y2)", () => {
     "import.meta.main",
     'new URL("./a.ts", import.meta.url)',
     "requireAbsoluteDir(x)",
+    "arequire(x)",
     "const required = 1",
   ];
   for (const sample of clean) {
-    expect(loaderUse(sample)).toBeNull();
+    expect(`${sample}: ${loaderUse(sample) ?? "clean"}`).toBe(`${sample}: clean`);
   }
 });
 

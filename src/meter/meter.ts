@@ -348,10 +348,7 @@ export async function startMeterWithInternals(deps: MeterDeps): Promise<{
     return settleRequest(requestId, state);
   }
 
-  async function settleRequest(
-    requestId: string,
-    state: TerminalState,
-  ): Promise<PortUsage | null> {
+  async function settleRequest(requestId: string, state: TerminalState): Promise<PortUsage | null> {
     // A resolved memo is returned before the latch check: a grant
     // that has settled keeps its value. A grant that has not settled
     // still sees the latch first, because its close could never have

@@ -14,7 +14,6 @@ import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { BudgetGate } from "../../src/budget/gate.js";
 import { readLedger } from "../../src/ledger/read.js";
 import { createMeteredPort } from "../../src/meter/metered-port.js";
-import type { Meter } from "../../src/meter/meter.js";
 import { meterUrl, withMeter } from "./helpers.js";
 
 const MODEL = { providerId: "meta-api", model: "muse-spark-1.3-contributor" };
@@ -91,7 +90,7 @@ test("a reply without usage refuses as spend unknown", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => (meter as Meter).settleRequest(requestId, "lost"),
+        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       const started = await dispatcher.start(
         item() as never,

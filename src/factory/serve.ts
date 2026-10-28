@@ -14,7 +14,8 @@ import {
 import { createLogAppender, startDashboard, type DashboardServer } from "../dashboard/server.js";
 import { requireWritableTarget } from "../fs/write.js";
 import { loadLedgerConfig } from "../ledger/read.js";
-import { providerDescriptorExists, ROUTE_PATH } from "../providers/config.js";
+import { providerDescriptorExists } from "../providers/config.js";
+import { PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
 
 function parseServeArgs(argv: readonly string[]): {
@@ -116,7 +117,7 @@ async function serve(): Promise<number> {
   };
   try {
     const budget = await loadBudgetConfig();
-    const route = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
+    const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
     if (!route.includes(budget.nvidiaProviderId)) {
       throw new Error(
         `budget guard: route is missing the NVIDIA provider ${budget.nvidiaProviderId}`,

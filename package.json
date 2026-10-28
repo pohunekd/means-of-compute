@@ -19,6 +19,8 @@
     "place": "bun run src/placement/cli.ts",
     "mcp:serve": "bun run src/mcp/serve.ts",
     "mcp:call": "bun run src/mcp/call.ts",
+    "approvals:list": "bun run src/approvals/cli.ts list",
+    "approvals:decide": "bun run src/approvals/cli.ts decide",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",
     "fmt": "prettier --write .",

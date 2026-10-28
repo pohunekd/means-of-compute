@@ -1,0 +1,93 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/src/approvals/requests.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApprovalsRequests",
+  "description": "One JSON document holding every approval request plus its decision records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "nextSeq", "requests"],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "nextSeq": { "type": "integer", "minimum": 1 },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "seq",
+          "tool",
+          "args",
+          "argsSha256",
+          "caller",
+          "requestedAt",
+          "state",
+          "decision"
+        ],
+        "properties": {
+          "requestId": { "type": "string", "pattern": "^req-[0-9]{6,}$" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "tool": { "enum": ["approve", "pause_fleet"] },
+          "args": { "type": "object" },
+          "argsSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "caller": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+          "requestedAt": { "type": "string", "format": "date-time" },
+          "state": { "enum": ["pending", "approved", "rejected"] },
+          "decision": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["seq", "author", "decidedAt"],
+            "properties": {
+              "seq": { "type": "integer", "minimum": 1 },
+              "author": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,38}$" },
+              "decidedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "tool": { "const": "approve" } },
+              "required": ["tool"]
+            },
+            "then": {
+              "properties": {
+                "args": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["workItemId", "pullNumber", "headSha", "reason"],
+                  "properties": {
+                    "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+                    "pullNumber": { "type": "integer", "minimum": 1 },
+                    "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+                    "reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "tool": { "const": "pause_fleet" } },
+              "required": ["tool"]
+            },
+            "then": {
+              "properties": {
+                "args": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["action", "reason"],
+                  "properties": {
+                    "action": { "enum": ["pause", "resume"] },
+                    "reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

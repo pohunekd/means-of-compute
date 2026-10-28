@@ -42,6 +42,7 @@ export interface DispatcherDeps {
   readonly now: () => Date;
   readonly sleep: (ms: number) => Promise<void>;
   readonly log: (event: DispatchLogEvent) => void;
+  readonly lostUsage: (requestId: string) => Promise<PortUsage | null>;
 }
 
 export interface DispatchLogEvent {
@@ -642,6 +643,21 @@ export function createDispatcher(deps: DispatcherDeps): {
     if (seconds < 0) {
       throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
     }
+    // The lost hook settles the meter grant before the first registry
+    // write; a port-reported lost never reaches this function, it
+    // carries the metered usage through the port instead.
+    const usage = await deps.lostUsage(entry.requestId);
+    const usageValid = usage === null ? true : checkUsageValid(usage);
+    if (!usageValid) {
+      deps.log({
+        level: "error",
+        event: "usage-invalid",
+        requestId: entry.requestId,
+        workItemId: entry.workItemId,
+        ...(entry.sessionId === null ? {} : { sessionId: entry.sessionId }),
+        detail: "lost usage failed validation",
+      });
+    }
     // A synthesized lost keeps the last observation and stores the final
     // unreachable count; only the terminal and the count change.
     const lost: RegistryEntry = {
@@ -652,8 +668,8 @@ export function createDispatcher(deps: DispatcherDeps): {
         state: "lost",
         observedAt,
         seconds,
-        usage: null,
-        usageValid: true,
+        usage: usageValid ? usage : null,
+        usageValid,
         detail: `unreachable ${String(count)} times`,
         ledgerAppended: false,
       },

@@ -410,12 +410,11 @@ test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
     submissions: [],
   });
   await writeTestFile(env.registryPath, { sessions: [] });
-  // Stdout through `head -c 1` closes after one byte while stdin stays
-  // open, so the queued calls never start. The first failing write marks
-  // stdoutOk false while the pipe still holds the 20 queued calls; stdin
-  // is closed at once (EOF), so the stop reason is stdout-closed only
-  // through the stdoutOk rule, never through `done` (R2-9). The stdoutOk
-  // guard in enqueueTransport is what skips the queued tasks.
+  // The EOF-first H5 case closes stdin at once: the first failing write
+  // marks stdoutOk false while the pipe still holds the 20 queued calls,
+  // so the stop reason is stdout-closed only through the stdoutOk rule,
+  // never through `done` (R2-9). The stdoutOk guard in enqueueTransport
+  // is what skips the queued tasks.
   // The brace group records the server's own exit status: the pipeline
   // rc alone only covers the head reader.
   const rcfile = join(env.dir, "server.rc");
@@ -491,13 +490,11 @@ test("closing stdout stops queued calls with stdin open (I3)", async () => {
     Bun.sleep(5000).then(() => false),
   ]);
   sink.end();
-  const [code, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stderr).text(),
-  ]);
+  const [code, openStderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   await new Response(proc.stdout).text();
   expect(exited).toBe(true);
   expect(code).toBe(0);
+  expect(openStderr).not.toContain("MaxListenersExceededWarning");
   const openServerRc = (await Bun.file(rcfile).text()).trim();
   expect(openServerRc).toBe("0");
   const logText = await Bun.file(env.callLogPath).text();

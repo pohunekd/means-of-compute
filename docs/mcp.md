@@ -63,8 +63,8 @@ in-process chain. Events: `server-start` (`ts, event, run, caller, pid`),
 `call-start` (`ts, event, run, callId, caller, client, tool, class,
 argsSha256, argsBytes`), `call-end` (`ts, event, run, callId, caller,
 tool, class, outcome (ok|refused|error), code|null, durationMs,
-summary|null, detail|null`), `protocol-error` (`ts, event, run, caller,
-code, method|null, tool|null`), `server-stop` (`ts, event, run,
+summary|null, detail|null`), `protocol-error` (`ts, event, run, caller, jsonrpcCode, method|null,
+tool|null`), `server-stop` (`ts, event, run,
 reason`). A failed append latches the log: later `tools/call` requests
 return `call-log-unavailable` without running the handler; a `call-end`
 that fails still returns its payload, because the call already happened.

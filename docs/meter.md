@@ -5,7 +5,7 @@ All model traffic from fleet sessions flows through the metering proxy
 its caller token through session metadata, and the token is valid only
 while its grant is open, and the proxy records
 per-session
-token usage into an append-only log. `createMeteredPort` and the `meter:usage` CLI exist; the host token helper is planned in #35.
+token usage into an append-only log. `createMeteredPort`, the `meter:usage` CLI and the host token helper exist.
 
 ## Proxy
 

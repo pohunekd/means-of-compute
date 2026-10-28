@@ -75,23 +75,41 @@ interface GitOutput {
   readonly stderr: string;
 }
 
+interface GitSpawn {
+  readonly argv: readonly string[];
+  readonly allowed: string | undefined;
+}
+
+// `-c key value` pairs sit before `-C <dir>`; find the subcommand after them.
+function splitGitArgs(args: readonly string[]): GitSpawn {
+  let index = 0;
+  while (args[index] === "-c") {
+    index += 3;
+  }
+  return { argv: args, allowed: args[index] };
+}
+
 async function runGit(
   dir: string,
   deps: GitDeps,
   step: string,
   args: readonly string[],
 ): Promise<GitOutput> {
-  // The trial merge passes `-c key value` pairs before the subcommand.
-  let head = args[0];
-  let index = 0;
-  while (head === "-c") {
-    index += 3;
-    head = args[index];
-  }
-  if (head === undefined || !ALLOWED.has(head)) {
+  return runGitAt([], dir, deps, step, args);
+}
+
+async function runGitAt(
+  prefix: readonly string[],
+  dir: string,
+  deps: GitDeps,
+  step: string,
+  args: readonly string[],
+): Promise<GitOutput> {
+  const { argv, allowed } = splitGitArgs(args);
+  if (allowed === undefined || !ALLOWED.has(allowed)) {
     throw new GitError("failed", step, `${step}: blocked subcommand`, null);
   }
-  const proc = Bun.spawn(["git", "-C", dir, ...args], {
+  const proc = Bun.spawn(["git", ...prefix, "-C", dir, ...argv], {
     env: {
       PATH: deps.PATH,
       GIT_TERMINAL_PROMPT: "0",
@@ -255,8 +273,16 @@ interface TrialStepResult {
 
 // J2 step 1 guard: only the named id directory inside the scratch dir may go.
 function checkWorktreePath(wt: string, scratchDir: string, id: string): void {
-  if (basename(id) !== id || id === "" || id === "." || id === "..") {
+  if (id === "" || id === "." || id === ".." || basename(id) !== id) {
     throw new GitError("failed", "trialMerge", "trialMerge: bad worktree id", null);
+  }
+  if (wt !== `${scratchDir}/${id}` && wt !== join(resolve(scratchDir), id)) {
+    throw new GitError(
+      "failed",
+      "trialMerge",
+      "trialMerge: worktree escapes the scratch dir",
+      null,
+    );
   }
   if (resolve(wt) !== join(resolve(scratchDir), id)) {
     throw new GitError(
@@ -312,7 +338,8 @@ async function runTrialStep(
 
 export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   const step = "trialMerge";
-  const wt = join(input.scratchDir, input.id);
+  // Join without normalization so the J2 guard sees a bad id.
+  const wt = `${input.scratchDir}/${input.id}`;
   const start = Date.now();
   const deadline = start + input.timeoutMs;
   const gitDeps: GitDeps = { PATH: input.PATH, timeoutMs: input.timeoutMs };
@@ -322,6 +349,7 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   };
 
   // Leftover recovery before any other work.
+  checkWorktreePath(wt, input.scratchDir, input.id);
   if (await pathExists(wt)) {
     const leftover = await runGit(input.dir, gitDeps, step, ["worktree", "remove", "--force", wt]);
     if (leftover.rc !== 0 && leftover.rc !== 128) {
@@ -383,16 +411,13 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         detailOf(added.stderr),
       );
     }
-    const merged = await runGit(wt, gitDeps, step, [
-      "-c",
-      "user.name=moc-trial",
-      "-c",
-      "user.email=trial@example.invalid",
-      "merge",
-      "--no-ff",
-      "--no-edit",
-      input.headSha,
-    ]);
+    const merged = await runGitAt(
+      ["-c", "user.name=moc-trial", "-c", "user.email=trial@example.invalid"],
+      wt,
+      gitDeps,
+      step,
+      ["merge", "--no-ff", "--no-edit", input.headSha],
+    );
     if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
       conflict = { rc: merged.rc };
     } else if (merged.rc !== 0) {

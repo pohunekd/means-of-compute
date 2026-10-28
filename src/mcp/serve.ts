@@ -267,9 +267,10 @@ async function serve(caller: string, configPath: string): Promise<number> {
     });
   });
   const reason = await done;
-  // A signal drops lines that have not started, so no call-start line is
-  // written for them; the message in flight finishes first.
-  if (reason === "signal") {
+  // A signal or a closed stdout drops lines that have not started, so no
+  // call-start line is written for them; the message in flight finishes
+  // first (T3.4).
+  if (reason === "signal" || reason === "stdout-closed") {
     protocol.abort();
   }
   await protocol.drain();

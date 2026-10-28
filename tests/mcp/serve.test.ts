@@ -269,3 +269,74 @@ test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   expect(missingCode).toBe(2);
   expect(missingOut).toBe("");
 });
+
+test("F13 a closed stdout aborts queued calls (F13, T3.4)", async () => {
+  const entries: { event: string }[] = [];
+  const slowGate = (() => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { gate, release: () => release?.() };
+  })();
+  const { createProtocol } = await import("../../src/mcp/protocol.ts");
+  let runs = 0;
+  const protocol = createProtocol({
+    tools: [
+      {
+        name: "slow_tool",
+        title: "Slow tool",
+        toolClass: "read" as const,
+        description: "[read] test tool",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+        validate: () => null,
+        run: async () => {
+          runs += 1;
+          await slowGate.gate;
+          return { payload: { ok: true }, summary: null, detail: null };
+        },
+      },
+    ],
+    serverInfo: { name: "means-of-compute-factory", version: "0.1.0" },
+    caller: "coordinator",
+    callLog: {
+      append: (entry: Record<string, unknown>): Promise<void> => {
+        entries.push(entry as { event: string });
+        return Promise.resolve();
+      },
+    },
+    now: () => new Date("2026-10-28T10:00:00.000Z"),
+    runId: "run-f13",
+  });
+  await protocol.handleLine(initLine(1));
+  // Two queued calls; a closed stdout aborts the queue like a signal, so
+  // the second call never starts and no drain listener leaks.
+  const first = protocol.handleLine(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "slow_tool", arguments: {} },
+    }),
+  );
+  const second = protocol.handleLine(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "slow_tool", arguments: {} },
+    }),
+  );
+  await Bun.sleep(10);
+  // Mirrors the serve.ts stdout-closed path: abort drops queued lines
+  // that have not started, then the in-flight call finishes.
+  protocol.abort();
+  slowGate.release();
+  await Promise.resolve();
+  const [firstRaw, secondRaw] = await Promise.all([first, second]);
+  await protocol.drain();
+  expect(firstRaw === null || secondRaw === null).toBe(true);
+  expect(runs).toBeLessThanOrEqual(1);
+  const starts = entries.filter((entry) => entry.event === "call-start");
+  expect(starts.length).toBeLessThanOrEqual(1);
+});

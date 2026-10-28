@@ -444,10 +444,7 @@ test("lost adds the host without raising startRejections (U14)", async () => {
 test("red-ci changes neither excludedHosts nor startRejections (U14)", async () => {
   await withTempDir(async (dir) => {
     const { ctx } = ctxFor(dir);
-    await writeState(
-      ctx.statePath,
-      loopItem({ excludedHosts: ["host-a"], startRejections: 2 }),
-    );
+    await writeState(ctx.statePath, loopItem({ excludedHosts: ["host-a"], startRejections: 2 }));
     await closeRound(ctx, item(), {
       outcome: "red-ci",
       attempt: "failure",

@@ -1,11 +1,4 @@
-// MCP boundary test (matrix X4): the import closure of every file under
-// src/mcp/ never reaches the approvals decide module or the CLI, so no
-// MCP call can decide a request; no file under src/mcp/ names the atomic
-// writer. Specs come from Bun's import scanner, and the loader checks
-// (require in any form, createRequire, getBuiltinModule, direct eval,
-// imports of module/node:module, other import.meta reads) run on
-// comment-free code, so no file in the closure loads decide outside the
-// closure (A9).
+// MCP boundary test (matrix X4): the import closure of every file under src/mcp/ never reaches the approvals decide module or the CLI, and no file under src/mcp/ names the atomic writer. Specs come from Bun's import scanner, every closure file is TypeScript or JSON, and the loader checks run on the comment-free code of every TypeScript file in the closure. The checks match loader names spelled in source; a name or code built at runtime is outside this test (docs/mcp.md, A9).
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

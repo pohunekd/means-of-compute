@@ -179,7 +179,7 @@ error it is `null`, because the call-end line already carries `code`.
    create `pending` entries only and has no parameter for `state`.
 2. `decideRequest` lives in its own module, `src/approvals/decide.ts`.
    Test X4 walks `src/mcp/` recursively and collects the import specs
-   of every `*.ts` file with Bun's import scanner, then follows every
+   of every file (each must be a `*.ts` file) with Bun's import scanner, then follows every
    relative import that resolves inside the repository and outside
    `node_modules`. A relative spec resolves in this order: the spec as
    written if it ends in `.ts`; `.js` mapped to `.ts`; the spec as
@@ -187,16 +187,16 @@ error it is `null`, because the call-end line already carries `code`.
    `.ts`; the spec plus `/index.ts`. A relative spec that resolves to
    no file fails X4 with `unresolved import "<spec>" in <file>`, and a
    relative spec that resolves outside the repository fails X4 with
-   `import "<spec>" in <file> leaves the repository`; bare package
+   `import "<spec>" in <file> leaves the repository`; a relative spec that resolves to a file other than `.ts` or `.json` fails X4 with `import "<spec>" in <file> resolves to an unsupported file type`; JSON files join the closure without a scan. Bare package
    specs are not followed. X4 fails if `src/approvals/decide.ts` or
    `src/approvals/cli.ts` is reachable; it also fails on
    `writeFileAtomic` in any file under `src/mcp/`, and in every file
    of the closure the loader checks run on comment-free code and cover
    `require` in any form, `createRequire`, `getBuiltinModule`, direct
-   `eval`, imports of `module` or `node:module` and any `import.meta`
+   `eval`, `Worker` and imports of `worker_threads` or `node:worker_threads`, imports of `module` or `node:module` and any `import.meta`
    other than `.url`, `.dir`, `.dirname`, `.path`, `.filename` or
    `.main`. The existing ESLint rule already rejects a
-   non-literal dynamic `import()`.
+   non-literal dynamic `import()`. X4 matches names spelled in source. A name or code built at runtime, such as a computed property read with a built string or a function constructor reached through `.constructor`, is outside X4; a runtime boundary for `mcp:serve` is tracked in #94.
 3. No tool reads `/dev/tty`, and there is no MCP method that decides.
 
 Residual gap, stated honestly. The requests file and the CLI belong to

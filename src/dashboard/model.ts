@@ -10,6 +10,7 @@ import type { NanoPricing } from "../budget/pricing.js";
 import { queryLedger } from "../ledger/query.js";
 import { spendEntriesOf } from "../ledger/read.js";
 import type { PendingUsage, SpendEntry } from "../ledger/types.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import {
   capScaled,
   formatUsd,
@@ -119,10 +120,10 @@ function priceCite(ids: readonly string[], pricing: ReadonlyMap<string, NanoPric
   const parts = [...new Set(ids)].sort().map((id) => {
     const entry = pricing.get(id);
     if (entry === undefined) {
-      return `config/providers/${id}.json (no price found)`;
+      return `${PROVIDERS_DIR}/${id}.json (no price found)`;
     }
     return (
-      `config/providers/${id}.json input $${priceText(entry.inputNanoPer1M)} per 1M, ` +
+      `${PROVIDERS_DIR}/${id}.json input $${priceText(entry.inputNanoPer1M)} per 1M, ` +
       `output $${priceText(entry.outputNanoPer1M)} per 1M`
     );
   });

@@ -186,7 +186,10 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   // The pipe reader sleeps before draining, so the server must keep the
   // whole response buffered until stdout accepts it; exiting early or
   // resolving the write without its callback truncates the response.
-  const slowReaderCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 1; cat)`;
+  // The brace group records the server's own exit status: the pipeline
+  // rc alone only covers the reader.
+  const rcfile = join(env.dir, "server.rc");
+  const slowReaderCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | (sleep 1; cat)`;
   const proc = Bun.spawn(["sh", "-c", slowReaderCmd], {
     cwd: process.cwd(),
     stdin: "pipe",
@@ -206,6 +209,8 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   ]);
   expect(stderr).not.toContain("{");
   expect(code).toBe(0);
+  const h1ServerRc = (await Bun.file(rcfile).text()).trim();
+  expect(h1ServerRc).toBe("0");
   const lines = stdout.split("\n").filter((line) => line.length > 0);
   expect(lines.length).toBe(2);
   const call = JSON.parse(lines[1] as string) as {
@@ -231,7 +236,10 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   // pid comes from its own server-start line, so SIGTERM hits the server
   // alone, not the reader. Stdin closes at once (EOF), then SIGTERM
   // arrives once the call log shows the first call-start.
-  const queuedCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 2; cat)`;
+  // The brace group records the server's own exit status: the pipeline
+  // rc alone only covers the reader.
+  const rcfile = join(env.dir, "server.rc");
+  const queuedCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | (sleep 2; cat)`;
   const proc = Bun.spawn(["sh", "-c", queuedCmd], {
     cwd: process.cwd(),
     stdin: "pipe",
@@ -271,6 +279,8 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   await new Response(proc.stdout).text();
   expect(stderr).not.toContain("{");
   expect(code).toBe(0);
+  const h2ServerRc = (await Bun.file(rcfile).text()).trim();
+  expect(h2ServerRc).toBe("0");
   const logText = await Bun.file(env.callLogPath).text();
   const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
   expect(starts.length).toBeLessThan(4);
@@ -406,7 +416,10 @@ test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
   // is closed at once (EOF), so the stop reason is stdout-closed only
   // through the stdoutOk rule, never through `done` (R2-9). The stdoutOk
   // guard in enqueueTransport is what skips the queued tasks.
-  const closingCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | head -c 1`;
+  // The brace group records the server's own exit status: the pipeline
+  // rc alone only covers the head reader.
+  const rcfile = join(env.dir, "server.rc");
+  const closingCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | head -c 1`;
   const proc = Bun.spawn(["sh", "-c", closingCmd], {
     cwd: process.cwd(),
     stdin: "pipe",
@@ -429,6 +442,8 @@ test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
   const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   await new Response(proc.stdout).text();
   expect(code).toBe(0);
+  const h5ServerRc = (await Bun.file(rcfile).text()).trim();
+  expect(h5ServerRc).toBe("0");
   expect(stderr).not.toContain("MaxListenersExceededWarning");
   const logText = await Bun.file(env.callLogPath).text();
   const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));

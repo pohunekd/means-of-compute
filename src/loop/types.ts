@@ -100,9 +100,11 @@ export interface LoopItem {
     | "final";
   readonly round: number;
   readonly retry: number;
-  readonly park:
-    | { readonly kind: "stall" | "lost" | "operator" | "blocked"; readonly reason: string; readonly code: string | null }
-    | null;
+  readonly park: {
+    readonly kind: "stall" | "lost" | "operator" | "blocked";
+    readonly reason: string;
+    readonly code: string | null;
+  } | null;
   readonly session: {
     readonly hostAlias: string;
     readonly providerId: string;

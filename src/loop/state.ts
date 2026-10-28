@@ -157,9 +157,7 @@ function checkItemRules(state: LoopState, path: string): void {
     }
     // Rule (f): a park means the item is idle or final, and blocked parks
     // only land on items whose finalize result is blocked.
-    const park = record["park"] as
-      | { kind: "stall" | "lost" | "operator" | "blocked" }
-      | null;
+    const park = record["park"] as { kind: "stall" | "lost" | "operator" | "blocked" } | null;
     const finalize = record["finalize"] as { result: "success" | "blocked" } | null;
     if (park !== null && phase !== "idle" && phase !== "final") {
       throw new LoopStateDataError(

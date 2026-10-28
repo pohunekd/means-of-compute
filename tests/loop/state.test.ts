@@ -203,7 +203,7 @@ test("rule (f): a stall park with phase running fails (C1)", async () => {
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
-    expect(String((error as Error).message)).toContain("rule (f)");
+    expect(String(error)).toContain("rule (f)");
   });
 });
 
@@ -231,7 +231,7 @@ test("rule (f): a blocked park without a blocked finalize fails (C1)", async () 
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
-    expect(String((error as Error).message)).toContain("rule (f)");
+    expect(String(error)).toContain("rule (f)");
   });
 });
 

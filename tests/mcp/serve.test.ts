@@ -373,73 +373,48 @@ test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   expect(missingOut).toBe("");
 });
 
-test("F13 a closed stdout aborts queued calls (F13, T3.4)", async () => {
-  const entries: { event: string }[] = [];
-  const slowGate = (() => {
-    let release: (() => void) | null = null;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return { gate, release: () => release?.() };
-  })();
-  const { createProtocol } = await import("../../src/mcp/protocol.ts");
-  let runs = 0;
-  const protocol = createProtocol({
-    tools: [
-      {
-        name: "slow_tool",
-        title: "Slow tool",
-        toolClass: "read" as const,
-        description: "[read] test tool",
-        inputSchema: { type: "object", additionalProperties: false, properties: {} },
-        validate: () => null,
-        run: async () => {
-          runs += 1;
-          await slowGate.gate;
-          return { payload: { ok: true }, summary: null, detail: null };
-        },
-      },
-    ],
-    serverInfo: { name: "means-of-compute-factory", version: "0.1.0" },
-    caller: "coordinator",
-    callLog: {
-      append: (entry: Record<string, unknown>): Promise<void> => {
-        entries.push(entry as { event: string });
-        return Promise.resolve();
-      },
-    },
-    now: () => new Date("2026-10-28T10:00:00.000Z"),
-    runId: "run-f13",
+test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
+  const env = await createMcpTestEnv("mcp-h5-");
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
   });
-  await protocol.handleLine(initLine(1));
-  // Two queued calls; a closed stdout aborts the queue like a signal, so
-  // the second call never starts and no drain listener leaks.
-  const first = protocol.handleLine(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: { name: "slow_tool", arguments: {} },
-    }),
-  );
-  const second = protocol.handleLine(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tools/call",
-      params: { name: "slow_tool", arguments: {} },
-    }),
-  );
-  await Bun.sleep(10);
-  // Mirrors the serve.ts stdout-closed path: abort drops queued lines
-  // that have not started, then the in-flight call finishes.
-  protocol.abort();
-  slowGate.release();
-  await Promise.resolve();
-  const [firstRaw, secondRaw] = await Promise.all([first, second]);
-  await protocol.drain();
-  expect(firstRaw === null || secondRaw === null).toBe(true);
-  expect(runs).toBeLessThanOrEqual(1);
-  const starts = entries.filter((entry) => entry.event === "call-start");
+  await writeTestFile(env.registryPath, { sessions: [] });
+  // Stdout through `head -c 1` closes after one byte while stdin stays
+  // open, so the queued calls never start. The first failing write marks
+  // stdoutOk false while the pipe still holds the 20 queued calls; stdin
+  // is closed at once (EOF), so the stop reason is stdout-closed only
+  // through the stdoutOk rule, never through `done` (R2-9). The stdoutOk
+  // guard in enqueueTransport is what skips the queued tasks.
+  const closingCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | head -c 1`;
+  const proc = Bun.spawn(["sh", "-c", closingCmd], {
+    cwd: process.cwd(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const sink = proc.stdin as unknown as {
+    write(chunk: string): void;
+    end(): void;
+  };
+  let input = `${initLine(1)}\n`;
+  for (let id = 2; id <= 21; id += 1) {
+    input += `${callLine(id)}\n`;
+  }
+  sink.write(input);
+  // EOF now: stdin closes while the large queued batch is still blocked
+  // on the one-byte reader. Every fleet_status call runs the registry
+  // read, so the first responses land after stdout already closed.
+  sink.end();
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  await new Response(proc.stdout).text();
+  expect(code).toBe(0);
+  expect(stderr).not.toContain("MaxListenersExceededWarning");
+  const logText = await Bun.file(env.callLogPath).text();
+  const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
   expect(starts.length).toBeLessThanOrEqual(1);
+  expect(logText).toContain('"event":"server-stop"');
+  expect(logText).toContain('"reason":"stdout-closed"');
 });

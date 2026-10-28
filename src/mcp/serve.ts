@@ -289,8 +289,12 @@ async function serve(caller: string, configPath: string): Promise<number> {
   }
   await protocol.drain();
   await transportTail;
+  // A failed stdout write means the reader is gone: the stop reason is
+  // "stdout-closed" whenever stdoutOk is false, even when stdin already
+  // ended first (R2-9). The stdoutOk guard in enqueueTransport is what
+  // skips the queued tasks after the close. A signal still wins (H2).
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  const stopReason = sawSignal ? "signal" : reason;
+  const stopReason = sawSignal ? "signal" : stdoutOk ? reason : "stdout-closed";
   switch (stopReason) {
     case "signal":
     case "stdout-closed": {

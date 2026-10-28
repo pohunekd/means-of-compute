@@ -1,6 +1,7 @@
 // CLI entry point for the meter usage query: bun run meter:usage.
 // Prints one JSON line with the joined usage for a grant, read-only:
 // a torn tail is ignored and the file is never modified.
+import { stat } from "node:fs/promises";
 import { joinUsage } from "./join.js";
 import { replayUsageLog } from "./usage-log.js";
 
@@ -41,6 +42,14 @@ async function runUsage(args: string[]): Promise<number> {
   const flags = takeFlags(args);
   const logPath = requiredFlag(flags, "--log");
   const requestId = requiredFlag(flags, "--request");
+  try {
+    await stat(logPath);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`meter: no log file at ${JSON.stringify(logPath)}`);
+    }
+    throw error;
+  }
   const index = await replayUsageLog(logPath, "read-only", () => {});
   if (!index.grants.has(requestId)) {
     console.error(`meter: no grant for ${requestId}`);

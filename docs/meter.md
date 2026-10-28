@@ -289,13 +289,4 @@ The provisional lost path runs only when `port.start` is unreachable; there `los
 
 ## Usage CLI
 
-`bun run meter:usage -- --log <path> --request <id>` prints the
-`joinUsage` row of one request as one JSON line (exit 0), without ever
-writing to the log — the read appendix is read-only, and the CLI uses
-`replayUsageLog` for both reads and writes. A request without a grant
-prints `meter: no grant for <id>` on stderr (exit 3); a usage error
-(bad flags, missing values, a repeated or unknown flag, a validation
-failure, or a missing or unreadable file) prints one line on stderr
-starting with `meter:` (exit 2). The CLI never speaks of `grant-open`
-and never reaches for `raw`: it is pure join, so a torn tail is just
-cut, never surfaced.
+`bun run meter:usage -- --log <path> --request <id>` prints the `joinUsage` row of one request as one JSON line (exit 0). The CLI replays the log read-only; a torn tail is ignored and the file is never modified. A request without a grant prints `meter: no grant for <id>` on stderr (exit 3). A usage error (bad flags, missing values, a repeated or unknown flag, a validation failure) or no log file prints one `meter:` line on stderr (exit 2).

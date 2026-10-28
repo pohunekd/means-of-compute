@@ -73,13 +73,19 @@ test("meter:usage prints the join, exits 3 without a grant", async () => {
 
 test("meter:usage exits 2 on a bad flag or log", async () => {
   await withMeter("tests/meter/recordings/stream-ok.json", async ({ logPath }) => {
+    const beforeFlags = await Bun.file(logPath).bytes();
     const missing = await runCli(["usage", "--log", logPath]);
     expect(missing.code).toBe(2);
+    expect(missing.stdout).toBe("");
     expect(missing.stderr.split("\n")).toHaveLength(2);
     expect(missing.stderr).toStartWith("meter:");
+    expect(await Bun.file(logPath).bytes()).toEqual(beforeFlags);
     const unknown = await runCli(["usage", "--log", logPath, "--request", "w1-demo:0", "--x", "1"]);
     expect(unknown.code).toBe(2);
+    expect(unknown.stdout).toBe("");
+    expect(unknown.stderr.split("\n")).toHaveLength(2);
     expect(unknown.stderr).toStartWith("meter:");
+    expect(await Bun.file(logPath).bytes()).toEqual(beforeFlags);
     const repeated = await runCli([
       "usage",
       "--log",
@@ -90,7 +96,10 @@ test("meter:usage exits 2 on a bad flag or log", async () => {
       "w1-demo:0",
     ]);
     expect(repeated.code).toBe(2);
+    expect(repeated.stdout).toBe("");
+    expect(repeated.stderr.split("\n")).toHaveLength(2);
     expect(repeated.stderr).toStartWith("meter:");
+    expect(await Bun.file(logPath).bytes()).toEqual(beforeFlags);
     const dir = mkdtempSync(join(tmpdir(), "meter-cli-"));
     try {
       const badLog = join(dir, "bad.jsonl");
@@ -98,10 +107,27 @@ test("meter:usage exits 2 on a bad flag or log", async () => {
       const before = await Bun.file(badLog).bytes();
       const bad = await runCli(["usage", "--log", badLog, "--request", "w1-demo:0"]);
       expect(bad.code).toBe(2);
+      expect(bad.stdout).toBe("");
+      expect(bad.stderr.split("\n")).toHaveLength(2);
       expect(bad.stderr).toStartWith("meter:");
       expect(await Bun.file(badLog).bytes()).toEqual(before);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("a missing log file exits 2 and creates nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "meter-cli-missing-"));
+  try {
+    const logPath = join(dir, "none.jsonl");
+    const missing = await runCli(["usage", "--log", logPath, "--request", "w1-demo:0"]);
+    expect(missing.code).toBe(2);
+    expect(missing.stdout).toBe("");
+    expect(missing.stderr.split("\n")).toHaveLength(2);
+    expect(missing.stderr).toStartWith("meter: no log file");
+    expect(Bun.file(logPath).size).toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

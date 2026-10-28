@@ -57,6 +57,7 @@ test("CL1 one call gives one start and one end line with the same callId (CL1, L
     tools: createTools({
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
+      auditorConfigPath: env.auditorConfigPath,
     }),
     serverInfo: { name: "means-of-compute-factory", version: "0.1.0" },
     caller: "coordinator",
@@ -152,6 +153,7 @@ test("CL3 a hostile client name is logged as null client (CL3, P2, L2)", async (
     tools: createTools({
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
+      auditorConfigPath: env.auditorConfigPath,
     }),
     serverInfo: { name: "means-of-compute-factory", version: "0.1.0" },
     caller: "coordinator",

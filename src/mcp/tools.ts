@@ -19,7 +19,7 @@ export type { ToolContext, ToolDefinition, ToolError, ToolOutcome, ToolPayload }
 export interface ToolPaths {
   readonly workConfigPath: string;
   readonly dispatcherConfigPath: string;
-  readonly auditorConfigPath?: string;
+  readonly auditorConfigPath: string;
 }
 
 export function okPayload(fields: Record<string, unknown>): ToolPayload {

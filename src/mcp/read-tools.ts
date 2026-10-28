@@ -154,9 +154,6 @@ async function runAuditResults(
   }
   let verdicts;
   try {
-    if (paths.auditorConfigPath === undefined) {
-      throw new Error("auditor config path is missing");
-    }
     const auditorConfig = await loadAuditorConfig(paths.auditorConfigPath);
     verdicts = await readVerdicts(auditorConfig.verdictDir, workItemId);
   } catch (error: unknown) {

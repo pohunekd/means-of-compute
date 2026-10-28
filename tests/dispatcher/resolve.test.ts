@@ -278,6 +278,16 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
     const sessions = control.sessions();
     expect(sessions.map((entry) => entry.handle.sessionId)).toEqual(["mem-1"]);
     expect(sessions.map((entry) => entry.state)).toEqual(["cancelled"]);
+    const registryAfter = await readRegistry(join(dir, "registry.json"));
+    expect(registryAfter).toHaveLength(1);
+    const resolvedEntry = registryAfter[0];
+    if (resolvedEntry?.terminal === null || resolvedEntry?.terminal === undefined) {
+      throw new Error("expected a lost terminal after resolve");
+    }
+    expect(resolvedEntry.terminal.state).toBe("lost");
+    expect(resolvedEntry.terminal.detail).toBe("operator resolved");
+    expect(resolvedEntry.terminal.ledgerAppended).toBe(true);
+    expect(resolvedEntry.resolvedAt).toBe(resolvedEntry.terminal.observedAt);
     const lines = await readPending(ledgerPath);
     expect(lines).toHaveLength(1);
     expect((lines[0] as { entryId: string }).entryId).toBe("demo-item:demo-item:0");
@@ -955,8 +965,12 @@ test("J4 watch before and after resolve returns the same result", async () => {
       usage: null,
       detail: "exited 0",
     });
+    const first = await dispatcher.watch("demo-item:0");
+    expect(first.result.state).toBe("finished");
+    expect(first.ledger).toBe("appended");
     const before = await dispatcher.watch("demo-item:0");
-    expect(before.result.state).toBe("finished");
+    expect(before.result).toEqual(first.result);
+    expect(before.ledger).toBe("unchanged");
     const resolved = await dispatcher.resolve("demo-item:0");
     expect(resolved.outcome).toBe("resolved");
     if (resolved.outcome !== "resolved") {
@@ -966,7 +980,6 @@ test("J4 watch before and after resolve returns the same result", async () => {
     const after = await dispatcher.watch("demo-item:0");
     expect(after.result).toEqual(before.result);
     expect(after.ledger).toBe("unchanged");
-    expect(before.ledger).toBe("appended");
   });
 });
 

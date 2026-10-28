@@ -26,7 +26,12 @@ export function serveMeter(
       return handleMeterRequest(buildState(), req, srv, address, index);
     },
   });
-  log({ level: "info", event: "listening", hostAlias: config.listenAlias });
+  try {
+    log({ level: "info", event: "listening", hostAlias: config.listenAlias });
+  } catch (error: unknown) {
+    void server.stop(true);
+    throw error;
+  }
   return {
     port: server.port ?? 0,
     stop(closeActive: boolean): void {

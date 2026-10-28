@@ -113,7 +113,9 @@ only the request id, the host alias and error codes, never routes or port
 messages. Every dispatcher, adapter and meter event appends one JSON line
 `{"at": <ISO time>, "source": <"dispatcher" | "adapter" | "meter">, ...event}`
 to `resolveLogPath` (`logs/dispatch-resolve.jsonl`), creating the parent
-directory; nothing from those logs reaches stdout or stderr.
+directory; nothing from those logs reaches stdout. A failed append prints
+one `dispatch: resolve log: <code>` line to stderr per run and drops later
+failures silently.
 
 The CLI holds the registry owner lock (`<registryPath>.lock`) for the whole
 run through `withFileLock` (`src/fs/lock.ts` `withFileLock`), so two runs

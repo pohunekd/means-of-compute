@@ -235,45 +235,70 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
     const adapterConfig = await loadPohunekAdapterConfig();
     const ledgerConfig = await loadLedgerConfig();
     mkdirSync(dirname(config.registryPath), { recursive: true });
+    try {
+      mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
+      appendFileSync(adapterConfig.resolveLogPath, "");
+    } catch (error: unknown) {
+      const raw = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+      const code = typeof raw === "string" && /^E[A-Z]+$/.test(raw) ? raw : "unwritable";
+      throw new Error(`resolve log: ${code}`, { cause: error });
+    }
     return await withFileLock("Dispatcher registry", config.registryPath, async () => {
+      let logFailed = false;
       const log =
         (source: string) =>
         (event: object): void => {
-          mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
-          appendFileSync(
-            adapterConfig.resolveLogPath,
-            `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
-          );
+          try {
+            mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
+            appendFileSync(
+              adapterConfig.resolveLogPath,
+              `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
+            );
+          } catch (error: unknown) {
+            // The resolve log is best effort: the entry point
+            // guarantees it exists, so a failure here names the errno
+            // code once per run and drops later failures silently.
+            if (logFailed) {
+              return;
+            }
+            logFailed = true;
+            const raw = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+            const code = typeof raw === "string" && /^E[A-Z]+$/.test(raw) ? raw : "unwritable";
+            console.error(`dispatch: resolve log: ${code}`);
+          }
         };
       const dispatcherLog = log("dispatcher");
       const adapterLog = log("adapter");
       const meterLog = log("meter");
       const port = await openPohunekPort(adapterConfig, adapterLog, process.env, null);
-      const meter = await startMeter({
-        config: meterConfig,
-        env: meterEnv,
-        providers,
-        now: () => new Date(),
-        log: meterLog,
-        timers: systemTimers,
-        logIo: systemUsageLogIo,
-      });
-      const dispatcher = createDispatcher({
-        port,
-        budget: {
-          admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
-        },
-        ledgerPath: ledgerConfig.ledgerPath,
-        config,
-        now: () => new Date(),
-        sleep: (ms) => Bun.sleep(ms),
-        log: dispatcherLog,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
-      });
       try {
-        return await use((requestId) => dispatcher.resolve(requestId));
+        const meter = await startMeter({
+          config: meterConfig,
+          env: meterEnv,
+          providers,
+          now: () => new Date(),
+          log: meterLog,
+          timers: systemTimers,
+          logIo: systemUsageLogIo,
+        });
+        try {
+          const dispatcher = createDispatcher({
+            port,
+            budget: {
+              admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
+            },
+            ledgerPath: ledgerConfig.ledgerPath,
+            config,
+            now: () => new Date(),
+            sleep: (ms) => Bun.sleep(ms),
+            log: dispatcherLog,
+            lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+          });
+          return await use((requestId) => dispatcher.resolve(requestId));
+        } finally {
+          await meter.close();
+        }
       } finally {
-        await meter.close();
         await port.close();
       }
     });

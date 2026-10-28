@@ -1,0 +1,8 @@
+{
+  "storePath": "logs/work-items.json",
+  "factorySpecsPath": "config/factory-specs.json",
+  "models": ["meta/muse-glimmer-30b", "muse-spark-1.3-contributor"],
+  "maxItemsPerSubmit": 50,
+  "maxItemBytes": 16384,
+  "maxStoreItems": 1000
+}

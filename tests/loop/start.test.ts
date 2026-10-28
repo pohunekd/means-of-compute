@@ -276,8 +276,7 @@ function grantUsage(
   };
 }
 
-// Rows U6 to U9:
-// and the refused write through the real dispatcher and memory port.
+// Rows U1 to U5: claim, the started write and the refused write.
 test("claimStart derives the next requestId from the ledger (U1)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -424,38 +423,40 @@ test("driveStart opens the session on the fallback model (U4)", async () => {
         },
       }),
     );
-    // The ledger holds two pending sessions, so :2 is the fresh id; seed
-    // the matching settled registry entry the started path expects.
+    // The ledger holds two pending sessions, so :2 is the fresh id; the
+    // real dispatcher then starts on host-b without a seeded entry.
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:1"));
-    const { briefSha256Of } = await import("../../src/dispatcher/dispatcher.js");
-    const { insertRegistryEntry } = await import("../../src/dispatcher/registry.js");
-    await insertRegistryEntry(registryPath, {
-      requestId: "gh-demo-1:2",
-      workItemId: "gh-demo-1",
-      repo: "example/demo",
-      hostAlias: "host-b",
-      branch: "moc/gh-demo-1",
-      baseRef: "origin/main",
-      resume: false,
-      model: { providerId: FALLBACK_PROVIDER, model: FALLBACK },
-      briefSha256: briefSha256Of("Do the work."),
-      sessionId: "mem-9",
-      worktree: "/memory-worktrees/host-b/mem-9",
-      baseCommit: null,
-      startedAt: NOW,
-      cursor: null,
-      unreachableCount: 0,
-      lastSeenState: "starting",
-      lastSeenAt: NOW,
-      cancelReason: null,
-      terminal: null,
-      resolvedAt: null,
-      revision: 0,
+    let starts = 0;
+    const startingPort: DispatcherPort = {
+      ...control.port,
+      async start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
+    const starting = createDispatcher({
+      port: startingPort,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
     });
-    const step = await driveStart(ctx, item());
+    const withStart = makeCtx(dir, starting, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    const step = await driveStart(withStart.ctx, item());
     expect(step).toBe("running");
-    const li = await readItem(ctx.statePath);
+    expect(starts).toBe(1);
+    const entries = await readRegistry(registryPath);
+    const entry = entries.find((candidate) => candidate.requestId === "gh-demo-1:2");
+    expect(entry?.hostAlias).toBe("host-b");
+    expect(entry?.sessionId).not.toBeNull();
+    const li = await readItem(withStart.ctx.statePath);
     expect(li.phase).toBe("running");
     expect(li.session).toEqual({
       hostAlias: "host-b",
@@ -521,16 +522,15 @@ test("driveStart on a failing gate logs budget-gate-error (U5)", async () => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
     const control = createMemoryPort();
-    const rejectingPort: DispatcherPort = {
-      ...control.port,
-      async start() {
-        const { BudgetGateError } = await import("../../src/budget/gate.js");
-        throw new BudgetGateError("gate process failed");
+    const { BudgetGateError } = await import("../../src/budget/gate.js");
+    const failing: BudgetGate = {
+      admit() {
+        return Promise.reject(new BudgetGateError("budget gate: timed out after 1000 ms"));
       },
     };
     const dispatcher = createDispatcher({
-      port: rejectingPort,
-      budget: GATE,
+      port: control.port,
+      budget: failing,
       ledgerPath,
       config: configOf(registryPath),
       now: () => new Date(NOW),
@@ -549,12 +549,16 @@ test("driveStart on a failing gate logs budget-gate-error (U5)", async () => {
     const li = await readItem(ctx.statePath);
     expect(li.backoffUntil).toBe(new Date(new Date(NOW).getTime() + 60_000).toISOString());
     expect(events.some((line) => line.startsWith("budget-refused:budget-gate-error:"))).toBe(true);
+    expect(await readRegistry(registryPath)).toHaveLength(0);
   });
 });
 
 // Rows U6 to U9: the unreachable retry and the rejected, conflicting
 // and drifted starts through the real dispatcher.
-test("driveStart sleeps once on an unreachable host then runs (U6)", async () => {
+// M1: an intent seeded with a past backoff is a retry of the same
+// intent, not a re-claim. The row keeps backoffUntil, sleeps once and
+// starts with the stored request id and host.
+test("an unreachable retry keeps the same intent (U6)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
@@ -571,7 +575,7 @@ test("driveStart sleeps once on an unreachable host then runs (U6)", async () =>
       settleUsage: () => Promise.resolve(null),
     });
     const sleeps: number[] = [];
-    const { ctx } = makeCtx(dir, dispatcher, {
+    const { ctx, events } = makeCtx(dir, dispatcher, {
       ledgerPath,
       dispatcherConfig: configOf(registryPath),
       sleep: (ms: number) => {
@@ -581,13 +585,21 @@ test("driveStart sleeps once on an unreachable host then runs (U6)", async () =>
       },
     });
     await writeStore(ctx.storePath, item());
-    await writeLoopState(ctx.statePath, startedLoopItem());
+    await writeLoopState(
+      ctx.statePath,
+      startedLoopItem({ backoffUntil: "2026-10-28T09:00:00.000Z" }),
+    );
+    const before = await readItem(ctx.statePath);
+    expect(before.start?.requestId).toBe("gh-demo-1:0");
     const step = await driveStart(ctx, item());
     expect(step).toBe("running");
     expect(sleeps).toEqual([5_000]);
     const li = await readItem(ctx.statePath);
     expect(li.requestId).toBe("gh-demo-1:0");
     expect(li.session?.hostAlias).toBe("host-a");
+    expect(li.backoffUntil).toBe("2026-10-28T09:00:00.000Z");
+    const claims = events.filter((line) => line.startsWith("claim:"));
+    expect(claims).toHaveLength(0);
   });
 });
 
@@ -755,13 +767,21 @@ test("a conflicting registry entry parks the item (U8)", async () => {
   });
 });
 
-test("a pending line between claim and drive parks with request-drift (U9)", async () => {
+test("a pre-check drift parks with request-drift and no start (U9a)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
     const control = createMemoryPort();
+    let starts = 0;
+    const counting: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
     const dispatcher = createDispatcher({
-      port: control.port,
+      port: counting,
       budget: GATE,
       ledgerPath,
       config: configOf(registryPath),
@@ -779,10 +799,183 @@ test("a pending line between claim and drive parks with request-drift (U9)", asy
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     const step = await driveStart(ctx, item());
     expect(step).toBe("parked");
+    expect(starts).toBe(0);
     const li = await readItem(ctx.statePath);
     expect(li.phase).toBe("idle");
     expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
     expect(li.rounds).toHaveLength(0);
+    expect(await readRegistry(registryPath)).toHaveLength(0);
+    const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+    expect(store.items[0]).toMatchObject({
+      status: "parked",
+      statusReason: "operator: request-drift",
+    });
+  });
+});
+
+// U9b (crash a): a drifted T2 settled before a crash leaves a live :1
+// entry. The next driveStart finds the drift in the pre-check and
+// cancels the live entry with no new start.
+test("a drifted start after a crash cancels the live session (U9b)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    let starts = 0;
+    const counting: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: counting,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const { ctx } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const stashed = await readItem(ctx.statePath);
+    const intent = stashed.start;
+    if (intent === null) {
+      throw new Error("U9b setup lost the start intent");
+    }
+    // The T2 that ran before the crash: a real start of :1.
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+    const seeded = await dispatcher.start(
+      { ...item(), status: "queued", branch: null },
+      intent.decision,
+      intent.model,
+      intent.brief,
+    );
+    if (seeded.kind !== "started") {
+      throw new Error("U9b setup did not start a session");
+    }
+    expect(seeded.request.requestId).toBe("gh-demo-1:1");
+    await writeLoopState(ctx.statePath, { ...stashed, phase: "starting" });
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("parked");
+    expect(starts).toBe(1);
+    const li = await readItem(ctx.statePath);
+    expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
+    const entries = await readRegistry(registryPath);
+    const live = entries.find((entry) => entry.requestId === "gh-demo-1:1");
+    expect(live?.terminal?.state).toBe("cancelled");
+    expect(live?.cancelReason).toBe("operator");
+    expect(entries.every((entry) => entry.terminal !== null)).toBe(true);
+  });
+});
+
+// U9c (post-start): the T2 appends the anomalous line and returns a
+// started with another request id. The drift park cancels that entry.
+test("a post-start drift cancels the started session (U9c)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const inner = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const drifting: StartContext["dispatcher"] = {
+      ...inner,
+      async start(workItem, decision, model, brief) {
+        await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+        return inner.start(workItem, decision, model, brief);
+      },
+    };
+    const { ctx } = makeCtx(dir, drifting, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("parked");
+    const li = await readItem(ctx.statePath);
+    expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
+    const entries = await readRegistry(registryPath);
+    const live = entries.find((entry) => entry.requestId === "gh-demo-1:1");
+    expect(live?.terminal?.state).toBe("cancelled");
+    expect(live?.cancelReason).toBe("operator");
+    expect(entries.every((entry) => entry.terminal !== null)).toBe(true);
+  });
+});
+
+// U9d (crash b): the cancel ran before the crash but the park write did
+// not. The pre-check finds the drift again with no live entry left and
+// parks with no new start.
+test("a drifted cancel before a crash parks with no live entry (U9d)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    let starts = 0;
+    const counting: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: counting,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const { ctx } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const stashed = await readItem(ctx.statePath);
+    const intent = stashed.start;
+    if (intent === null) {
+      throw new Error("U9d setup lost the start intent");
+    }
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+    const seeded = await dispatcher.start(
+      { ...item(), status: "queued", branch: null },
+      intent.decision,
+      intent.model,
+      intent.brief,
+    );
+    if (seeded.kind !== "started") {
+      throw new Error("U9d setup did not start a session");
+    }
+    await dispatcher.cancel("gh-demo-1:1", "operator");
+    await writeLoopState(ctx.statePath, { ...stashed, phase: "starting" });
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("parked");
+    expect(starts).toBe(1);
+    const li = await readItem(ctx.statePath);
+    expect(li.park).toMatchObject({ kind: "operator", code: "request-drift" });
+    const entries = await readRegistry(registryPath);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ requestId: "gh-demo-1:1" });
+    expect(entries[0]?.terminal?.state).toBe("cancelled");
   });
 });
 
@@ -794,6 +987,7 @@ async function crashingRegistry(
   registryPath: string,
   ledgerPath: string,
   withPending: boolean,
+  ledgered: boolean,
 ): Promise<void> {
   await withMeter(
     "tests/meter/recordings/stream-ok.json",
@@ -830,10 +1024,15 @@ async function crashingRegistry(
       expect(stored).toHaveLength(1);
       const entry = stored[0] as RegistryEntry;
       expect(entry.terminal?.detail).toBe("start-rejected: host-unsupported");
+      const terminal = entry.terminal === null ? null : { ...entry.terminal };
+      if (terminal !== null && !ledgered) {
+        terminal.ledgerAppended = false;
+      }
+      // M2: the C19 leg keeps the dispatcher's own revision and flag.
       const crashing: RegistryEntry = {
         ...(entry as RegistryEntry & { sessionId: null }),
-        revision: 1,
-        terminal: entry.terminal === null ? null : { ...entry.terminal, ledgerAppended: false },
+        revision: ledgered ? entry.revision : 1,
+        terminal,
       };
       const { writeFileAtomic } = await import("../../src/fs/write.js");
       await writeFileAtomic(
@@ -853,7 +1052,7 @@ test("C18 replays the terminal without a port start (L51)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
-    await crashingRegistry(registryPath, ledgerPath, false);
+    await crashingRegistry(registryPath, ledgerPath, false, false);
     const control = createMemoryPort();
     let starts = 0;
     const counting: DispatcherPort = {
@@ -893,14 +1092,20 @@ test("C18 replays the terminal without a port start (L51)", async () => {
     expect(contents.pending).toHaveLength(1);
     expect(contents.pending[0]?.session?.result).toBe("failure");
     expect((await readLoopState(ctx.statePath)).items["gh-demo-1"]).toBeDefined();
+    const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+    expect(store.items[0]).toMatchObject({ status: "queued", stallRounds: 0 });
+    expect(li.rounds[0]).toMatchObject({ outcome: "start-rejected", attempt: "failure" });
   });
 });
 
+// C19 keeps the dispatcher's own revision with the flag set, while the
+// ledger line stays appended; neither row lets the port start. U15 keeps
+// the previous state with the flag unset.
 test("C19 replays the ledgered terminal without a port start (L52)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
-    await crashingRegistry(registryPath, ledgerPath, true);
+    await crashingRegistry(registryPath, ledgerPath, true, true);
     const control = createMemoryPort();
     let starts = 0;
     const counting: DispatcherPort = {
@@ -936,6 +1141,55 @@ test("C19 replays the ledgered terminal without a port start (L52)", async () =>
       requestId: "gh-demo-1:0",
     });
     expect(li.startRejections).toBe(1);
+    const replayed = await readLedger("Test ledger", ledgerPath);
+    expect(replayed.pending).toHaveLength(1);
+    expect(replayed.pending[0]?.session?.result).toBe("failure");
+  });
+});
+
+test("an unflagged ledgered replay appends one pending line (U15)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    await crashingRegistry(registryPath, ledgerPath, true, false);
+    const control = createMemoryPort();
+    let starts = 0;
+    const counting: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: counting,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const { ctx } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await writeLoopState(ctx.statePath, startedLoopItem());
+    const step = await driveStart(ctx, item());
+    expect(step).toBe("idle");
+    expect(starts).toBe(0);
+    const li = await readItem(ctx.statePath);
+    expect(li.rounds[0]).toMatchObject({
+      outcome: "start-rejected",
+      attempt: "failure",
+      requestId: "gh-demo-1:0",
+    });
+    expect(li.startRejections).toBe(1);
+    const replayed = await readLedger("Test ledger", ledgerPath);
+    expect(replayed.pending).toHaveLength(1);
+    expect(replayed.pending[0]?.session?.result).toBe("failure");
   });
 });
 
@@ -1065,6 +1319,9 @@ test("checkSessionTimeout honours the durable startedAt bound (U11)", async () =
     );
     const published = await watchSession(ctx, item());
     expect(published).toBe("publishing");
+    const stalled = seen.events.filter((line) => line.startsWith("terminal:"));
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0]).toContain(":stalled:");
   });
 });
 

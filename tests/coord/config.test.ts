@@ -1,14 +1,83 @@
 // Coordinator config tests (C1-C15, X3, C14d): missing keys, literal pins,
 // exclusions, seed shapes, committed bytes and the unexpected-key rule.
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CoordConfigError, loadCoordConfig, type CoordConfig } from "../../src/coord/config.js";
 
 const COMMITTED = "config/coordinator.json";
+const COMMITTED_DESCRIPTOR = join("config", "providers", "meta-api.json");
+const BROKEN_DESCRIPTOR_MESSAGE =
+  'Coordinator config config/coordinator.json: invalid required key "providerId" ' +
+  `(Provider descriptor ${COMMITTED_DESCRIPTOR}: not a regular file)`;
+
+let descriptorBefore: { ino: number; mtimeMs: number } | null = null;
+
+beforeAll(async () => {
+  const before = await stat(COMMITTED_DESCRIPTOR);
+  descriptorBefore = { ino: before.ino, mtimeMs: before.mtimeMs };
+});
+
+afterAll(async () => {
+  if (descriptorBefore === null) {
+    throw new Error("missing descriptor snapshot");
+  }
+  const after = await stat(COMMITTED_DESCRIPTOR);
+  expect(after.ino).toBe(descriptorBefore.ino);
+  expect(after.mtimeMs).toBe(descriptorBefore.mtimeMs);
+});
+
+interface BrokenDescriptorResult {
+  readonly code: number;
+  readonly output: string;
+}
+
+async function brokenDescriptorTree(
+  edit: (tree: string) => void | Promise<void>,
+): Promise<BrokenDescriptorResult> {
+  const dir = mkdtempSync(join(tmpdir(), "coord-tree-"));
+  try {
+    cpSync("config", join(dir, "config"), { recursive: true });
+    cpSync(
+      join(".agents", "skills", "factory-coord"),
+      join(dir, ".agents", "skills", "factory-coord"),
+      { recursive: true },
+    );
+    const treeDescriptor = join(dir, "config", "providers", "meta-api.json");
+    rmSync(treeDescriptor);
+    mkdirSync(treeDescriptor);
+    await edit(dir);
+    const helper = join(dir, "coord-check.ts");
+    await Bun.write(
+      helper,
+      `import { loadCoordConfig } from ${JSON.stringify(join(import.meta.dir, "..", "..", "src", "coord", "config.ts"))};
+try {
+  await loadCoordConfig("config/coordinator.json");
+  console.log("loaded");
+} catch (error: unknown) {
+  console.log(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+`,
+    );
+    const proc = Bun.spawn(["bun", helper], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { code, output: `${stdout}${stderr}`.trim() };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 async function readCommitted(): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(COMMITTED, "utf8")) as Record<string, unknown>;
@@ -319,102 +388,18 @@ test("a parsed non-object is not a JSON object (C15)", async () => {
 });
 
 test("a descriptor directory fails from a temp tree (X3)", async () => {
-  const committedDescriptor = join("config", "providers", "meta-api.json");
-  const before = await stat(committedDescriptor);
-  const dir = mkdtempSync(join(tmpdir(), "coord-tree-"));
-  try {
-    cpSync("config", join(dir, "config"), { recursive: true });
-    cpSync(
-      join(".agents", "skills", "factory-coord"),
-      join(dir, ".agents", "skills", "factory-coord"),
-      { recursive: true },
-    );
-    const treeDescriptor = join(dir, "config", "providers", "meta-api.json");
-    rmSync(treeDescriptor);
-    const { mkdirSync } = await import("node:fs");
-    mkdirSync(treeDescriptor);
-    const helper = join(dir, "coord-check.ts");
-    await Bun.write(
-      helper,
-      `import { loadCoordConfig } from ${JSON.stringify(join(import.meta.dir, "..", "..", "src", "coord", "config.ts"))};
-try {
-  await loadCoordConfig("config/coordinator.json");
-  console.log("loaded");
-} catch (error: unknown) {
-  console.log(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-}
-`,
-    );
-    const proc = Bun.spawn(["bun", helper], {
-      cwd: dir,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    expect(code).toBe(1);
-    expect(`${stdout}${stderr}`.trim()).toBe(
-      'Coordinator config config/coordinator.json: invalid required key "providerId" ' +
-        `(Provider descriptor ${join("config", "providers", "meta-api.json")}: not a regular file)`,
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  const after = await stat(committedDescriptor);
-  expect(after.ino).toBe(before.ino);
-  expect(after.mtimeMs).toBe(before.mtimeMs);
+  const result = await brokenDescriptorTree(() => {});
+  expect(result.code).toBe(1);
+  expect(result.output).toBe(BROKEN_DESCRIPTOR_MESSAGE);
 });
 
 test("a bad model after a broken descriptor still names the provider (C14d)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "coord-tree-"));
-  try {
-    cpSync("config", join(dir, "config"), { recursive: true });
-    cpSync(
-      join(".agents", "skills", "factory-coord"),
-      join(dir, ".agents", "skills", "factory-coord"),
-      { recursive: true },
-    );
-    const treeDescriptor = join(dir, "config", "providers", "meta-api.json");
-    rmSync(treeDescriptor);
-    const { mkdirSync } = await import("node:fs");
-    mkdirSync(treeDescriptor);
-    const treeConfig = join(dir, "config", "coordinator.json");
+  const result = await brokenDescriptorTree(async (tree) => {
+    const treeConfig = join(tree, "config", "coordinator.json");
     const parsed = JSON.parse(await readFile(treeConfig, "utf8")) as Record<string, unknown>;
     parsed["model"] = "x";
     await Bun.write(treeConfig, `${JSON.stringify(parsed, null, 2)}\n`);
-    const helper = join(dir, "coord-check.ts");
-    await Bun.write(
-      helper,
-      `import { loadCoordConfig } from ${JSON.stringify(join(import.meta.dir, "..", "..", "src", "coord", "config.ts"))};
-try {
-  await loadCoordConfig("config/coordinator.json");
-  console.log("loaded");
-} catch (error: unknown) {
-  console.log(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-}
-`,
-    );
-    const proc = Bun.spawn(["bun", helper], {
-      cwd: dir,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    expect(code).toBe(1);
-    expect(`${stdout}${stderr}`.trim()).toBe(
-      'Coordinator config config/coordinator.json: invalid required key "providerId" ' +
-        `(Provider descriptor ${join("config", "providers", "meta-api.json")}: not a regular file)`,
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
+  expect(result.code).toBe(1);
+  expect(result.output).toBe(BROKEN_DESCRIPTOR_MESSAGE);
 });

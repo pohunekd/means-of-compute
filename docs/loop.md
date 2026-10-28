@@ -84,3 +84,13 @@ markers, and pinned merges; rule 3 stays in PR 5.
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.
+## Sandbox stub (PR 4)
+
+`src/loop/git.ts` runs the loop's git calls with a fixed env, a bounded
+wait and no shell, and exports `fetchRefs`, `remoteBranchSha`,
+`revParse`, `isAncestor` and `trialMerge`. `trialMerge` rehearses the
+merge in a scratch worktree, cleans leftovers first, and always removes
+the worktree. `src/loop/stub/github.ts` implements `GitHubPort` over a
+sandbox `origin.git`: live tips, real merges pinned by CAS update-ref,
+and a shared counter for PRs and issues. The gh `stderrPrefix` cuts on
+UTF-8 boundaries after redacting the token.

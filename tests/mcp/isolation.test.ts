@@ -1,8 +1,8 @@
 // MCP boundary test (matrix X4): the import closure of every file under
 // src/mcp/ never reaches the approvals decide module or the CLI, so no
 // MCP call can decide a request; no file under src/mcp/ names the atomic
-// writer or a CommonJS-style loader, so no MCP call writes a file
-// directly or loads decide outside the import closure (A9).
+// writer, and no file in the closure uses a CommonJS-style loader, so no
+// MCP call writes a file directly or loads decide outside the closure (A9).
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -10,7 +10,32 @@ import { dirname, join, resolve } from "node:path";
 const IMPORT_SPEC =
   /(?:from\s+["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["'])/g;
 
-const FORBIDDEN_TEXTS = ["writeFileAtomic", "require(", "import.meta.require", "createRequire"];
+const MODULE_SPECS = new RegExp(IMPORT_SPEC.source, "g");
+
+const REQUIRE_CALL = /\brequire\s*\(/;
+const CREATE_REQUIRE = /\bcreateRequire\b/;
+const IMPORT_META = /\bimport\.meta(?!\.(?:url|dir|dirname|path|filename|main)\b)/;
+
+export function loaderUse(text: string): string | null {
+  if (REQUIRE_CALL.test(text)) {
+    return "require call";
+  }
+  if (CREATE_REQUIRE.test(text)) {
+    return "createRequire";
+  }
+  MODULE_SPECS.lastIndex = 0;
+  let found: RegExpExecArray | null;
+  while ((found = MODULE_SPECS.exec(text)) !== null) {
+    const spec = found[1] ?? found[2] ?? found[3];
+    if (spec === "module" || spec === "node:module") {
+      return `import of "${spec}"`;
+    }
+  }
+  if (IMPORT_META.test(text)) {
+    return "import.meta";
+  }
+  return null;
+}
 
 function specOf(file: string): string[] {
   const text = readFileSync(file, "utf8");
@@ -78,7 +103,56 @@ function mcpFiles(dir: string): string[] {
     .map((name) => join(dir, name));
 }
 
-test("the src/mcp/ import closure never reaches decide or the CLI (X4, A9)", () => {
+test("loaderUse flags every loader spelling (X4 Y1)", () => {
+  const flagged = [
+    'require("x")',
+    'require ("x")',
+    "createRequire(import.meta.url)",
+    'import { createRequire } from "node:module"',
+    'import m from "module"',
+    'await import("node:module")',
+    'import.meta.require("x")',
+    'import.meta["require"]("x")',
+    "const { require: r } = import.meta",
+    "const meta = import.meta",
+  ];
+  for (const sample of flagged) {
+    expect(loaderUse(sample)).not.toBeNull();
+  }
+});
+
+test("loaderUse allows plain property reads and identifiers (X4 Y2)", () => {
+  const clean = [
+    "import.meta.url",
+    "import.meta.dir",
+    "import.meta.main",
+    'new URL("./a.ts", import.meta.url)',
+    "requireAbsoluteDir(x)",
+    "const required = 1",
+  ];
+  for (const sample of clean) {
+    expect(loaderUse(sample)).toBeNull();
+  }
+});
+
+test("every closure file is checked for loader use (X4 Y3)", () => {
+  const dir = join(process.cwd(), "src", "mcp");
+  const entries = mcpFiles(dir);
+  const closure = importClosure(entries);
+  const checked: string[] = [];
+  for (const file of closure) {
+    const text = readFileSync(file, "utf8");
+    const hit = loaderUse(text);
+    expect(`${file}: ${hit ?? "clean"}`).toBe(`${file}: clean`);
+    checked.push(file);
+  }
+  expect(checked.sort()).toEqual([...closure].sort());
+  // Size reads the checked set: checking only src/mcp/ files fails here.
+  expect(checked.length).toBeGreaterThan(entries.length);
+  expect(checked.some((file) => !file.startsWith(`${dir}/`))).toBe(true);
+});
+
+test("the src/mcp/ import closure never reaches decide or the CLI (X4 Y4, A9)", () => {
   const dir = join(process.cwd(), "src", "mcp");
   const entries = mcpFiles(dir);
   const closure = importClosure(entries);
@@ -88,8 +162,6 @@ test("the src/mcp/ import closure never reaches decide or the CLI (X4, A9)", () 
   expect(closure.has(cli)).toBe(false);
   for (const file of entries) {
     const text = readFileSync(file, "utf8");
-    for (const forbidden of FORBIDDEN_TEXTS) {
-      expect(text).not.toContain(forbidden);
-    }
+    expect(text).not.toContain("writeFileAtomic");
   }
 });

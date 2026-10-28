@@ -104,22 +104,73 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
   return { protocol, callLog, maxMessageBytes: config.maxMessageBytes, run, caller };
 }
 
-// Writes through stdout and reports an EPIPE-style failure so the caller
-// stops writing responses. A failed write resolves false; a closed stream
-// resolves false as well.
+// Every response travels through one serialized transport queue below: the
+// write callback (and drain under backpressure) is awaited before the queue
+// moves on, so awaiting the queue covers written bytes. Serialization also
+// means at most one drain listener is ever pending. A failed write resolves
+// false; a closed stream resolves false as well.
 async function writeStdout(text: string): Promise<boolean> {
-  const ok = process.stdout.write(`${text}\n`);
-  if (!ok) {
+  const line = `${text}\n`;
+  let accepted = true;
+  const flushed = new Promise<boolean>((resolve) => {
+    const done = (error: Error | null | undefined) => {
+      resolve(error === null || error === undefined);
+    };
+    try {
+      accepted = process.stdout.write(line, done);
+    } catch {
+      resolve(false);
+    }
+  });
+  if (!accepted) {
+    // Backpressure: wait until the kernel takes the buffered bytes (or the
+    // stream goes away) before the transport queue moves on.
     await new Promise<void>((resolve) => {
-      process.stdout.once("drain", () => {
+      const cleanup = () => {
+        process.stdout.removeListener("drain", onDrain);
+        process.stdout.removeListener("error", onGone);
+        process.stdout.removeListener("close", onGone);
+      };
+      const onDrain = () => {
+        cleanup();
         resolve();
-      });
-    }).catch(() => undefined);
+      };
+      const onGone = () => {
+        cleanup();
+        resolve();
+      };
+      process.stdout.once("drain", onDrain);
+      process.stdout.once("error", onGone);
+      process.stdout.once("close", onGone);
+    });
+  }
+  const ok = await flushed;
+  if (!ok) {
+    return false;
   }
   if (process.stdout.writableEnded || process.stdout.destroyed) {
     return false;
   }
   return true;
+}
+
+// Ends stdout and waits until the kernel has taken every buffered byte.
+async function endStdoutAndWait(): Promise<void> {
+  if (process.stdout.writableEnded || process.stdout.destroyed) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      resolve();
+    };
+    process.stdout.once("finish", done);
+    process.stdout.once("error", done);
+    try {
+      process.stdout.end(done);
+    } catch {
+      done();
+    }
+  });
 }
 
 async function serve(caller: string, configPath: string): Promise<number> {
@@ -144,6 +195,23 @@ async function serve(caller: string, configPath: string): Promise<number> {
       .catch(() => undefined);
     await callLog.close().catch(() => undefined);
   }
+  // One serialized transport queue: each task awaits its protocol line and
+  // then the stdout write (callback, plus drain under backpressure) before
+  // the queue moves on, so awaiting transportTail covers written bytes.
+  // Serialization also means at most one drain listener is ever pending.
+  let transportTail: Promise<void> = Promise.resolve();
+  let transportFailed = false;
+  function enqueueTransport(task: () => Promise<void>): void {
+    const next = transportTail.then(async () => {
+      if (stdoutOk && !stopping) {
+        await task();
+      }
+    });
+    transportTail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
   async function handleTransportLine(line: string): Promise<void> {
     let response: string | null;
     try {
@@ -151,10 +219,10 @@ async function serve(caller: string, configPath: string): Promise<number> {
     } catch (error: unknown) {
       process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
       await stop("error");
-      process.exit(1);
+      transportFailed = true;
       return;
     }
-    if (response !== null && stdoutOk && !stopping) {
+    if (response !== null) {
       stdoutOk = await writeStdout(response);
     }
   }
@@ -166,14 +234,12 @@ async function serve(caller: string, configPath: string): Promise<number> {
   const splitter = createLineSplitter(
     maxMessageBytes,
     (line: string) => {
-      handleTransportLine(line).catch(() => undefined);
+      enqueueTransport(() => handleTransportLine(line));
     },
     () => {
-      (async () => {
-        if (stdoutOk && !stopping) {
-          stdoutOk = await writeStdout(tooLargeResponse);
-        }
-      })().catch(() => undefined);
+      enqueueTransport(async () => {
+        stdoutOk = await writeStdout(tooLargeResponse);
+      });
     },
   );
   process.stdin.setEncoding("utf8");
@@ -203,18 +269,30 @@ async function serve(caller: string, configPath: string): Promise<number> {
     protocol.abort();
   }
   await protocol.drain();
+  await transportTail;
   process.stdin.destroy();
   await stop(reason === "stdout-closed" ? "stdout-closed" : reason);
+  if (transportFailed) {
+    process.exitCode = 1;
+    return 1;
+  }
+  // On EOF and on signal the server ends stdout and waits for its finish,
+  // so the last buffered bytes reach the client before the process exits.
+  if (reason === "eof" || reason === "signal") {
+    await endStdoutAndWait();
+  }
+  process.exitCode = 0;
   return 0;
 }
 
 const args = Bun.argv.slice(2);
-let parsed: { caller: string; configPath: string };
+let parsed: { caller: string; configPath: string } | null = null;
 try {
   parsed = parseArgs(args);
 } catch (error: unknown) {
   process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(2);
+  process.exitCode = 2;
 }
-const code = await serve(parsed.caller, parsed.configPath);
-process.exit(code);
+if (process.exitCode === undefined && parsed !== null) {
+  process.exitCode = await serve(parsed.caller, parsed.configPath);
+}

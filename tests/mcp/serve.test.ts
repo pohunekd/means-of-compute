@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMcpTestEnv } from "../../tests/mcp/env.js";
+import { createMcpTestEnv, writeTestFile } from "../../tests/mcp/env.js";
 
 function initLine(id: number): string {
   return JSON.stringify({
@@ -149,6 +149,65 @@ test("F1 a final call line without a newline is answered (F1, T3.2)", async () =
   expect(call.result.structuredContent.ok).toBe(true);
   const logText = await Bun.file(env.callLogPath).text();
   expect(logText).toContain('"event":"call-end"');
+});
+
+test("F2 a large response is written whole before exit (F2, T3.2)", async () => {
+  const env = await createMcpTestEnv("mcp-f2-");
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
+  const sessions: Record<string, unknown>[] = [];
+  for (let n = 0; n < 6000; n += 1) {
+    const id = `w${String(n)}`;
+    sessions.push({
+      requestId: `${id}:0`,
+      workItemId: id,
+      repo: "example/demo",
+      hostAlias: `host-${String(n).padStart(5, "0")}`,
+      branch: `moc/${id}`,
+      baseRef: "origin/main",
+      resume: false,
+      model: { providerId: "meta-api", model: "muse-spark-1.3-contributor" },
+      briefSha256: "a".repeat(64),
+      sessionId: null,
+      worktree: null,
+      baseCommit: null,
+      startedAt: "2026-10-27T10:00:00.000Z",
+      cursor: null,
+      unreachableCount: 0,
+      lastSeenState: "starting",
+      lastSeenAt: "2026-10-27T10:00:00.000Z",
+      cancelReason: null,
+      terminal: null,
+      revision: 0,
+    });
+  }
+  await writeTestFile(env.registryPath, { sessions });
+  // Stdin closes right after the call; stdout is read only after the
+  // child has exited, so any truncation fails the parse below.
+  const result = await spawnServer(env.dir, `${initLine(1)}\n${callLine(2)}\n`, [
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(result.code).toBe(0);
+  const lines = result.stdout.split("\n").filter((line) => line.length > 0);
+  expect(lines.length).toBe(2);
+  const call = JSON.parse(lines[1] as string) as {
+    id: number;
+    result: {
+      structuredContent: {
+        ok: boolean;
+        hosts: readonly { hostAlias: string }[];
+      };
+    };
+  };
+  expect(call.id).toBe(2);
+  expect(call.result.structuredContent.ok).toBe(true);
+  expect(call.result.structuredContent.hosts.length).toBe(6000);
+  expect(result.stdout.length).toBeGreaterThan(300000);
 });
 
 test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {

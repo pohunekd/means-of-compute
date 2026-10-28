@@ -128,6 +128,29 @@ test("P1 initialize echoes a supported version (P1)", async () => {
   expect(result.result.protocolVersion).toBe("2025-06-18");
 });
 
+test("F10 an empty client name initializes with client null (F10, P2)", async () => {
+  const entries: LogEntry[] = [];
+  const protocol = await protocolWithTools(entries, []);
+  const raw = await protocol.handleLine(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "", version: "1" },
+      },
+    }),
+  );
+  const parsed = JSON.parse(raw as string) as {
+    result: { protocolVersion: string };
+  };
+  expect(parsed.result.protocolVersion).toBe("2025-11-25");
+  const session = entries.find((entry) => entry.event === "session-init");
+  expect(session?.["client"]).toBeNull();
+});
+
 test("P2 initialize falls back to latest on unknown version (P2)", async () => {
   const entries: LogEntry[] = [];
   const protocol = await protocolWithTools(entries, []);

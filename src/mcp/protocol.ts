@@ -369,11 +369,9 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
       const versionValue: unknown = readParam(msg["params"], "protocolVersion");
       const nameValue: unknown = readParam(readParam(msg["params"], "clientInfo"), "name");
       const versionInfo: unknown = readParam(readParam(msg["params"], "clientInfo"), "version");
-      if (
-        typeof versionValue !== "string" ||
-        typeof nameValue !== "string" ||
-        nameValue.length === 0
-      ) {
+      // Only a non-string name is invalid params (P2); an empty name
+      // initializes with client null, like any other pattern mismatch.
+      if (typeof versionValue !== "string" || typeof nameValue !== "string") {
         await logProtocolError(-32602, method, null);
         return jsonError(id, -32602, errorMessage(-32602, null));
       }

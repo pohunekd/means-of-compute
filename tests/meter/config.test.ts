@@ -129,14 +129,128 @@ test("listen wildcard refused", async () => {
 });
 
 test("short secret refused", async () => {
-  const short = Buffer.from("too-short").toString("base64");
+  // Section 9: the secret must decode to at least 32 bytes. A 31-byte
+  // secret is refused, and the error names the secret env var.
+  const short = Buffer.from("x".repeat(31)).toString("base64");
   let message = "";
   try {
     await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_SECRET: short }));
   } catch (error: unknown) {
     message = (error as Error).message;
   }
+  expect(message).toContain("MOC_METER_SECRET");
   expect(message).toContain("at least 32 bytes");
+});
+
+test("host-file alias outside the pattern refused", async () => {
+  // Aliases match ^[a-z][a-z0-9-]{0,31}$: an uppercase alias is
+  // refused, and the error names the alias.
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify({ "Laptop-A": ["127.0.0.1"] }));
+  try {
+    let message = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_HOST_ADDRESSES_FILE: file }));
+    } catch (error: unknown) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('invalid alias "Laptop-A"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("empty host-file array refused", async () => {
+  // Every alias maps to a non-empty array: an empty one is refused,
+  // and the error names the alias.
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify({ "laptop-a": [] }));
+  try {
+    let message = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_HOST_ADDRESSES_FILE: file }));
+    } catch (error: unknown) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('alias "laptop-a" must map to a non-empty array');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unset listen env var refused", async () => {
+  // An unset listen variable is refused, and the error names the
+  // listen variable and the listen alias.
+  const env = envWith();
+  delete env["MOC_METER_LISTEN"];
+  let message = "";
+  try {
+    await resolveMeterEnv(baseConfig(), env);
+  } catch (error: unknown) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain("MOC_METER_LISTEN");
+  expect(message).toContain("is not set");
+});
+
+test("listen value outside host-port refused", async () => {
+  // The listen value is host:port: a bare host is refused, and the
+  // error names the listen variable.
+  let message = "";
+  try {
+    await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_LISTEN: "127.0.0.1" }));
+  } catch (error: unknown) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain("MOC_METER_LISTEN");
+  expect(message).toContain("must be host:port");
+});
+
+test("unset host-file env var refused", async () => {
+  // An unset host-file variable is refused, and the error names the
+  // host-file variable.
+  const env = envWith();
+  delete env["MOC_METER_HOST_ADDRESSES_FILE"];
+  let message = "";
+  try {
+    await resolveMeterEnv(baseConfig(), env);
+  } catch (error: unknown) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain("MOC_METER_HOST_ADDRESSES_FILE");
+  expect(message).toContain("is not set");
+});
+
+test("non-object host file refused", async () => {
+  // The host file holds a JSON object: an array is refused.
+  const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
+  const file = join(dir, "hosts.json");
+  await Bun.write(file, JSON.stringify(["127.0.0.1"]));
+  try {
+    let message = "";
+    try {
+      await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_HOST_ADDRESSES_FILE: file }));
+    } catch (error: unknown) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("must be a JSON object");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("env name outside the pattern refused", async () => {
+  // Config env names match ^[A-Z][A-Z0-9_]*$: a lowercase name is
+  // refused, and the error names the key.
+  let message = "";
+  try {
+    await configFromObject(baseConfig({ listenEnv: "moc-listen" }));
+  } catch (error: unknown) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain('"listenEnv"');
 });
 
 test("mapped address entry refused", async () => {

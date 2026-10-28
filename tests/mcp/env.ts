@@ -11,6 +11,8 @@ export interface McpTestEnv {
   readonly workConfigPath: string;
   readonly auditorConfigPath: string;
   readonly dispatcherConfigPath: string;
+  readonly approvalsConfigPath: string;
+  readonly requestsPath: string;
   readonly storePath: string;
   readonly registryPath: string;
   readonly verdictDir: string;
@@ -37,8 +39,12 @@ export async function createMcpTestEnv(prefix = "mcp-test-"): Promise<McpTestEnv
   const workConfigPath = join(dir, "work.json");
   const auditorConfigPath = join(dir, "auditor.json");
   const dispatcherConfigPath = join(dir, "dispatcher.json");
+  const approvalsConfigPath = join(dir, "approvals.json");
+  const requestsPath = join(dir, "logs", "approval-requests.json");
   const mcpConfigPath = join(dir, "mcp.json");
 
+  const committedApprovals = await readCommittedJson("config/approvals.json");
+  await writeJson(approvalsConfigPath, { ...committedApprovals, requestsPath });
   const committedWork = await readCommittedJson("config/work.json");
   await writeJson(workConfigPath, {
     ...committedWork,
@@ -58,6 +64,7 @@ export async function createMcpTestEnv(prefix = "mcp-test-"): Promise<McpTestEnv
     workConfigPath,
     auditorConfigPath,
     dispatcherConfigPath,
+    approvalsConfigPath,
   });
   return {
     dir,
@@ -65,6 +72,8 @@ export async function createMcpTestEnv(prefix = "mcp-test-"): Promise<McpTestEnv
     workConfigPath,
     auditorConfigPath,
     dispatcherConfigPath,
+    approvalsConfigPath,
+    requestsPath,
     storePath,
     registryPath,
     verdictDir,

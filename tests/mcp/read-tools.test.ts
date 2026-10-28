@@ -32,6 +32,7 @@ async function setupProtocol(
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+      approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,

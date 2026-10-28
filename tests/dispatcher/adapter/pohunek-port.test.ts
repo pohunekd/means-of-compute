@@ -1404,27 +1404,32 @@ test("release stops then unbinds a pending session", async () => {
       sessionId: null,
     });
     expect(result).toEqual({ sessionIds: [pendingId] });
-    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual([
-      "session.list",
-      "session.new",
-      "session.stop",
-      "session.list",
-      "session.stop",
-      "session.set_metadata",
-    ]);
+    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual(
+      [
+        "session.list",
+        "session.new",
+        "session.stop",
+        "session.list",
+        "session.stop",
+        "session.set_metadata",
+      ],
+    );
     const metadataCall = fake
       .calls("laptop-a")
       .find((call) => call.method === "session.set_metadata");
-    expect(Object.keys((metadataCall?.params as { metadata: Record<string, unknown> }).metadata)).toEqual([
+    expect(
+      Object.keys((metadataCall?.params as { metadata: Record<string, unknown> }).metadata),
+    ).toEqual([
       "moc.requestId",
       "moc.start",
       "moc.voidCode",
       "moc.voidedRequestId",
       "moc.meterToken",
     ]);
-    expect(
-      (metadataCall?.params as { metadata: Record<string, unknown> }).metadata,
-    ).toMatchObject({ "moc.voidCode": "operator-release", "moc.voidedRequestId": "req-1" });
+    expect((metadataCall?.params as { metadata: Record<string, unknown> }).metadata).toMatchObject({
+      "moc.voidCode": "operator-release",
+      "moc.voidedRequestId": "req-1",
+    });
     const after = fake.sessions("laptop-a");
     expect(after[0]?.state).toBe("stopped");
     expect(after[0]?.metadata?.[MOC_METADATA.requestId]).toBeUndefined();
@@ -1446,13 +1451,9 @@ test("release stops a known unbound session without unbinding", async () => {
       sessionId: handle.sessionId,
     });
     expect(result).toEqual({ sessionIds: [handle.sessionId] });
-    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual([
-      "session.list",
-      "session.new",
-      "session.set_metadata",
-      "session.list",
-      "session.stop",
-    ]);
+    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual(
+      ["session.list", "session.new", "session.set_metadata", "session.list", "session.stop"],
+    );
     expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
   } finally {
     await teardown(fake, port);
@@ -1477,9 +1478,9 @@ test("release handles two bound sessions in daemon order", async () => {
       "stopped",
       "stopped",
     ]);
-    const filtered = fake.sessions("laptop-a").filter(
-      (session) => session.metadata?.[MOC_METADATA.requestId] === "req-1",
-    );
+    const filtered = fake
+      .sessions("laptop-a")
+      .filter((session) => session.metadata?.[MOC_METADATA.requestId] === "req-1");
     expect(filtered).toHaveLength(0);
   } finally {
     await teardown(fake, port);
@@ -1534,7 +1535,9 @@ test("an unreachable stop is unreachable", async () => {
     expect(error).not.toBeInstanceOf(PortRejectedError);
     expect((error as Error).message).toBe("laptop-a: session_stop_outcome_unknown");
     expect(dropped).toBe(1);
-    expect(methodNames(fake, "laptop-a").filter((method) => method === "session.set_metadata")).toHaveLength(1);
+    expect(
+      methodNames(fake, "laptop-a").filter((method) => method === "session.set_metadata"),
+    ).toHaveLength(1);
   } finally {
     await droppingPort.close();
     await teardown(fake, port);

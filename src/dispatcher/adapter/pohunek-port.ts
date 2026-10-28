@@ -677,10 +677,7 @@ async function diffSession(
 // A missing session counts as released. The daemon is the authority, so the
 // terminal cache is neither read nor written. Any refusal becomes
 // PortRejectedError("void-incomplete").
-async function releaseSessions(
-  port: PortInternals,
-  ref: ReleaseRef,
-): Promise<ReleaseResult> {
+async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<ReleaseResult> {
   if (port.closed) {
     throw new PohunekAdapterError("closed");
   }

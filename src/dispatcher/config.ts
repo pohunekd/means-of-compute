@@ -9,6 +9,7 @@ export interface DispatcherConfig {
   readonly branchPrefix: string;
   readonly waitTimeoutMs: number;
   readonly lostAfterUnreachable: number;
+  readonly nonTerminalPauseMs: number;
   readonly unreachableBackoffMs: number;
   readonly registryPath: string;
 }
@@ -19,6 +20,7 @@ const REQUIRED_KEYS = [
   "branchPrefix",
   "waitTimeoutMs",
   "lostAfterUnreachable",
+  "nonTerminalPauseMs",
   "unreachableBackoffMs",
   "registryPath",
 ] as const;
@@ -102,6 +104,7 @@ export async function loadDispatcherConfig(
     branchPrefix: requiredBranchPrefix(record, path),
     waitTimeoutMs: requiredInteger(record, "waitTimeoutMs", path, 1, 3600000),
     lostAfterUnreachable: requiredInteger(record, "lostAfterUnreachable", path, 1, 100),
+    nonTerminalPauseMs: requiredInteger(record, "nonTerminalPauseMs", path, 0, 600000),
     unreachableBackoffMs: requiredInteger(record, "unreachableBackoffMs", path, 0, 600000),
     registryPath: requiredRegistryPath(record, path),
   };

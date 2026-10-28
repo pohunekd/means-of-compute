@@ -13,6 +13,8 @@ import {
   PortUnreachableError,
   type CancelReason,
   type DiffResult,
+  type ReleaseRef,
+  type ReleaseResult,
   type SessionHandle,
   type SessionRef,
   type StartRequest,
@@ -48,11 +50,12 @@ export interface AdapterLogEvent {
 export interface PohunekPortDeps {
   readonly connector: HostConnector;
   readonly log: (event: AdapterLogEvent) => void;
+  readonly meterToken: ((requestId: string) => string) | null;
 }
 
 export class PohunekAdapterError extends Error {
-  readonly code: "closed" | "void-incomplete";
-  constructor(code: "closed" | "void-incomplete", message?: string) {
+  readonly code: "closed" | "void-incomplete" | "no-meter";
+  constructor(code: "closed" | "void-incomplete" | "no-meter", message?: string) {
     super(message ?? code);
     this.name = "PohunekAdapterError";
     this.code = code;
@@ -65,6 +68,7 @@ interface PortInternals {
   readonly config: PohunekAdapterConfig;
   readonly connector: HostConnector;
   readonly log: (event: AdapterLogEvent) => void;
+  readonly meterToken: ((requestId: string) => string) | null;
   closed: boolean;
   closeDone: boolean;
   readonly inspected: Map<string, Client>;
@@ -182,6 +186,52 @@ async function clientFor(port: PortInternals, alias: string): Promise<Client> {
   }
 }
 
+// Stop then unbind one session: V1 stops the session; a missing session
+// returns "absent" at once and V2 never runs. V2 clears the binding with
+// the five void keys (a missing session counts as unbound). Any other
+// error goes through `voidError`: an unreachable error drops the connection
+// and becomes `PortUnreachableError`; any other error becomes
+// void-incomplete. Returns "stopped" or "absent"; callers
+// decide what to throw or log.
+async function stopAndUnbind(
+  port: PortInternals,
+  client: Client,
+  alias: string,
+  sessionId: string,
+  requestId: string,
+  code: string,
+  unbind: boolean,
+): Promise<"stopped" | "absent"> {
+  try {
+    await client.call("session.stop", sessionId);
+  } catch (error) {
+    if (!isSessionNotFound(error)) {
+      throw await voidError(port, alias, error);
+    }
+    return "absent";
+  }
+  if (!unbind) {
+    return "stopped";
+  }
+  try {
+    await client.call("session.set_metadata", {
+      session_id: sessionId,
+      metadata: {
+        [MOC_METADATA.requestId]: null,
+        [MOC_METADATA.start]: "void",
+        [MOC_METADATA.voidCode]: code,
+        [MOC_METADATA.voidedRequestId]: requestId,
+        [MOC_METADATA.meterToken]: null,
+      },
+    });
+  } catch (error) {
+    if (!isSessionNotFound(error)) {
+      throw await voidError(port, alias, error);
+    }
+  }
+  return "stopped";
+}
+
 // Void path V (3.5): stop first, then unbind, so a session is never unbound
 // while it may still run. Every path throws.
 async function voidSession(
@@ -192,46 +242,7 @@ async function voidSession(
   req: StartRequest,
   code: string,
 ): Promise<never> {
-  try {
-    await client.call("session.stop", session.id);
-  } catch (error) {
-    if (isSessionNotFound(error)) {
-      port.log({
-        level: "error",
-        event: "adapter-start-void",
-        hostAlias: alias,
-        requestId: req.requestId,
-        sessionId: session.id,
-        code,
-      });
-      throw new PortRejectedError(code);
-    }
-    throw await voidError(port, alias, error);
-  }
-  try {
-    await client.call("session.set_metadata", {
-      session_id: session.id,
-      metadata: {
-        [MOC_METADATA.requestId]: null,
-        [MOC_METADATA.start]: "void",
-        [MOC_METADATA.voidCode]: code,
-        [MOC_METADATA.voidedRequestId]: req.requestId,
-      },
-    });
-  } catch (error) {
-    if (isSessionNotFound(error)) {
-      port.log({
-        level: "error",
-        event: "adapter-start-void",
-        hostAlias: alias,
-        requestId: req.requestId,
-        sessionId: session.id,
-        code,
-      });
-      throw new PortRejectedError(code);
-    }
-    throw await voidError(port, alias, error);
-  }
+  await stopAndUnbind(port, client, alias, session.id, req.requestId, code, true);
   port.log({
     level: "error",
     event: "adapter-start-void",
@@ -330,6 +341,10 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   if (port.closed) {
     throw new PohunekAdapterError("closed");
   }
+  if (port.meterToken === null) {
+    throw new PohunekAdapterError("no-meter");
+  }
+  const token = port.meterToken(req.requestId);
   const alias = req.hostAlias;
   const client = await startClientFor(port, alias);
   const digest = requestDigestOf(req);
@@ -347,7 +362,7 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   await startPreflight(port, alias, client);
   let created: SessionNewResult;
   try {
-    created = await client.call("session.new", sessionNewParams(req, port.config, digest));
+    created = await client.call("session.new", sessionNewParams(req, port.config, digest, token));
   } catch (error) {
     const mapped = portErrorOf(error, alias);
     if (mapped instanceof PortUnreachableError) {
@@ -661,8 +676,66 @@ async function diffSession(
   }
 }
 
+// Operator release: stop every session on the host that is either the
+// known id or bound to the request, then unbind each stopped bound one.
+// The binding filter decides with daemon order; the known id comes first.
+// A missing session counts as released. The daemon is the authority, so the
+// terminal cache is neither read nor written. A refused session.list or
+// connector call gives PortRejectedError(code) with that call's code; a
+// refused stop or unbind gives PortRejectedError("void-incomplete"); a
+// transport failure gives PortUnreachableError.
+async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<ReleaseResult> {
+  if (port.closed) {
+    throw new PohunekAdapterError("closed");
+  }
+  const alias = ref.hostAlias;
+  const client = await clientFor(port, alias);
+  const bound = await listBound(port, client, alias, ref.requestId);
+  const ids: string[] = [];
+  if (ref.sessionId !== null) {
+    ids.push(ref.sessionId);
+  }
+  for (const match of bound) {
+    if (!ids.includes(match.id)) {
+      ids.push(match.id);
+    }
+  }
+  const stopped: string[] = [];
+  try {
+    for (const id of ids) {
+      const outcome = await stopAndUnbind(
+        port,
+        client,
+        alias,
+        id,
+        ref.requestId,
+        "operator-release",
+        bound.some((session) => session.id === id),
+      );
+      if (outcome === "absent") {
+        continue;
+      }
+      stopped.push(id);
+      port.log({
+        level: "info",
+        event: "adapter-release",
+        hostAlias: alias,
+        requestId: ref.requestId,
+        sessionId: id,
+        code: "operator-release",
+      });
+    }
+  } catch (error) {
+    if (error instanceof PohunekAdapterError && error.code === "void-incomplete") {
+      throw new PortRejectedError("void-incomplete");
+    }
+    throw error;
+  }
+  return { sessionIds: stopped };
+}
+
 // 3.9: close the connector once; a second close returns at once. Later
-// start/wait/diff/cancel throw PohunekAdapterError("closed").
+// start/wait/diff/cancel/release throw PohunekAdapterError("closed").
 async function closePort(port: PortInternals): Promise<void> {
   if (port.closeDone) {
     return;
@@ -680,6 +753,7 @@ export function createPohunekPort(
     config,
     connector: deps.connector,
     log: deps.log,
+    meterToken: deps.meterToken,
     closed: false,
     closeDone: false,
     inspected: new Map(),
@@ -691,6 +765,7 @@ export function createPohunekPort(
       waitSession(port, ref, timeoutMs, cursor),
     diff: (ref: SessionRef, base: string) => diffSession(port, ref, base),
     cancel: (ref: SessionRef, reason: CancelReason) => cancelSession(port, ref, reason),
+    release: (ref: ReleaseRef): Promise<ReleaseResult> => releaseSessions(port, ref),
     close: () => closePort(port),
   };
 }
@@ -699,8 +774,9 @@ export async function openPohunekPort(
   config: PohunekAdapterConfig,
   log: (event: AdapterLogEvent) => void,
   env: Readonly<Record<string, string | undefined>>,
+  meterToken: ((requestId: string) => string) | null,
 ): Promise<import("../port.js").DispatcherPort> {
   const routes = await loadHostRoutes(config.hostRoutesFileEnv, env);
   const connector = createHostConnector(routes, { connectTimeoutMs: config.connectTimeoutMs }, env);
-  return createPohunekPort(config, { connector, log });
+  return createPohunekPort(config, { connector, log, meterToken });
 }

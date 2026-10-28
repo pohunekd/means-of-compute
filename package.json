@@ -13,6 +13,8 @@
     "ledger:query": "bun run src/ledger/cli.ts query",
     "factory:serve": "bun run src/factory/serve.ts",
     "dispatch:start": "bun run src/dispatcher/cli.ts start",
+    "dispatch:diff": "bun run src/dispatcher/cli.ts diff",
+    "dispatch:resolve": "bun run src/dispatcher/cli.ts resolve",
     "meter:usage": "bun run src/meter/cli.ts usage",
     "place": "bun run src/placement/cli.ts",
     "mcp:serve": "bun run src/mcp/serve.ts",

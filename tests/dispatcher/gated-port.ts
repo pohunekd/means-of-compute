@@ -7,13 +7,15 @@ import type {
   CancelReason,
   DiffResult,
   DispatcherPort,
+  ReleaseRef,
+  ReleaseResult,
   SessionHandle,
   SessionRef,
   StartRequest,
   WaitResult,
 } from "../../src/dispatcher/port.js";
 
-export type GatedMethod = "start" | "wait" | "cancel";
+export type GatedMethod = "start" | "wait" | "cancel" | "release";
 
 type PortArgs = readonly unknown[];
 
@@ -41,16 +43,19 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
     ["start", 0],
     ["wait", 0],
     ["cancel", 0],
+    ["release", 0],
   ]);
   const queues = new Map<GatedMethod, ParkedCall[]>([
     ["start", []],
     ["wait", []],
     ["cancel", []],
+    ["release", []],
   ]);
   const waiters = new Map<GatedMethod, Array<(call: PendingCall) => void>>([
     ["start", []],
     ["wait", []],
     ["cancel", []],
+    ["release", []],
   ]);
 
   function makeCall(method: GatedMethod, parked: ParkedCall): PendingCall {
@@ -61,6 +66,7 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
       wait: (ref, timeoutMs, cursor) =>
         inner.wait(ref as SessionRef, timeoutMs as number, cursor as string | null),
       cancel: (ref, reason) => inner.cancel(ref as SessionRef, reason as CancelReason),
+      release: (ref) => inner.release(ref as ReleaseRef),
     };
     const target = run[method];
     return {
@@ -118,6 +124,10 @@ export function gatePort(inner: DispatcherPort, methods: ReadonlySet<GatedMethod
       gated("cancel", [ref, reason], (input, why) =>
         inner.cancel(input as SessionRef, why as CancelReason),
       ) as Promise<WaitResult>,
+    release: (ref: ReleaseRef): Promise<ReleaseResult> =>
+      gated("release", [ref], (input) =>
+        inner.release(input as ReleaseRef),
+      ) as Promise<ReleaseResult>,
     close: () => inner.close(),
   };
 

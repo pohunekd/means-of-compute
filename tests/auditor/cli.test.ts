@@ -207,7 +207,7 @@ async function runCliWithGh(
   ref: string,
   recording: string,
   extra: string[],
-): Promise<CliRun> {
+): Promise<CliRun & { modelRequests: number }> {
   const server = await startLoopback(recording);
   try {
     const itemPath = join(tree.dir, "item.json");
@@ -236,7 +236,8 @@ async function runCliWithGh(
       new Response(proc.stderr as ReadableStream).text(),
       proc.exited,
     ]);
-    return { code, stdout, stderr };
+    const modelRequests = server.requests().length;
+    return { code, stdout, stderr, modelRequests };
   } finally {
     void server.stop();
   }
@@ -597,9 +598,9 @@ test("L1: --phase-critical requires --pull (mutation: drop the CLI check)", asyn
     }
     expect(run.code).toBe(2);
     expect(run.stderr.trim()).toBe("audit: --phase-critical requires --pull");
-    // The flag check runs before any model call, so the loopback stub
-    // never started: parsing rejects before the env is even built.
+    // The flag check runs before any model call, so server.requests() has length 0.
     expect(run.stdout).toBe("");
+    expect(server.requests()).toHaveLength(0);
   } finally {
     tree.cleanup();
     removeTempRepo(repo.dir);
@@ -622,10 +623,11 @@ test("L2: phase-critical re-post refuses a general verdict (mutation: drop the P
       ["--pull", "7"],
     );
     expect(first.code).toBe(0);
+    expect(first.modelRequests).toBe(1);
     const callsBefore = await ghCommentCalls(tree);
     const ledgerBefore = await Bun.file(join(tree.dir, "ledger.jsonl")).text();
     // The re-post with the opt-in refuses the stored Spark verdict:
-    // no model call, no gh call, no new ledger line.
+    // first run makes one model request, re-post makes none.
     const second = await runCliWithGh(
       tree,
       repo,
@@ -634,6 +636,7 @@ test("L2: phase-critical re-post refuses a general verdict (mutation: drop the P
       ["--pull", "7", "--post", "yes", "--phase-critical", "yes"],
     );
     expect(second.code).toBe(3);
+    expect(second.modelRequests).toBe(0);
     expect(second.stderr.trim()).toBe(
       `audit: refused: stored verdict ${head} is by muse-spark-1.3-contributor, not the merge auditor muse-wonder-1.0`,
     );

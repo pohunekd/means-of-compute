@@ -57,6 +57,7 @@ test("refusal blocks new starts but a running item still finishes", async () => 
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -170,6 +171,7 @@ test("a gate error throws BudgetGateError with no port session", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();

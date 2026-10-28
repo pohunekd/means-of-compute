@@ -177,3 +177,19 @@ test("cancel and wait return deep-equal terminals", async () => {
     ).toHaveLength(1);
   });
 });
+
+test("release delegates without a meter record", async () => {
+  await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, logPath }) => {
+    const control = createMemoryPort();
+    const port = createMeteredPort(control.port, meter, () => {});
+    const handle = await port.start(startReq());
+    const before = await readLogLines(logPath);
+    const result = await port.release({
+      requestId: handle.requestId,
+      hostAlias: "laptop-a",
+      sessionId: handle.sessionId,
+    });
+    expect(result).toEqual({ sessionIds: [handle.sessionId] });
+    expect(await readLogLines(logPath)).toEqual(before);
+  });
+});

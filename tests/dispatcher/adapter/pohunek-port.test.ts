@@ -33,8 +33,12 @@ const CONFIG: PohunekAdapterConfig = {
   inputAckTimeoutMs: 8000,
   connectTimeoutMs: 5000,
   cancelWaitTimeoutMs: 30000,
+  diffLogPath: "logs/dispatch-diff.jsonl",
+  resolveLogPath: "logs/dispatch-resolve.jsonl",
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 };
+
+const METER_TOKEN = (rid: string): string => "moc1." + rid + ".T";
 
 function request(overrides: Partial<StartRequest> = {}): StartRequest {
   return {
@@ -67,6 +71,7 @@ function setup(): {
     log: (event) => {
       log.push(event);
     },
+    meterToken: METER_TOKEN,
   });
   return { fake, log, port };
 }
@@ -110,7 +115,12 @@ test("a resume start sends branch_source remote and reports the base commit", as
   const { fake, port } = setup();
   try {
     const req = request({ resume: true });
-    const params = sessionNewParams(req, CONFIG, requestDigestOf(req));
+    const params = sessionNewParams(
+      req,
+      CONFIG,
+      requestDigestOf(req),
+      "moc1." + req.requestId + ".T",
+    );
     expect(params.branch_source).toBe("remote");
     expect("base_branch" in params).toBe(false);
     const handle = await port.start(req);
@@ -197,6 +207,7 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
       log: (event) => {
         log.push(event);
       },
+      meterToken: METER_TOKEN,
     });
     try {
       const replayed = await fresh.start(request());
@@ -258,6 +269,7 @@ test("a thrown non-Error value rejects unchanged (L2)", async () => {
   const throwingPort = createPohunekPort(CONFIG, {
     connector: throwing,
     log: () => {},
+    meterToken: METER_TOKEN,
   });
   try {
     const caught: unknown = await throwingPort.start(request()).then(
@@ -391,6 +403,7 @@ test("a replayed start returns the accepted session although the preflight now f
     const second = createPohunekPort(CONFIG, {
       connector: fake.connector,
       log: () => {},
+      meterToken: METER_TOKEN,
     });
     try {
       fake.setCapabilities("laptop-a", {
@@ -425,6 +438,7 @@ test("a replayed start voids a pending match although the preflight now fails (R
     const second = createPohunekPort(CONFIG, {
       connector: fake.connector,
       log: () => {},
+      meterToken: METER_TOKEN,
     });
     try {
       fake.setCapabilities("laptop-a", {
@@ -593,6 +607,26 @@ test("a refused unbind keeps the provisional path (A8)", async () => {
     expect(error).toMatchObject({ code: "void-incomplete" });
     expect(fake.sessions("laptop-a")).toHaveLength(1);
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.requestId]).toBe("req-1");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a start void on a missing session rejects without unbinding", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
+    fake.failNext("laptop-a", "session.stop", { errCode: "session_not_found", apply: false });
+    fake.failNext("laptop-a", "session.set_metadata", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "prompt-not-acknowledged" });
+    expect(fake.calls("laptop-a").map((call) => call.method)).not.toContain("session.set_metadata");
+    expect(eventsOf(log)).toContain("adapter-start-void");
+    expect(eventsOf(log)).not.toContain("adapter-connection-dropped");
   } finally {
     await teardown(fake, port);
   }
@@ -890,6 +924,7 @@ test("a restart after stop keeps finished (WC3)", async () => {
       log: (event) => {
         secondLog.push(event);
       },
+      meterToken: METER_TOKEN,
     });
     try {
       fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
@@ -1192,6 +1227,7 @@ test("a hostUnreachable route gives alias plus code and drops the connection", a
     log: (event) => {
       droppingLog.push(event);
     },
+    meterToken: METER_TOKEN,
   });
   try {
     fake.failNext("laptop-a", "session.list", {
@@ -1252,6 +1288,67 @@ test("diff on a missing session gives session-not-found (3.8)", async () => {
   }
 });
 
+test("start sends the meter token in session.new metadata only", async () => {
+  const { fake, log, port } = setup();
+  try {
+    const req = request();
+    const handle = await port.start(req);
+    expect(handle.sessionId).toBe("fake-1");
+    const news = fake.calls("laptop-a").filter((call) => call.method === "session.new");
+    expect(news).toHaveLength(1);
+    const newParams = news[0]?.params as { metadata?: Record<string, unknown> };
+    expect(newParams.metadata?.[MOC_METADATA.meterToken]).toBe("moc1." + req.requestId + ".T");
+    for (const call of fake.calls("laptop-a")) {
+      if (call.method !== "session.new") {
+        expect(JSON.stringify(call.params)).not.toContain(".T");
+      }
+    }
+    expect(JSON.stringify(log)).not.toContain(".T");
+    expect(JSON.stringify(handle)).not.toContain(".T");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a port without a meter refuses to start", async () => {
+  const fake = createFakeDaemon(["laptop-a"], CONFIG.agentProfile);
+  const log: AdapterLogEvent[] = [];
+  const port = createPohunekPort(CONFIG, {
+    connector: fake.connector,
+    log: (event) => {
+      log.push(event);
+    },
+    meterToken: null,
+  });
+  try {
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PohunekAdapterError);
+    expect(error).toMatchObject({ code: "no-meter" });
+    expect(fake.calls("laptop-a")).toHaveLength(0);
+  } finally {
+    await port.close();
+    await fake.connector.close();
+  }
+});
+
+test("void clears the meter token", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({ applied_input: false }));
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "prompt-not-acknowledged" });
+    const voids = fake.calls("laptop-a").filter((call) => call.method === "session.set_metadata");
+    expect(voids.length).toBeGreaterThan(0);
+    const unbind = voids[voids.length - 1]?.params as {
+      metadata?: Record<string, unknown>;
+    };
+    expect(unbind.metadata?.[MOC_METADATA.meterToken]).toBeNull();
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("after close, start throws closed and a second close returns at once", async () => {
   const { fake, port } = setup();
   try {
@@ -1281,6 +1378,249 @@ test("after close, start throws closed and a second close returns at once", asyn
         (cause: unknown): unknown => cause,
       );
     expect(matched_12).toMatchObject({ code: "closed" });
+  } finally {
+    await fake.connector.close();
+  }
+});
+
+test("release with nothing bound lists only", async () => {
+  const { fake, port } = setup();
+  try {
+    const result = await port.release({
+      requestId: "req-1",
+      hostAlias: "laptop-a",
+      sessionId: null,
+    });
+    expect(result).toEqual({ sessionIds: [] });
+    expect(methodNames(fake, "laptop-a")).toEqual(["session.list"]);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("release stops then unbinds a pending session", async () => {
+  const { fake, port } = setup();
+  try {
+    const req = request();
+    // A failed void stop leaves the pending session bound (A6).
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
+    fake.failNext("laptop-a", "session.stop", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const failed = await port.start(req).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(failed).toBeInstanceOf(PortUnreachableError);
+    const listed = fake.sessions("laptop-a");
+    expect(listed).toHaveLength(1);
+    const pendingId = listed[0]?.id;
+    if (typeof pendingId !== "string") {
+      throw new Error("expected one bound session");
+    }
+    const result = await port.release({
+      requestId: req.requestId,
+      hostAlias: "laptop-a",
+      sessionId: null,
+    });
+    expect(result).toEqual({ sessionIds: [pendingId] });
+    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual(
+      [
+        "session.list",
+        "session.new",
+        "session.stop",
+        "session.list",
+        "session.stop",
+        "session.set_metadata",
+      ],
+    );
+    const metadataCall = fake
+      .calls("laptop-a")
+      .find((call) => call.method === "session.set_metadata");
+    expect(
+      Object.keys((metadataCall?.params as { metadata: Record<string, unknown> }).metadata),
+    ).toEqual([
+      "moc.requestId",
+      "moc.start",
+      "moc.voidCode",
+      "moc.voidedRequestId",
+      "moc.meterToken",
+    ]);
+    expect((metadataCall?.params as { metadata: Record<string, unknown> }).metadata).toMatchObject({
+      "moc.voidCode": "operator-release",
+      "moc.voidedRequestId": "req-1",
+    });
+    const after = fake.sessions("laptop-a");
+    expect(after[0]?.state).toBe("stopped");
+    expect(after[0]?.metadata?.[MOC_METADATA.requestId]).toBeUndefined();
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("release stops a known unbound session without unbinding", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.setSession("laptop-a", handle.sessionId, {
+      metadata: { [MOC_METADATA.requestId]: "other:0" },
+    });
+    const result = await port.release({
+      requestId: "req-1",
+      hostAlias: "laptop-a",
+      sessionId: handle.sessionId,
+    });
+    expect(result).toEqual({ sessionIds: [handle.sessionId] });
+    expect(methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."))).toEqual(
+      ["session.list", "session.new", "session.set_metadata", "session.list", "session.stop"],
+    );
+    expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("release handles two bound sessions in daemon order", async () => {
+  const { fake, port } = setup();
+  try {
+    const first = await port.start(request());
+    const second = await port.start(request({ requestId: "req-1x", workItemId: "item-1x" }));
+    fake.setSession("laptop-a", second.sessionId, {
+      metadata: { [MOC_METADATA.requestId]: "req-1" },
+    });
+    const result = await port.release({
+      requestId: "req-1",
+      hostAlias: "laptop-a",
+      sessionId: null,
+    });
+    expect(result).toEqual({ sessionIds: [first.sessionId, second.sessionId] });
+    expect(fake.sessions("laptop-a").map((session) => session.state)).toEqual([
+      "stopped",
+      "stopped",
+    ]);
+    const filtered = fake
+      .sessions("laptop-a")
+      .filter((session) => session.metadata?.[MOC_METADATA.requestId] === "req-1");
+    expect(filtered).toHaveLength(0);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a missing session counts as released", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.stop", { errCode: "session_not_found", apply: false });
+    const result = await port.release({
+      requestId: "req-1",
+      hostAlias: "laptop-a",
+      sessionId: "fake-9",
+    });
+    expect(result).toEqual({ sessionIds: [] });
+    expect(methodNames(fake, "laptop-a")).toEqual(["session.list", "session.stop"]);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("an unreachable stop is unreachable", async () => {
+  const { fake, port } = setup();
+  let dropped = 0;
+  const dropping = {
+    aliases: () => fake.connector.aliases(),
+    client: (alias: string) => fake.connector.client(alias),
+    close: () => fake.connector.close(),
+    drop: (alias: string) => {
+      dropped += 1;
+      return fake.connector.drop(alias);
+    },
+  };
+  const droppingPort = createPohunekPort(CONFIG, {
+    connector: dropping,
+    log: () => undefined,
+    meterToken: METER_TOKEN,
+  });
+  try {
+    await port.start(request());
+    fake.failNext("laptop-a", "session.stop", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const error = await droppingPort
+      .release({ requestId: "req-1", hostAlias: "laptop-a", sessionId: "fake-1" })
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(error).toBeInstanceOf(PortUnreachableError);
+    expect(error).not.toBeInstanceOf(PortRejectedError);
+    expect((error as Error).message).toBe("laptop-a: session_stop_outcome_unknown");
+    expect(dropped).toBe(1);
+    expect(
+      methodNames(fake, "laptop-a").filter((method) => method === "session.set_metadata"),
+    ).toHaveLength(1);
+  } finally {
+    await droppingPort.close();
+    await teardown(fake, port);
+  }
+});
+
+test("a refused unbind is void-incomplete", async () => {
+  const { fake, port } = setup();
+  try {
+    await port.start(request());
+    fake.failNext("laptop-a", "session.set_metadata", { errCode: "bad_request", apply: false });
+    const error = await port
+      .release({ requestId: "req-1", hostAlias: "laptop-a", sessionId: null })
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "void-incomplete" });
+    const after = fake.sessions("laptop-a");
+    expect(after[0]?.state).toBe("stopped");
+    expect(after[0]?.metadata?.[MOC_METADATA.requestId]).toBe("req-1");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("release never prints the route", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.list", {
+      error: fakeErrors.hostUnreachable("peer.example-route"),
+      apply: false,
+    });
+    const error = await port
+      .release({ requestId: "req-1", hostAlias: "laptop-a", sessionId: null })
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(error).toBeInstanceOf(PortUnreachableError);
+    expect((error as Error).message).toBe("laptop-a: host_unreachable");
+    expect((error as Error).message).not.toContain("peer.example-route");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("release after close throws closed", async () => {
+  const { fake, log, port } = setup();
+  try {
+    await port.close();
+    const error = await port
+      .release({ requestId: "req-1", hostAlias: "laptop-a", sessionId: null })
+      .then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+    expect(error).toBeInstanceOf(PohunekAdapterError);
+    expect(error).toMatchObject({ code: "closed" });
+    expect(log).toHaveLength(0);
   } finally {
     await fake.connector.close();
   }

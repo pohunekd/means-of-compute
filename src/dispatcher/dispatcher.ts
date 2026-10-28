@@ -66,7 +66,26 @@ export type DispatchStateCode =
   | "request-unappended"
   | "request-ledger-mismatch"
   | "port-binding-conflict"
-  | "invalid-handle";
+  | "invalid-handle"
+  | "request-active";
+
+export type ResolveOutcome =
+  | {
+      readonly requestId: string;
+      readonly hostAlias: string;
+      readonly outcome: "resolved";
+      readonly from: "provisional" | "terminal";
+      readonly state: TerminalState;
+      readonly stopped: readonly string[];
+      readonly ledger: WriteOutcome | "none";
+    }
+  | {
+      readonly requestId: string;
+      readonly hostAlias: string;
+      readonly outcome: "already-resolved";
+      readonly state: TerminalState;
+      readonly ledger: WriteOutcome | "none";
+    };
 
 export class DispatchStateError extends Error {
   readonly code: DispatchStateCode;
@@ -475,6 +494,7 @@ export function createDispatcher(deps: DispatcherDeps): {
   watch(requestId: string): Promise<FinishOutcome>;
   diff(requestId: string): Promise<DiffResult>;
   cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome>;
+  resolve(requestId: string): Promise<ResolveOutcome>;
 } {
   // Port wait/cancel/diff and sleep always run outside a hold; port start
   // is the only port call made under the lock. The hold uses the
@@ -638,7 +658,12 @@ export function createDispatcher(deps: DispatcherDeps): {
     });
   }
 
-  async function finishLost(entry: RegistryEntry, count: number): Promise<FinishOutcome> {
+  async function finishLost(
+    entry: RegistryEntry,
+    count: number,
+    detail: string,
+    resolved: boolean,
+  ): Promise<FinishOutcome> {
     const observedAt = deps.now().toISOString();
     const seconds = Math.floor((Date.parse(entry.lastSeenAt) - Date.parse(entry.startedAt)) / 1000);
     if (seconds < 0) {
@@ -671,9 +696,10 @@ export function createDispatcher(deps: DispatcherDeps): {
         seconds,
         usage: usageValid ? usage : null,
         usageValid,
-        detail: `unreachable ${String(count)} times`,
+        detail,
         ledgerAppended: false,
       },
+      resolvedAt: resolved ? observedAt : entry.resolvedAt,
     };
     await replaceRegistryEntry(deps.config.registryPath, lost);
     const stored = lost.terminal;
@@ -770,6 +796,7 @@ export function createDispatcher(deps: DispatcherDeps): {
           lastSeenAt: t,
           cancelReason: null,
           terminal: null,
+          resolvedAt: null,
           revision: 0,
         };
         await insertRegistryEntry(deps.config.registryPath, provisional);
@@ -799,7 +826,12 @@ export function createDispatcher(deps: DispatcherDeps): {
             });
             throw error;
           }
-          const lost = await finishLost(provisional, count);
+          const lost = await finishLost(
+            provisional,
+            count,
+            `unreachable ${String(count)} times`,
+            false,
+          );
           return { kind: "lost", requestId: request.requestId, ledger: lost.ledger };
         }
         if (error instanceof PortRejectedError) {
@@ -911,7 +943,15 @@ export function createDispatcher(deps: DispatcherDeps): {
         if (miss) {
           const count = current.unreachableCount + 1;
           if (count >= deps.config.lostAfterUnreachable) {
-            return { kind: "outcome" as const, outcome: await finishLost(current, count) };
+            return {
+              kind: "outcome" as const,
+              outcome: await finishLost(
+                current,
+                count,
+                `unreachable ${String(count)} times`,
+                false,
+              ),
+            };
           }
           const persisted: RegistryEntry = {
             ...current,
@@ -931,13 +971,16 @@ export function createDispatcher(deps: DispatcherDeps): {
           revision: current.revision + 1,
         };
         await replaceRegistryEntry(deps.config.registryPath, persisted);
-        return { kind: "loop" as const };
+        return { kind: "pause" as const };
       });
       if (after.kind === "outcome") {
         return after.outcome;
       }
       if (after.kind === "sleep") {
         await deps.sleep(deps.config.unreachableBackoffMs);
+      }
+      if (after.kind === "pause") {
+        await deps.sleep(deps.config.nonTerminalPauseMs);
       }
     }
   }
@@ -1020,7 +1063,155 @@ export function createDispatcher(deps: DispatcherDeps): {
     return watch(requestId);
   }
 
-  return { start, watch, diff, cancel };
+  async function resolveRequest(requestId: string): Promise<ResolveOutcome> {
+    // The whole algorithm runs inside one item-lock hold, port call
+    // included, so a racing start cannot reuse this request id meanwhile.
+    const key = itemKeyFor(requestId);
+    return withItemLock(key, async () => {
+      const entry = await loadEntry(requestId);
+      if (entry.resolvedAt !== null) {
+        const terminal = entry.terminal;
+        if (terminal === null) {
+          throw new Error(`dispatcher: entry ${requestId} is marked resolved without a terminal`);
+        }
+        let ledger: WriteOutcome | "none" = "none";
+        if (!terminal.ledgerAppended) {
+          ledger = (await replayTerminal(entry)).ledger;
+        }
+        deps.log({ level: "info", event: "resolve-noop", requestId, workItemId: entry.workItemId });
+        return {
+          requestId,
+          hostAlias: entry.hostAlias,
+          outcome: "already-resolved",
+          state: terminal.state,
+          ledger,
+        };
+      }
+      if (entry.terminal === null && entry.sessionId !== null) {
+        const error = new DispatchStateError(
+          "request-active",
+          requestId,
+          `dispatcher state request-active: ${requestId} is still active`,
+        );
+        deps.log({
+          level: "info",
+          event: "resolve-refused",
+          requestId,
+          workItemId: entry.workItemId,
+          sessionId: entry.sessionId,
+          detail: "request-active",
+        });
+        throw error;
+      }
+      if (entry.terminal !== null) {
+        const terminal = entry.terminal;
+        let current = entry;
+        let ledger: WriteOutcome | "none" = "none";
+        if (!terminal.ledgerAppended) {
+          ledger = (await replayTerminal(current)).ledger;
+          const reloaded = await loadEntry(requestId);
+          const reloadedTerminal = reloaded.terminal;
+          if (reloadedTerminal === null) {
+            throw new Error(`dispatcher: entry ${requestId} lost its terminal state`);
+          }
+          current = reloaded;
+        }
+        let stopped: readonly string[];
+        try {
+          const released = await deps.port.release({
+            requestId,
+            hostAlias: current.hostAlias,
+            sessionId: current.sessionId,
+          });
+          stopped = released.sessionIds;
+        } catch (error: unknown) {
+          logResolveRefused(current, error);
+          throw error;
+        }
+        const finalTerminal = current.terminal;
+        if (finalTerminal === null) {
+          throw new Error(`dispatcher: entry ${requestId} lost its terminal state`);
+        }
+        const observedAt = deps.now().toISOString();
+        const resolved: RegistryEntry = {
+          ...current,
+          resolvedAt: observedAt,
+          revision: current.revision + 1,
+        };
+        await replaceRegistryEntry(deps.config.registryPath, resolved);
+        deps.log({
+          level: "info",
+          event: "resolved",
+          requestId,
+          workItemId: current.workItemId,
+          ...(current.sessionId === null ? {} : { sessionId: current.sessionId }),
+          detail: `stopped ${String(stopped.length)}`,
+        });
+        return {
+          requestId,
+          hostAlias: current.hostAlias,
+          outcome: "resolved",
+          from: "terminal",
+          state: finalTerminal.state,
+          stopped,
+          ledger,
+        };
+      }
+      // Provisional: sessionId is null and terminal is null. The port
+      // call runs before the meter hook, so a refusal leaves the meter
+      // grant and the registry unchanged.
+      let stopped: readonly string[];
+      try {
+        const released = await deps.port.release({
+          requestId,
+          hostAlias: entry.hostAlias,
+          sessionId: null,
+        });
+        stopped = released.sessionIds;
+      } catch (error: unknown) {
+        logResolveRefused(entry, error);
+        throw error;
+      }
+      const finished = await finishLost(entry, entry.unreachableCount, "operator resolved", true);
+      deps.log({
+        level: "info",
+        event: "resolved",
+        requestId,
+        workItemId: entry.workItemId,
+        detail: `stopped ${String(stopped.length)}`,
+      });
+      return {
+        requestId,
+        hostAlias: entry.hostAlias,
+        outcome: "resolved",
+        from: "provisional",
+        state: "lost",
+        stopped,
+        ledger: finished.ledger,
+      };
+    });
+  }
+
+  function logResolveRefused(entry: RegistryEntry, error: unknown): void {
+    let detail: string;
+    if (error instanceof PortUnreachableError) {
+      detail = "unreachable";
+    } else if (error instanceof PortRejectedError) {
+      detail = error.code;
+    } else {
+      return;
+    }
+    deps.log({
+      level: "info",
+      event: "resolve-refused",
+      requestId: entry.requestId,
+      workItemId: entry.workItemId,
+      ...(entry.sessionId === null ? {} : { sessionId: entry.sessionId }),
+      detail,
+    });
+  }
+
+  return { start, watch, diff, cancel, resolve: resolveRequest };
 }
 
 export { PortRejectedError, PortUnreachableError };

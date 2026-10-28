@@ -121,6 +121,21 @@ All flags take a value. A repeated flag, an unknown flag or a missing value
 exits 2 with `ledger: <message>`. Exits follow the budget guard: 0 ok,
 2 input, config or data error, 3 domain refusal.
 
+## Resolved entries
+
+`resolve` writes no correcting line. A provisional entry resolved to `lost`
+gets its first and only pending line, exactly like a `watch`-reported loss.
+An entry that already has a terminal gets nothing new: `resolve` only
+completes the dispatcher's own line through the usual replay, and a second
+run finds it appended. There is no operation that could add a correction:
+the fold only adds, a line with the same `entryId` and different content is
+rejected, and a line with a later `finishedAt` after finalize would count a
+second attempt and double the spend. The spend of a `lost` entry is final:
+the meter closed the grant before the first registry write, so the joined
+usage on the line is the complete billed usage. A session that finished on
+the host after it was ledgered `lost` keeps attempt `lost`; its pushed
+commits stay on the branch for the next attempt to pick up.
+
 ## Module layout
 
 - `src/ledger/types.ts` — `PendingUsage`, `LedgerContents`, `FinalizeInput`,

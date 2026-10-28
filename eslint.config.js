@@ -40,5 +40,5 @@ export default defineConfig(
       ],
     },
   },
-  { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
+  { files: ["**/*.js", "**/*.mjs"], extends: [tseslint.configs.disableTypeChecked] },
 );

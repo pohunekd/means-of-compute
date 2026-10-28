@@ -12,6 +12,8 @@ export interface PohunekAdapterConfig {
   readonly inputAckTimeoutMs: number;
   readonly connectTimeoutMs: number;
   readonly cancelWaitTimeoutMs: number;
+  readonly diffLogPath: string;
+  readonly resolveLogPath: string;
   readonly hostRoutesFileEnv: string;
 }
 
@@ -25,6 +27,8 @@ const ALLOWED_KEYS = new Set([
   "inputAckTimeoutMs",
   "connectTimeoutMs",
   "cancelWaitTimeoutMs",
+  "diffLogPath",
+  "resolveLogPath",
   "hostRoutesFileEnv",
 ]);
 
@@ -74,6 +78,12 @@ function checkPohunekAdapterConfig(value: unknown): string | null {
   if (!isIntegerIn(record["cancelWaitTimeoutMs"], 1, MAX_SESSION_WAIT_TURN_MS)) {
     return `"cancelWaitTimeoutMs" must be an integer in 1..${String(MAX_SESSION_WAIT_TURN_MS)}`;
   }
+  if (!isNonEmptyString(record["diffLogPath"])) {
+    return '"diffLogPath" must be a non-empty string';
+  }
+  if (!isNonEmptyString(record["resolveLogPath"])) {
+    return '"resolveLogPath" must be a non-empty string';
+  }
   const envName = record["hostRoutesFileEnv"];
   if (!isNonEmptyString(envName) || !ENV_NAME_PATTERN.test(envName)) {
     return '"hostRoutesFileEnv" must match ^[A-Z][A-Z0-9_]*$';
@@ -108,6 +118,8 @@ export async function loadPohunekAdapterConfig(
     inputAckTimeoutMs: record["inputAckTimeoutMs"] as number,
     connectTimeoutMs: record["connectTimeoutMs"] as number,
     cancelWaitTimeoutMs: record["cancelWaitTimeoutMs"] as number,
+    diffLogPath: record["diffLogPath"] as string,
+    resolveLogPath: record["resolveLogPath"] as string,
     hostRoutesFileEnv: record["hostRoutesFileEnv"] as string,
   };
 }

@@ -12,6 +12,7 @@ import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { openCallLog } from "./call-log.js";
 import type { CallLog } from "./call-log.js";
 import { createTools } from "./tools.js";
+import { loadApprovalsConfig } from "../approvals/config.js";
 import { loadWorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { loadDispatcherConfig } from "../dispatcher/config.js";
@@ -67,8 +68,10 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
   await loadFactorySpecs(workConfig.factorySpecsPath);
   const auditorConfig = await loadAuditorConfig(config.auditorConfigPath);
   await loadDispatcherConfig(config.dispatcherConfigPath);
+  const approvalsConfig = await loadApprovalsConfig(config.approvalsConfigPath);
   await requireWritableTarget("MCP call log", config.callLogPath);
   await requireWritableTarget("Work store", workConfig.storePath);
+  await requireWritableTarget("Approval requests", approvalsConfig.requestsPath);
   await requireInputDir("Verdict dir", auditorConfig.verdictDir);
   const callLog = await openCallLog(config.callLogPath);
   const run = randomUUID();
@@ -93,6 +96,7 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
     workConfigPath: config.workConfigPath,
     dispatcherConfigPath: config.dispatcherConfigPath,
     auditorConfigPath: config.auditorConfigPath,
+    approvalsConfigPath: config.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,

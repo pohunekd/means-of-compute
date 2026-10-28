@@ -1,11 +1,14 @@
-// PR 2 tool slice: P3 types, result helpers and the read-only
-// fleet_status tool (R1 without the fleet field; PR 6 adds it).
+// MCP tools: read, write and sensitive tools over the work store,
+// verdicts, registry and approval requests (P3, R1, A3-A5).
 import Ajv from "ajv/dist/2020";
+import { loadApprovalsConfig } from "../approvals/config.js";
+import { fleetPause, pendingRequests, readApprovals } from "../approvals/store.js";
 import { loadDispatcherConfig } from "../dispatcher/config.js";
 import { readRegistry } from "../dispatcher/registry.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
 import { createAuditResultsTool, createListWorkTool } from "./read-tools.js";
+import { createApproveTool, createPauseFleetTool } from "./sensitive.js";
 import { createSubmitWorkTool } from "./submit.js";
 import type {
   ToolContext,
@@ -95,6 +98,24 @@ async function runFleetStatus(
       detail,
     };
   }
+  let requests;
+  try {
+    const approvalsConfig = await loadApprovalsConfig(paths.approvalsConfigPath);
+    requests = await readApprovals(approvalsConfig.requestsPath);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      payload: unavailablePayload("requests"),
+      summary: null,
+      detail,
+    };
+  }
+  const pause = fleetPause(requests);
+  const pending = pendingRequests(requests).map((request) => ({
+    requestId: request.requestId,
+    tool: request.tool,
+    requestedAt: request.requestedAt,
+  }));
   const counts: Record<string, number | undefined> = {
     queued: 0,
     running: 0,
@@ -138,6 +159,11 @@ async function runFleetStatus(
         available: false,
         reason: "no host-state source in the MCP server (#42 PR 3)",
       },
+      fleet: {
+        paused: pause.paused,
+        pausedBy: pause.pausedBy,
+        pendingRequests: pending,
+      },
     }),
     summary: { items, hosts: hosts.length },
     detail: null,
@@ -162,5 +188,7 @@ export function createTools(paths: ToolPaths): readonly ToolDefinition[] {
     createListWorkTool(paths),
     createAuditResultsTool(paths),
     createSubmitWorkTool(paths),
+    createApproveTool(paths),
+    createPauseFleetTool(paths),
   ];
 }

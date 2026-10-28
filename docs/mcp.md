@@ -45,15 +45,6 @@ initialized"`. `tools/list` answers in PR order (read slice: only
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
 error response also appends a `protocol-error` line.
 
-`mcp:call <tool> [--file <path>] [--config <path>]` (`bun run mcp:call`)
-is an MCP client of its own: it spawns `serve.ts` with `--caller mcp-call`
-over stdio pipes, sends `initialize` (`clientInfo {name:"mcp-call",
-version:<serverInfo.version>}`), `notifications/initialized`, then
-`tools/call`, and prints `structuredContent` as one compact JSON line.
-Exit 0 when `ok` is true, 3 when `ok` is false, 2 for usage or a bad
-`--file`, 4 when the server exits early, a JSON-RPC error comes back, a
-response is malformed, or `clientTimeoutMs` passes.
-
 `config/mcp.json` (`loadMcpConfig`): `serverInfo`, `callers` (pattern
 `^[a-z][a-z0-9-]{0,31}$`, unique), `callLogPath`, `maxMessageBytes`
 (1024-16777216), `clientTimeoutMs` (1-600000), `workConfigPath`,

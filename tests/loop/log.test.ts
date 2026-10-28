@@ -108,7 +108,8 @@ test("a failed write latches and later logs write nothing and do not throw (C3)"
     expect(log.failed()).toBe(false);
     log.log({ event: "ci", workItemId: "gh-moc-5" });
     // Awaiting close drains the chain, so the latch is set with no
-    // wall-clock wait.
+    // wall-clock wait; the failed write rejects the chain, which close
+    // settles before reporting through failed().
     await log.close();
     expect(log.failed()).toBe(true);
     expect(seam.written()).toBe(1);

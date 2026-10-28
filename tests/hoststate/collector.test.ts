@@ -29,7 +29,7 @@ const CONFIG: HostStateConfig = {
     id: PACKAGE_ID,
     version: "0.1.0",
     sourceDigest: `sha256:${"a".repeat(64)}`,
-    targets: ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"],
+    command: "host-state",
   },
   collector: {
     acceptedVersions: ["0.1.0"],

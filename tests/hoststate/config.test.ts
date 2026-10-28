@@ -8,7 +8,7 @@ const validPackage = {
   id: "moc.host-state",
   version: "0.1.0",
   sourceDigest: `sha256:${"a".repeat(64)}`,
-  targets: ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"],
+  command: "host-state",
 };
 
 const validCollector = {
@@ -62,7 +62,7 @@ async function mutateCollector(
   return writeDoc({ package: validPackage, collector });
 }
 
-async function packageWithout(key: "id" | "version" | "sourceDigest" | "targets"): Promise<string> {
+async function packageWithout(key: "id" | "version" | "sourceDigest" | "command"): Promise<string> {
   const full = JSON.parse(JSON.stringify(validPackage)) as Record<string, unknown>;
   const rest: Record<string, unknown> = {};
   for (const k of Object.keys(full)) {
@@ -94,12 +94,7 @@ describe("host-state package config", () => {
     );
     expect(config.package.id).toBe("moc.host-state");
     expect(config.package.version).toBe("0.1.0");
-    expect(config.package.targets).toEqual([
-      "bun-linux-x64",
-      "bun-linux-arm64",
-      "bun-darwin-arm64",
-      "bun-darwin-x64",
-    ]);
+    expect(config.package.command).toBe("host-state");
     expect(config.collector.acceptedVersions).toEqual(["0.1.0"]);
     expect(config.collector.pluginTimeoutMs).toBe(10000);
     expect(config.collector.transportMarginMs).toBe(2000);
@@ -130,7 +125,7 @@ describe("host-state package config", () => {
     );
   });
 
-  for (const key of ["id", "version", "sourceDigest", "targets"] as const) {
+  for (const key of ["id", "version", "sourceDigest", "command"] as const) {
     test(`missing package ${key} throws`, async () => {
       const path = await packageWithout(key);
       expect(() => loadHostStateConfig(path)).toThrow(
@@ -164,27 +159,36 @@ describe("host-state package config", () => {
     );
   });
 
-  test("empty targets throws", async () => {
+  test("missing package.command throws", async () => {
     const path = await mutatePackage((pkg) => {
-      pkg["targets"] = [];
+      delete pkg["command"];
     });
     expect(() => loadHostStateConfig(path)).toThrow(
-      "config host-state.json: invalid package.targets",
+      "config host-state.json: invalid package.command",
     );
   });
 
-  test("duplicate targets throws", async () => {
+  test("uppercase package.command throws", async () => {
     const path = await mutatePackage((pkg) => {
-      pkg["targets"] = ["bun-linux-x64", "bun-linux-x64"];
+      pkg["command"] = "Host-State";
     });
     expect(() => loadHostStateConfig(path)).toThrow(
-      "config host-state.json: invalid package.targets",
+      "config host-state.json: invalid package.command",
     );
   });
 
-  test("unknown target throws", async () => {
+  test("long package.command throws", async () => {
     const path = await mutatePackage((pkg) => {
-      pkg["targets"] = ["bun-linux-x64", "bun-windows-x64"];
+      pkg["command"] = `${"a".repeat(33)}`;
+    });
+    expect(() => loadHostStateConfig(path)).toThrow(
+      "config host-state.json: invalid package.command",
+    );
+  });
+
+  test("package.targets present throws", async () => {
+    const path = await mutatePackage((pkg) => {
+      pkg["targets"] = ["bun-linux-x64"];
     });
     expect(() => loadHostStateConfig(path)).toThrow(
       "config host-state.json: invalid package.targets",
@@ -336,9 +340,17 @@ describe("host-state collector config", () => {
     );
   });
 
+  test("maxOutputBytes at the daemon ceiling loads", async () => {
+    const path = await mutateCollector((collector) => {
+      collector["maxOutputBytes"] = 131072;
+    });
+    const config = loadHostStateConfig(path);
+    expect(config.collector.maxOutputBytes).toBe(131072);
+  });
+
   test("maxOutputBytes above range throws", async () => {
     const path = await mutateCollector((collector) => {
-      collector["maxOutputBytes"] = 2097152;
+      collector["maxOutputBytes"] = 131073;
     });
     expect(() => loadHostStateConfig(path)).toThrow(
       "config host-state.json: invalid collector.maxOutputBytes",

@@ -3,7 +3,7 @@
     "id": "moc.host-state",
     "version": "0.1.0",
     "sourceDigest": "sha256:9f4088c69d65b0832c699cca560d8cdcc3481657f7e77c3ec0a056ec334e56f5",
-    "targets": ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"]
+    "command": "host-state"
   },
   "collector": {
     "acceptedVersions": ["0.1.0"],

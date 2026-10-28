@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { hostStateTargets, loadHostStateConfig } from "../src/hoststate/config.js";
+import { loadHostStateConfig } from "../src/hoststate/config.js";
 
 const root = process.cwd();
 
@@ -71,17 +71,7 @@ const outDir = isAbsolute(out) ? out : join(root, out);
 const config = loadHostStateConfig(join(root, "config", "host-state.json"));
 const { version, sourceDigest } = config.package;
 
-let targets: readonly string[];
-if (target === "all") {
-  targets = config.package.targets;
-} else if (target === "native") {
-  targets = ["native"];
-} else if ((hostStateTargets as readonly string[]).includes(target)) {
-  targets = [target];
-} else {
-  usageError(`unknown target ${target}`);
-  targets = [];
-}
+let targets: readonly string[] = [target];
 
 if (existsSync(outDir)) {
   const isDirectory = statSync(outDir, { throwIfNoEntry: false })?.isDirectory() ?? false;

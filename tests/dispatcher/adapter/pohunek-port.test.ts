@@ -211,6 +211,19 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
       expect(log.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
         "agent_runtime",
       );
+      const newsBefore = methodNames(fake, "laptop-a").filter(
+        (method) => method === "session.new",
+      ).length;
+      const original: unknown = await port.start(request({ requestId: "req-2" })).then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+      expect(original).toBeInstanceOf(PortRejectedError);
+      expect(original).toMatchObject({ code: "host-unsupported" });
+      const newsAfter = methodNames(fake, "laptop-a").filter(
+        (method) => method === "session.new",
+      ).length;
+      expect(newsAfter).toBe(newsBefore);
     } finally {
       await fresh.close();
     }

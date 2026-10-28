@@ -2,7 +2,7 @@
 // then checked against the runtime limits and configured repos and models.
 import Ajv from "ajv/dist/2020";
 import type { FactorySpec } from "../../contracts/v1/types.js";
-import { readInputText, statInputPath } from "../fs/input.js";
+import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 import type { WorkConfig } from "../work/config.js";
 import goalSchema from "./goal.schema.json" with { type: "json" };
 
@@ -48,12 +48,33 @@ function firstSchemaError(): string {
   return `invalid at ${path} (${String(first?.keyword)})`;
 }
 
+function goalMessage(label: string, path: string, detail: string): string {
+  const prefix = `${label} ${path}: `;
+  const reason = detail.startsWith(prefix) ? detail.slice(prefix.length) : detail;
+  return `${label}: ${reason}`;
+}
+
 export async function loadGoal(path: string, ctx: GoalContext): Promise<Goal> {
   const label = `Goal ${path}`;
-  if ((await statInputPath(label, path)) === "absent") {
-    throw new GoalError(`${label}: file is missing`);
+  try {
+    if ((await statInputPath(label, path)) === "absent") {
+      throw new GoalError(`${label}: file is missing`);
+    }
+  } catch (error: unknown) {
+    if (error instanceof InputPathError) {
+      throw new GoalError(goalMessage(label, path, error.message));
+    }
+    throw error;
   }
-  const text = await readInputText(label, path);
+  let text: string;
+  try {
+    text = await readInputText(label, path);
+  } catch (error: unknown) {
+    if (error instanceof InputPathError) {
+      throw new GoalError(goalMessage(label, path, error.message));
+    }
+    throw error;
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;

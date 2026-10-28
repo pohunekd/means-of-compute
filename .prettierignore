@@ -2,3 +2,4 @@ node_modules/
 logs/
 quarantine/
 bun.lock
+tests/fixtures/coord/prompt-*-expected.md

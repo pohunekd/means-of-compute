@@ -69,53 +69,6 @@ function fence(text: string): string {
   return "`".repeat(Math.max(3, longest + 1));
 }
 
-function stringifyCompact(value: unknown): string {
-  const full = JSON.stringify(value, null, 2);
-  if (typeof full !== "string") {
-    throw new Error("Cannot stringify value");
-  }
-  const lines = full.split("\n");
-  const out: string[] = [];
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index] as string;
-    const open = line.indexOf("[");
-    if (open >= 0 && line.trimEnd().endsWith("[")) {
-      const items: string[] = [];
-      let cursor = index + 1;
-      let fits = true;
-      while (cursor < lines.length) {
-        const entry = lines[cursor] as string;
-        const trimmedEntry = entry.trim();
-        if (trimmedEntry === "]" || trimmedEntry === "],") {
-          break;
-        }
-        const trimmed = entry.trim();
-        if (!trimmed.startsWith('"') || (!trimmed.endsWith('",') && !trimmed.endsWith('"'))) {
-          fits = false;
-          break;
-        }
-        items.push(trimmed.endsWith(",") ? trimmed.slice(0, -1) : trimmed);
-        cursor += 1;
-      }
-      const closing = lines[cursor];
-      const trimmedClosing = closing?.trim();
-      const suffix = trimmedClosing === "]," ? "," : "";
-      if (fits && closing !== undefined && items.length > 0) {
-        const collapsed = `${line.slice(0, open + 1)}${items.join(", ")}]${suffix}`;
-        if (collapsed.length <= 100) {
-          out.push(collapsed);
-          index = cursor + 1;
-          continue;
-        }
-      }
-    }
-    out.push(line);
-    index += 1;
-  }
-  return out.join("\n");
-}
-
 function block(text: string): readonly string[] {
   const rule = fence(text);
   return [`${rule}json`, text, rule];
@@ -153,7 +106,7 @@ export function renderPlanPrompt(input: {
     "",
     "### Goal",
     "",
-    ...block(stringifyCompact(input.goal)),
+    ...block(JSON.stringify(input.goal, null, 2)),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -191,11 +144,11 @@ export function renderReactPrompt(input: {
     "",
     "### Goal",
     "",
-    ...block(stringifyCompact(input.goal)),
+    ...block(JSON.stringify(input.goal, null, 2)),
     "",
     "### Attention",
     "",
-    ...block(stringifyCompact(input.attention)),
+    ...block(JSON.stringify(input.attention, null, 2)),
   ];
   return `${lines.join("\n")}\n`;
 }

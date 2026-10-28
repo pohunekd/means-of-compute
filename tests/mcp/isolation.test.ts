@@ -16,6 +16,7 @@ const REQUIRE_TOKEN = /\brequire\b/;
 const CREATE_REQUIRE = /\bcreateRequire\b/;
 const GET_BUILTIN_MODULE = /\bgetBuiltinModule\b/;
 const DIRECT_EVAL = /\beval\b/;
+const WORKER_TOKEN = /\bWorker\b/;
 const IMPORT_META = /\bimport\.meta(?!\.(?:url|dir|dirname|path|filename|main)\b)/;
 
 export function specsOf(text: string): string[] {
@@ -36,8 +37,14 @@ export function loaderUse(text: string): string | null {
   if (DIRECT_EVAL.test(code)) {
     return "eval";
   }
+  if (WORKER_TOKEN.test(code)) {
+    return "Worker";
+  }
   for (const spec of specsOf(text)) {
     if (spec === "module" || spec === "node:module") {
+      return `import of "${spec}"`;
+    }
+    if (spec === "worker_threads" || spec === "node:worker_threads") {
       return `import of "${spec}"`;
     }
   }
@@ -74,6 +81,19 @@ function resolveSpec(fromFile: string, spec: string): string | null {
   throw new Error(`unresolved import "${spec}" in ${fromFile}`);
 }
 
+export function checkTarget(spec: string, file: string, target: string, root: string): "follow" | "skip" {
+  if (target.includes("/node_modules/")) {
+    return "skip";
+  }
+  if (!target.startsWith(root)) {
+    throw new Error(`import "${spec}" in ${file} leaves the repository`);
+  }
+  if (!target.endsWith(".ts") && !target.endsWith(".json")) {
+    throw new Error(`import "${spec}" in ${file} resolves to an unsupported file type`);
+  }
+  return "follow";
+}
+
 function importClosure(entries: string[]): Set<string> {
   const root = join(process.cwd(), "/");
   const seen = new Set<string>();
@@ -92,11 +112,8 @@ function importClosure(entries: string[]): Set<string> {
       if (target === null) {
         continue;
       }
-      if (target.includes("/node_modules/")) {
+      if (checkTarget(spec, file, target, root) === "skip") {
         continue;
-      }
-      if (!target.startsWith(root)) {
-        throw new Error(`import "${spec}" in ${file} leaves the repository`);
       }
       queue.push(target);
     }
@@ -106,8 +123,8 @@ function importClosure(entries: string[]): Set<string> {
 
 function mcpFiles(dir: string): string[] {
   return (readdirSync(dir, { recursive: true }) as string[])
-    .filter((name) => name.endsWith(".ts"))
-    .map((name) => join(dir, name));
+    .map((name) => join(dir, name))
+    .filter((file) => isFile(file));
 }
 
 test("specsOf reads commented and namespace import specs (X4 Y5)", () => {
@@ -133,9 +150,13 @@ test("loaderUse flags every loader spelling (X4 Y1)", () => {
     'const load = require; load("x")',
     'require.call(undefined, "x")',
     "const { require: r } = import /* x */.meta",
+    "const m = import /* x */.meta",
     'process.getBuiltinModule("node:module")',
     'eval("x")',
     'import * as m from /* x */ "node:module"',
+    'new Worker(new URL("./w.ts", import.meta.url).href)',
+    'import { Worker } from "node:worker_threads"',
+    'await import("worker_threads")',
   ];
   for (const sample of flagged) {
     expect(`${sample}: ${loaderUse(sample) ?? "clean"}`).not.toBe(`${sample}: clean`);
@@ -151,6 +172,8 @@ test("loaderUse allows plain property reads and identifiers (X4 Y2)", () => {
     "requireAbsoluteDir(x)",
     "arequire(x)",
     "const required = 1",
+    "const workers = 1",
+    "// require(\"x\")\nimport.meta.url",
   ];
   for (const sample of clean) {
     expect(`${sample}: ${loaderUse(sample) ?? "clean"}`).toBe(`${sample}: clean`);
@@ -172,10 +195,29 @@ test("every closure file is checked for loader use (X4 Y3)", () => {
     checked.push(file);
   }
   expect(checked.sort()).toEqual([...closure].filter((file) => file.endsWith(".ts")).sort());
+  expect(
+    [...closure].filter((file) => !file.endsWith(".ts") && !file.endsWith(".json")),
+  ).toEqual([]);
   // Size reads the checked set: checking only src/mcp/ files fails here.
   expect(checked.length).toBeGreaterThan(entries.length);
   expect(checked.some((file) => !file.startsWith(`${dir}/`))).toBe(true);
   expect(closure.has(join(process.cwd(), "contracts", "v1", "validate.ts"))).toBe(true);
+});
+
+test("checkTarget gates closure edges by location and file type (X4 Y6)", () => {
+  const root = "/repo/";
+  const file = "/repo/src/mcp/a.ts";
+  expect(checkTarget("./a", file, "/repo/src/util/a.ts", root)).toBe("follow");
+  expect(checkTarget("./a", file, "/repo/src/util/a.json", root)).toBe("follow");
+  expect(checkTarget("x", file, "/repo/node_modules/x/a.mjs", root)).toBe("skip");
+  expect(() => checkTarget("../a", file, "/other/a.ts", root)).toThrow(
+    `import "../a" in ${file} leaves the repository`,
+  );
+  for (const ext of [".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx", ".tsx"]) {
+    expect(() => checkTarget(`../a${ext}`, file, `/repo/src/util/a${ext}`, root)).toThrow(
+      `import "../a${ext}" in ${file} resolves to an unsupported file type`,
+    );
+  }
 });
 
 test("the src/mcp/ import closure never reaches decide or the CLI (X4 Y4, A9)", () => {
@@ -186,6 +228,7 @@ test("the src/mcp/ import closure never reaches decide or the CLI (X4 Y4, A9)", 
   const cli = join(process.cwd(), "src", "approvals", "cli.ts");
   expect(closure.has(decide)).toBe(false);
   expect(closure.has(cli)).toBe(false);
+  expect(entries.filter((file) => !file.endsWith(".ts"))).toEqual([]);
   for (const file of entries) {
     const text = readFileSync(file, "utf8");
     expect(text).not.toContain("writeFileAtomic");

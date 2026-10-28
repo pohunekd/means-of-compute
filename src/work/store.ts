@@ -185,9 +185,7 @@ function checkAppendOnly(label: string, oldStore: WorkStore, next: WorkStoreBody
     const before = oldStore.submissions[index] as WorkSubmission;
     const after = next.submissions[index];
     if (after === undefined || canonicalJson(after) !== canonicalJson(before)) {
-      throw new WorkStoreDataError(
-        `${label}: rule (h): submission ${String(index)} changed`,
-      );
+      throw new WorkStoreDataError(`${label}: rule (h): submission ${String(index)} changed`);
     }
   }
 }

@@ -112,12 +112,12 @@ async function runGh(
       stdout: "pipe",
       stderr: "pipe",
     });
-  } catch (error: unknown) {
+  } catch {
     throw new GitHubError("unavailable", step, `${step}: cannot start gh`);
   }
-  let timedOut = false;
+  const state = { timedOut: false };
   const timer = setTimeout(() => {
-    timedOut = true;
+    state.timedOut = true;
     try {
       proc.kill("SIGKILL");
     } catch {
@@ -129,7 +129,7 @@ async function runGh(
     const stderrPromise = new Response(proc.stderr as ReadableStream).text();
     const rc = await proc.exited;
     const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-    if (timedOut || proc.signalCode === "SIGKILL") {
+    if (state.timedOut) {
       throw new GitHubError("unavailable", step, `${step}: timed out`);
     }
     if (rc !== 0) {

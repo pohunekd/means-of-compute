@@ -27,17 +27,25 @@ const dir = process.env["GH_CONFIG_DIR"];
 if (dir === undefined || dir.length === 0) {
   fail("fake-gh: no config dir\n");
 }
-const configDir = dir as string;
+const configDir: string = dir;
 const argv = process.argv.slice(2);
 
-const raw = (await readFile(join(configDir, "fake-gh.json"), "utf8").catch(() => {
+const raw: string = await readFile(join(configDir, "fake-gh.json"), "utf8").catch(() => {
   fail("fake-gh: no reply file\n");
-})) as string;
-const config = JSON.parse(raw) as Config;
+});
+const parsed: unknown = JSON.parse(raw);
+if (typeof parsed !== "object" || parsed === null) {
+  fail("fake-gh: bad reply file\n");
+}
+const config = parsed as Config;
 
 let used: number[] = [];
 try {
-  used = JSON.parse(await readFile(join(configDir, "fake-gh-used.json"), "utf8")) as number[];
+  const text: string = await readFile(join(configDir, "fake-gh-used.json"), "utf8");
+  const saved: unknown = JSON.parse(text);
+  if (Array.isArray(saved)) {
+    used = saved.filter((entry): entry is number => typeof entry === "number");
+  }
 } catch {
   used = [];
 }

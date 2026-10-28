@@ -145,13 +145,13 @@ export type M1Result =
 
 export function m1(view: PullView, headSha: string, baseBranch: string): M1Result {
   if (view.state === "OPEN") {
-    if (view.headRefOid === headSha && view.baseRefName === baseBranch && view.isDraft === false) {
+    if (view.headRefOid === headSha && view.baseRefName === baseBranch && !view.isDraft) {
       return { kind: "pass" };
     }
     if (view.baseRefName !== baseBranch) {
       return { kind: "operator", code: "base-mismatch" };
     }
-    if (view.isDraft === true) {
+    if (view.isDraft) {
       return { kind: "draft" };
     }
     return { kind: "head-moved", headSha: view.headRefOid };

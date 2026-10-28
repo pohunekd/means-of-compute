@@ -62,7 +62,7 @@ test("C3: a route provider is refused as merge auditor (mutation: drop rule 4)",
 
 test("C4: a zero-priced merge auditor is refused (mutation: drop rule 7)", async () => {
   const message = await loadFails(
-    await tempAuditorJson({ providerId: "local", model: "local-model" }),
+    await tempAuditorJson({ providerId: "local", model: "muse-glimmer-30b" }),
   );
   expect(message).toContain(
     "mergeAuditor provider file config/providers/local.json must price inputPer1M and outputPer1M above 0",

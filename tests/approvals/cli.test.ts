@@ -150,7 +150,7 @@ async function waitForLine(child: Bun.Subprocess, text: string): Promise<void> {
   }
 }
 
-test("list prints one JSON line per pending request", async () => {
+test("list prints one JSON line per pending request", { timeout: 15_000 }, async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);

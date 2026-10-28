@@ -84,8 +84,11 @@ request whose state is `approved` and whose `args` match all three, else
   pending request becomes `decided` with `decision {seq: nextSeq, author,
 decidedAt}`, then `nextSeq + 1`.
 - Exit codes: 0 decided or unchanged; 2 for usage, config, `/dev/tty`
-  unavailable, unknown request, a data error or a write failure; 3 for a
-  mismatched confirmation, an already-decided request, or a busy lock.
+  unavailable, unknown request, a data error or a write failure;
+  3 for EOF at the prompt
+  (`approvals: confirmation for "<id>" was not entered`,
+  `src/approvals/cli.ts:147-148`), a mismatched confirmation, an
+  already-decided request, or a busy lock.
 
 ## What "author" is (A8)
 

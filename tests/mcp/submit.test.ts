@@ -41,6 +41,7 @@ async function setup(submitArgs: unknown): Promise<{
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -115,6 +116,7 @@ test("U2 same args replay with the same id at revision 1 (U2)", async () => {
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -168,6 +170,7 @@ test("U3 same ids with a changed title are refused as id-exists (U3)", async () 
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -228,6 +231,7 @@ test("U4 cyclic dag is refused and the store file stays absent (U4)", async () =
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -296,6 +300,7 @@ test("U6 a new item depending on a stored item is accepted (U6)", async () => {
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -479,6 +484,7 @@ test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -560,6 +566,7 @@ test("U10 held lock is store-busy with retryable true (U10)", async () => {
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -641,6 +648,7 @@ test("U11 the U4 call-end carries dag-cycle with an edge summary and no goal tex
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
     auditorConfigPath: env.auditorConfigPath,
+    approvalsConfigPath: env.approvalsConfigPath,
   });
   const protocol = createProtocol({
     tools,

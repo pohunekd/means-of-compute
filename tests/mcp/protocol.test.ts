@@ -315,6 +315,7 @@ test("F3 a too-large line is answered in order and logged (F3, T4, L1)", async (
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
       auditorConfigPath: env.auditorConfigPath,
+      approvalsConfigPath: env.approvalsConfigPath,
     }),
     slowTool,
   ];
@@ -369,6 +370,7 @@ test("an aborted protocol answers no too-large line (H8, R2-7)", async () => {
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
       auditorConfigPath: env.auditorConfigPath,
+      approvalsConfigPath: env.approvalsConfigPath,
     }),
   );
   protocol.abort();
@@ -388,6 +390,7 @@ test("P8 oversized line is rejected and the next line is answered (P8)", async (
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
       auditorConfigPath: env.auditorConfigPath,
+      approvalsConfigPath: env.approvalsConfigPath,
     }),
   );
   const pending: Promise<string | null>[] = [];
@@ -463,6 +466,7 @@ test("P9 fleet_status counts running items and open sessions (P9, R1)", async ()
       workConfigPath: env.workConfigPath,
       dispatcherConfigPath: env.dispatcherConfigPath,
       auditorConfigPath: env.auditorConfigPath,
+      approvalsConfigPath: env.approvalsConfigPath,
     }),
   );
   await init(protocol);

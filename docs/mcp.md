@@ -15,9 +15,10 @@ after call-end 1).
 
 Startup: parse args (`--caller` exactly once, `--config` at most once,
 default `config/mcp.json`), load the MCP config, require the caller in
-`callers`, load the work and dispatcher configs plus factory specs,
-`requireWritableTarget` for the call log and store paths,
-`requireInputDir` for the verdict dir, open the call log, append
+`callers`, load the work, auditor, dispatcher and approvals configs plus factory
+specs, `requireWritableTarget` for the call log, store and approval
+requests paths, `requireInputDir` for the verdict dir, open the call log,
+append
 `server-start`, print `mcp: serving as <caller>` to stderr. Any failure
 exits 2 with empty stdout. Stdout carries only JSON-RPC messages;
 diagnostics go to stderr; no `console.log` runs in a server file.
@@ -42,7 +43,7 @@ as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the
 initialized flag are `-32600 "server not
-initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results, submit_work`.
+initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results, submit_work, approve, pause_fleet`.
 Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
@@ -51,8 +52,9 @@ error response also appends a `protocol-error` line with `jsonrpcCode`.
 `config/mcp.json` (`loadMcpConfig`): `serverInfo`, `callers` (pattern
 `^[a-z][a-z0-9-]{0,31}$`, unique), `callLogPath`, `maxMessageBytes`
 (1024-16777216), `clientTimeoutMs` (1-600000), `workConfigPath`,
-`auditorConfigPath`, `dispatcherConfigPath`. Every key is required, no
-extra key is allowed. The PR 2 slice has no approvals key yet.
+`auditorConfigPath`, `dispatcherConfigPath`, `approvalsConfigPath` (the
+approvals config from `config/approvals.json`). Every key is required, no
+extra key is allowed.
 
 ## Call log
 
@@ -73,10 +75,11 @@ If `server-start` cannot be logged, the server exits 2.
 ## Read tools
 
 `fleet_status` (`[read]`, no arguments): work items by status from the
-work store plus `openSessions` (registry entries with `terminal: null`).
-It reads only `storePath` and `registryPath` from the work and dispatcher
-configs, so an unknown provider model never fails it. Store or registry
-unreadable (missing file with a missing parent, non-file path) is
+work store, `openSessions` (registry entries with `terminal: null`), and
+the `fleet` field (`paused`, `pausedBy`, `pendingRequests` in seq order
+from `readApprovals`). It reads only `storePath`, `registryPath` and
+`requestsPath` from the work, dispatcher and approvals configs, so an
+unknown provider model never fails it. Any failing source is
 `source-unreadable` naming the source; out-of-scope items fail dispatch,
 never this tool.
 
@@ -143,6 +146,58 @@ indices}`; on `store-full` it is `{limit}`; on the `index` codes it is
 `{index}`; on `id-exists` it is `{ids}`; the step-0 `invalid-arguments`
 (`maxItems`) keeps `null`. Item ids are synthetic slugs, never brief
 text. The call log carries only the summary, never the arguments.
+
+## `approve` and `pause_fleet`
+
+`approve` and `pause_fleet` (`[sensitive: records a request a human must
+confirm out of band; never executes]`) record a `pending` approval
+request through `recordRequest` and return `{requestId, state:"pending",
+outcome:"recorded"|"existing"}`. The `approve` description is
+`[sensitive: ...] Requests a human approval to merge one pull request at
+one head.` and `pause_fleet` is `[sensitive: ...] Requests a human pause
+or resume of new starts.` Every snapshot `inputSchema` is `type: object`
+with `additionalProperties: false`, `minLength: 1` on `reason` and no
+`maxLength`; `validate` is compiled from it with `new Ajv({ strict: true
+})` from `ajv/dist/2020` at startup. `run` loads the approvals config
+first (`source-unreadable {source:"requests"}` with the message in
+`detail` on failure), then refuses a `reason` longer than
+`maxReasonChars` code points as `invalid-arguments` at `/reason`
+(`maxLength`), retryable `false`. `approve` then checks the work store:
+unknown id is `unknown-work-item` (`"unknown work item <id>"`); a status
+other than `review` is `not-in-review` (`"item <id> is <status>, not
+review"`); a pull mismatch is `pull-mismatch` (`"item <id> has pull
+<n|null>"`). Errors map as `store-busy {store:"requests"}`
+(retryable), `source-unreadable {source:"requests"}`,
+`store-write-failed`, and `source-unreadable {source:"work-store"}` for
+a work-store read failure on `approve`; an exception message goes only to
+`detail`. Summary on ok is `{requestId, outcome}`; on a refusal or an
+error it is `null`, because the call-end line already carries `code`.
+
+## Why an MCP call alone never executes a sensitive action (A9)
+
+1. The sensitive handlers call only `recordRequest`. That function can
+   create `pending` entries only and has no parameter for `state`.
+2. `decideRequest` lives in its own module, `src/approvals/decide.ts`.
+   Test X4 walks `src/mcp/` recursively and collects the static and
+   dynamic imports of every `*.ts` file, then follows them transitively
+   within `src/`. A relative spec resolves in this order: the spec as
+   written if it ends in `.ts`; `.js` mapped to `.ts`; the spec plus
+   `.ts`; the spec plus `/index.ts`. A relative spec that resolves to
+   no file fails X4 with `unresolved import "<spec>" in <file>`; bare
+   package specs are not followed. X4 fails if
+   `src/approvals/decide.ts` or `src/approvals/cli.ts` is reachable;
+   it also fails if any file under `src/mcp/` contains the text
+   `writeFileAtomic`, `require(`, `import.meta.require` or
+   `createRequire`. The existing ESLint rule already rejects a
+   non-literal dynamic `import()`.
+3. No tool reads `/dev/tty`, and there is no MCP method that decides.
+
+Residual gap, stated honestly. The requests file and the CLI belong to
+the same OS user. A coordinator, or a worker session on the same
+machine, that has a shell could write the file or drive the CLI through
+a pty. The guarantee is therefore "no MCP call can do it", not "no
+process of this user can do it". The `/dev/tty` prompt stops
+non-interactive misuse only. This is open question Q1.
 
 ## Client `mcp:call`
 

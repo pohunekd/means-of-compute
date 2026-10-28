@@ -623,9 +623,7 @@ test("a start void on a missing session rejects without unbinding", async () => 
     const error = await port.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PortRejectedError);
     expect(error).toMatchObject({ code: "prompt-not-acknowledged" });
-    expect(fake.calls("laptop-a").map((call) => call.method)).not.toContain(
-      "session.set_metadata",
-    );
+    expect(fake.calls("laptop-a").map((call) => call.method)).not.toContain("session.set_metadata");
     expect(eventsOf(log)).toContain("adapter-start-void");
     expect(eventsOf(log)).not.toContain("adapter-connection-dropped");
   } finally {

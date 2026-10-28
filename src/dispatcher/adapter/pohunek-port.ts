@@ -678,8 +678,10 @@ async function diffSession(
 // known id or bound to the request, then unbind each stopped bound one.
 // The binding filter decides with daemon order; the known id comes first.
 // A missing session counts as released. The daemon is the authority, so the
-// terminal cache is neither read nor written. Any refusal becomes
-// PortRejectedError("void-incomplete").
+// terminal cache is neither read nor written. A refused session.list or
+// connector call gives PortRejectedError(code) with that call's code; a
+// refused stop or unbind gives PortRejectedError("void-incomplete"); a
+// transport failure gives PortUnreachableError.
 async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<ReleaseResult> {
   if (port.closed) {
     throw new PohunekAdapterError("closed");

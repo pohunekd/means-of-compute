@@ -1,0 +1,318 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/src/loop/state.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LoopState",
+  "description": "Durable journal of the loop runner: one LoopItem per work item plus executed approvals, merge hold and digest day.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "revision",
+    "items",
+    "resolvedApprovals",
+    "mergeHold",
+    "lastDigestDay"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "v1" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "items": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+      "additionalProperties": { "$ref": "#/$defs/loopItem" }
+    },
+    "resolvedApprovals": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "mergeHold": { "anyOf": [{ "$ref": "#/$defs/mergeHold" }, { "type": "null" }] },
+    "lastDigestDay": {
+      "anyOf": [{ "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "isoDateTime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "attemptCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headSha", "count"],
+      "properties": {
+        "headSha": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "startIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round", "decision", "model", "brief", "itemBranch", "requestId"],
+      "properties": {
+        "round": { "type": "integer", "minimum": 0 },
+        "decision": { "$ref": "#/$defs/placementDecision" },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["providerId", "model"],
+          "properties": {
+            "providerId": { "type": "string", "minLength": 1 },
+            "model": { "type": "string", "minLength": 1 }
+          }
+        },
+        "brief": { "type": "string" },
+        "itemBranch": { "type": ["string", "null"], "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "placementDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "workItemId", "chosenHostAlias", "reason", "candidates"],
+      "properties": {
+        "schemaVersion": { "const": "v1" },
+        "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "chosenHostAlias": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["hostAlias", "score", "reason", "excluded"],
+            "properties": {
+              "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+              "score": { "type": "number" },
+              "reason": { "type": "string", "minLength": 1 },
+              "excluded": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "roundRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "retry",
+        "requestId",
+        "model",
+        "providerId",
+        "hostAlias",
+        "attempt",
+        "outcome",
+        "headSha",
+        "failingChecks",
+        "verdict",
+        "newlyMet",
+        "at",
+        "baseRace"
+      ],
+      "properties": {
+        "round": { "type": "integer", "minimum": 0 },
+        "retry": { "type": "integer", "minimum": 0 },
+        "requestId": { "type": ["string", "null"], "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "providerId": { "type": "string", "minLength": 1 },
+        "hostAlias": { "type": ["string", "null"], "minLength": 1 },
+        "attempt": { "enum": ["success", "failure", "stalled", "lost"] },
+        "outcome": {
+          "enum": [
+            "merged",
+            "findings",
+            "red-ci",
+            "no-push",
+            "no-new-commit",
+            "empty-diff",
+            "diff-too-large",
+            "session-failed",
+            "ci-timeout",
+            "trial-failed",
+            "lost",
+            "start-rejected"
+          ]
+        },
+        "headSha": { "type": ["string", "null"], "minLength": 1 },
+        "failingChecks": { "type": "array", "items": { "type": "string" } },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["auditorModel", "high", "medium", "low"],
+              "properties": {
+                "auditorModel": { "type": "string", "minLength": 1 },
+                "high": { "type": "integer", "minimum": 0 },
+                "medium": { "type": "integer", "minimum": 0 },
+                "low": { "type": "integer", "minimum": 0 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "newlyMet": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "at": { "$ref": "#/$defs/isoDateTime" },
+        "baseRace": { "type": "boolean" }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "retry", "target", "posted"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "retry": { "type": "integer", "minimum": 0 },
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["issue"],
+              "properties": { "issue": { "type": "integer", "minimum": 1 } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["newIssue"],
+              "properties": { "newIssue": { "const": true } }
+            }
+          ]
+        },
+        "posted": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "followup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "kind", "posted"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["finding", "blocked"] },
+        "posted": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "finalize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "done"],
+      "properties": {
+        "result": { "enum": ["success", "blocked"] },
+        "done": { "type": "boolean" }
+      }
+    },
+    "loopItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "round",
+        "start",
+        "requestId",
+        "pull",
+        "ciSince",
+        "trial",
+        "rounds",
+        "failures",
+        "excludedHosts",
+        "startRejections",
+        "escalations",
+        "followups",
+        "humanInterventions",
+        "finalize",
+        "auditAttempts",
+        "mergeAttempts",
+        "backoffUntil"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "idle",
+            "starting",
+            "running",
+            "publishing",
+            "ci",
+            "auditing",
+            "merging",
+            "awaiting-approval",
+            "finalizing",
+            "final"
+          ]
+        },
+        "round": { "type": "integer", "minimum": 0 },
+        "start": { "anyOf": [{ "$ref": "#/$defs/startIntent" }, { "type": "null" }] },
+        "requestId": { "type": ["string", "null"], "minLength": 1 },
+        "pull": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["number", "headSha"],
+              "properties": {
+                "number": { "type": "integer", "minimum": 1 },
+                "headSha": { "type": "string", "minLength": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "ciSince": { "anyOf": [{ "$ref": "#/$defs/isoDateTime" }, { "type": "null" }] },
+        "trial": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["baseSha", "headSha", "passed"],
+              "properties": {
+                "baseSha": { "type": "string", "minLength": 1 },
+                "headSha": { "type": "string", "minLength": 1 },
+                "passed": { "type": "boolean" }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "rounds": { "type": "array", "items": { "$ref": "#/$defs/roundRecord" } },
+        "failures": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "excludedHosts": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" }
+        },
+        "startRejections": { "type": "integer", "minimum": 0 },
+        "escalations": { "type": "array", "items": { "$ref": "#/$defs/escalation" } },
+        "followups": { "type": "array", "items": { "$ref": "#/$defs/followup" } },
+        "humanInterventions": { "type": "integer", "minimum": 0 },
+        "finalize": { "anyOf": [{ "$ref": "#/$defs/finalize" }, { "type": "null" }] },
+        "auditAttempts": {
+          "anyOf": [{ "$ref": "#/$defs/attemptCount" }, { "type": "null" }]
+        },
+        "mergeAttempts": {
+          "anyOf": [{ "$ref": "#/$defs/attemptCount" }, { "type": "null" }]
+        },
+        "backoffUntil": { "anyOf": [{ "$ref": "#/$defs/isoDateTime" }, { "type": "null" }] }
+      }
+    },
+    "mergeHold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mergeSha", "workItemId", "expectedBase", "parents", "since"],
+      "properties": {
+        "mergeSha": { "type": "string", "minLength": 1 },
+        "workItemId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "expectedBase": { "type": "string", "minLength": 1 },
+        "parents": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        },
+        "since": { "$ref": "#/$defs/isoDateTime" }
+      }
+    }
+  }
+}

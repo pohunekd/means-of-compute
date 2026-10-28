@@ -1,0 +1,88 @@
+{
+  "statePath": "logs/loop-demo/loop-state.json",
+  "logPath": "logs/loop-demo/loop.jsonl",
+  "resultsPath": "logs/loop-demo/loop-results.jsonl",
+  "workConfigPath": "tests/fixtures/loop/demo/work.json",
+  "dispatcherConfigPath": "tests/fixtures/loop/demo/dispatcher.json",
+  "auditorConfigPath": "tests/fixtures/loop/demo/auditor.json",
+  "ledgerConfigPath": "tests/fixtures/loop/demo/ledger.json",
+  "budgetGateConfigPath": "tests/fixtures/loop/demo/budget-gate.json",
+  "placementConfigPath": "config/placement.json",
+  "approvalsConfigPath": "tests/fixtures/loop/demo/approvals.json",
+  "meterConfigPath": "tests/fixtures/loop/demo/meter.json",
+  "adapterConfigPath": null,
+  "dashboardConfigPath": null,
+  "tickMs": 200,
+  "maxActiveItems": 1,
+  "shutdownGraceMs": 2000,
+  "sessionTimeoutMs": 60000,
+  "unreachableRetryMs": 100,
+  "budgetBackoffMs": 1000,
+  "maxStartRejections": 3,
+  "maxBriefBytes": 65536,
+  "stall": {
+    "maxStagnantRounds": 3,
+    "maxRetries": 2
+  },
+  "routing": {
+    "models": {
+      "meta/muse-glimmer-30b": "nvidia-build",
+      "muse-spark-1.3-contributor": "meta-api"
+    },
+    "fallback": {
+      "meta/muse-glimmer-30b": "muse-spark-1.3-contributor"
+    },
+    "fallbackAfterFailures": 2,
+    "window": 20,
+    "minSamples": 5,
+    "minSuccessRate": 0.3
+  },
+  "github": {
+    "tokenEnv": "MOC_GITHUB_TOKEN",
+    "configDir": "logs/loop-demo/gh-config",
+    "factoryLogin": "moc-demo",
+    "timeoutMs": 5000,
+    "ciPollMs": 100,
+    "ciTimeoutMs": 60000,
+    "mergeRetries": 3,
+    "trustedAssociations": ["OWNER", "MEMBER", "COLLABORATOR"],
+    "requiredChecks": ["gates"],
+    "mergeMethod": "merge",
+    "intake": {
+      "enabled": false,
+      "optInLabel": "factory:auto",
+      "readyLabel": "readiness:ready",
+      "blockedLabel": "readiness:blocked",
+      "pollMs": 300000,
+      "defaultModel": "meta/muse-glimmer-30b",
+      "maxGoalChars": 12000
+    },
+    "followupLabels": ["factory:followup", "readiness:design-needed"],
+    "escalationLabel": "factory:escalation"
+  },
+  "repos": [
+    {
+      "repo": "example/demo-repo",
+      "checkoutDir": "logs/loop-demo/checkout",
+      "idPrefix": "demo"
+    }
+  ],
+  "trialMerge": {
+    "scratchDir": "logs/loop-demo/trial",
+    "steps": [["bun", "run", "gates"]],
+    "timeoutMs": 120000
+  },
+  "audit": {
+    "retries": 2
+  },
+  "digest": {
+    "dir": "logs/loop-demo/digest",
+    "onExit": true
+  },
+  "stub": {
+    "sandboxDir": "logs/loop-demo",
+    "demoRepoDir": "tests/fixtures/loop/demo-repo",
+    "observationsPath": "tests/fixtures/loop/hosts.json",
+    "recordingsPath": "tests/fixtures/loop/recordings.json"
+  }
+}

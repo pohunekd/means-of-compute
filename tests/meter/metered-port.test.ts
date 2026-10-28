@@ -44,7 +44,9 @@ test("P1 replay opens twice and binds once", async () => {
     expect(lines.filter((line) => line.includes('"kind":"grant-open"'))).toHaveLength(2);
     const binds = lines.filter((line) => line.includes('"kind":"grant-bind"'));
     expect(binds).toHaveLength(1);
-    expect(JSON.parse(binds[0] as string).sessionId).toBe(first.sessionId);
+    expect((JSON.parse(binds[0] as string) as { sessionId: unknown }).sessionId).toBe(
+      first.sessionId,
+    );
     expect(control.sessions()).toHaveLength(1);
   });
 });

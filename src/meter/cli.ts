@@ -46,7 +46,7 @@ async function runUsage(args: string[]): Promise<number> {
     await stat(logPath);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`meter: no log file at ${JSON.stringify(logPath)}`);
+      throw new Error(`meter: no log file at ${JSON.stringify(logPath)}`, { cause: error });
     }
     throw error;
   }

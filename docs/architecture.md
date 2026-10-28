@@ -19,7 +19,7 @@ README. At runtime every model call goes to a Meta model: the provider schema al
    work store; `approve` and `pause_fleet` record pending requests a
    human confirms out of band through the `approvals` CLI, and
    `fleet_status` reports the resulting `fleet` field; see
-   [mcp.md](mcp.md) and [approvals.md](approvals.md).
+   [mcp.md](mcp.md) and [approvals.md](approvals.md). The coordinator's playbook, goal format and prompt are in [coordinator.md](coordinator.md).
 2. **Placement** reads each host's `HostCapacity` from its **host probe** and returns a
    `PlacementDecision` with the reason. A host is idle when it is inside the policy
    window, on AC power, its battery is above the configured threshold (or it has

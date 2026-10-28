@@ -1,7 +1,8 @@
-// Builds the host-state plugin package directory per target.
-// Usage: bun run plugin:build --target <native|all|bun-...> --out <dir>
+// Builds the host-state plugin package directory.
+// Usage: bun run plugin:build --out <dir>
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -20,32 +21,28 @@ function usageError(message: string): never {
   process.exit(2);
 }
 
-function parseArgs(args: readonly string[]): { target: string; out: string } {
-  let target: string | undefined;
+function parseArgs(args: readonly string[]): { out: string } {
   let out: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--target" && args[i + 1] !== undefined) {
-      target = args[i + 1];
-      i++;
-    } else if (arg === "--out" && args[i + 1] !== undefined) {
+    if (arg === "--out" && args[i + 1] !== undefined) {
       out = args[i + 1];
       i++;
     } else {
       usageError(`unknown argument ${arg ?? "(missing value)"}`);
     }
   }
-  if (target === undefined || out === undefined) {
-    usageError("usage: bun run plugin:build --target <native|all|bun-...> --out <dir>");
+  if (out === undefined) {
+    usageError("usage: bun run plugin:build --out <dir>");
   }
-  return { target, out };
+  return { out };
 }
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-const { target, out } = parseArgs(Bun.argv.slice(2));
+const { out } = parseArgs(Bun.argv.slice(2));
 const outDir = isAbsolute(out) ? out : join(root, out);
 
 // The digest script compares the computed digest with the committed one and
@@ -70,8 +67,6 @@ const outDir = isAbsolute(out) ? out : join(root, out);
 
 const config = loadHostStateConfig(join(root, "config", "host-state.json"));
 const { version, sourceDigest } = config.package;
-
-let targets: readonly string[] = [target];
 
 if (existsSync(outDir)) {
   const isDirectory = statSync(outDir, { throwIfNoEntry: false })?.isDirectory() ?? false;
@@ -102,51 +97,60 @@ if (gitCommitRc !== 0) {
 const gitCommit = gitCommitOut.trim();
 const bunVersion = Bun.version;
 
-for (const t of targets) {
-  const dirName =
-    t === "native" ? `moc-host-state-${version}-native` : `moc-host-state-${version}-${t}`;
-  const dir = join(outDir, dirName);
-  const binDir = join(dir, "bin");
-  mkdirSync(binDir, { recursive: true });
-  const binPath = join(binDir, "moc-host-state");
-  const buildArgs =
-    t === "native"
-      ? ["build", "--compile", "src/probe/plugin-entry.ts", "--outfile", binPath]
-      : ["build", "--compile", `--target=${t}`, "src/probe/plugin-entry.ts", "--outfile", binPath];
-  const build = Bun.spawn(["bun", ...buildArgs], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [buildOut, buildErr, buildRc] = await Promise.all([
-    new Response(build.stdout).text(),
-    new Response(build.stderr).text(),
-    build.exited,
-  ]);
-  process.stdout.write(buildOut);
-  process.stderr.write(buildErr);
-  if (buildRc !== 0) {
-    process.exit(2);
-  }
-  mkdirSync(join(dir, "config", "scenarios"), { recursive: true });
-  cpSync(join(root, "config", "probe.json"), join(dir, "config", "probe.json"));
-  for (const f of readdirSync(join(root, "config", "scenarios"))) {
-    if (f.endsWith(".json")) {
-      cpSync(join(root, "config", "scenarios", f), join(dir, "config", "scenarios", f));
-    }
-  }
-  const binarySha256 = sha256Hex(readFileSync(binPath));
-  const buildTarget = t === "native" ? `native-${process.platform}-${process.arch}` : t;
-  const buildJson = {
-    packageId: config.package.id,
-    version,
-    target: buildTarget,
-    gitCommit,
-    sourceDigest,
-    bunVersion,
-    binarySha256,
-  };
-  writeFileSync(join(dir, "build.json"), `${JSON.stringify(buildJson, null, 2)}\n`);
+const dir = join(outDir, `moc-host-state-${version}`);
+const binDir = join(dir, "bin");
+mkdirSync(binDir, { recursive: true });
+const binPath = join(binDir, "moc-host-state");
+const buildArgs = ["build", "--target=bun", "src/probe/plugin-entry.ts", "--outfile", binPath];
+const build = Bun.spawn(["bun", ...buildArgs], {
+  cwd: root,
+  stdout: "pipe",
+  stderr: "pipe",
+});
+const [buildOut, buildErr, buildRc] = await Promise.all([
+  new Response(build.stdout).text(),
+  new Response(build.stderr).text(),
+  build.exited,
+]);
+process.stdout.write(buildOut);
+process.stderr.write(buildErr);
+if (buildRc !== 0) {
+  process.exit(2);
 }
+chmodSync(binPath, 0o755);
+mkdirSync(join(dir, "config", "scenarios"), { recursive: true });
+cpSync(join(root, "config", "plugin.json"), join(dir, "config", "plugin.json"));
+cpSync(join(root, "config", "probe.json"), join(dir, "config", "probe.json"));
+for (const f of readdirSync(join(root, "config", "scenarios"))) {
+  if (f.endsWith(".json")) {
+    cpSync(join(root, "config", "scenarios", f), join(dir, "config", "scenarios", f));
+  }
+}
+const binarySha256 = sha256Hex(readFileSync(binPath));
+const buildJson = {
+  packageId: config.package.id,
+  version,
+  command: config.package.command,
+  gitCommit,
+  sourceDigest,
+  bunVersion,
+  binarySha256,
+};
+writeFileSync(join(dir, "build.json"), `${JSON.stringify(buildJson, null, 2)}\n`);
 
-console.log(`plugin:build: wrote ${String(targets.length)} package(s) to ${out}`);
+const runtimeToml = [
+  "schema = 1",
+  `id = "${config.package.id}"`,
+  `version = "${version}"`,
+  "runtime_api = 1",
+  `requires = ["package-commands-v1"]`,
+  "",
+  `[commands.${config.package.command}]`,
+  `program = "bin/moc-host-state"`,
+  `args = []`,
+  `expose = "peers"`,
+  "",
+].join("\n");
+writeFileSync(join(dir, "runtime.toml"), runtimeToml);
+
+console.log(`plugin:build: wrote 1 package(s) to ${out}`);

@@ -253,7 +253,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
   // A signal aborts the protocol even when stdin already ended: resolve()
   // is a no-op then, but the abort still drops every queued line and the
   // stop reason below still becomes "signal".
-  let sawSignal = false;
+  let sawSignal: boolean = false;
   const done = new Promise<string>((resolve) => {
     process.stdin.on("data", (chunk: string) => {
       splitter.push(chunk);
@@ -285,9 +285,17 @@ async function serve(caller: string, configPath: string): Promise<number> {
   }
   await protocol.drain();
   await transportTail;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const stopReason = sawSignal ? "signal" : reason;
-  if (stopReason === "signal" || stopReason === "stdout-closed") {
-    protocol.abort();
+  switch (stopReason) {
+    case "signal":
+    case "stdout-closed": {
+      protocol.abort();
+      break;
+    }
+    default: {
+      break;
+    }
   }
   process.stdin.destroy();
   // transportFailed is only assigned inside the serialized queue, so by

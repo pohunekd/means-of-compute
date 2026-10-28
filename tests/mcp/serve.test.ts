@@ -185,8 +185,7 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   // The pipe reader sleeps before draining, so the server must keep the
   // whole response buffered until stdout accepts it; exiting early or
   // resolving the write without its callback truncates the response.
-  const slowReaderCmd =
-    `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 1; cat)`;
+  const slowReaderCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 1; cat)`;
   const proc = Bun.spawn(["sh", "-c", slowReaderCmd], {
     cwd: process.cwd(),
     stdin: "pipe",
@@ -231,8 +230,7 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   // pid comes from its own server-start line, so SIGTERM hits the server
   // alone, not the reader. Stdin closes at once (EOF), then SIGTERM
   // arrives once the call log shows the first call-start.
-  const queuedCmd =
-    `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 2; cat)`;
+  const queuedCmd = `${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}" | (sleep 2; cat)`;
   const proc = Bun.spawn(["sh", "-c", queuedCmd], {
     cwd: process.cwd(),
     stdin: "pipe",
@@ -248,7 +246,9 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   let serverPid = 0;
   let finishedFirstCall = false;
   for (let n = 0; n < 400 && (serverPid === 0 || !finishedFirstCall); n += 1) {
-    const logText = await Bun.file(env.callLogPath).text().catch(() => "");
+    const logText = await Bun.file(env.callLogPath)
+      .text()
+      .catch(() => "");
     const pidMatch = /"event":"server-start"[^}]*"pid":(\d+)/.exec(logText);
     if (pidMatch?.[1] !== undefined) {
       const parsed = Number.parseInt(pidMatch[1], 10);
@@ -266,11 +266,8 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   expect(serverPid).toBeGreaterThan(0);
   expect(finishedFirstCall).toBe(true);
   process.kill(serverPid, "SIGTERM");
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  await new Response(proc.stdout).text();
   expect(stderr).not.toContain("{");
   expect(code).toBe(0);
   const logText = await Bun.file(env.callLogPath).text();

@@ -107,11 +107,7 @@ test("a failed write latches and later logs write nothing and do not throw (C3)"
   await withTempDir(async (dir) => {
     const path = join(dir, "loop.jsonl");
     const seam = failingFirstFs();
-    const log = await openLoopLog(
-      path,
-      () => new Date("2026-10-28T00:00:01.000Z"),
-      seam.fs,
-    );
+    const log = await openLoopLog(path, () => new Date("2026-10-28T00:00:01.000Z"), seam.fs);
     expect(log.failed()).toBe(false);
     log.log({ event: "ci", workItemId: "gh-moc-5" });
     log.log({ event: "merged", workItemId: "gh-moc-6" });

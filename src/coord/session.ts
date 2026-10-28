@@ -356,6 +356,9 @@ export async function runMuseSession(
   };
   const timeoutTimer = setTimeout(onTimeout, opts.timeoutMs);
   opts.signal.addEventListener("abort", onAbort, { once: true });
+  // The setup awaits above can resolve after the abort lands, so the signal
+  // can read as aborted here even though it was live at the entry check.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (opts.signal.aborted) {
     onAbort();
   }
@@ -371,7 +374,7 @@ export async function runMuseSession(
     await stderrHandle.close();
   }
   if (killState.killError !== null) {
-    throw killState.killError;
+    throw killState.killError as Error;
   }
   const end = now();
   const durationMs = end.getTime() - t0.getTime();

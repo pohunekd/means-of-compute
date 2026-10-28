@@ -326,8 +326,12 @@ test("an ok approve summary lands in requests, a refused line without a code thr
     codeThrown = error;
   }
   expect(codeThrown).toBeInstanceOf(ReportDataError);
+  const missingCall = missingCode.calls[0];
+  if (missingCall === undefined) {
+    throw new Error("expected a call line");
+  }
   expect((codeThrown as Error).message).toBe(
-    `Report: call ${missingCode.calls[0]?.run}/${String(missingCode.calls[0]?.callId)} has an invalid submit_work summary`,
+    `Report: call ${missingCall.run}/${String(missingCall.callId)} has an invalid submit_work summary`,
   );
 });
 

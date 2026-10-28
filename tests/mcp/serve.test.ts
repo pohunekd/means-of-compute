@@ -94,6 +94,7 @@ async function writeLargeRegistry(env: McpTestEnv): Promise<void> {
       lastSeenAt: "2026-10-27T10:00:00.000Z",
       cancelReason: null,
       terminal: null,
+      resolvedAt: null,
       revision: 0,
     });
   }

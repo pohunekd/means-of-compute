@@ -106,6 +106,7 @@ function registryEntry(overrides: Record<string, unknown> = {}): Record<string, 
     lastSeenAt: "2026-10-28T10:00:00.000Z",
     cancelReason: null,
     terminal: null,
+    resolvedAt: null,
     revision: 0,
     ...overrides,
   };

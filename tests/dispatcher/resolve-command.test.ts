@@ -16,7 +16,7 @@ import { createDispatcher, type ResolveOutcome } from "../../src/dispatcher/disp
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import { FileLockError, withFileLock } from "../../src/fs/lock.js";
 import type { ModelSelection, ReleaseRef, ReleaseResult } from "../../src/dispatcher/port.js";
-import { PortUnreachableError } from "../../src/dispatcher/port.js";
+import { PortRejectedError, PortUnreachableError } from "../../src/dispatcher/port.js";
 import { runResolveCommand } from "../../src/dispatcher/resolve-command.js";
 
 const MODEL: ModelSelection = { providerId: "nvidia-build", model: "meta/muse-glimmer-30b" };
@@ -190,17 +190,24 @@ test("refusals exit 3 with the request id", async () => {
     expect(h.stdout).toEqual([]);
     expect(h.stderr).toEqual(["dispatch: demo-item:0: unreachable"]);
   });
-  await withCommandHarness(async (h) => {
-    await h.provisionProvisional();
-    h.control.refuseRelease("laptop-a", "void-incomplete");
-    const rc = await runResolveCommand(["--request", "demo-item:0"], h.withRuntime, {
-      stdout: (line) => h.stdout.push(line),
-      stderr: (line) => h.stderr.push(line),
-    });
-    expect(rc).toBe(3);
-    expect(h.stdout).toEqual([]);
-    expect(h.stderr).toEqual(["dispatch: demo-item:0: void-incomplete"]);
-  });
+  await withCommandHarness(
+    async (h) => {
+      await h.provisionProvisional();
+      const rc = await runResolveCommand(["--request", "demo-item:0"], h.withRuntime, {
+        stdout: (line) => h.stdout.push(line),
+        stderr: (line) => h.stderr.push(line),
+      });
+      expect(rc).toBe(3);
+      expect(h.stdout).toEqual([]);
+      expect(h.stderr).toEqual(["dispatch: demo-item:0: void-incomplete"]);
+      expect(h.stdout.join("\n")).not.toContain("peer.example-route");
+      expect(h.stderr.join("\n")).not.toContain("peer.example-route");
+    },
+    {
+      release: () =>
+        Promise.reject(new PortRejectedError("void-incomplete", "peer.example-route: refused")),
+    },
+  );
   await withCommandHarness(async (h) => {
     await h.provisionActive();
     const rc = await runResolveCommand(["--request", "demo-item:0"], h.withRuntime, {

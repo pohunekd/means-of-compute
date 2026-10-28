@@ -228,5 +228,4 @@ async function run(): Promise<number> {
   return 2;
 }
 
-const code = await run();
-process.exit(code);
+process.exitCode = await run();

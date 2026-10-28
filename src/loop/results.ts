@@ -129,9 +129,8 @@ export async function readResults(path: string): Promise<readonly ResultLine[]> 
     return [];
   }
   const segments = text.split("\n");
-  const last: string | undefined = segments[segments.length - 1];
   // A non-empty last segment is a torn tail: ignored, left in place.
-  const body = last === "" ? segments.slice(0, -1) : segments.slice(0, -1);
+  const body = segments.slice(0, -1);
   const lines: ResultLine[] = [];
   const seen = new Set<string>();
   body.forEach((segment: string | undefined, index) => {
@@ -176,22 +175,33 @@ async function appendOnce(
     }
   }
   let handle: Awaited<ReturnType<typeof open>> | null = null;
+  let pending: unknown = null;
   try {
     handle = await open(path, "a", 0o600);
     await handle.write(`${JSON.stringify(line)}\n`);
     await handle.sync();
   } catch (error: unknown) {
-    throw new LoopResultsWriteError(`loop results ${path}: cannot append (${errnoOf(error)})`, {
-      cause: error,
-    });
-  } finally {
-    if (handle !== null) {
-      await handle.close().catch((error: unknown) => {
-        throw new LoopResultsWriteError(`loop results ${path}: cannot close (${errnoOf(error)})`, {
-          cause: error,
-        });
-      });
+    pending = error;
+  }
+  // A close failure never replaces an earlier write or sync failure: the
+  // first error is rethrown with the close error attached as its cause.
+  let closeError: unknown = null;
+  if (handle !== null) {
+    try {
+      await handle.close();
+    } catch (error: unknown) {
+      closeError = error;
     }
+  }
+  if (pending !== null) {
+    throw new LoopResultsWriteError(`loop results ${path}: cannot append (${errnoOf(pending)})`, {
+      cause: closeError ?? pending,
+    });
+  }
+  if (closeError !== null) {
+    throw new LoopResultsWriteError(`loop results ${path}: cannot close (${errnoOf(closeError)})`, {
+      cause: closeError,
+    });
   }
   return { truncatedBytes };
 }

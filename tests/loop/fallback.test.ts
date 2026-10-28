@@ -85,7 +85,12 @@ function line(
     model,
     providerId: "nvidia-build",
     hostAlias: "host-a",
-    outcome: routingResult === "success" ? "merged" : "red-ci",
+    outcome:
+      routingResult === "success"
+        ? "merged"
+        : routingResult === "failure"
+          ? "red-ci"
+          : "ci-timeout",
     routingResult,
   };
 }

@@ -112,10 +112,12 @@ test("a tight limit drops findings from the end with an omission line (L13b, B5)
     "",
     "Previous round: red-ci.",
     "Audit findings at 0123456789ab:",
-    ...findings.slice(0, 10).map(
-      (finding) =>
-        `- [${finding.severity}] ${finding.location}: ${finding.defect} Fix: ${finding.fixDirection}`,
-    ),
+    ...findings
+      .slice(0, 10)
+      .map(
+        (finding) =>
+          `- [${finding.severity}] ${finding.location}: ${finding.defect} Fix: ${finding.fixDirection}`,
+      ),
     "(50 more findings omitted)",
   ];
   const expected = `${head.join("\n")}\n`;

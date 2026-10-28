@@ -18,7 +18,8 @@ The loop runner drives factory work items from ready to merged or blocked.
 
 `src/loop/state.schema.json` validates `{schemaVersion:"v1", revision, items:{<id>: LoopItem}, resolvedApprovals:[...], mergeHold, lastDigestDay:"YYYY-MM-DD"|null}`.
 
-A `LoopStateItem` is a `LoopItem` (`src/loop/types.ts`): phase, round, start
+A `LoopStateItem` is typed `Record<string, unknown>` and validated to the
+`LoopItem` shape that `src/loop/types.ts` mirrors: phase, round, start
 intent, request id, pull, CI start, trial, round records, failures,
 excluded hosts, start rejections, escalations, follow-ups, human
 interventions, finalize flag, audit and merge attempts, backoff bound.
@@ -56,7 +57,7 @@ This slice adds the pure policy the later driver calls:
   model choice (rule F: used fallback, failure count, result steering).
 - `src/loop/results.ts` reads and appends `logs/loop-results.jsonl`: a torn
   tail is ignored on read and repaired on append, duplicate keys keep the
-  first line, and rules R-a (key shape) and R-b (routing match) guard every
+  first line, and rules R-a (key equals `<workItemId>:<round>`) and R-b (routing match) guard every
   line.
 - `src/loop/brief.ts` builds the session brief byte-exactly and drops audit
   findings from the end when the `maxBriefBytes` limit requires it.

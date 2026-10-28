@@ -140,10 +140,15 @@ async function runDecide(argv: readonly string[], deps: ApprovalsCliDeps): Promi
   let typed: string;
   try {
     typed = await deps.confirm(`Type ${parsed.requestId} to ${verb}: `);
-  } catch {
-    throw new ApprovalsNotConfirmedError(
-      `approvals: confirmation for "${parsed.requestId}" was not entered`,
-    );
+  } catch (error: unknown) {
+    // Only a not-confirmed abort maps to exit 3. A missing terminal and
+    // any other I/O error propagate unchanged to exit 2 (AM3-4).
+    if (error instanceof ApprovalsNotConfirmedError) {
+      throw new ApprovalsNotConfirmedError(
+        `approvals: confirmation for "${parsed.requestId}" was not entered`,
+      );
+    }
+    throw error;
   }
   if (typed !== parsed.requestId) {
     deps.err(`approvals: confirmation does not match "${parsed.requestId}"`);
@@ -221,9 +226,9 @@ async function confirmFromTty(requestLine: string, prompt: string): Promise<stri
     for await (const line of handle.readLines()) {
       return line;
     }
-    // EOF (Ctrl-D) closes the stream with no line: this is a not-confirmed
-    // abort, not a missing terminal. Rejecting routes it to the mismatch
-    // branch (exit 3) instead of the terminal-unavailable branch (exit 2).
+    // EOF (Ctrl-D) closes the stream with no line: the operator aborted
+    // without confirming. ApprovalsNotConfirmedError reports it as not
+    // confirmed (exit 3), distinct from a missing terminal (exit 2).
     throw new ApprovalsNotConfirmedError();
   } finally {
     await handle.close();

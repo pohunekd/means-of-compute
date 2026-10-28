@@ -7,7 +7,11 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runApprovalsCli, type ApprovalsCliDeps } from "../../src/approvals/cli.js";
+import {
+  ApprovalsNotConfirmedError,
+  runApprovalsCli,
+  type ApprovalsCliDeps,
+} from "../../src/approvals/cli.js";
 import { recordRequest } from "../../src/approvals/store.js";
 
 const APPROVE_ARGS = {
@@ -88,8 +92,10 @@ interface SpawnedCli {
   readonly rc: number;
 }
 
-// The child starts in a new session with no controlling terminal, so the
-// decide prompt fails fast instead of blocking on the test's terminal.
+// A child without a controlling terminal fails fast with the AM3-4 text
+// (exit 2), so the decide prompt never blocks on the test's terminal.
+const RUN_CLI_TIMEOUT_MS = 4_000;
+
 async function runCli(args: readonly string[]): Promise<SpawnedCli> {
   const child = spawn("bun", ["run", "src/approvals/cli.ts", ...args], {
     cwd: process.cwd(),
@@ -107,8 +113,12 @@ async function runCli(args: readonly string[]): Promise<SpawnedCli> {
   const rc = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`approvals CLI timed out: ${args.join(" ")}`));
-    }, 30_000);
+      reject(
+        new Error(
+          `approvals CLI timed out after ${String(RUN_CLI_TIMEOUT_MS)} ms: ${args.join(" ")}`,
+        ),
+      );
+    }, RUN_CLI_TIMEOUT_MS);
     child.on("error", (error: Error) => {
       clearTimeout(timer);
       reject(error);
@@ -183,62 +193,74 @@ test("decide with a matching confirmation approves the request", async () => {
   }
 });
 
-test("confirm returns another text: exit 3, file bytes unchanged (A9)", async () => {
-  const harness = await writeHarness();
-  try {
-    const requestId = await recordedId(harness);
-    const before = await readFile(harness.requests, "utf8");
-    const seen = deps(() => Promise.resolve("req-009999"));
-    const rc = await runApprovalsCli(
-      ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
-      seen.deps,
-    );
-    expect(rc).toBe(3);
-    expect(seen.out).toHaveLength(0);
-    expect(await readFile(harness.requests, "utf8")).toBe(before);
-    const spawned = await runCli([
-      "decide",
-      requestId,
-      "--approve",
-      "--author",
-      "owner",
-      "--config",
-      harness.config,
-    ]);
-    expect(spawned.rc).toBe(3);
-    expect(spawned.stdout).toBe("");
-    expect(spawned.stderr).toContain("was not entered");
-  } finally {
-    await rm(harness.dir, { recursive: true, force: true });
-  }
-});
+test(
+  "confirm returns another text: exit 3, file bytes unchanged (A9)",
+  {
+    timeout: 15_000,
+  },
+  async () => {
+    const harness = await writeHarness();
+    try {
+      const requestId = await recordedId(harness);
+      const before = await readFile(harness.requests, "utf8");
+      const seen = deps(() => Promise.resolve("req-009999"));
+      const rc = await runApprovalsCli(
+        ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
+        seen.deps,
+      );
+      expect(rc).toBe(3);
+      expect(seen.out).toHaveLength(0);
+      expect(await readFile(harness.requests, "utf8")).toBe(before);
+      const spawned = await runCli([
+        "decide",
+        requestId,
+        "--approve",
+        "--author",
+        "owner",
+        "--config",
+        harness.config,
+      ]);
+      expect(spawned.rc).toBe(2);
+      expect(spawned.stdout).toBe("");
+      expect(spawned.stderr).toContain("needs an interactive terminal (/dev/tty)");
+    } finally {
+      await rm(harness.dir, { recursive: true, force: true });
+    }
+  },
+);
 
-test("--author intruder: exit 2 (A10)", async () => {
-  const harness = await writeHarness();
-  try {
-    const requestId = await recordedId(harness);
-    const seen = deps(() => Promise.resolve(requestId));
-    const rc = await runApprovalsCli(
-      ["decide", requestId, "--approve", "--author", "intruder", "--config", harness.config],
-      seen.deps,
-    );
-    expect(rc).toBe(2);
-    expect(seen.err.join("\n")).toContain("intruder");
-    const spawned = await runCli([
-      "decide",
-      requestId,
-      "--approve",
-      "--author",
-      "intruder",
-      "--config",
-      harness.config,
-    ]);
-    expect(spawned.rc).toBe(2);
-    expect(spawned.stdout).toBe("");
-  } finally {
-    await rm(harness.dir, { recursive: true, force: true });
-  }
-});
+test(
+  "--author intruder: exit 2 (A10)",
+  {
+    timeout: 15_000,
+  },
+  async () => {
+    const harness = await writeHarness();
+    try {
+      const requestId = await recordedId(harness);
+      const seen = deps(() => Promise.resolve(requestId));
+      const rc = await runApprovalsCli(
+        ["decide", requestId, "--approve", "--author", "intruder", "--config", harness.config],
+        seen.deps,
+      );
+      expect(rc).toBe(2);
+      expect(seen.err.join("\n")).toContain("intruder");
+      const spawned = await runCli([
+        "decide",
+        requestId,
+        "--approve",
+        "--author",
+        "intruder",
+        "--config",
+        harness.config,
+      ]);
+      expect(spawned.rc).toBe(2);
+      expect(spawned.stdout).toBe("");
+    } finally {
+      await rm(harness.dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("lock held by a subprocess: exit 3 (A11)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approvals-cli-busy-"));
@@ -312,7 +334,7 @@ test("an unknown request id exits 2", async () => {
   }
 });
 
-test("a request decided between the prompt and the write exits 2 as unknown (L1)", async () => {
+test("a request removed between the prompt and the write exits 2 as unknown (L1)", async () => {
   const harness = await writeHarness();
   try {
     const requestId = await recordedId(harness);
@@ -361,14 +383,33 @@ test("EOF at the prompt exits 3 as not confirmed (L2)", async () => {
   try {
     const requestId = await recordedId(harness);
     const before = await readFile(harness.requests, "utf8");
-    const seen = deps(() => Promise.reject(new Error("closed without a line")));
+    const seen = deps(() => Promise.reject(new ApprovalsNotConfirmedError()));
     const rc = await runApprovalsCli(
       ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
       seen.deps,
     );
     expect(rc).toBe(3);
     expect(seen.out).toHaveLength(0);
-    expect(seen.err.join("\n")).toContain("was not entered");
+    expect(seen.err.join("\n")).toContain(`confirmation for "${requestId}" was not entered`);
+    expect(await readFile(harness.requests, "utf8")).toBe(before);
+  } finally {
+    await rm(harness.dir, { recursive: true, force: true });
+  }
+});
+
+test("a confirm I/O error exits 2 and leaves the file byte-identical", async () => {
+  const harness = await writeHarness();
+  try {
+    const requestId = await recordedId(harness);
+    const before = await readFile(harness.requests, "utf8");
+    const seen = deps(() => Promise.reject(new Error("tty write failed")));
+    const rc = await runApprovalsCli(
+      ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
+      seen.deps,
+    );
+    expect(rc).toBe(2);
+    expect(seen.out).toHaveLength(0);
+    expect(seen.err.join("\n")).toContain("tty write failed");
     expect(await readFile(harness.requests, "utf8")).toBe(before);
   } finally {
     await rm(harness.dir, { recursive: true, force: true });

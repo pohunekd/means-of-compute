@@ -1,7 +1,7 @@
 // Local git runner: fetch, branch checks, ancestry and trial merges run
 // through one spawner with a fixed env, a bounded wait and no shell.
 import { rm, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 export type GitErrorKind = "failed" | "timeout" | "invalid-output";
 
@@ -80,13 +80,9 @@ interface GitSpawn {
   readonly allowed: string | undefined;
 }
 
-// `-c key value` pairs sit before `-C <dir>`; find the subcommand after them.
+// The identity flags travel in the spawn prefix, so args[0] is the subcommand.
 function splitGitArgs(args: readonly string[]): GitSpawn {
-  let index = 0;
-  while (args[index] === "-c") {
-    index += 3;
-  }
-  return { argv: args, allowed: args[index] };
+  return { argv: args, allowed: args[0] };
 }
 
 async function runGit(
@@ -95,7 +91,33 @@ async function runGit(
   step: string,
   args: readonly string[],
 ): Promise<GitOutput> {
-  return runGitAt([], dir, deps, step, args);
+  return runGitAt([], dir, deps, step, args, deps.timeoutMs);
+}
+
+function requireAbsoluteDir(field: string, step: string, value: string): void {
+  if (!isAbsolute(value)) {
+    throw new GitError("failed", step, `${step}: ${field} must be absolute`, null);
+  }
+}
+
+async function collectReader(
+  reader: { read(): Promise<{ done: boolean; value?: Uint8Array }>; releaseLock(): void },
+): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      if (next.value) {
+        chunks.push(next.value);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function runGitAt(
@@ -104,6 +126,7 @@ async function runGitAt(
   deps: GitDeps,
   step: string,
   args: readonly string[],
+  timeoutMs: number,
 ): Promise<GitOutput> {
   const { argv, allowed } = splitGitArgs(args);
   if (allowed === undefined || !ALLOWED.has(allowed)) {
@@ -120,24 +143,37 @@ async function runGitAt(
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
+    detached: true,
   });
-  const state = { timedOut: false };
+  const outReader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+  const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
+  const outText = collectReader(outReader);
+  const errText = collectReader(errReader);
+  let timedOut = false;
   const timer = setTimeout(() => {
-    state.timedOut = true;
+    timedOut = true;
     try {
-      proc.kill("SIGKILL");
+      process.kill(-proc.pid, "SIGKILL");
     } catch {
       // The child already exited; the timeout error below carries the failure.
     }
-  }, deps.timeoutMs);
+    try {
+      void outReader.cancel();
+    } catch {
+      // The pipe already closed; the collected chunks carry the output.
+    }
+    try {
+      void errReader.cancel();
+    } catch {
+      // The pipe already closed; the collected chunks carry the output.
+    }
+  }, timeoutMs);
   try {
-    const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
-    const stderrPromise = new Response(proc.stderr as ReadableStream).text();
     const rc = await proc.exited;
-    const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-    if (state.timedOut) {
+    if (timedOut) {
       throw new GitError("timeout", step, `${step}: timed out`, null);
     }
+    const [stdout, stderr] = await Promise.all([outText, errText]);
     return { rc, stdout, stderr };
   } finally {
     clearTimeout(timer);
@@ -266,9 +302,16 @@ export async function isAncestor(
   );
 }
 
-interface TrialStepResult {
-  readonly done: boolean;
-  readonly failed: TrialResult | null;
+interface TrialCallDeps {
+  readonly deps: GitDeps;
+  readonly timeoutMs: number;
+}
+
+class TrialTimeout extends Error {
+  constructor() {
+    super("trialMerge: deadline hit");
+    this.name = "TrialTimeout";
+  }
 }
 
 // J2 step 1 guard: only the named id directory inside the scratch dir may go.
@@ -308,50 +351,105 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-// One deadline covers steps 3 to 5: a running step is killed at the deadline.
+// A trial step runs in its own process group; at the deadline the group dies.
 async function runTrialStep(
   argv: readonly string[],
   wt: string,
   env: { readonly PATH: string; readonly HOME: string },
-  deadline: number,
-): Promise<{ readonly rc: number; readonly timedOut: boolean }> {
-  const proc = Bun.spawn([...argv], { cwd: wt, env, stdin: "ignore" });
-  const wait = proc.exited.then(
-    (rc) => ({ rc, timedOut: false as const }),
-    () => ({ rc: -1, timedOut: false as const }),
+  timeoutMs: number,
+): Promise<{ readonly type: "exit"; readonly rc: number } | { readonly type: "timeout" }> {
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([...argv], { cwd: wt, env, stdin: "ignore", detached: true });
+  } catch {
+    return { type: "exit", rc: -2 };
+  }
+  const current = proc;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wait = current.exited.then(
+    (rc) => ({ type: "exit" as const, rc }),
+    () => ({ type: "exit" as const, rc: -1 }),
   );
-  const delay = Math.max(0, deadline - Date.now());
-  const timeout = new Promise<{ readonly rc: number; readonly timedOut: boolean }>(
-    (resolvePromise) => {
-      setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
-          // The step already exited; the race below picks the exit.
-        }
-        resolvePromise({ rc: -1, timedOut: true });
-      }, delay);
-    },
-  );
-  return Promise.race([wait, timeout]);
+  const timeout = new Promise<{ readonly type: "timeout" }>((resolvePromise) => {
+    timer = setTimeout(() => {
+      try {
+        process.kill(-current.pid, "SIGKILL");
+      } catch {
+        // The step already exited; the race below picks the exit.
+      }
+      resolvePromise({ type: "timeout" });
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([wait, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Remaining budget of the single trial deadline, never negative.
+function deadlineTimeout(deadline: number): number {
+  return Math.max(0, deadline - Date.now());
+}
+
+function trialGitDeps(input: TrialInput, timeoutMs: number): TrialCallDeps {
+  return { deps: { PATH: input.PATH, timeoutMs }, timeoutMs };
 }
 
 export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   const step = "trialMerge";
   // Join without normalization so the J2 guard sees a bad id.
+  requireAbsoluteDir("dir", step, input.dir);
+  requireAbsoluteDir("scratchDir", step, input.scratchDir);
   const wt = `${input.scratchDir}/${input.id}`;
-  const start = Date.now();
-  const deadline = start + input.timeoutMs;
-  const gitDeps: GitDeps = { PATH: input.PATH, timeoutMs: input.timeoutMs };
+  // One deadline, set at entry, covers steps 1 to 5.
+  const deadline = Date.now() + input.timeoutMs;
   let cleanupFailed = false;
-  const markCleanupFailed = (): void => {
-    cleanupFailed = true;
-  };
+  // Step 6 cleanup gets its own budget after the step 1-5 deadline.
+  const cleanupDeps: GitDeps = { PATH: input.PATH, timeoutMs: input.timeoutMs };
+
+  async function checkedRunGit(
+    dir: string,
+    call: TrialCallDeps,
+    args: readonly string[],
+  ): Promise<GitOutput> {
+    try {
+      return await runGit(dir, call.deps, step, args);
+    } catch (error: unknown) {
+      if (error instanceof GitError && error.kind === "timeout") {
+        throw new TrialTimeout();
+      }
+      throw error;
+    }
+  }
+
+  async function mergeCall(): Promise<GitOutput> {
+    try {
+      return await runGitAt(
+        ["-c", "user.name=moc-trial", "-c", "user.email=trial@example.invalid"],
+        wt,
+        trialGitDeps(input, deadlineTimeout(deadline)).deps,
+        step,
+        ["merge", "--no-ff", "--no-edit", input.headSha],
+        deadlineTimeout(deadline),
+      );
+    } catch (error: unknown) {
+      if (error instanceof GitError && error.kind === "timeout") {
+        throw new TrialTimeout();
+      }
+      throw error;
+    }
+  }
 
   // Leftover recovery before any other work.
   checkWorktreePath(wt, input.scratchDir, input.id);
   if (await pathExists(wt)) {
-    const leftover = await runGit(input.dir, gitDeps, step, ["worktree", "remove", "--force", wt]);
+    const leftover = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
+      "worktree",
+      "remove",
+      "--force",
+      wt,
+    ]);
     if (leftover.rc !== 0 && leftover.rc !== 128) {
       throw new GitError(
         "failed",
@@ -362,7 +460,10 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
       );
     }
     await removePath(wt, input.scratchDir, input.id);
-    const pruned = await runGit(input.dir, gitDeps, step, ["worktree", "prune"]);
+    const pruned = await checkedRunGit(input.dir, trialGitDeps(input, deadlineTimeout(deadline)), [
+      "worktree",
+      "prune",
+    ]);
     if (pruned.rc !== 0) {
       throw new GitError(
         "failed",
@@ -372,36 +473,49 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         detailOf(pruned.stderr),
       );
     }
+  } else {
+    const pruned = await runGit(input.dir, cleanupDeps, step, ["worktree", "prune"]);
+    if (pruned.rc !== 0) {
+      cleanupFailed = true;
+    }
   }
 
   async function cleanupWorktree(): Promise<void> {
     try {
-      await runGit(input.dir, gitDeps, step, ["worktree", "remove", "--force", wt]);
+      const removed = await runGit(input.dir, cleanupDeps, step, [
+        "worktree",
+        "remove",
+        "--force",
+        wt,
+      ]);
+      if (removed.rc !== 0) {
+        cleanupFailed = true;
+      }
     } catch {
-      markCleanupFailed();
+      cleanupFailed = true;
     }
     try {
       if (await pathExists(wt)) {
         await removePath(wt, input.scratchDir, input.id);
-        await runGit(input.dir, gitDeps, step, ["worktree", "prune"]);
+        const pruned = await runGit(input.dir, cleanupDeps, step, ["worktree", "prune"]);
+        if (pruned.rc !== 0) {
+          cleanupFailed = true;
+        }
       }
     } catch {
-      markCleanupFailed();
+      cleanupFailed = true;
     }
   }
 
-  // Steps 2 to 4 run under cleanup: a GitError still removes the worktree.
-  let conflict: { readonly rc: number } | null = null;
+  // Steps 2 to 5 run inside one try; step 6 cleanup runs in its finally.
   try {
     // A bad head ref fails here, before the merge (H4).
-    await revParse(input.dir, gitDeps, input.headSha);
-    const added = await runGit(input.dir, gitDeps, step, [
-      "worktree",
-      "add",
-      "--detach",
-      wt,
-      input.baseSha,
-    ]);
+    await revParse(input.dir, trialGitDeps(input, deadlineTimeout(deadline)).deps, input.headSha);
+    const added = await checkedRunGit(
+      input.dir,
+      trialGitDeps(input, deadlineTimeout(deadline)),
+      ["worktree", "add", "--detach", wt, input.baseSha],
+    );
     if (added.rc !== 0) {
       throw new GitError(
         "failed",
@@ -411,16 +525,17 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         detailOf(added.stderr),
       );
     }
-    const merged = await runGitAt(
-      ["-c", "user.name=moc-trial", "-c", "user.email=trial@example.invalid"],
-      wt,
-      gitDeps,
-      step,
-      ["merge", "--no-ff", "--no-edit", input.headSha],
-    );
+    const merged = await mergeCall();
     if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
-      conflict = { rc: merged.rc };
-    } else if (merged.rc !== 0) {
+      return {
+        passed: false,
+        reason: "conflict",
+        step: null,
+        rc: merged.rc,
+        cleanupFailed,
+      };
+    }
+    if (merged.rc !== 0) {
       throw new GitError(
         "failed",
         step,
@@ -429,16 +544,6 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         detailOf(merged.stderr),
       );
     }
-  } catch (error: unknown) {
-    await cleanupWorktree();
-    throw error;
-  }
-  if (conflict !== null) {
-    await cleanupWorktree();
-    return { passed: false, reason: "conflict", step: null, rc: conflict.rc, cleanupFailed };
-  }
-
-  const trialSteps: TrialStepResult = await (async (): Promise<TrialStepResult> => {
     for (let index = 0; index < input.steps.length; index += 1) {
       const argv = input.steps[index];
       if (argv === undefined) {
@@ -448,32 +553,31 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         argv,
         wt,
         { PATH: input.PATH, HOME: input.HOME },
-        deadline,
+        deadlineTimeout(deadline),
       );
-      if (outcome.timedOut) {
-        return {
-          done: false,
-          failed: { passed: false, reason: "timeout", step: index, rc: null, cleanupFailed: false },
-        };
+      if (outcome.type === "timeout") {
+        return { passed: false, reason: "timeout", step: index, rc: null, cleanupFailed };
+      }
+      if (outcome.rc === -2) {
+        return { passed: false, reason: "step-failed", step: index, rc: null, cleanupFailed };
       }
       if (outcome.rc !== 0) {
         return {
-          done: false,
-          failed: {
-            passed: false,
-            reason: "step-failed",
-            step: index,
-            rc: outcome.rc,
-            cleanupFailed: false,
-          },
+          passed: false,
+          reason: "step-failed",
+          step: index,
+          rc: outcome.rc,
+          cleanupFailed,
         };
       }
     }
-    return { done: true, failed: null };
-  })();
-  await cleanupWorktree();
-  if (!trialSteps.done && trialSteps.failed !== null) {
-    return { ...trialSteps.failed, cleanupFailed };
+    return { passed: true as const, cleanupFailed };
+  } catch (error: unknown) {
+    if (error instanceof TrialTimeout) {
+      return { passed: false, reason: "timeout", step: null, rc: null, cleanupFailed };
+    }
+    throw error;
+  } finally {
+    await cleanupWorktree();
   }
-  return { passed: true, cleanupFailed };
 }

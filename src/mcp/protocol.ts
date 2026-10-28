@@ -68,6 +68,8 @@ export interface ProtocolDeps {
 
 export interface Protocol {
   handleLine(line: string): Promise<string | null>;
+  abort(): void;
+  drain(): Promise<void>;
 }
 
 export interface LineSplitter {
@@ -217,6 +219,7 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
   let nextCallId = 1;
   let logFailed = false;
   let queue: Promise<void> = Promise.resolve();
+  let aborted = false;
 
   function sanitizedMethod(value: unknown): string | null {
     return typeof value === "string" && METHOD_PATTERN.test(value) ? value : null;
@@ -530,12 +533,21 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
 
   return {
     handleLine(line: string): Promise<string | null> {
-      const task = queue.then(() => processLine(line));
+      if (aborted) {
+        return Promise.resolve(null);
+      }
+      const task = queue.then(() => (aborted ? null : processLine(line)));
       queue = task.then(
         () => undefined,
         () => undefined,
       );
       return task;
+    },
+    abort(): void {
+      aborted = true;
+    },
+    drain(): Promise<void> {
+      return queue;
     },
   };
 }

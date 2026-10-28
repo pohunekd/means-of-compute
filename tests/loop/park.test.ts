@@ -227,6 +227,34 @@ test("escalate posts once and the second call writes nothing (P1)", async () => 
   });
 });
 
+// Holds the work store lock in a subprocess while the callback runs;
+// the loop sees every store write as busy until the child is killed.
+async function withBusyStore(storePath: string, run: () => Promise<void>): Promise<void> {
+  const holder = Bun.spawn(["bun", join(import.meta.dir, "..", "work", "lock-holder.case.ts")], {
+    stdout: "pipe",
+    stderr: "ignore",
+    env: { ...process.env, WORK_STORE_TEST_PATH: storePath },
+  });
+  try {
+    const reader = (holder.stdout as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        throw new Error("holder exited before printing the ready line");
+      }
+      if ((decoder.decode(value, { stream: true }) + "\n").includes("holder ready")) {
+        reader.releaseLock();
+        break;
+      }
+    }
+    await run();
+  } finally {
+    holder.kill(9);
+    await holder.exited;
+  }
+}
+
 test("a busy store repairs itself on the next park tick (P11)", async () => {
   await withTempDir(async (dir) => {
     const fake = new FakeGitHub();
@@ -241,41 +269,58 @@ test("a busy store repairs itself on the next park tick (P11)", async () => {
       }),
     );
     await writeStore(ctx.storePath, entry);
-    const holder = Bun.spawn(["bun", join(import.meta.dir, "..", "work", "lock-holder.case.ts")], {
-      stdout: "pipe",
-      stderr: "ignore",
-      env: { ...process.env, WORK_STORE_TEST_PATH: ctx.storePath },
-    });
-    try {
-      const reader = (holder.stdout as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          throw new Error("holder exited before printing the ready line");
-        }
-        if ((decoder.decode(value, { stream: true }) + "\n").includes("holder ready")) {
-          reader.releaseLock();
-          break;
-        }
-      }
+    await withBusyStore(ctx.storePath, async () => {
       // parkOperator writes L while the store is busy; the W write waits.
       expect(await parkOperator(ctx, entry, "pull-closed")).toBe("done");
       expect((await readItem(ctx.statePath)).park?.kind).toBe("operator");
       expect(
         ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0]?.status,
       ).toBe("queued");
-      // One tick after the lock is released repairs W to parked.
-      holder.kill(9);
-      await holder.exited;
-      expect(await advancePark(ctx, entry)).toBe("done");
-      const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
-      expect(store.items[0]?.status).toBe("parked");
-      expect(store.items[0]?.statusReason).toBe("operator: pull-closed");
-    } finally {
-      holder.kill(9);
-      await holder.exited;
-    }
+    });
+    // One tick after the lock is released repairs W to parked.
+    expect(await advancePark(ctx, entry)).toBe("done");
+    const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+    expect(store.items[0]?.status).toBe("parked");
+    expect(store.items[0]?.statusReason).toBe("operator: pull-closed");
+  });
+  // A busy retry write repairs the same way: W is queued with retryCount 1.
+  await withTempDir(async (dir) => {
+    const fake = new FakeGitHub();
+    const { ctx } = makeCtx(dir, fake);
+    const entry = item();
+    await writeLoopState(ctx.statePath, loopItem({ round: 0, retry: 0 }));
+    await writeStore(ctx.storePath, entry);
+    await withBusyStore(ctx.storePath, async () => {
+      await redRounds(ctx, entry, 3);
+      expect((await readItem(ctx.statePath)).retry).toBe(1);
+      expect(
+        ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0],
+      ).toMatchObject({ status: "queued", retryCount: 0 });
+    });
+    expect(await advancePark(ctx, entry)).toBe("done");
+    expect((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).toMatchObject({
+      items: [{ status: "queued", retryCount: 1, statusReason: null }],
+    });
+  });
+  // A busy unparkLost repairs the same way: W leaves parked.
+  await withTempDir(async (dir) => {
+    const fake = new FakeGitHub();
+    const { ctx } = makeCtx(dir, fake);
+    const entry = item();
+    await writeLoopState(ctx.statePath, loopItem({ phase: "idle" }));
+    await writeStore(ctx.storePath, entry);
+    await parkLost(ctx, entry);
+    await withBusyStore(ctx.storePath, async () => {
+      await unparkLost(ctx, entry);
+      expect((await readItem(ctx.statePath)).park).toBe(null);
+      expect(
+        ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0]?.status,
+      ).toBe("parked");
+    });
+    expect(await advancePark(ctx, entry)).toBe("done");
+    expect((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).toMatchObject({
+      items: [{ status: "queued", statusReason: null, retryCount: 0 }],
+    });
   });
 });
 
@@ -334,6 +379,7 @@ test("a null issue creates one labelled issue and adopts it (P3)", async () => {
     expect(await escalate(ctx, entry, key, "")).toBe("done");
     expect(fake.callsOf("createIssue")).toHaveLength(1);
     expect(fake.calls.length).toBeGreaterThan(before);
+    expect((await readItem(ctx.statePath)).escalations[0]?.posted).toBe(100);
   });
 });
 
@@ -500,8 +546,47 @@ test("a lost park waits and unparks queued on the next tick (P8)", async () => {
   await withTempDir(async (dir) => {
     const fake = new FakeGitHub();
     const { ctx, events } = makeCtx(dir, fake);
-    const entry = item({ stallRounds: 2 });
-    await writeLoopState(ctx.statePath, loopItem({ phase: "idle" }));
+    const entry = item();
+    await writeLoopState(
+      ctx.statePath,
+      loopItem({
+        phase: "idle",
+        rounds: [
+          {
+            round: 0,
+            retry: 0,
+            requestId: null,
+            model: PREFERRED,
+            providerId: PROVIDER,
+            hostAlias: null,
+            attempt: "failure",
+            outcome: "red-ci",
+            headSha: null,
+            failingChecks: ["gates"],
+            verdict: null,
+            newlyMet: [],
+            at: "2026-10-28T00:00:01.000Z",
+            baseRace: false,
+          },
+          {
+            round: 1,
+            retry: 0,
+            requestId: null,
+            model: PREFERRED,
+            providerId: PROVIDER,
+            hostAlias: null,
+            attempt: "failure",
+            outcome: "red-ci",
+            headSha: null,
+            failingChecks: ["gates"],
+            verdict: null,
+            newlyMet: [],
+            at: "2026-10-28T00:00:01.000Z",
+            baseRace: false,
+          },
+        ],
+      }),
+    );
     await writeStore(ctx.storePath, entry);
     await parkLost(ctx, entry);
     let li = await readItem(ctx.statePath);
@@ -509,15 +594,19 @@ test("a lost park waits and unparks queued on the next tick (P8)", async () => {
     const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
     expect(store.items[0]?.status).toBe("parked");
     expect(store.items[0]?.statusReason).toBe("session lost");
+    expect(store.items[0]?.stallRounds).toBe(2);
+    expect(store.items[0]?.retryCount).toBe(0);
     expect(await advancePark(ctx, entry)).toBe("done");
     expect((await readItem(ctx.statePath)).park?.kind).toBe("lost");
     await unparkLost(ctx, entry);
     li = await readItem(ctx.statePath);
     expect(li.park).toBe(null);
+    expect(li.retry).toBe(0);
+    expect(events.filter((line) => line.startsWith("unparked:"))).toHaveLength(1);
     const reopened = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
     expect(reopened.items[0]?.status).toBe("queued");
-    expect(events.some((line) => line.startsWith("unparked:"))).toBe(true);
-    expect(reopened.items[0]?.stallRounds).toBe(0);
+    expect(reopened.items[0]?.stallRounds).toBe(2);
+    expect(reopened.items[0]?.retryCount).toBe(0);
   });
 });
 
@@ -556,7 +645,7 @@ test("an operator park holds while advancePark never unparks (P9)", async () => 
   });
 });
 
-// L3: the O4 escalation body is fixed template text with codes only:
+// The O4 escalation body is fixed template text with codes only:
 // no goal, DoD or issue text, with a Pull request line when a pull exists.
 test("the escalation body is exact template text (P12)", async () => {
   await withTempDir(async (dir) => {

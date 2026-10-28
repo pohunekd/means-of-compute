@@ -260,7 +260,12 @@ export async function parkOperator(
   });
   ctx.log.log({ event: "parked", workItemId: item.id, code });
   await reconcile(ctx.storePath, item.id, li, ctx);
-  return escalate(ctx, item, `op:${item.id}:${code}`, escalationBody(item, li, `operator: ${code}`));
+  return escalate(
+    ctx,
+    item,
+    `op:${item.id}:${code}`,
+    escalationBody(item, li, `operator: ${code}`),
+  );
 }
 
 // T9: stall parking after closeRound returned a park decision.

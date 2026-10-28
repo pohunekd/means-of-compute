@@ -13,6 +13,7 @@ import {
 import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import { loadDispatcherConfig } from "./config.js";
 import { briefSha256Of, deriveStartRequest } from "./dispatcher.js";
 import type { ModelSelection } from "./port.js";
@@ -100,7 +101,7 @@ async function readProviderDescriptor(providerId: string, model: string): Promis
   if (!PROVIDER_ID_PATTERN.test(providerId)) {
     throw new Error(`dispatch: invalid provider id "${providerId}"`);
   }
-  const path = `config/providers/${providerId}.json`;
+  const path = `${PROVIDERS_DIR}/${providerId}.json`;
   if ((await statInputPath("Provider descriptor", path)) === "absent") {
     throw new Error(`Provider descriptor ${path}: file is missing`);
   }

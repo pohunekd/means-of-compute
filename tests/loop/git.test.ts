@@ -418,10 +418,9 @@ describe("git runner", () => {
         expect(result.step).toBe(0);
       }
       const pid = Number(await readFile(pidFile, "utf8"));
-      trackedPids.push(pid);
-      expect(await waitGone(pid)).toBe(true);
       const gcPid = Number(await readFile(gcFile, "utf8"));
-      trackedPids.push(gcPid);
+      trackedPids.push(pid, gcPid);
+      expect(await waitGone(pid)).toBe(true);
       expect(await waitGone(gcPid)).toBe(true);
       expect(await worktreeCount(repos.factory)).toBe(1);
     } finally {
@@ -447,6 +446,29 @@ describe("git runner", () => {
       expect(bad).toBeInstanceOf(GitError);
       const keep = await stat(join(repos.root, "x", "keep")).catch((error: unknown) => error);
       expect((keep as { isDirectory(): boolean }).isDirectory()).toBe(true);
+      // A bad id throws before any git call or removal: a registered
+      // worktree at the escaped target survives with its files and the
+      // porcelain listing byte-identical to the listing before the call.
+      await rm(join(repos.root, "x"), { recursive: true, force: true });
+      await mkdir(scratchDir, { recursive: true });
+      const before = await git(repos.factory, ["worktree", "list", "--porcelain"]);
+      await git(repos.factory, ["worktree", "add", "--detach", join(repos.root, "x"), base]);
+      await writeFile(join(repos.root, "x", "uncommitted.txt"), "uncommitted\n", "utf8");
+      await git(repos.factory, ["worktree", "add", "--detach", join(scratchDir, "other"), base]);
+      await writeFile(join(scratchDir, "other", "uncommitted.txt"), "uncommitted\n", "utf8");
+      const listed = await git(repos.factory, ["worktree", "list", "--porcelain"]);
+      const escaped = await trialMerge({ ...trial, id: "../x" }).catch((error: unknown) => error);
+      expect(escaped).toBeInstanceOf(GitError);
+      expect((escaped as GitError).message).toContain("bad worktree id");
+      const nested = await trialMerge({ ...trial, id: "../scratch/other" }).catch(
+        (error: unknown) => error,
+      );
+      expect(nested).toBeInstanceOf(GitError);
+      expect((nested as GitError).message).toContain("bad worktree id");
+      expect(await git(repos.factory, ["worktree", "list", "--porcelain"])).toBe(listed);
+      expect((await stat(join(repos.root, "x", "uncommitted.txt"))).isFile()).toBe(true);
+      expect((await stat(join(scratchDir, "other", "uncommitted.txt"))).isFile()).toBe(true);
+      expect(before).not.toBe(listed);
     } finally {
       await repos.cleanup();
     }
@@ -472,10 +494,9 @@ describe("git runner", () => {
       expect((failed as GitError).kind).toBe("timeout");
       expect(elapsed).toBeLessThan(2000);
       const pid = Number(await readFile(pidFile, "utf8"));
-      trackedPids.push(pid);
-      expect(await waitGone(pid)).toBe(true);
       const gcPid = Number(await readFile(gcFile, "utf8"));
-      trackedPids.push(gcPid);
+      trackedPids.push(pid, gcPid);
+      expect(await waitGone(pid)).toBe(true);
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
       await repos.cleanup();

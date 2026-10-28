@@ -92,8 +92,14 @@ each child in its own process group killed at the deadline, and exports
 `trialMerge`. `trialMerge` builds the result, runs step-6 cleanup, then returns it
 with the `cleanupFailed` the cleanup set; it needs absolute `dir` and
 `scratchDir`, runs steps 1 to 5 under one `start + timeoutMs`
-deadline, and reports a deadline hit as `reason: "timeout"` with
-`step: null`. Step 6 cleanup shares one `cleanupStart + timeoutMs`
-budget. A `GitError` from `git.ts` maps to `rejected` (`failed`,
-rc 128) or `unavailable` (other); a failure of the stub's own git
-commands is `rejected`.
+deadline, and a deadline hit in a git call of steps 1 to 4 gives
+`reason: "timeout"` with `step: null`; a step command that runs past
+the deadline gives `step: <index>`. Step 6 cleanup shares one
+`cleanupStart + timeoutMs` budget. A `GitError` from `git.ts` maps to
+`rejected` (`failed`, rc 128) or `unavailable` (other); a non-zero rc
+of the stub's own git commands is `rejected`, a timeout is
+`unavailable`. `src/loop/stub/github.ts` implements `GitHubPort` over
+a sandbox `origin.git` with absolute dirs and async ports; `detail` and
+the gh `stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step
+is `step-failed` with `rc: null`; merge rc 1 without the conflict line
+is `GitError` `failed`.

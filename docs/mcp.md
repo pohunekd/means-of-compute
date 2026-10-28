@@ -35,15 +35,18 @@ exits 1; a handler exception is a tool result, never an exit.
 
 `initialize` negotiates: an offered version inside
 `["2025-11-25","2025-06-18","2025-03-26","2024-11-05"]` is echoed, anything
-else falls back to `"2025-11-25"`. A missing or empty `clientInfo.name` is
-`-32602`; a hostile name fails the caller pattern and is logged as `null`
-client, never raw. `notifications/initialized` flips the initialized flag;
-`tools/list` and `tools/call` before it are `-32600 "server not
+else falls back to `"2025-11-25"`. Only a non-string `clientInfo.name` is
+`-32602`; an empty name initializes with `client` null, like any other
+pattern mismatch. A hostile name fails the caller pattern and is logged
+as `null` client, never raw. The initialized flag flips only on an
+`initialize` response; `notifications/initialized` and every other
+notification produce no output. `tools/list` and `tools/call` before the
+initialized flag are `-32600 "server not
 initialized"`. `tools/list` answers in PR order (read slice: only
 `fleet_status` so far). Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
-error response also appends a `protocol-error` line.
+error response also appends a `protocol-error` line with `jsonrpcCode`.
 
 `config/mcp.json` (`loadMcpConfig`): `serverInfo`, `callers` (pattern
 `^[a-z][a-z0-9-]{0,31}$`, unique), `callLogPath`, `maxMessageBytes`
@@ -74,5 +77,5 @@ work store plus `openSessions` (registry entries with `terminal: null`).
 It reads only `storePath` and `registryPath` from the work and dispatcher
 configs, so an unknown provider model never fails it. Store or registry
 unreadable (missing file with a missing parent, non-file path) is
-`source-unavailable` naming the source; out-of-scope items fail dispatch,
+`source-unreadable` naming the source; out-of-scope items fail dispatch,
 never this tool.

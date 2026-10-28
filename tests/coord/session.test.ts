@@ -260,30 +260,37 @@ test("a nonzero exit still exports, and a failed export is recorded (S4)", async
     '{"calls":[],"exit":7,"hang":false,"exportFails":true}',
   );
   const second = await setupEnvFresh(setup.env, fresh, join(setup.env.dir, failingName));
-    const secondResult = await runMuseSession(second.opts, second.deps);
-    expect(secondResult.exportOk).toBe(false);
-    const exports = second.entries.filter((entry) => entry["event"] === "export");
-    expect(exports.length).toBe(1);
-    const line = exports[0] as Record<string, unknown>;
-    expect(line["event"]).toBe("export");
-    expect(line["k"]).toBe(1);
-    expect(line["ok"]).toBe(false);
-    expect(line["reason"]).toBe("exit");
-    expect(line["rc"]).toBe(5);
+  const secondResult = await runMuseSession(second.opts, second.deps);
+  expect(secondResult.exportOk).toBe(false);
+  const exports = second.entries.filter((entry) => entry["event"] === "export");
+  expect(exports.length).toBe(1);
+  const line = exports[0] as Record<string, unknown>;
+  expect(line["event"]).toBe("export");
+  expect(line["k"]).toBe(1);
+  expect(line["ok"]).toBe(false);
+  expect(line["reason"]).toBe("exit");
+  expect(line["rc"]).toBe(5);
 }, 30000);
 
 test("an abort during setup is reported as aborted (S10)", async () => {
   const setup = await setupEnv("hang.json");
   const controller = new AbortController();
-  const seen: string[] = [];
+  const inner: CallLog = setup.deps.log;
+  let first = true;
   const log: CallLog = {
     append(entry: Record<string, unknown>): Promise<void> {
-      seen.push(String(entry["event"]));
-      if (seen.length === 1) {
-        controller.abort();
+      const pending = inner.append(entry);
+      if (first) {
+        first = false;
+        void (async (): Promise<void> => {
+          await pending;
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+          controller.abort();
+        })();
       }
-      setup.entries.push(entry);
-      return Promise.resolve();
+      return pending;
     },
   };
   const opts: MuseSessionOpts = {

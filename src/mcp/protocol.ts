@@ -441,6 +441,19 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
         await logProtocolError(-32602, method, name);
         return jsonError(id, -32602, message);
       }
+      // Arguments that cannot be canonicalized are a protocol-level
+      // invalid-params refusal: log one protocol-error and answer -32602
+      // without a callId, call-start or call-end. The server keeps serving.
+      let argsText: string;
+      try {
+        argsText = canonicalJson(args ?? {});
+      } catch (error: unknown) {
+        if (!(error instanceof RangeError)) {
+          throw error;
+        }
+        await logProtocolError(-32602, method, tool.name);
+        return jsonError(id, -32602, errorMessage(-32602, null));
+      }
       if (logFailed) {
         const payload: ToolPayload = {
           ok: false,
@@ -456,7 +469,6 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
       nextCallId += 1;
       const start = now();
       const argsValue: unknown = args ?? {};
-      const argsText = canonicalJson(argsValue);
       const clientForCall: { readonly name: string; readonly version: string } | null =
         storedClient;
       const startOk = await appendLog({

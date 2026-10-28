@@ -16,6 +16,7 @@ export interface McpConfig {
   readonly workConfigPath: string;
   readonly auditorConfigPath: string;
   readonly dispatcherConfigPath: string;
+  readonly approvalsConfigPath: string;
 }
 
 export const MCP_CONFIG_PATH = "config/mcp.json";
@@ -29,6 +30,7 @@ const REQUIRED_KEYS = [
   "workConfigPath",
   "auditorConfigPath",
   "dispatcherConfigPath",
+  "approvalsConfigPath",
 ] as const;
 
 const CALLER_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -122,5 +124,6 @@ export async function loadMcpConfig(path: string = MCP_CONFIG_PATH): Promise<Mcp
     workConfigPath: requiredPath(record, path, "workConfigPath"),
     auditorConfigPath: requiredPath(record, path, "auditorConfigPath"),
     dispatcherConfigPath: requiredPath(record, path, "dispatcherConfigPath"),
+    approvalsConfigPath: requiredPath(record, path, "approvalsConfigPath"),
   };
 }

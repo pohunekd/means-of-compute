@@ -1,0 +1,6 @@
+{
+  "requestsPath": "logs/mcp-demo-requests.json",
+  "operators": ["owner"],
+  "maxPendingRequests": 20,
+  "maxReasonChars": 2000
+}

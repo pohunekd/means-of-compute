@@ -6,5 +6,6 @@
   "clientTimeoutMs": 30000,
   "workConfigPath": "config/work.json",
   "auditorConfigPath": "config/auditor.json",
-  "dispatcherConfigPath": "config/dispatcher.json"
+  "dispatcherConfigPath": "config/dispatcher.json",
+  "approvalsConfigPath": "config/approvals.json"
 }

@@ -21,6 +21,7 @@ export interface ToolPaths {
   readonly workConfigPath: string;
   readonly dispatcherConfigPath: string;
   readonly auditorConfigPath: string;
+  readonly approvalsConfigPath: string;
 }
 
 export function okPayload(fields: Record<string, unknown>): ToolPayload {

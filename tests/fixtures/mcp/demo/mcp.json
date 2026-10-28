@@ -6,5 +6,6 @@
   "clientTimeoutMs": 30000,
   "workConfigPath": "tests/fixtures/mcp/demo/work.json",
   "auditorConfigPath": "tests/fixtures/mcp/demo/auditor.json",
-  "dispatcherConfigPath": "tests/fixtures/mcp/demo/dispatcher.json"
+  "dispatcherConfigPath": "tests/fixtures/mcp/demo/dispatcher.json",
+  "approvalsConfigPath": "tests/fixtures/mcp/demo/approvals.json"
 }

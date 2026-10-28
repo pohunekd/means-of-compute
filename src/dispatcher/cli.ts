@@ -27,7 +27,7 @@ import { loadPohunekAdapterConfig } from "./adapter/config.js";
 import { openPohunekPort, type AdapterLogEvent } from "./adapter/pohunek-port.js";
 import { runDiffCommand } from "./diff-command.js";
 import { runResolveCommand } from "./resolve-command.js";
-import { createDispatcher } from "./dispatcher.js";
+import { createDispatcher, type ResolveOutcome } from "./dispatcher.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { briefSha256Of, deriveStartRequest } from "./dispatcher.js";
@@ -222,7 +222,12 @@ async function runDiff(dargs: readonly string[]): Promise<number> {
 }
 
 async function runResolve(dargs: readonly string[]): Promise<number> {
-  try {
+  // The whole runtime (configs, registry lock, port, meter, dispatcher)
+  // is built inside this closure, so runResolveCommand parses the flags
+  // before anything is loaded, locked or started.
+  const withRuntime = async <T>(
+    use: (resolve: (requestId: string) => Promise<ResolveOutcome>) => Promise<T>,
+  ): Promise<T> => {
     const meterConfig = await loadMeterConfig();
     const meterEnv = await resolveMeterEnv(meterConfig, process.env);
     const providers = await getProviders();
@@ -265,22 +270,21 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
         lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       try {
-        return await runResolveCommand(
-          dargs,
-          (use) => use((requestId) => dispatcher.resolve(requestId)),
-          {
-            stdout: (line: string): void => {
-              process.stdout.write(line);
-            },
-            stderr: (line: string): void => {
-              console.error(line);
-            },
-          },
-        );
+        return await use((requestId) => dispatcher.resolve(requestId));
       } finally {
         await meter.close();
         await port.close();
       }
+    });
+  };
+  try {
+    return await runResolveCommand(dargs, withRuntime, {
+      stdout: (line: string): void => {
+        process.stdout.write(line);
+      },
+      stderr: (line: string): void => {
+        console.error(line);
+      },
     });
   } catch (error: unknown) {
     console.error(`dispatch: ${error instanceof Error ? error.message : String(error)}`);

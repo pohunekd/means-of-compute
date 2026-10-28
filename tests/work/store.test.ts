@@ -298,7 +298,7 @@ test("held lock is busy and the file is unchanged (S8)", async () => {
   const storePath = join(dir, "work-items.json");
   await writeJson(storePath, { schemaVersion: "v1", revision: 0, items: [], submissions: [] });
   const before = readFileSync(storePath, "utf8");
-  const child = Bun.spawn(["bun", "./tests/work/lock-holder.case.ts"], {
+  const child = Bun.spawn(["bun", join(import.meta.dir, "lock-holder.case.ts")], {
     stdout: "pipe",
     stderr: "ignore",
     env: { ...process.env, WORK_STORE_TEST_PATH: storePath },

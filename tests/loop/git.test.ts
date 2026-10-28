@@ -234,6 +234,14 @@ describe("git runner", () => {
     }
     expect(other).toBeInstanceOf(GitError);
     expect((other as GitError).kind).toBe("invalid-output");
+    let bad: unknown = null;
+    try {
+      parseLsRemote(`${"z".repeat(40)}\trefs/heads/moc/demo-a\n`, "moc/demo-a");
+    } catch (error: unknown) {
+      bad = error;
+    }
+    expect(bad).toBeInstanceOf(GitError);
+    expect((bad as GitError).kind).toBe("invalid-output");
   });
 
   test("L23c: revParse reads and isAncestor maps rc 0, 1 and 128", async () => {
@@ -495,7 +503,7 @@ describe("git runner", () => {
     const fake = await fakeGitDir(
       realDir,
       "worktree",
-      `for a in "$@"; do\n  if [ "$a" = "worktree" ] || [ "$a" = "merge" ]; then\n    sleep 0.6\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+      `for a in "$@"; do\n  if [ "$a" = "merge" ]; then\n    sleep 2\n  elif [ "$a" = "worktree" ]; then\n    sleep 0.4\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
     );
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");
@@ -507,6 +515,7 @@ describe("git runner", () => {
         [[process.execPath, "-e", "process.exit(0)"]],
         { id: "demo-deadline", timeoutMs: 1000, PATH: fake.fakePath },
       );
+      const t0 = Date.now();
       const result = await trialMerge(trial);
       expect(result).toEqual({
         passed: false,
@@ -515,6 +524,7 @@ describe("git runner", () => {
         rc: null,
         cleanupFailed: false,
       });
+      expect(Date.now() - t0).toBeLessThan(1500);
       const gone = await stat(join(trial.scratchDir, trial.id)).catch((error: unknown) => error);
       expect((gone as NodeJS.ErrnoException).code).toBe("ENOENT");
       expect(await worktreeCount(repos.factory)).toBe(1);

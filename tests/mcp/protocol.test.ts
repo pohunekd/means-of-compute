@@ -264,6 +264,7 @@ test("P9 fleet_status counts running items and open sessions (P9, R1)", async ()
     revision: 3,
     items: [
       workItem("w-running", { status: "running", assignedHostAlias: "desktop" }),
+      workItem("w-queued", { status: "queued" }),
       workItem("w-done", { status: "done" }),
     ],
     submissions: [],
@@ -318,6 +319,8 @@ test("P9 fleet_status counts running items and open sessions (P9, R1)", async ()
   const payload = parsed.result.structuredContent;
   expect(payload.hosts).toEqual([{ hostAlias: "desktop", runningItems: 1, openSessions: 1 }]);
   expect(payload.work.counts["running"]).toBe(1);
+  expect(payload.work.counts["queued"]).toBe(1);
+  expect(payload.work.counts["done"]).toBe(1);
   expect(payload.hostState.available).toBe(false);
 });
 

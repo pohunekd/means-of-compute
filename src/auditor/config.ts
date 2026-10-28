@@ -147,9 +147,6 @@ export async function loadAuditorConfig(
     providerId: string;
     model: string;
   };
-  // The Wonder price is an upper bound only because the descriptor is
-  // priced per token; a zero or missing price would silently count
-  // Wonder spend as $0, so the config refuses to load instead.
   if (!MODEL_PATTERN.test(mergeModel) || mergeModel.includes(":")) {
     throw new Error(`${label} ${path}: mergeAuditor.model is invalid`);
   }
@@ -174,6 +171,7 @@ export async function loadAuditorConfig(
     typeof mergePricing === "object" && mergePricing !== null && !Array.isArray(mergePricing)
       ? (mergePricing as Record<string, unknown>)["outputPer1M"]
       : undefined;
+  // A zero price would count Wonder spend as $0
   if (
     typeof mergeInputPer1M !== "number" ||
     mergeInputPer1M <= 0 ||

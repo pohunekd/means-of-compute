@@ -97,6 +97,8 @@ async function withHarness(body: (h: CrashHarness) => Promise<void>): Promise<vo
       },
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     await body({ dir, ledgerPath, registryPath, control, waits, gate, config, dispatcher });
   } finally {
@@ -195,6 +197,8 @@ test("K1: a crash before port.start settles on replay", async () => {
         now: () => ticks.now,
         sleep: () => Promise.resolve(),
         log: () => undefined,
+
+        lostUsage: () => Promise.resolve(null),
       });
       // The refusal above would stop a fresh placement, but the
       // provisional hit replays without touching the gate.
@@ -295,6 +299,8 @@ test("K4: an unreachable host at start ends lost after the threshold", async () 
       log: (event) => {
         events.push({ ...event });
       },
+
+      lostUsage: () => Promise.resolve(null),
     });
     control.setUnreachable("laptop-a", true);
     const attempts: Array<unknown> = [];
@@ -360,6 +366,8 @@ test("K4b: two unreachable starts then a settle reset the count", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     control.setUnreachable("laptop-a", true);
     for (let round = 0; round < 2; round += 1) {
@@ -400,6 +408,8 @@ test("K4b: two unreachable starts then a settle reset the count", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const watching = watcher.watch(outcome.request.requestId);
     const parkedFirst = await gated.next("wait");
@@ -443,6 +453,8 @@ test("K5: a rejected start removes its provisional entry", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const pending = rejecting.start(
       item("item-a") as never,
@@ -489,6 +501,8 @@ test("K6: an invalid handle keeps the provisional entry", async () => {
       log: (event) => {
         events.push({ ...event });
       },
+
+      lostUsage: () => Promise.resolve(null),
     });
     let error: unknown;
     try {
@@ -553,6 +567,8 @@ test("K6b: a handle for the wrong host logs invalid-handle", async () => {
       log: (event) => {
         events.push({ ...event });
       },
+
+      lostUsage: () => Promise.resolve(null),
     });
     let error: unknown;
     try {
@@ -595,6 +611,8 @@ test("K7: a port binding conflict keeps the provisional entry", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     let error: unknown;
     try {

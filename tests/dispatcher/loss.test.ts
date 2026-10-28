@@ -86,6 +86,8 @@ async function withHarness(body: (h: Harness) => Promise<void>): Promise<void> {
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, config, control, dispatcher, clock, dir });
   } finally {
@@ -186,6 +188,8 @@ test("unreachable: miss, miss, running, miss recovers as finished", async () => 
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -244,6 +248,8 @@ test("unreachable: two misses recover, the third is lost", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -286,6 +292,8 @@ test("unreachable: two misses recover, the third is lost", async () => {
       },
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started2 = await dispatcher2.start(
       queuedItem() as never,
@@ -341,6 +349,8 @@ test("watch replay after a failed appendPending writes exactly one pending entry
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -402,6 +412,8 @@ test("replay after a crash between append and write returns unchanged", async ()
       now: () => clock.now,
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -498,6 +510,8 @@ test("a start on an unappended terminal asks for watch first", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
+
+      lostUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,

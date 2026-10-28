@@ -179,6 +179,7 @@ the committed names. Every error names the variable, never its value.
 Generate the secret and store it without printing it:
 
 ```sh
+: "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"
 install -d -m 0700 "$XDG_RUNTIME_DIR/moc"
 chmod 0700 "$XDG_RUNTIME_DIR/moc"
 ( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" )

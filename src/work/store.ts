@@ -6,6 +6,7 @@ import addFormats from "ajv-formats";
 import { isWorkItem } from "../../contracts/v1/validate.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath, InputPathError } from "../fs/input.js";
+import { canonicalJson } from "./canonical.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { findCycle } from "./dag.js";
@@ -168,6 +169,29 @@ function toInputError(error: unknown, label: string, path: string): WorkStoreWri
   );
 }
 
+// Append-only rule (h): no write may drop a stored item or change a
+// stored submission. Item fields other than id may change in place (W7
+// status transitions), and new items and submissions may be appended.
+function checkAppendOnly(label: string, oldStore: WorkStore, next: WorkStoreBody): void {
+  const nextIds = new Set(next.items.map((entry) => entry.id));
+  for (const item of oldStore.items) {
+    if (!nextIds.has(item.id)) {
+      throw new WorkStoreDataError(
+        `${label}: rule (h): item "${item.id}" is missing from the next store`,
+      );
+    }
+  }
+  for (let index = 0; index < oldStore.submissions.length; index += 1) {
+    const before = oldStore.submissions[index] as WorkSubmission;
+    const after = next.submissions[index];
+    if (after === undefined || canonicalJson(after) !== canonicalJson(before)) {
+      throw new WorkStoreDataError(
+        `${label}: rule (h): submission ${String(index)} changed`,
+      );
+    }
+  }
+}
+
 export async function updateWorkStore<T>(
   path: string,
   fn: (store: WorkStore) => Promise<{ readonly next: WorkStoreBody | null; readonly value: T }>,
@@ -180,6 +204,7 @@ export async function updateWorkStore<T>(
       if (r.next === null) {
         return r;
       }
+      checkAppendOnly(`work store ${path}`, store, r.next);
       const next: WorkStore = {
         schemaVersion: "v1",
         revision: store.revision + 1,

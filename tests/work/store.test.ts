@@ -136,6 +136,61 @@ test("a null item is a data error naming rule (b) (M1)", async () => {
   }
 });
 
+test("an update that drops an item is refused by rule (h) (M2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "work-store-"));
+  try {
+    const path = join(dir, "work-items.json");
+    const doc = storeOf([item("a"), item("b", { dependencies: ["a"] })]);
+    await writeJson(path, doc);
+    const before = readFileSync(path, "utf8");
+    let message = "";
+    try {
+      await updateWorkStore(path, (store) =>
+        Promise.resolve({
+          next: { items: [item("a")], submissions: store.submissions },
+          value: undefined,
+        }),
+      );
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("rule (h)");
+    expect(message).toContain("b");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an update that changes a submission is refused by rule (h) (M2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "work-store-"));
+  try {
+    const path = join(dir, "work-items.json");
+    await writeJson(path, storeOf([item("a")]));
+    const before = readFileSync(path, "utf8");
+    let message = "";
+    try {
+      await updateWorkStore(path, (store) =>
+        Promise.resolve({
+          next: {
+            items: store.items,
+            submissions: store.submissions.map((entry, index) =>
+              index === 0 ? { ...entry, caller: "intruder" } : entry,
+            ),
+          },
+          value: undefined,
+        }),
+      );
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("rule (h)");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate item id names rule (c) (S5)", () => {
   const path = "unused-for-check";
   let message = "";

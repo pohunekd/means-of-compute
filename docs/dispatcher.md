@@ -52,8 +52,9 @@ id first then the bound ones in daemon order with no duplicates, or `[]` when
 none was there. It never creates a session and never sends input. A refused
 `session.list` or connector call gives `PortRejectedError(code)` with that
 call's code; a refused stop or unbind gives
-`PortRejectedError("void-incomplete")`; nothing confirmed gives
-`PortUnreachableError`. This trusts that the binding metadata survives a daemon
+`PortRejectedError("void-incomplete")`; a transport failure gives
+`PortUnreachableError`; sessions stopped and unbound before the failure stay
+so. This trusts that the binding metadata survives a daemon
 restart: an empty `session.list` reading means nothing is bound.
 
 ## Adapter configuration

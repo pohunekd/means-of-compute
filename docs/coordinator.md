@@ -43,3 +43,19 @@ read. `envPassthrough` excludes `HOME`, `XDG_*` and the key variable.
 `factoryEntry` runs `src/mcp/serve.ts` under bun with the coordinator
 caller. `exportArgv` builds the redacted `export` command. `readCoordCalls`
 returns null for an absent log, otherwise the coordinator call-ends.
+
+## Sessions and the run report
+
+Each Muse session runs with only the `envPassthrough` names plus an
+isolated `HOME` (`<runDir>/home`) and its XDG dirs. The API key travels
+on stdin only, never in argv, env, files or logs. A timeout or abort
+kills the whole process group with `SIGTERM`, then `SIGKILL` after
+`killGraceMs`. After `exited`, `timeout` or `aborted`, the launcher runs
+the redacted `export`; the outcome is `exited`, `timeout`, `aborted` or
+`spawn-failed` with its stage and code. The log carries `session-start`
+(with the argv hash), `session-end` and `export` events, each starting
+with an ISO timestamp. `buildReport` folds call-ends, gates, sessions
+and the final `list_work` snapshot into `report.json`, and
+`renderReportMd` renders the same data as `report.md`; neither file
+holds the key or any env value. `report-expected.md` pins the exact
+render, so `.prettierignore` excludes it from formatting.

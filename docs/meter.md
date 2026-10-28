@@ -179,14 +179,18 @@ the committed names. Every error names the variable, never its value.
 Generate the secret and store it without printing it:
 
 ```sh
-( umask 077 && mkdir -p /run/moc && openssl rand -base64 32 > /run/moc/meter-secret )
-export MOC_METER_SECRET="$(cat /run/moc/meter-secret)"
+install -d -m 0700 "$XDG_RUNTIME_DIR/moc"
+chmod 0700 "$XDG_RUNTIME_DIR/moc"
+( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" )
+chmod 0600 "$XDG_RUNTIME_DIR/moc/meter-secret"
+export MOC_METER_SECRET="$(cat "$XDG_RUNTIME_DIR/moc/meter-secret")"
 test -n "$MOC_METER_SECRET" && echo set
 ```
 
-The subshell umask makes the parent directory and the file readable
-only by the factory user; no `chmod` step is needed. The secret file
-lives outside the repository, never under `logs/`.
+The explicit `chmod`s make the modes hold even when the directory or the
+file already exists; `XDG_RUNTIME_DIR` must be set, and the command fails
+loudly when it is not. The secret file lives outside the repository,
+never under `logs/`.
 
 ## Usage-log format
 

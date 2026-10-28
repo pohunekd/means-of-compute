@@ -1,7 +1,7 @@
 // Stub GitHub tests (PR 4 matrix rows L22-L22e): the stub answers from a
 // sandbox origin.git, with live tips, real merges and a shared counter.
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitError, revParse, type GitDeps } from "../../src/loop/git.js";
@@ -280,4 +280,76 @@ describe("stub github", () => {
       await sandbox.cleanup();
     }
   });
+
+  test("S1: a slow scratch cleanup never changes the merge outcome", async () => {
+    const sandbox = await makeSandbox();
+    // A fake git that sleeps past the stub timeout on `worktree remove`.
+    const realLine = (
+      await (async (): Promise<string> => {
+        const proc = Bun.spawn(["sh", "-c", "command -v git"], {
+          stdout: "pipe",
+          stderr: "ignore",
+          stdin: "ignore",
+        });
+        const text = await new Response(proc.stdout as ReadableStream).text();
+        await proc.exited;
+        return (text.split("\n")[0] ?? "/usr/bin/git").trim();
+      })()
+    ).replace(/\/git$/, "");
+    const fakeDir = await mkdtemp(join(tmpdir(), "fake-stub-git-"));
+    await writeFile(
+      join(fakeDir, "git"),
+      `#!/bin/sh\nREAL_GIT="${realLine}/git"\n` +
+        'for a in "$@"; do\n  if [ "$a" = "remove" ]; then\n    sleep 3\n  fi\ndone\n' +
+        'exec "$REAL_GIT" "$@"\n',
+      "utf8",
+    );
+    await chmod(join(fakeDir, "git"), 0o755);
+    try {
+      const options = {
+        ...stubOptions(sandbox.origin, sandbox.scratchDir),
+        git: { PATH: `${fakeDir}:${realLine}`, timeoutMs: 1500 },
+      };
+      const stub = createStubGitHub(options);
+      // Case (a): an open, mergeable pull resolves even though the
+      // scratch cleanup times out, and the base ref moves to the commit.
+      await pushEmpty(sandbox.seed, "moc/demo-s1");
+      const head = await revParse(options.originDir, options.git, "refs/heads/moc/demo-s1");
+      const pull = await stub.createPull("factory/demo", "moc/demo-s1", "main", "t", "b");
+      await stub.mergePull("factory/demo", pull, head);
+      const view = await stub.viewPull("factory/demo", pull);
+      expect(view.state).toBe("MERGED");
+      expect(view.mergeCommit).not.toBeNull();
+      expect(await revParse(options.originDir, options.git, "refs/heads/main")).toBe(
+        view.mergeCommit as string,
+      );
+      // Case (b): a conflicting pull rejects as rejected, never unavailable.
+      await git(sandbox.seed, ["checkout", "-b", "moc/demo-s1b", "main~0"]);
+      await writeFile(join(sandbox.seed, "f.txt"), "branch line\n", "utf8");
+      await git(sandbox.seed, ["add", "f.txt"]);
+      await git(sandbox.seed, ["commit", "-m", "branch change"]);
+      await git(sandbox.seed, ["push", "origin", "moc/demo-s1b"]);
+      await git(sandbox.seed, ["checkout", "main"]);
+      await git(sandbox.seed, ["fetch", "origin"]);
+      await git(sandbox.seed, ["reset", "--hard", "origin/main"]);
+      await writeFile(join(sandbox.seed, "f.txt"), "main line\nchanged on main\n", "utf8");
+      await git(sandbox.seed, ["add", "f.txt"]);
+      await git(sandbox.seed, ["commit", "-m", "main change"]);
+      await git(sandbox.seed, ["push", "origin", "main"]);
+      const conflictHead = await revParse(
+        options.originDir,
+        options.git,
+        "refs/heads/moc/demo-s1b",
+      );
+      const conflict = await stub.createPull("factory/demo", "moc/demo-s1b", "main", "t", "b");
+      const failed = await stub
+        .mergePull("factory/demo", conflict, conflictHead)
+        .catch((error: unknown) => error);
+      expect(failed).toBeInstanceOf(GitHubError);
+      expect((failed as GitHubError).kind).toBe("rejected");
+    } finally {
+      await rm(fakeDir, { recursive: true, force: true });
+      await sandbox.cleanup();
+    }
+  }, 15_000);
 });

@@ -89,17 +89,18 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `src/loop/git.ts` runs the loop's git calls with a fixed env, no shell,
 each child in its own process group killed at the deadline, and exports
 `fetchRefs`, `remoteBranchSha`, `revParse`, `isAncestor` and
-`trialMerge`. `trialMerge` builds the result, runs step-6 cleanup, then returns it
-with the `cleanupFailed` the cleanup set; it needs absolute `dir` and
-`scratchDir`, runs steps 1 to 5 under one `start + timeoutMs`
-deadline, and a deadline hit in a git call of steps 1 to 4 gives
-`reason: "timeout"` with `step: null`; a step command that runs past
-the deadline gives `step: <index>`. Step 6 cleanup shares one
-`cleanupStart + timeoutMs` budget. A `GitError` from `git.ts` maps to
-`rejected` (`failed`, rc 128) or `unavailable` (other); a non-zero rc
-of the stub's own git commands is `rejected`, a timeout is
-`unavailable`. `src/loop/stub/github.ts` implements `GitHubPort` over
-a sandbox `origin.git` with absolute dirs and async ports; `detail` and
-the gh `stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step
-is `step-failed` with `rc: null`; merge rc 1 without the conflict line
-is `GitError` `failed`.
+`trialMerge`; it needs absolute `dir` and `scratchDir`. `trialMerge`
+builds the result, runs step-6 cleanup, then returns it with the
+`cleanupFailed` the cleanup set; steps 1 to 5 share one
+`start + timeoutMs` deadline, and a git call of steps 1 to 4 past it
+gives `reason: "timeout"` with `step: null` while a step command past
+it gives `step: <index>`; step 6 shares `cleanupStart + timeoutMs`.
+A `GitError` from `git.ts` maps to `rejected` (`failed`, rc 128) or
+`unavailable` (other); a non-zero rc of the stub's own git commands in
+a port call is `rejected`, a timeout is `unavailable`; the `mergePull`
+scratch cleanup is best effort and never changes the result.
+`src/loop/stub/github.ts` implements `GitHubPort` over a sandbox
+`origin.git` with absolute dirs and async ports; `detail` and the gh
+`stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step is
+`step-failed` with `rc: null`; merge rc 1 without the conflict line is
+`GitError` `failed`.

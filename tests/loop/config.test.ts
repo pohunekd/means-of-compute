@@ -1,5 +1,6 @@
-// Loop config tests (matrix rows L1-L2): a missing stall.maxRetries names
-// the key, and the stub section is rejected in production but required in
+// Loop config tests (matrix rows L1-L2, decision F1): a missing
+// stall.maxRetries names the key, the stub section is rejected in
+// production but required in stub mode, and the demo config resolves in
 // stub mode. The valid cases load the checked-in production config.
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -49,6 +50,108 @@ test("a missing stall.maxRetries fails naming the key (L1)", async () => {
     }
     expect(message).toContain("stall.maxRetries");
   });
+});
+
+test("the demo config resolves in stub mode with a stub work setup (F1)", async () => {
+  const demo = JSON.parse(await readFile("config/loop-demo.json", "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const sandbox = await mkdtemp(join(tmpdir(), "loop-demo-"));
+  // Input fixtures live outside the sandbox (stub step 4 clears it), as in
+  // the committed demo config.
+  const fixtureDir = await mkdtemp(join(tmpdir(), "loop-demo-input-"));
+  try {
+    const workPath = join(fixtureDir, "work.json");
+    await writeFile(
+      workPath,
+      JSON.stringify({
+        storePath: join(fixtureDir, "work-items.json"),
+        factorySpecsPath: join(fixtureDir, "factory-specs.json"),
+        models: ["meta/muse-glimmer-30b"],
+        maxItemsPerSubmit: 50,
+        maxItemBytes: 16384,
+        maxStoreItems: 1000,
+      }),
+    );
+    await writeFile(
+      join(fixtureDir, "factory-specs.json"),
+      JSON.stringify([{ schemaVersion: "v1", repo: "example/demo-repo", mergeMode: "by-rule" }]),
+    );
+    const sandboxDemo = {
+      ...demo,
+      statePath: join(sandbox, "loop-state.json"),
+      logPath: join(sandbox, "loop.jsonl"),
+      resultsPath: join(sandbox, "loop-results.jsonl"),
+      workConfigPath: workPath,
+      github: {
+        ...(demo["github"] as Record<string, unknown>),
+        configDir: join(sandbox, "gh-config"),
+      },
+      digest: { dir: join(sandbox, "digest"), onExit: true },
+      trialMerge: {
+        ...(demo["trialMerge"] as Record<string, unknown>),
+        scratchDir: join(sandbox, "trial"),
+      },
+      repos: [
+        { repo: "example/demo-repo", checkoutDir: join(sandbox, "checkout"), idPrefix: "demo" },
+      ],
+      stub: {
+        ...(demo["stub"] as Record<string, unknown>),
+        sandboxDir: sandbox,
+      },
+    };
+    const path = await writeConfig(sandbox, sandboxDemo);
+    const config = await loadLoopConfig(path, "stub");
+    expect(config.stub?.sandboxDir).toBe(sandbox);
+    expect(config.statePath).toBe(join(sandbox, "loop-state.json"));
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+    await rm(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test("a written path outside the stub sandbox is rejected naming the key (F1)", async () => {
+  const demo = JSON.parse(await readFile("config/loop-demo.json", "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const sandbox = await mkdtemp(join(tmpdir(), "loop-demo-outside-"));
+  try {
+    const workPath = join(sandbox, "work.json");
+    await writeFile(
+      workPath,
+      JSON.stringify({
+        storePath: join(sandbox, "work-items.json"),
+        factorySpecsPath: join(sandbox, "factory-specs.json"),
+        models: ["meta/muse-glimmer-30b"],
+        maxItemsPerSubmit: 50,
+        maxItemBytes: 16384,
+        maxStoreItems: 1000,
+      }),
+    );
+    await writeFile(
+      join(sandbox, "factory-specs.json"),
+      JSON.stringify([{ schemaVersion: "v1", repo: "example/demo-repo", mergeMode: "by-rule" }]),
+    );
+    const outside = {
+      ...demo,
+      statePath: join(tmpdir(), "loop-state-outside.json"),
+      workConfigPath: workPath,
+      stub: { ...(demo["stub"] as Record<string, unknown>), sandboxDir: sandbox },
+    };
+    const path = await writeConfig(sandbox, outside);
+    let error: unknown;
+    try {
+      await loadLoopConfig(path, "stub");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toContain("stub path outside the sandbox: statePath");
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
 });
 
 test("the checked-in production config has no stub section (L2 valid case)", async () => {

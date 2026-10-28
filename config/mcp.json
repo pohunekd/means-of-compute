@@ -1,0 +1,10 @@
+{
+  "serverInfo": { "name": "means-of-compute-factory", "version": "0.1.0" },
+  "callers": ["coordinator", "mcp-call"],
+  "callLogPath": "logs/mcp-calls.jsonl",
+  "maxMessageBytes": 1048576,
+  "clientTimeoutMs": 30000,
+  "workConfigPath": "config/work.json",
+  "auditorConfigPath": "config/auditor.json",
+  "dispatcherConfigPath": "config/dispatcher.json"
+}

@@ -148,7 +148,7 @@ describe("plugin package", () => {
   );
 
   test(
-    "package lists the six entries with mode, shebang, size and manifest",
+    "package lists the six entries with mode, shebang, size, manifest and command",
     async () => {
       const out = tempDir("hoststate-pkg-");
       try {
@@ -186,6 +186,11 @@ describe("plugin package", () => {
             "",
           ].join("\n"),
         );
+        const buildJson = JSON.parse(readFileSync(join(pkg, "build.json"), "utf-8")) as Record<
+          string,
+          unknown
+        >;
+        expect(buildJson["command"]).toBe(config.package.command);
       } finally {
         rmSync(out, { recursive: true, force: true });
       }
@@ -256,20 +261,6 @@ describe("plugin package", () => {
       expect(r.stderr).toContain(`output path ${filePath} is not a directory`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("build.json records the package command", async () => {
-    const out = tempDir("hoststate-pkg-");
-    try {
-      const pkg = await buildPackage(out);
-      const buildJson = JSON.parse(readFileSync(join(pkg, "build.json"), "utf-8")) as Record<
-        string,
-        unknown
-      >;
-      expect(buildJson["command"]).toBe("host-state");
-    } finally {
-      rmSync(out, { recursive: true, force: true });
     }
   });
 });

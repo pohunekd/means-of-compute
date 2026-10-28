@@ -214,6 +214,25 @@ test("a thrown non-Error value rejects unchanged (L2)", async () => {
   }
 });
 
+test("a timed-out session.list on start gives PortUnreachableError with no session.new (A1, L3)", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.list", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const caught: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught).toBeInstanceOf(PortUnreachableError);
+    expect(fake.sessions("laptop-a")).toHaveLength(0);
+    expect(methodNames(fake, "laptop-a")).not.toContain("session.new");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("an unreachable host before session.new creates nothing (A1)", async () => {
   const { fake, port } = setup();
   try {
@@ -258,6 +277,26 @@ test("a lost session.new reply is voided on replay (A2)", async () => {
     ]);
     const news = methodNames(fake, "laptop-a").filter((method) => method === "session.new");
     expect(news).toHaveLength(2);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a refused accept write voids and unbinds (S6, L4)", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.set_metadata", {
+      errCode: "invalid_params",
+      apply: false,
+    });
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "invalid-params" });
+    const sessions = fake.sessions("laptop-a");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.state).toBe("stopped");
+    expect(sessions[0]?.metadata?.[MOC_METADATA.requestId]).toBeUndefined();
+    expect(sessions[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
   } finally {
     await teardown(fake, port);
   }
@@ -588,6 +627,30 @@ function finishedTurn(id: string, cursor = "cursor-1"): SessionWaitTurnResult {
     progress: [{ session_id: id, state: "running", output_advanced: true }],
   };
 }
+
+test("a timed-out marker write retries the mark on the next wait (W5, L4)", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    fake.failNext("laptop-a", "session.set_metadata", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const timedOut: unknown = await port.wait(ref, 1000, null).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(timedOut).toBeInstanceOf(PortUnreachableError);
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toMatchObject({ state: "finished", detail: "turn completed" });
+    expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.outcome]).toBe("finished");
+  } finally {
+    await teardown(fake, port);
+  }
+});
 
 test("wait stores a finished terminal with set_metadata then stop (W5, W6)", async () => {
   const { fake, port } = setup();
@@ -992,7 +1055,10 @@ test("a hostUnreachable route gives alias plus code and drops the connection", a
     },
   });
   try {
-    fake.setUnreachable("laptop-a", true);
+    fake.failNext("laptop-a", "session.list", {
+      error: fakeErrors.hostUnreachable("peer.example-route"),
+      apply: false,
+    });
     const error = await droppingPort.start(request()).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(PortUnreachableError);
     expect((error as PortUnreachableError).message).toBe("laptop-a: host_unreachable");

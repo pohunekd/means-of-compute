@@ -1,6 +1,6 @@
 # Host state plugin
 
-The host probe (`src/probe/`) ships to fleet hosts as a compiled plugin package.
+The host probe (`src/probe/`) ships to fleet hosts as a bundled plugin package.
 A Pohunek release with a host-state extension point (PR 3) will run the plugin
 on each host and carry its `HostCapacity` output back to the coordinator, where
 the collector validates it before placement sees it.
@@ -14,14 +14,16 @@ output in parallel through `HostStatePort` and turns each reply into one
 
 ## Package contents
 
-`plugin:build` assembles one directory per target:
+`plugin:build` assembles one directory:
 
 ```text
-moc-host-state-<version>-<target>/
-  bin/moc-host-state          compiled plugin entry (src/probe/plugin-entry.ts)
+moc-host-state-<version>/
+  runtime.toml                package manifest consumed by the host daemon
+  bin/moc-host-state          bundled plugin entry (src/probe/plugin-entry.ts)
+  config/plugin.json          fleet-wide host file path
   config/probe.json           fleet-wide probe policy
   config/scenarios/*.json     scenario inputs (tests and diagnosis only)
-  build.json                  { packageId, version, target, gitCommit, sourceDigest, bunVersion, binarySha256 }
+  build.json                  { packageId, version, command, gitCommit, sourceDigest, bunVersion, binarySha256 }
 ```
 
 `config/hosts.json` is never copied into the package: a digest-pinned package
@@ -32,19 +34,17 @@ hostname map would put private hostnames into a distributed artifact.
 
 ```sh
 bun run plugin:digest
-bun run plugin:build --target native --out <dir>   # builds for this machine
-bun run plugin:build --target all --out <dir>      # one directory per target in config/host-state.json
+bun run plugin:build --out <dir>
 ```
 
-Both `--target` and `--out` are required. `--out` must be absent or an empty
-directory; the script never overwrites. The native build carries no `--target`
-flag and records `native-<platform>-<arch>` in `build.json`.
+`--out` is the only argument. `--out` must be absent or an empty
+directory; the script never overwrites.
 `plugin:build` refuses to build when `plugin:digest` does not match, so a stale
 digest cannot be built.
 
-The source digest pins the source inputs of the binary: every repo file
+The source digest pins the source inputs of the bundle: every repo file
 the bundle includes (from the `Bun.build` metafile, excluding `node_modules/`),
-plus `bun.lock`, `config/probe.json` and every `config/scenarios/*.json` file.
+plus `bun.lock`, `config/plugin.json`, `config/probe.json` and every `config/scenarios/*.json` file.
 The toolchain is recorded separately as `bunVersion` in `build.json`.
 `plugin:digest` prints the digest and exits 0 only when it equals
 `package.sourceDigest` in `config/host-state.json`.
@@ -59,21 +59,24 @@ intended way to retire a build whose idle rule is outdated.
 
 ## Host precondition
 
-Every fleet host carries its alias in `~/.config/means-of-compute/host.json`:
+Every fleet host carries its alias in `/etc/means-of-compute/host.json`:
 
 ```json
 { "hostAlias": "laptop-a" }
 ```
 
-The plugin reads this file for a live run (never the hostname, never
+The fleet-wide path lives in the package as `config/plugin.json`; the host file
+itself stays outside the package, outside `HOME`, and outside the
+digest-pinned inputs. Writing it needs `sudo` once on every host. The plugin
+reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
 
 ## Artifacts
 
 Built packages are never committed (`dist/` is gitignored) and never published
-from this repository. The owner builds `--target all` once per version and
-installs that one archive per target on every host, by its sha256. A rebuild
+from this repository. The owner builds once per version and installs that one
+directory on every host with `pohunek plugin link`, by its sha256. A rebuild
 is a new artifact with a new digest.
 
 ## Causes
@@ -102,7 +105,7 @@ records it as an excluded candidate. No failure yields a `reported` host.
 | other package id in the reply                                                             | `package-mismatch`                                |
 | version not accepted                                                                      | `version-not-accepted`                            |
 | not JSON, or more than one document                                                       | `not-json`                                        |
-| not a `HostCapacity`, or `freeMb > totalMb`                                               | `contract-invalid`                                |
+| not a `HostCapacity`, `freeMb > totalMb`, or an unparseable timestamp                     | `contract-invalid`                                |
 | reported alias differs from the asked alias                                               | `alias-mismatch`                                  |
 | timestamp too old                                                                         | `stale`                                           |
 | timestamp too far ahead                                                                   | `future-timestamp`                                |
@@ -113,8 +116,8 @@ records it as an excluded candidate. No failure yields a `reported` host.
 With `c = config.collector`:
 
 - `pluginTimeoutMs` (`10000`): the daemon kills the plugin at this deadline.
-- `requestTimeoutMs` (`pluginTimeoutMs + transportMarginMs`): the adapter's
-  bound for the whole call.
+- `requestTimeoutMs` (`pluginTimeoutMs + transportMarginMs`): passed to the
+  daemon as the call deadline; the adapter sets no timer of its own.
 - `guardMs` (`pluginTimeoutMs + 2 * transportMarginMs`): the collector's own
   bound through `deps.sleep`, for an adapter that never settles.
 - `maxOutputBytes` (`16384`): passed to the daemon and re-checked by the

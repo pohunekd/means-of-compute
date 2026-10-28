@@ -1,7 +1,8 @@
 // Typed loader for the operator-owned factory-specs file: a JSON array
 // with at least one entry, each entry passing isFactorySpec, repo unique.
 // A missing file or a failed entry names the cause.
-import { isFactorySpec, type FactorySpec } from "../../contracts/v1/validate.js";
+import type { FactorySpec } from "../../contracts/v1/types.js";
+import { isFactorySpec } from "../../contracts/v1/validate.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 
 export async function loadFactorySpecs(path: string): Promise<readonly FactorySpec[]> {

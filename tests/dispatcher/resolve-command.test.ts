@@ -5,14 +5,16 @@
 // builds a real dispatcher over the memory port; temp registry and ledger
 // paths; no timers and no real host.
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { cp, existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BudgetGate } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher, type ResolveOutcome } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import { FileLockError } from "../../src/fs/lock.js";
+import { FileLockError, withFileLock } from "../../src/fs/lock.js";
 import type { ModelSelection, ReleaseRef, ReleaseResult } from "../../src/dispatcher/port.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { runResolveCommand } from "../../src/dispatcher/resolve-command.js";
@@ -278,5 +280,89 @@ test("an unknown request exits 2", async () => {
     expect(h.stdout).toEqual([]);
     expect(h.stderr).toHaveLength(1);
     expect(h.stderr[0]?.startsWith("dispatch: dispatcher precondition known-request: ")).toBe(true);
+  });
+});
+
+async function runResolveCli(
+  dir: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<{ readonly stdout: string; readonly stderr: string; readonly rc: number }> {
+  const proc = Bun.spawn(["bun", join(process.cwd(), "src/dispatcher/cli.ts"), "resolve", ...args], {
+    cwd: dir,
+    env: { ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, rc] = await Promise.all([
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, rc };
+}
+
+async function withConfigCopy(body: (dir: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-resolve-cli-"));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      cp(join(process.cwd(), "config"), join(dir, "config"), { recursive: true }, (error) => {
+        if (error === null || error === undefined) {
+          resolve();
+        } else {
+          reject(error);
+        }
+      });
+    });
+    await body(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+function envWithoutMoc(): Record<string, string | undefined> {
+  const kept: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith("MOC_")) {
+      kept[key] = value;
+    }
+  }
+  return kept;
+}
+
+test("a bad flag opens nothing", async () => {
+  await withConfigCopy(async (dir) => {
+    const { stdout, stderr, rc } = await runResolveCli(dir, ["--bogus", "x"], envWithoutMoc());
+    expect(rc).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr).toBe('dispatch: unknown flag "--bogus"\n');
+    expect(existsSync(join(dir, "logs"))).toBe(false);
+  });
+});
+
+test("a held registry lock exits 3", async () => {
+  await withConfigCopy(async (dir) => {
+    await mkdir(join(dir, "logs"), { recursive: true });
+    const addressesFile = join(dir, "host-addresses.json");
+    await writeFile(addressesFile, JSON.stringify({ "laptop-a": ["10.0.0.1"] }), "utf8");
+    const env: Record<string, string | undefined> = {
+      ...envWithoutMoc(),
+      MOC_METER_LISTEN: "127.0.0.1:0",
+      MOC_METER_SECRET: randomBytes(32).toString("base64"),
+      MOC_METER_HOST_ADDRESSES_FILE: addressesFile,
+      NVIDIA_API_KEY: "test-nvidia-key",
+      META_API_KEY: "test-meta-key",
+    };
+    const registryPath = join(dir, "logs", "dispatcher-sessions.json");
+    await withFileLock("Dispatcher resolve test", registryPath, async () => {
+      const { stdout, stderr, rc } = await runResolveCli(
+        dir,
+        ["--request", "demo-item:0"],
+        env,
+      );
+      expect(rc).toBe(3);
+      expect(stdout).toBe("");
+      expect(stderr.split("\n")).toEqual(["dispatch: registry busy", ""]);
+    });
   });
 });

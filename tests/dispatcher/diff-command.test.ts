@@ -7,7 +7,11 @@ import { createFakeDaemon } from "../../src/dispatcher/adapter/fake-daemon.js";
 import { createPohunekPort } from "../../src/dispatcher/adapter/pohunek-port.js";
 import type { PohunekAdapterConfig } from "../../src/dispatcher/adapter/config.js";
 import { runDiffCommand } from "../../src/dispatcher/diff-command.js";
-import type { DispatcherPort, SessionRef } from "../../src/dispatcher/port.js";
+import {
+  PortRejectedError,
+  type DispatcherPort,
+  type SessionRef,
+} from "../../src/dispatcher/port.js";
 
 const CONFIG: PohunekAdapterConfig = {
   agentProfile: "moc-worker",
@@ -195,6 +199,38 @@ test("a missing session exits 2 with its code", async () => {
   } finally {
     await teardown(h);
   }
+});
+
+test("a rejected diff prints the code, not the message", async () => {
+  let closes = 0;
+  const stub: DispatcherPort = {
+    start: () => Promise.reject(new Error("unused")),
+    wait: () => Promise.reject(new Error("unused")),
+    diff: () => Promise.reject(new PortRejectedError("session-not-found", "unknown session x")),
+    cancel: () => Promise.reject(new Error("unused")),
+    close: () => {
+      closes += 1;
+      return Promise.resolve();
+    },
+  };
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const rc = await runDiffCommand(
+    ["--host", "laptop-a", "--session", "x", "--base", "origin/main"],
+    () => Promise.resolve(stub),
+    {
+      stdout: (text) => {
+        stdout.push(text);
+      },
+      stderr: (line) => {
+        stderr.push(line);
+      },
+    },
+  );
+  expect(rc).toBe(2);
+  expect(stdout).toEqual([]);
+  expect(stderr).toEqual(["dispatch: laptop-a: session-not-found"]);
+  expect(closes).toBe(1);
 });
 
 const BAD_FLAG_CASES: ReadonlyArray<readonly [string, readonly string[]]> = [

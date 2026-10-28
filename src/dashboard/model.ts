@@ -415,9 +415,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
           : failureCell(inputs.registry.failure);
       }
     } else {
-      branch = inputs.registry.ok
-        ? noDataCell("no session")
-        : failureCell(inputs.registry.failure);
+      branch = inputs.registry.ok ? noDataCell("no session") : failureCell(inputs.registry.failure);
     }
     const model: Cell =
       latest !== null

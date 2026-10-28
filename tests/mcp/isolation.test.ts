@@ -1,54 +1,49 @@
 // MCP boundary test (matrix X4): the import closure of every file under
 // src/mcp/ never reaches the approvals decide module or the CLI, so no
 // MCP call can decide a request; no file under src/mcp/ names the atomic
-// writer, and no file in the closure uses a CommonJS-style loader, so no
-// MCP call writes a file directly or loads decide outside the closure (A9).
+// writer. Specs come from Bun's import scanner, and the loader checks run
+// on comment-free code, so no file in the closure uses a CommonJS-style
+// loader in any spelling and no MCP call loads decide outside the closure
+// (A9).
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-const IMPORT_SPEC =
-  /(?:from\s+["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["'])/g;
+const transpiler = new Bun.Transpiler({ loader: "ts" });
 
-const MODULE_SPECS = new RegExp(IMPORT_SPEC.source, "g");
-
-const REQUIRE_CALL = /\brequire\s*\(/;
+const REQUIRE_TOKEN = /\brequire\b/;
 const CREATE_REQUIRE = /\bcreateRequire\b/;
+const GET_BUILTIN_MODULE = /\bgetBuiltinModule\b/;
+const DIRECT_EVAL = /\beval\b/;
 const IMPORT_META = /\bimport\.meta(?!\.(?:url|dir|dirname|path|filename|main)\b)/;
 
+export function specsOf(text: string): string[] {
+  return transpiler.scanImports(text).map((entry) => entry.path);
+}
+
 export function loaderUse(text: string): string | null {
-  if (REQUIRE_CALL.test(text)) {
-    return "require call";
+  const code = transpiler.transformSync(text);
+  if (REQUIRE_TOKEN.test(code)) {
+    return "require";
   }
-  if (CREATE_REQUIRE.test(text)) {
+  if (CREATE_REQUIRE.test(code)) {
     return "createRequire";
   }
-  MODULE_SPECS.lastIndex = 0;
-  let found: RegExpExecArray | null;
-  while ((found = MODULE_SPECS.exec(text)) !== null) {
-    const spec = found[1] ?? found[2] ?? found[3];
+  if (GET_BUILTIN_MODULE.test(code)) {
+    return "getBuiltinModule";
+  }
+  if (DIRECT_EVAL.test(code)) {
+    return "eval";
+  }
+  for (const spec of specsOf(text)) {
     if (spec === "module" || spec === "node:module") {
       return `import of "${spec}"`;
     }
   }
-  if (IMPORT_META.test(text)) {
+  if (IMPORT_META.test(code)) {
     return "import.meta";
   }
   return null;
-}
-
-function specOf(file: string): string[] {
-  const text = readFileSync(file, "utf8");
-  const specs: string[] = [];
-  let found: RegExpExecArray | null;
-  IMPORT_SPEC.lastIndex = 0;
-  while ((found = IMPORT_SPEC.exec(text)) !== null) {
-    const spec = found[1] ?? found[2] ?? found[3];
-    if (spec !== undefined) {
-      specs.push(spec);
-    }
-  }
-  return specs;
 }
 
 function isFile(path: string): boolean {
@@ -79,6 +74,7 @@ function resolveSpec(fromFile: string, spec: string): string | null {
 }
 
 function importClosure(entries: string[]): Set<string> {
+  const root = join(process.cwd(), "/");
   const seen = new Set<string>();
   const queue = [...entries];
   while (queue.length > 0) {
@@ -87,11 +83,21 @@ function importClosure(entries: string[]): Set<string> {
       continue;
     }
     seen.add(file);
-    for (const spec of specOf(file)) {
+    if (!file.endsWith(".ts")) {
+      continue;
+    }
+    for (const spec of specsOf(readFileSync(file, "utf8"))) {
       const target = resolveSpec(file, spec);
-      if (target !== null && target.startsWith(join(process.cwd(), "src") + "/")) {
-        queue.push(target);
+      if (target === null) {
+        continue;
       }
+      if (target.includes("/node_modules/")) {
+        continue;
+      }
+      if (!target.startsWith(root)) {
+        throw new Error(`import "${spec}" in ${file} leaves the repository`);
+      }
+      queue.push(target);
     }
   }
   return seen;
@@ -102,6 +108,16 @@ function mcpFiles(dir: string): string[] {
     .filter((name) => name.endsWith(".ts"))
     .map((name) => join(dir, name));
 }
+
+test("specsOf reads commented and namespace import specs (X4 Y5)", () => {
+  expect(specsOf('import(/* x */ "../approvals/decide.ts")')).toContain(
+    "../approvals/decide.ts",
+  );
+  expect(specsOf('import * as d from /* x */ "../approvals/decide.ts"')).toContain(
+    "../approvals/decide.ts",
+  );
+  expect(specsOf('import * as m from /* x */ "node:module"')).toContain("node:module");
+});
 
 test("loaderUse flags every loader spelling (X4 Y1)", () => {
   const flagged = [
@@ -115,9 +131,15 @@ test("loaderUse flags every loader spelling (X4 Y1)", () => {
     'import.meta["require"]("x")',
     "const { require: r } = import.meta",
     "const meta = import.meta",
+    "const load = require; load(\"x\")",
+    'require.call(undefined, "x")',
+    "const { require: r } = import /* x */.meta",
+    'process.getBuiltinModule("node:module")',
+    'eval("x")',
+    'import * as m from /* x */ "node:module"',
   ];
   for (const sample of flagged) {
-    expect(loaderUse(sample)).not.toBeNull();
+    expect(`${sample}: ${loaderUse(sample) ?? "clean"}`).not.toBe(`${sample}: clean`);
   }
 });
 
@@ -142,15 +164,19 @@ test("every closure file is checked for loader use (X4 Y3)", () => {
   const closure = importClosure(entries);
   const checked: string[] = [];
   for (const file of closure) {
+    if (!file.endsWith(".ts")) {
+      continue;
+    }
     const text = readFileSync(file, "utf8");
     const hit = loaderUse(text);
     expect(`${file}: ${hit ?? "clean"}`).toBe(`${file}: clean`);
     checked.push(file);
   }
-  expect(checked.sort()).toEqual([...closure].sort());
+  expect(checked.sort()).toEqual([...closure].filter((file) => file.endsWith(".ts")).sort());
   // Size reads the checked set: checking only src/mcp/ files fails here.
   expect(checked.length).toBeGreaterThan(entries.length);
   expect(checked.some((file) => !file.startsWith(`${dir}/`))).toBe(true);
+  expect(closure.has(join(process.cwd(), "contracts", "v1", "validate.ts"))).toBe(true);
 });
 
 test("the src/mcp/ import closure never reaches decide or the CLI (X4 Y4, A9)", () => {

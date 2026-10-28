@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
+    const text = JSON.stringify(value);
+    return typeof text === "string" ? text : "null";
   }
   if (Array.isArray(value)) {
     return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;

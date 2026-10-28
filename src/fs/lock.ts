@@ -17,11 +17,7 @@ export class FileLockError extends Error {
     | "unsupported-platform"
     | "flock-unavailable"
     | "release-failed";
-  constructor(
-    code: FileLockError["code"],
-    message: string,
-    options?: ErrorOptions,
-  ) {
+  constructor(code: FileLockError["code"], message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "FileLockError";
     this.code = code;
@@ -102,10 +98,7 @@ async function acquire(label: string, lockPath: string): Promise<FileHandle> {
   if (held === -1) {
     throw new FileLockError("busy", `${label} ${lockPath}: held by another process`);
   }
-  throw new FileLockError(
-    "flock-failed",
-    `${label} ${lockPath}: flock returned ${String(held)}`,
-  );
+  throw new FileLockError("flock-failed", `${label} ${lockPath}: flock returned ${String(held)}`);
 }
 
 async function release(label: string, lockPath: string, handle: FileHandle): Promise<void> {

@@ -23,11 +23,9 @@ export async function loadFactorySpecs(path: string): Promise<readonly FactorySp
   const specs: FactorySpec[] = [];
   const repos = new Set<string>();
   for (let index = 0; index < raw.length; index += 1) {
-    const entry = raw[index];
+    const entry: unknown = raw[index];
     if (!isFactorySpec(entry)) {
-      throw new Error(
-        `${label} ${path}: entry ${String(index)} is not a valid FactorySpec`,
-      );
+      throw new Error(`${label} ${path}: entry ${String(index)} is not a valid FactorySpec`);
     }
     if (repos.has(entry.repo)) {
       throw new Error(`${label} ${path}: duplicate repo "${entry.repo}"`);

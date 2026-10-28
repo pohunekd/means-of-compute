@@ -42,7 +42,15 @@ function storeOf(items: readonly WorkItem[]): Record<string, unknown> {
     schemaVersion: "v1",
     revision: 1,
     items,
-    submissions: [{ submissionId: "sub-0123456789abcdef", digest: `sha256:${"0".repeat(64)}`, itemIds: items.map((entry) => entry.id), caller: "coordinator", submittedAt: "2026-10-28T00:00:00.000Z" }],
+    submissions: [
+      {
+        submissionId: "sub-0123456789abcdef",
+        digest: `sha256:${"0".repeat(64)}`,
+        itemIds: items.map((entry) => entry.id),
+        caller: "coordinator",
+        submittedAt: "2026-10-28T00:00:00.000Z",
+      },
+    ],
   };
 }
 
@@ -111,7 +119,7 @@ test("stored cycle names rule (g) (S4)", async () => {
   }
 });
 
-test("duplicate item id names rule (c) (S5)", async () => {
+test("duplicate item id names rule (c) (S5)", () => {
   const path = "unused-for-check";
   let message = "";
   try {
@@ -128,10 +136,12 @@ test("update with next bumps the revision and re-reads equal (S6)", async () => 
     const path = join(dir, "work-items.json");
     await writeJson(path, { schemaVersion: "v1", revision: 0, items: [], submissions: [] });
     const before = await readWorkStore(path);
-    await updateWorkStore(path, async (store) => ({
-      next: { items: [item("a")], submissions: store.submissions },
-      value: undefined,
-    }));
+    await updateWorkStore(path, (store) =>
+      Promise.resolve({
+        next: { items: [item("a")], submissions: store.submissions },
+        value: undefined,
+      }),
+    );
     const after = await readWorkStore(path);
     expect(after.revision).toBe(before.revision + 1);
     expect(after.items.map((entry) => entry.id)).toEqual(["a"]);
@@ -147,7 +157,7 @@ test("null next writes nothing (S7)", async () => {
     const doc = { schemaVersion: "v1", revision: 4, items: [], submissions: [] };
     await writeJson(path, doc);
     const before = readFileSync(path, "utf8");
-    await updateWorkStore(path, async () => ({ next: null, value: undefined }));
+    await updateWorkStore(path, () => Promise.resolve({ next: null, value: undefined }));
     expect(readFileSync(path, "utf8")).toBe(before);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -193,10 +203,12 @@ test("held lock is busy and the file is unchanged (S8)", async () => {
     await waitForLine(child, "holder ready");
     let error: unknown;
     try {
-      await updateWorkStore(storePath, async (store) => ({
-        next: { items: [item("a")], submissions: store.submissions },
-        value: undefined,
-      }));
+      await updateWorkStore(storePath, (store) =>
+        Promise.resolve({
+          next: { items: [item("a")], submissions: store.submissions },
+          value: undefined,
+        }),
+      );
     } catch (thrown: unknown) {
       error = thrown;
     }
@@ -219,10 +231,12 @@ test("next with an item missing title fails and writes nothing (S9)", async () =
     delete broken["title"];
     let error: unknown;
     try {
-      await updateWorkStore(path, async (store) => ({
-        next: { items: [broken as unknown as WorkItem], submissions: store.submissions },
-        value: undefined,
-      }));
+      await updateWorkStore(path, (store) =>
+        Promise.resolve({
+          next: { items: [broken as unknown as WorkItem], submissions: store.submissions },
+          value: undefined,
+        }),
+      );
     } catch (thrown: unknown) {
       error = thrown;
     }
@@ -233,7 +247,7 @@ test("next with an item missing title fails and writes nothing (S9)", async () =
   }
 });
 
-test("ready set holds queued items whose deps are done (S10)", async () => {
+test("ready set holds queued items whose deps are done (S10)", () => {
   const store = {
     schemaVersion: "v1" as const,
     revision: 1,

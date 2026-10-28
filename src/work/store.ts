@@ -58,17 +58,18 @@ const validateStore = ajv.compile(storeSchema);
 
 const EMPTY_STORE: WorkStore = { schemaVersion: "v1", revision: 0, items: [], submissions: [] };
 
-function shapeErrors(value: unknown): string {
+function shapeErrors(): string {
   const errors = validateStore.errors ?? [];
   const first = errors[0] as { instancePath?: string; keyword?: string } | undefined;
-  const path = first?.instancePath === "" || first?.instancePath === undefined ? "/" : first.instancePath;
-  return `${String(path)} (${String(first?.keyword)})`;
+  const path =
+    first?.instancePath === "" || first?.instancePath === undefined ? "/" : first.instancePath;
+  return `${path} (${String(first?.keyword)})`;
 }
 
 export function checkWorkStore(value: unknown, path: string): WorkStore {
   const label = `work store ${path}`;
   if (!validateStore(value)) {
-    throw new WorkStoreDataError(`${label}: rule (a): invalid shape at ${shapeErrors(value)}`);
+    throw new WorkStoreDataError(`${label}: rule (a): invalid shape at ${shapeErrors()}`);
   }
   const doc = value as {
     readonly items: readonly unknown[];
@@ -106,9 +107,7 @@ export function checkWorkStore(value: unknown, path: string): WorkStore {
         );
       }
       if (submittedItems.has(id)) {
-        throw new WorkStoreDataError(
-          `${label}: rule (e): item "${id}" is in two submissions`,
-        );
+        throw new WorkStoreDataError(`${label}: rule (e): item "${id}" is in two submissions`);
       }
       submittedItems.add(id);
     }

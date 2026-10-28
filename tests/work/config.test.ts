@@ -55,7 +55,10 @@ test("work config missing key or empty models names it (F1)", async () => {
     const missing = validWork();
     delete missing["maxStoreItems"];
     await failsWith(await writeJson(dir, "missing.json", missing), '"maxStoreItems"');
-    await failsWith(await writeJson(dir, "empty-models.json", { ...validWork(), models: [] }), '"models"');
+    await failsWith(
+      await writeJson(dir, "empty-models.json", { ...validWork(), models: [] }),
+      '"models"',
+    );
     const extra = { ...validWork(), extra: true };
     await failsWith(await writeJson(dir, "extra.json", extra), '"extra"');
   } finally {

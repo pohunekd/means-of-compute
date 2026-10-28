@@ -76,6 +76,8 @@ key (`src/dispatcher/adapter/config.ts` `loadPohunekAdapterConfig`):
   in `1..86400000`.
 - `diffLogPath`: where the `dispatch:diff` CLI appends one JSON line per
   adapter event (`logs/dispatch-diff.jsonl`).
+- `resolveLogPath`: where the `dispatch:resolve` CLI appends one JSON line
+  per dispatcher, adapter and meter event (`logs/dispatch-resolve.jsonl`).
 - `hostRoutesFileEnv`: the env variable naming the host routes file
   (`MOC_HOST_ROUTES_FILE`).
 
@@ -96,6 +98,28 @@ alias and the file path, never the route
 the `StartRequest` as JSON (with the brief replaced by its sha256 and byte
 count), and exits 0 without calling the gate or the port and without writing
 anything. Any other use exits 2.
+
+`dispatch:resolve` (`src/dispatcher/cli.ts` `runResolve`) takes `--request <id>`,
+exactly once and required (`src/dispatcher/resolve-command.ts` `parseResolveArgs`).
+It prints the `ResolveOutcome` as one JSON line and exits 0; a second run
+prints `already-resolved` and exits 0. An unknown or malformed request
+exits 2 with `dispatch: <message>`; an unreachable host exits 3 with
+`dispatch: <requestId>: unreachable`; a refused release exits 3 with
+`dispatch: <requestId>: <code>`; a settled active entry exits 3 with
+`dispatch: <requestId>: request-active`; a busy registry exits 3 with
+`dispatch: registry busy`. Any other error exits 2 with one line
+`dispatch: <message>` (`src/dispatcher/cli.ts` `runResolve`). Output names
+only the request id, the host alias and error codes, never routes or port
+messages. Every dispatcher, adapter and meter event appends one JSON line
+`{"at": <ISO time>, "source": <"dispatcher" | "adapter" | "meter">, ...event}`
+to `resolveLogPath` (`logs/dispatch-resolve.jsonl`), creating the parent
+directory; nothing from those logs reaches stdout or stderr.
+
+The CLI holds the registry owner lock (`<registryPath>.lock`) for the whole
+run through `withFileLock` (`src/fs/lock.ts` `withFileLock`), so two runs
+exclude each other and a running factory is excluded too. The CLI runs the
+meter for the length of one resolve because the meter is the only writer
+of the usage log; the null meter token keeps `start` refused.
 
 `dispatch:diff` (`src/dispatcher/cli.ts` `runDiff`) takes `--host <alias>`,
 `--session <id>` and `--base <ref>`, each exactly once and all required

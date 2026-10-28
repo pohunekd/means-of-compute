@@ -1,8 +1,9 @@
-// CLI entry point for dispatch: bun run dispatch:start --dry-run --item
+// CLI entry point for dispatch: dispatch:start --dry-run --item
 // <file> --decision <file> --provider <id> --model <model> --ledger <path>
-// --brief-file <path>. Dry-run prints the StartRequest as JSON (with the
-// brief replaced by its sha256 and byte count) and exits 0 without calling
-// the gate or the port and without writing anything. Any other use
+// --brief-file <path> prints the StartRequest as JSON (with the brief
+// replaced by its sha256 and byte count) and exits 0 without calling the
+// gate or the port and without writing anything; dispatch:diff --host
+// <alias> --session <id> --base <ref> prints the session diff. Any other use
 // exits 2: the factory process owns real starts.
 import {
   contractErrors,
@@ -15,6 +16,11 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import { loadDispatcherConfig } from "./config.js";
+import { loadPohunekAdapterConfig } from "./adapter/config.js";
+import { openPohunekPort, type AdapterLogEvent } from "./adapter/pohunek-port.js";
+import { runDiffCommand } from "./diff-command.js";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { briefSha256Of, deriveStartRequest } from "./dispatcher.js";
 import type { ModelSelection } from "./port.js";
 
@@ -180,10 +186,39 @@ async function runDryRun(): Promise<number> {
   }
 }
 
+async function runDiff(dargs: readonly string[]): Promise<number> {
+  try {
+    const config = await loadPohunekAdapterConfig();
+    // Every adapter event appends one JSON line to the diff log; the log
+    // never reaches stdout or stderr.
+    const log = (event: AdapterLogEvent): void => {
+      mkdirSync(dirname(config.diffLogPath), { recursive: true });
+      appendFileSync(
+        config.diffLogPath,
+        `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
+      );
+    };
+    return await runDiffCommand(dargs, () => openPohunekPort(config, log, process.env), {
+      stdout: (text: string): void => {
+        process.stdout.write(text);
+      },
+      stderr: (line: string): void => {
+        console.error(line);
+      },
+    });
+  } catch (error: unknown) {
+    console.error(`dispatch: ${error instanceof Error ? error.message : String(error)}`);
+    return 2;
+  }
+}
+
 async function run(): Promise<number> {
   const args = Bun.argv.slice(2);
+  if (args[0] === "diff") {
+    return runDiff(args.slice(1));
+  }
   if (args[0] !== "start") {
-    console.error("dispatch: only the start command is supported");
+    console.error("dispatch: only the start and diff commands are supported");
     return 2;
   }
   if (args.includes("--dry-run")) {
@@ -193,5 +228,4 @@ async function run(): Promise<number> {
   return 2;
 }
 
-const code = await run();
-process.exit(code);
+process.exitCode = await run();

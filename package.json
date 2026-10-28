@@ -13,6 +13,7 @@
     "ledger:query": "bun run src/ledger/cli.ts query",
     "factory:serve": "bun run src/factory/serve.ts",
     "dispatch:start": "bun run src/dispatcher/cli.ts start",
+    "dispatch:diff": "bun run src/dispatcher/cli.ts diff",
     "meter:usage": "bun run src/meter/cli.ts usage",
     "place": "bun run src/placement/cli.ts",
     "plugin:build": "bun run scripts/host-state-build.ts",

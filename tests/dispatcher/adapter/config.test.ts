@@ -20,6 +20,7 @@ const VALID = {
   inputAckTimeoutMs: 8000,
   connectTimeoutMs: 5000,
   cancelWaitTimeoutMs: 30000,
+  diffLogPath: "logs/dispatch-diff.jsonl",
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 };
 
@@ -53,6 +54,7 @@ test("the checked-in adapter config loads", async () => {
   expect(config.inputAckTimeoutMs).toBe(8000);
   expect(config.connectTimeoutMs).toBe(5000);
   expect(config.cancelWaitTimeoutMs).toBe(30000);
+  expect(config.diffLogPath).toBe("logs/dispatch-diff.jsonl");
   expect(config.hostRoutesFileEnv).toBe("MOC_HOST_ROUTES_FILE");
 });
 
@@ -94,6 +96,21 @@ for (const [name, value, key, fragment] of BAD_CASES) {
     });
   });
 }
+
+test("diffLogPath is required", async () => {
+  await withTempDir(async (dir) => {
+    const without: Record<string, unknown> = { ...VALID };
+    delete without["diffLogPath"];
+    const path = await writeConfig(dir, without);
+    let message = "";
+    try {
+      await loadPohunekAdapterConfig(path);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('missing required key "diffLogPath"');
+  });
+});
 
 test("checkDispatcherWaitTimeout accepts the turn ceiling and rejects above it", () => {
   checkDispatcherWaitTimeout(86400000);

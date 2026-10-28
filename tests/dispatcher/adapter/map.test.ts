@@ -107,6 +107,7 @@ const CONFIG = {
   inputAckTimeoutMs: 8000,
   connectTimeoutMs: 5000,
   cancelWaitTimeoutMs: 30000,
+  diffLogPath: "logs/dispatch-diff.jsonl",
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 } as const;
 

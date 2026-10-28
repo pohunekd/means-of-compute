@@ -95,6 +95,7 @@ test("a metered session records real counts", async () => {
         waitTimeoutMs: 1000,
         lostAfterUnreachable: 3,
         unreachableBackoffMs: 0,
+        nonTerminalPauseMs: 0,
         registryPath: join(dir, "registry.json"),
       };
       const control = createMemoryPort();
@@ -180,6 +181,7 @@ test("a lost session gets metered usage and is revoked", async () => {
         waitTimeoutMs: 1000,
         lostAfterUnreachable: 1,
         unreachableBackoffMs: 0,
+        nonTerminalPauseMs: 0,
         registryPath: join(dir, "registry.json"),
       };
       const control = createMemoryPort();
@@ -251,6 +253,7 @@ test("a provisional lost gets the measured zero row", async () => {
         waitTimeoutMs: 1000,
         lostAfterUnreachable: 1,
         unreachableBackoffMs: 0,
+        nonTerminalPauseMs: 0,
         registryPath: join(dir, "registry.json"),
       };
       const control = createMemoryPort();
@@ -305,6 +308,7 @@ test("a crash after settle replays to the same lost usage", async () => {
         waitTimeoutMs: 1000,
         lostAfterUnreachable: 2,
         unreachableBackoffMs: 0,
+        nonTerminalPauseMs: 0,
         registryPath: join(dir, "registry.json"),
       };
       const control = createMemoryPort();

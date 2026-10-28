@@ -99,7 +99,8 @@ for (const [name, value, key, fragment] of BAD_CASES) {
 
 test("diffLogPath is required", async () => {
   await withTempDir(async (dir) => {
-    const { diffLogPath: _omitted, ...without } = VALID;
+    const without: Record<string, unknown> = { ...VALID };
+    delete without["diffLogPath"];
     const path = await writeConfig(dir, without);
     let message = "";
     try {

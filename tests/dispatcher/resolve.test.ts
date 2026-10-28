@@ -22,6 +22,7 @@ import type {
 import { PortRejectedError, PortUnreachableError } from "../../src/dispatcher/port.js";
 import { gatePort } from "./gated-port.js";
 import type { GatedMethod } from "./gated-port.js";
+import { LedgerDataError } from "../../src/ledger/errors.js";
 
 const MODEL: ModelSelection = { providerId: "nvidia-build", model: "meta/muse-glimmer-30b" };
 
@@ -568,7 +569,8 @@ test("R9 a lost entry with its line unappended is completed first", async () => 
     } catch (error: unknown) {
       firstError = error;
     }
-    expect(firstError).toBeDefined();
+    expect(firstError).toBeInstanceOf(LedgerDataError);
+    expect((firstError as LedgerDataError).message).toMatch(/cannot open lock \(EACCES\)$/);
     await chmod(ledgerDir, 0o755);
     await chmod(blockedPath, 0o644);
     const stored = await readRegistry(join(dir, "registry.json"));
@@ -751,7 +753,8 @@ test("R11 a run after a crash before the append completes it", async () => {
     } finally {
       await chmod(ledgerDir, 0o755);
     }
-    expect(firstError).toBeDefined();
+    expect(firstError).toBeInstanceOf(LedgerDataError);
+    expect((firstError as LedgerDataError).message).toMatch(/cannot open lock \(EACCES\)$/);
     const second = await dispatcher.resolve("demo-item:0");
     expect(second.outcome).toBe("already-resolved");
     if (second.outcome !== "already-resolved") {

@@ -9,7 +9,18 @@
     "name": { "type": "string", "minLength": 1 },
     "baseUrl": { "type": "string", "format": "uri" },
     "baseUrlEnv": { "type": "string" },
-    "model": { "type": "string", "minLength": 1 },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "enum": [
+        "muse-spark-1.3-contributor",
+        "muse-wonder-1.0",
+        "meta/muse-glimmer-30b",
+        "meta-models/muse-spark-open-1026",
+        "muse-glimmer-30b",
+        "muse-spark-open-1026"
+      ]
+    },
     "apiKeyEnv": { "type": "string" },
     "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 600000 },
     "pricing": {

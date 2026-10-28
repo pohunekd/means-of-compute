@@ -627,7 +627,7 @@ test("pricing: stale same-id copy next to the descriptor has no effect", async (
       id: "live-api",
       name: "Live",
       baseUrl: "https://live.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { inputPer1M: 1, outputPer1M: 2 },
     };
@@ -635,7 +635,7 @@ test("pricing: stale same-id copy next to the descriptor has no effect", async (
       id: "live-api",
       name: "Stale",
       baseUrl: "https://stale.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     };
@@ -657,7 +657,7 @@ test("pricing: symlink to a shared descriptor is read", async () => {
       id: "linked-api",
       name: "Linked",
       baseUrl: "https://linked.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { inputPer1M: 3, outputPer1M: 4 },
     };
@@ -679,7 +679,7 @@ test("pricing: null or array pricing block exits 2", async () => {
       id: "null-api",
       name: "Null",
       baseUrl: "https://null.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
     };
     await Bun.write(join(dir, "null-api.json"), JSON.stringify({ ...base, pricing: null }));
@@ -709,7 +709,7 @@ test("pricing: price key outside pricing does not fill a missing price", async (
       id: "outer-api",
       name: "Outer",
       baseUrl: "https://outer.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { outputPer1M: 0.2 },
       legacy: { inputPer1M: 0 },
@@ -734,7 +734,7 @@ test("pricing: 1e-7 price exits 2", async () => {
       id: "tiny-api",
       name: "Tiny",
       baseUrl: "https://tiny.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { inputPer1M: 1e-7, outputPer1M: 0 },
     };
@@ -775,7 +775,7 @@ test("pricing: descriptor id must match the file name", async () => {
       id: "other-api",
       name: "Other",
       baseUrl: "https://other.example",
-      model: "m",
+      model: "muse-glimmer-30b",
       timeoutMs: 10000,
       pricing: { inputPer1M: 1, outputPer1M: 2 },
     };

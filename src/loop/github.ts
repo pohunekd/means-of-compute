@@ -92,10 +92,22 @@ function redact(token: string, value: string): string {
   return token.length === 0 ? value : value.split(token).join("[redacted]");
 }
 
+// R2-1 keeps at most 300 bytes and never ends in a cut-made U+FFFD.
+export function utf8Prefix(text: string, max: number): string {
+  const buf = Buffer.from(text, "utf8");
+  if (buf.length <= max) {
+    return text;
+  }
+  let end = max;
+  while (end > 0 && ((buf[end] ?? 0) & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return buf.subarray(0, end).toString("utf8");
+}
+
 // E2 keeps the first 300 bytes of stderr after redacting the token.
 function stderrPrefix(token: string, stderr: string): string {
-  const clean = redact(token, stderr);
-  return Buffer.from(clean, "utf8").subarray(0, 300).toString("utf8");
+  return utf8Prefix(redact(token, stderr), 300);
 }
 
 async function runGh(

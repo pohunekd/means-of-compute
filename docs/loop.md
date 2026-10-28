@@ -84,3 +84,24 @@ markers, and pinned merges; rule 3 stays in PR 5.
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.
+
+## Sandbox stub (PR 4)
+
+`src/loop/git.ts` runs the loop's git calls with a fixed env, no shell,
+each child in its own process group killed at the deadline, and exports
+`fetchRefs`, `remoteBranchSha`, `revParse`, `isAncestor` and
+`trialMerge`; it needs absolute `dir` and `scratchDir`. `trialMerge`
+builds the result, runs step-6 cleanup, then returns it with the
+`cleanupFailed` the cleanup set; steps 1 to 5 share one
+`start + timeoutMs` deadline, and a git call of steps 1 to 4 past it
+gives `reason: "timeout"` with `step: null` while a step command past
+it gives `step: <index>`; step 6 shares `cleanupStart + timeoutMs`.
+A `GitError` from `git.ts` maps to `rejected` (`failed`, rc 128) or
+`unavailable` (other); a non-zero rc of the stub's own git commands in
+a port call is `rejected`, a timeout is `unavailable`; the `mergePull`
+scratch cleanup is best effort and never changes the result.
+`src/loop/stub/github.ts` implements `GitHubPort` over a sandbox
+`origin.git` with absolute dirs and async ports; `detail` and the gh
+`stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step is
+`step-failed` with `rc: null`; merge rc 1 without the conflict line is
+`GitError` `failed`.

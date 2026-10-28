@@ -198,6 +198,13 @@ describe("mergeStep", () => {
     ).toEqual({
       kind: "ready",
     });
+    expect(mergeStep({ ...base, ci: "pending" as const, verdict: { kind: "missing" } })).toEqual({
+      kind: "ci",
+      status: "pending",
+    });
+    expect(
+      mergeStep({ ...base, ci: "pending" as const, verdict: { kind: "findings", verdict: clean } }),
+    ).toEqual({ kind: "ci", status: "pending" });
   });
 });
 

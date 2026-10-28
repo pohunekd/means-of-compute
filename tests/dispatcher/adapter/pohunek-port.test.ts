@@ -120,7 +120,7 @@ test("a resume start sends branch_source remote and reports the base commit", as
   }
 });
 
-test("host-unsupported makes no session call", async () => {
+test("host-unsupported on the create path makes no session.new", async () => {
   const { fake, log, port } = setup();
   try {
     fake.setCapabilities("laptop-a", { git_available: false });
@@ -134,7 +134,8 @@ test("host-unsupported makes no session call", async () => {
       (cause: unknown): unknown => cause,
     );
     expect(matched_1).toMatchObject({ code: "host-unsupported" });
-    expect(methodNames(fake, "laptop-a")).not.toContain("session.list");
+    expect(methodNames(fake, "laptop-a")).toContain("session.list");
+    expect(methodNames(fake, "laptop-a")).not.toContain("session.new");
     expect(eventsOf(log)).toContain("adapter-host-unsupported");
     expect(log.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
       "git_available",
@@ -179,12 +180,29 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
     expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(1);
     const observed = await port.wait(ref, 1000, null);
     expect(observed).toEqual(cancelled);
-    const startError: unknown = await port.start(request()).then(
-      (): unknown => "unexpected success",
-      (cause: unknown): unknown => cause,
-    );
-    expect(startError).toMatchObject({ code: "host-unsupported" });
-    expect(eventsOf(log)).toContain("adapter-host-unsupported");
+    const freshLog: AdapterLogEvent[] = [];
+    const fresh = createPohunekPort(CONFIG, {
+      connector: fake.connector,
+      log: (event) => {
+        freshLog.push(event);
+      },
+    });
+    try {
+      const replayed = await fresh.start(request());
+      expect(replayed.sessionId).toBe(handle.sessionId);
+      expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
+      const noBound = await fresh.start(request({ requestId: "req-2" })).then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+      expect(noBound).toMatchObject({ code: "host-unsupported" });
+      expect(eventsOf(freshLog)).toContain("adapter-host-unsupported");
+      expect(freshLog.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
+        "agent_runtime",
+      );
+    } finally {
+      await fresh.close();
+    }
   } finally {
     await teardown(fake, port);
   }
@@ -322,6 +340,70 @@ test("an unreachable accept write is voided on replay (A4)", async () => {
     const handle = await port.start(request());
     expect(handle.sessionId).toBe("fake-2");
     expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a replayed start returns the accepted session although the preflight now fails (R2-H1)", async () => {
+  const { fake, port } = setup();
+  try {
+    const first = await port.start(request());
+    const second = createPohunekPort(CONFIG, {
+      connector: fake.connector,
+      log: () => {},
+    });
+    try {
+      fake.setCapabilities("laptop-a", {
+        runtimes: [{ agent: CONFIG.agentProfile, available: false }],
+      });
+      const handle = await second.start(request());
+      expect(handle.sessionId).toBe(first.sessionId);
+      expect(
+        methodNames(fake, "laptop-a").filter((method) => method === "session.new"),
+      ).toHaveLength(1);
+      expect(fake.sessions("laptop-a")[0]?.state).toBe("running");
+    } finally {
+      await second.close();
+    }
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a replayed start voids a pending match although the preflight now fails (R2-H1)", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.new", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: true,
+    });
+    const timedOut: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(timedOut).toBeInstanceOf(PortUnreachableError);
+    const second = createPohunekPort(CONFIG, {
+      connector: fake.connector,
+      log: () => {},
+    });
+    try {
+      fake.setCapabilities("laptop-a", {
+        runtimes: [{ agent: CONFIG.agentProfile, available: false }],
+      });
+      const voided: unknown = await second.start(request()).then(
+        (): unknown => "unexpected success",
+        (cause: unknown): unknown => cause,
+      );
+      expect(voided).toBeInstanceOf(PortRejectedError);
+      expect(voided).toMatchObject({ code: "start-unconfirmed" });
+      const sessions = fake.sessions("laptop-a");
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.state).toBe("stopped");
+      expect(sessions[0]?.metadata?.[MOC_METADATA.requestId]).toBeUndefined();
+    } finally {
+      await second.close();
+    }
   } finally {
     await teardown(fake, port);
   }

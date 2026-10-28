@@ -280,7 +280,7 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
   try {
     return await runResolveCommand(dargs, withRuntime, {
       stdout: (line: string): void => {
-        process.stdout.write(line);
+        process.stdout.write(`${line}\n`);
       },
       stderr: (line: string): void => {
         console.error(line);

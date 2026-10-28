@@ -217,6 +217,10 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
     };
   };
   expect(call.id).toBe(2);
+  if (call.result.structuredContent.ok !== true) {
+    console.log(`DEBUG-H1 payload: ${JSON.stringify(call.result.structuredContent).slice(0, 500)}`);
+    console.log(`DEBUG-H1 stderr: ${stderr.slice(0, 500)}`);
+  }
   expect(call.result.structuredContent.ok).toBe(true);
   expect(call.result.structuredContent.hosts.length).toBe(6000);
   expect(stdout.length).toBeGreaterThan(300000);

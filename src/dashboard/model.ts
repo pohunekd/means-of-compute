@@ -183,25 +183,24 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
       byAlias.set(observation.hostAlias, observation);
     }
   }
-  const runningFor = (alias: string): Cell => {
+  const runningFor = (alias: string, maxConcurrentAgents: number | null): Cell => {
     if (!inputs.registry.ok) {
       return failureCell(inputs.registry.failure);
     }
-    return textCell(groupDigits(openSessionCount(inputs.registry.value, alias)));
+    const count = groupDigits(openSessionCount(inputs.registry.value, alias));
+    return maxConcurrentAgents === null
+      ? textCell(count)
+      : textCell(`${count} of ${groupDigits(maxConcurrentAgents)}`);
   };
-  const runningReportedFor = (alias: string, maxConcurrentAgents: number): Cell =>
-    textCell(
-      `${groupDigits(inputs.registry.ok ? openSessionCount(inputs.registry.value, alias) : 0)} of ${groupDigits(maxConcurrentAgents)}`,
-    );
   const rows = ordered.map((alias): readonly Cell[] => {
     const observation = byAlias.get(alias);
     if (!inputs.hosts.ok) {
       const failure = failureCell(inputs.hosts.failure);
-      return [aliasesCell([alias]), failure, failure, runningFor(alias), failure];
+      return [aliasesCell([alias]), failure, failure, runningFor(alias, null), failure];
     }
     if (observation === undefined) {
       const missing = noDataCell("not in this collector round");
-      return [aliasesCell([alias]), missing, missing, runningFor(alias), missing];
+      return [aliasesCell([alias]), missing, missing, runningFor(alias, null), missing];
     }
     if (observation.kind === "unavailable") {
       const state = textCell(`unavailable: ${CAUSE_LABELS[observation.cause]}`);
@@ -209,11 +208,11 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
         aliasesCell([alias]),
         state,
         state,
-        runningFor(alias),
+        runningFor(alias, null),
         textCell(observation.observedAt),
       ];
     }
-    const running = runningReportedFor(alias, observation.capacity.policy.maxConcurrentAgents);
+    const running = runningFor(alias, observation.capacity.policy.maxConcurrentAgents);
     const state = observation.capacity.idle
       ? textCell("idle")
       : textCell(`not idle: ${observation.capacity.idleReason}`);

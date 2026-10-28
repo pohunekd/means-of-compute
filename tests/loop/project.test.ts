@@ -148,9 +148,22 @@ test("a start-rejected round on the preferred model never counts toward attempts
     ],
   });
   const p = project(base, li, CTX);
-  // One failure-routed round plus the open preferred session; the
-  // excluded routings never count.
+  // One preferred round plus the open preferred session; start-rejected
+  // and lost never count.
   expect(p.modelRouting.attempts).toBe(2);
+});
+
+test("ci-timeout and trial-failed count while start-rejected and lost never do (P10)", () => {
+  const base = item();
+  const li = loopItem({
+    rounds: [
+      record({ round: 0, model: PREFERRED, outcome: "ci-timeout", attempt: "failure" }),
+      record({ round: 1, model: PREFERRED, outcome: "trial-failed", attempt: "failure" }),
+      record({ round: 2, model: PREFERRED, outcome: "start-rejected", attempt: "failure" }),
+      record({ round: 3, model: PREFERRED, outcome: "lost", attempt: "lost" }),
+    ],
+  });
+  expect(project(base, li, CTX).modelRouting.attempts).toBe(2);
 });
 
 test("attempts count the open session once, stall counts the retry only, branch needs a head (C5)", () => {
@@ -228,8 +241,9 @@ test("reconcile on an unknown id throws the rule (a) text (C6)", async () => {
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
-    expect(String(error)).toContain('rule (a): item "gh-moc-9"');
-    expect(String(error)).toContain(`work store ${storePath}: rule (a)`);
+    expect((error as Error).message).toBe(
+      `work store ${storePath}: rule (a): item "gh-moc-9" is not in the work store`,
+    );
   });
 });
 

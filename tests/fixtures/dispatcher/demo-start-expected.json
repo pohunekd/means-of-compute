@@ -1,0 +1,17 @@
+{
+  "requestId": "demo-item:0",
+  "workItemId": "demo-item",
+  "repo": "example/demo",
+  "hostAlias": "laptop-a",
+  "branch": "moc/demo-item",
+  "baseRef": "origin/main",
+  "resume": false,
+  "model": {
+    "providerId": "nvidia-build",
+    "model": "meta/muse-glimmer-30b"
+  },
+  "brief": {
+    "briefSha256": "53d6660c354f94b92d7ee16e6e9872cf96f08d605a756b0f8ef60ba3a72f96c8",
+    "briefBytes": 220
+  }
+}

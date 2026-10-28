@@ -1,0 +1,13 @@
+{
+  "listenEnv": "MOC_DASHBOARD_LISTEN",
+  "listenAlias": "dashboard",
+  "logPath": "logs/dashboard.jsonl",
+  "maxRequestBytes": 1024,
+  "idleTimeoutSec": 10,
+  "workRowLimit": 50,
+  "baselines": {
+    "frontierTokens": null,
+    "cloudSandboxHour": null,
+    "ownedHostHour": null
+  }
+}

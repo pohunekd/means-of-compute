@@ -31,6 +31,23 @@ README.
 5. The **ledger** stores a `UsageRecord` per item; the **Budget guard** reads it before
    every new model session; the **dashboard** shows fleet, work, usage, and savings.
 
+## Dashboard
+
+The factory process runs a second `Bun.serve` listener for the
+operator dashboard: a loopback-only HTTP page rendered server-side from a
+pure model. Inputs are the ledger file, the verdict store, config prices
+and caps, the baseline config, and host observations from a
+`HostStateCollector` round of this request (`null` in PR 1, so Fleet state
+stays no-data). No probe, meter, placement, registry, or host-map module
+runs behind the page; nothing under `src/dashboard/` reads `hosts.json` or
+`process.env`. The model is pure (no clock, no I/O) and the renderer
+emits static HTML: no client JavaScript, no auto-refresh, no external
+resource, no inline style (one hashed `<style>` block under a
+`default-src 'none'` CSP), every dynamic string escaped and every host
+cell a checked alias. See [dashboard.md](dashboard.md) for the listener,
+loopback rule, config keys, baselines, panel rules, money arithmetic, and
+the failure table.
+
 ## Auditor
 
 `runAudit` in `src/auditor/audit.ts` is a read-only check of one revision
@@ -106,6 +123,39 @@ host, 2 on any input or config error.
   `@pohunek/sdk`; no other module imports it.
 - Contracts live under `contracts/` and are versioned by tag (`contracts-v1`).
 - Providers, prices, caps, and host aliases are configuration in `config/`.
+
+## Metering proxy
+
+All model traffic from worker sessions flows through the metering proxy
+(`src/meter/`). The proxy holds the provider keys: the session receives
+its caller token through session metadata, and the token is valid only
+while its grant is open. Provider keys never appear in the usage
+log, the factory log, or error responses. See [meter.md](meter.md) for the proxy, the
+config keys, the env vars, the usage-log format, and the operator secret
+command.
+
+Call authorization runs in the order A1 to A5: the bearer's MAC, the
+grant exists, the grant is not closed, an unbound grant is admitted only
+within `unboundGrantTtlMs` of its last open, and the source address is in
+the host's list.
+
+Only `model` is rewritten, to the grant's descriptor model. The caller
+must send `model: sessionModelId`, and anything else gets 400
+`model-mismatch`.
+
+Error mapping: a connection failure gives 502, not billed; a missing
+first byte gives 504, billed with null counts; idle and total timeouts
+and broken or aborted streams after the headers error the caller's
+stream, billed; non-2xx statuses pass through, not billed.
+
+Drain abort: `closed-abort` is billed — with the seen counts, else null.
+
+Join: one `PortUsage`, with one token per (provider, model), over the
+replayed-plus-appended index. A `call-start` without an end counts as one
+request with null counts.
+
+`settle` closes the grant, waits up to `drainTimeoutMs`, aborts the
+rest, awaits every end, then joins.
 
 The component list and the rules behind these boundaries are in
 [.agents/instructions/project.md](../.agents/instructions/project.md).

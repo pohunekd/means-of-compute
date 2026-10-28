@@ -1,0 +1,7 @@
+[
+  {
+    "status": 500,
+    "sseChunks": ["{\"error\":{\"message\":\"x\"}}"],
+    "holdAfterChunks": 0
+  }
+]

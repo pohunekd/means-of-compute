@@ -268,11 +268,7 @@ async function readDescriptorApiKeyEnv(path: string): Promise<string> {
   }
   const descriptor = raw as Record<string, unknown>;
   if (descriptor["id"] !== COORD_PROVIDER_ID) {
-    throw wrapped(
-      path,
-      "providerId",
-      new Error(`${label} ${file}: id is not meta-api`),
-    );
+    throw wrapped(path, "providerId", new Error(`${label} ${file}: id is not meta-api`));
   }
   if (descriptor["model"] !== COORD_MODEL) {
     throw wrapped(

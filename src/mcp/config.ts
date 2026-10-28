@@ -84,7 +84,7 @@ function requiredCallers(record: Record<string, unknown>, path: string): readonl
   ) {
     throw new Error(`MCP config ${path}: invalid required key "callers"`);
   }
-  return [...(value as string[])];
+  return [...value];
 }
 
 export async function loadMcpConfig(path: string = MCP_CONFIG_PATH): Promise<McpConfig> {

@@ -597,8 +597,7 @@ test("L1: --phase-critical requires --pull (mutation: drop the CLI check)", asyn
     }
     expect(run.code).toBe(2);
     expect(run.stderr.trim()).toBe("audit: --phase-critical requires --pull");
-    // The flag check runs before any model call, so the loopback stub
-    // never started: parsing rejects before the env is even built.
+    // The flag check runs before any model call, so server.requests() has length 0.
     expect(run.stdout).toBe("");
   } finally {
     tree.cleanup();
@@ -625,7 +624,7 @@ test("L2: phase-critical re-post refuses a general verdict (mutation: drop the P
     const callsBefore = await ghCommentCalls(tree);
     const ledgerBefore = await Bun.file(join(tree.dir, "ledger.jsonl")).text();
     // The re-post with the opt-in refuses the stored Spark verdict:
-    // no model call, no gh call, no new ledger line.
+    // no new loopback request (length before equals length after).
     const second = await runCliWithGh(
       tree,
       repo,

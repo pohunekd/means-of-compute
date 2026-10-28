@@ -343,8 +343,13 @@ test("U6 a new item depending on a stored item is accepted (U6)", async () => {
 
 test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
   const fixture = await loadFixture("tests/fixtures/mcp/good-dag.json");
-  const items = [fixture.items[0], fixture.items[1], { ...fixture.items[0] }];
-  const { structured, lines } = await setup({ items });
+  const items = [
+    fixture.items[0],
+    fixture.items[1],
+    { ...(fixture.items[0] as Record<string, unknown>), dependencies: ["demo-a"] },
+    { ...(fixture.items[1] as Record<string, unknown>), id: "demo-d" },
+  ];
+  const { structured, store, lines } = await setup({ items });
   expect(structured["ok"]).toBe(false);
   expect(errorOf(structured)).toEqual({
     code: "duplicate-id",
@@ -353,6 +358,7 @@ test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
     id: "demo-a",
     indices: [0, 2],
   });
+  expect(store).toBeNull();
   const ends = lines.filter(
     (entry) => (entry as { event?: string }).event === "call-end",
   ) as Record<string, unknown>[];
@@ -400,11 +406,12 @@ test("U8 every non-initial loop field is refused with its field (U8)", async () 
     ["dod[0].done", true],
   ];
   for (const [field, value] of cases) {
-    const { structured } = await setup({ items: fieldCase(field, value) });
+    const { structured, store } = await setup({ items: fieldCase(field, value) });
     expect(structured["ok"]).toBe(false);
     const error = errorOf(structured);
     expect(error["code"]).toBe("loop-state-not-initial");
     expect(error["field"]).toBe(field);
+    expect(store).toBeNull();
   }
 });
 
@@ -418,6 +425,7 @@ test("U9 each removed predicate is refused (U9)", async () => {
     code: "repo-not-configured",
     message: "item demo-a: repo pohunekd/means-of-compute is not configured",
   });
+  expect(repoCase.store).toBeNull();
 
   const badModel = [
     {
@@ -431,10 +439,12 @@ test("U9 each removed predicate is refused (U9)", async () => {
     code: "model-not-allowed",
     message: "item demo-a: model unknown/model is not allowed",
   });
+  expect(modelCase.store).toBeNull();
 
   const big = [{ ...first, goal: `x`.repeat(20000) }, base.items[1]];
   const bigCase = await setup({ items: big });
   expect(errorOf(bigCase.structured)["code"]).toBe("item-too-large");
+  expect(bigCase.store).toBeNull();
 
   const missing = [{ ...first }];
   delete missing[0]?.["title"];
@@ -444,6 +454,7 @@ test("U9 each removed predicate is refused (U9)", async () => {
     path: "/",
     keyword: "required",
   });
+  expect(contractCase.store).toBeNull();
 
   const many: Record<string, unknown>[] = [];
   for (let n = 0; n < 51; n += 1) {
@@ -457,6 +468,7 @@ test("U9 each removed predicate is refused (U9)", async () => {
     path: "/items",
     keyword: "maxItems",
   });
+  expect(maxCase.store).toBeNull();
 });
 
 test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
@@ -465,7 +477,7 @@ test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
     string,
     unknown
   >;
-  committed["maxStoreItems"] = 1;
+  committed["maxStoreItems"] = 2;
   await writeTestFile(env.workConfigPath, committed);
   const { log, lines } = memoryLog();
   const tools = createTools({
@@ -494,29 +506,56 @@ test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
     }),
   );
   const fixture = await loadFixture("tests/fixtures/mcp/good-dag.json");
-  const raw = await protocol.handleLine(
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 1,
+    items: [fixture.items[0]],
+    submissions: [
+      {
+        submissionId: "sub-0123456789abcdef",
+        digest: `sha256:${"0".repeat(64)}`,
+        itemIds: ["demo-a"],
+        caller: "seed",
+        submittedAt: "2026-10-28T10:00:00.000Z",
+      },
+    ],
+  });
+  const call = (id: number, args: unknown): string =>
     JSON.stringify({
       jsonrpc: "2.0",
-      id: 2,
+      id,
       method: "tools/call",
-      params: { name: "submit_work", arguments: { items: fixture.items } },
-    }),
-  );
+      params: { name: "submit_work", arguments: args },
+    });
+  const first = JSON.parse(
+    (await protocol.handleLine(call(2, { items: [fixture.items[1]] }))) as string,
+  ) as {
+    result: { structuredContent: Record<string, unknown> };
+  };
+  expect(first.result.structuredContent["ok"]).toBe(true);
+  expect(first.result.structuredContent["replayed"]).toBe(false);
+  const raw = await protocol.handleLine(call(3, { items: [fixture.items[2]] }));
   const parsed = JSON.parse(raw as string) as {
     result: { structuredContent: Record<string, unknown> };
   };
   expect(parsed.result.structuredContent["ok"]).toBe(false);
   expect(errorOf(parsed.result.structuredContent)).toEqual({
     code: "store-full",
-    message: "store holds at most 1 items",
+    message: "store holds at most 2 items",
     retryable: false,
-    limit: 1,
+    limit: 2,
   });
   const ends = lines.filter(
     (entry) => (entry as { event?: string }).event === "call-end",
   ) as Record<string, unknown>[];
-  expect(ends.length).toBe(1);
-  expect(ends[0]?.["summary"]).toEqual({ limit: 1 });
+  expect(ends.length).toBe(2);
+  expect(ends[1]?.["summary"]).toEqual({ limit: 2 });
+  const store = JSON.parse(await Bun.file(env.storePath).text()) as {
+    revision: number;
+    items: unknown[];
+  };
+  expect(store.revision).toBe(2);
+  expect(store.items.length).toBe(2);
 });
 
 test("U10 held lock is store-busy with retryable true (U10)", async () => {

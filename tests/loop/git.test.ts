@@ -14,6 +14,7 @@ import {
   trialMerge,
   type GitDeps,
   type TrialInput,
+  type TrialResult,
 } from "../../src/loop/git.js";
 
 const trackedPids: number[] = [];
@@ -397,8 +398,8 @@ describe("git runner", () => {
       await writeFile(
         join(repos.root, "step-hang.js"),
         `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
-          `require("node:child_process").execSync(` +
-          `\"sh -c 'sleep 30 & echo \\$! > ${gcFile}; wait'\", { stdio: "ignore" });\n`,
+          'require("node:child_process").execSync(\n' +
+          `  "sh -c 'sleep 30 & echo \\$! > ${gcFile}; wait'", { stdio: "ignore" });\n`,
         "utf8",
       );
       const result = await trialMerge(
@@ -626,9 +627,9 @@ describe("git runner", () => {
         }),
       );
       const elapsed = Date.now() - t0;
-      expect(result.reason ?? "passed").toBe("timeout");
       expect(result.passed).toBe(false);
       if (!result.passed) {
+        expect(result.reason).toBe("timeout");
         expect(result.step).toBeNull();
         expect(result.rc).toBeNull();
       }

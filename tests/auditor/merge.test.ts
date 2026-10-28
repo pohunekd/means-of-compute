@@ -291,3 +291,48 @@ test("M-W3: a Wonder 429 is exit 4 with no fallback and no ledger entry (mutatio
     run.cleanup();
   }
 });
+
+test("D1: invalid work item is reported before phase-critical check", async () => {
+  const setup = await setupMergeCase("auditor-merge-d1-");
+  const restoreEnv = applyTestEnv();
+  const general = await startLoopback("tests/auditor/recordings/clean.json");
+  process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(general.port)}`;
+  process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(general.port)}`;
+  const cleanup = (): void => {
+    void general.stop();
+    restoreEnv();
+    setup.cleanupFiles();
+  };
+  try {
+    const config = await loadAuditorConfig();
+    const gate = admittingGate(process.cwd());
+    let error: unknown;
+    try {
+      await runAudit(
+        {
+          item: { id: "bad" } as any,
+          repoDir: setup.repoDir,
+          ref: "demo-good",
+          baseRef: "main",
+          pullNumber: null,
+          phaseCritical: true,
+          authorModels: [GLIMMER],
+        },
+        {
+          config: { ...config, verdictDir: setup.verdictDir },
+          git: createReadOnlyGit(setup.repoDir),
+          budget: gate,
+          call: setup.counting,
+          ledgerPath: setup.ledgerPath,
+          now: () => new Date("2026-10-27T10:00:00.000Z"),
+        },
+      );
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^invalid work item /);
+  } finally {
+    cleanup();
+  }
+});

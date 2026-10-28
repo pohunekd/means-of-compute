@@ -108,12 +108,6 @@ async function recordAuditUsage(
 }
 
 export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
-  if (typeof input.phaseCritical !== "boolean") {
-    throw new Error(`invalid phaseCritical ${JSON.stringify(input.phaseCritical)}`);
-  }
-  if (input.phaseCritical && input.pullNumber === null) {
-    throw new Error("phase-critical audit needs a pull request");
-  }
   if (!isWorkItem(input.item)) {
     throw new Error(`invalid work item ${JSON.stringify(contractErrors("work-item", input.item))}`);
   }
@@ -122,6 +116,12 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     (!Number.isSafeInteger(input.pullNumber) || input.pullNumber < 1)
   ) {
     throw new Error(`invalid pull number ${JSON.stringify(input.pullNumber)}`);
+  }
+  if (typeof input.phaseCritical !== "boolean") {
+    throw new Error(`invalid phaseCritical ${JSON.stringify(input.phaseCritical)}`);
+  }
+  if (input.phaseCritical && input.pullNumber === null) {
+    throw new Error("phase-critical audit needs a pull request");
   }
 
   let headSha: string;

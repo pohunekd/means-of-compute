@@ -111,9 +111,7 @@ function mcpFiles(dir: string): string[] {
 }
 
 test("specsOf reads commented and namespace import specs (X4 Y5)", () => {
-  expect(specsOf('import(/* x */ "../approvals/decide.ts")')).toContain(
-    "../approvals/decide.ts",
-  );
+  expect(specsOf('import(/* x */ "../approvals/decide.ts")')).toContain("../approvals/decide.ts");
   expect(specsOf('import * as d from /* x */ "../approvals/decide.ts"')).toContain(
     "../approvals/decide.ts",
   );
@@ -132,7 +130,7 @@ test("loaderUse flags every loader spelling (X4 Y1)", () => {
     'import.meta["require"]("x")',
     "const { require: r } = import.meta",
     "const meta = import.meta",
-    "const load = require; load(\"x\")",
+    'const load = require; load("x")',
     'require.call(undefined, "x")',
     "const { require: r } = import /* x */.meta",
     'process.getBuiltinModule("node:module")',

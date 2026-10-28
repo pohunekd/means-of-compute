@@ -81,6 +81,15 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `src/loop/rounds.ts` appends the round record, then the result line, logs `round-closed`, and returns the stall decision; `appendMissingResults` backfills missing lines.
 `src/loop/approvals-view.ts` re-reads the requests file on every call and reports the pause state and the merge triple match.
 
+## Driver start (PR 5c)
+
+`src/loop/start.ts` drives work item starts from claim to timeout:
+
+- `claimStart` checks the rejection bound, snapshots the store entry, creates the loop item with `initialLoopItem`, and writes the state before reconciling the store. `driveStart` passes the stored start intent to `dispatcher.start` untouched.
+- `rejectStart` logs `start-rejected`, excludes the host, and closes a start-rejected round; when the transaction rejections reach `maxStartRejections`, a second rejection parks the item as operator `start-rejected` instead of recording another round.
+- Refused starts idle with a `budgetBackoffMs` backoff; a failing gate logs `budget-gate-error`. An unreachable host sleeps `unreachableRetryMs` once, then proceeds with the same intent.
+- `watchSession` classifies results through the terminal table and skips stale results whose request id no longer matches the loop run. `checkSessionTimeout` reads the durable registry `startedAt` and cancels the overdue session before the watch closes the round.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.

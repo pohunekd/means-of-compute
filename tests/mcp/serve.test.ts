@@ -340,12 +340,30 @@ test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
     { cwd: process.cwd(), stdin: "pipe", stdout: "pipe", stderr: "pipe" },
   );
   (badCaller.stdin as unknown as { end(): void }).end();
-  const [badCallerCode, badCallerOut] = await Promise.all([
+  const [badCallerCode, badCallerOut, badCallerErr] = await Promise.all([
     badCaller.exited,
     new Response(badCaller.stdout).text(),
+    new Response(badCaller.stderr).text(),
   ]);
   expect(badCallerCode).toBe(2);
   expect(badCallerOut).toBe("");
+  // The exact stderr line for an unknown caller (H6, R2-5): the thrown
+  // message carries no prefix, the printer adds it once (T3.1).
+  expect(badCallerErr.trim()).toBe('mcp: unknown caller "intruder"');
+
+  const badArg = Bun.spawn(
+    [process.execPath, "src/mcp/serve.ts", "--caller", "coordinator", "--frobnicate"],
+    { cwd: process.cwd(), stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+  );
+  (badArg.stdin as unknown as { end(): void }).end();
+  const [badArgCode, badArgOut, badArgErr] = await Promise.all([
+    badArg.exited,
+    new Response(badArg.stdout).text(),
+    new Response(badArg.stderr).text(),
+  ]);
+  expect(badArgCode).toBe(2);
+  expect(badArgOut).toBe("");
+  expect(badArgErr.trim()).toBe('mcp: unknown argument "--frobnicate"');
 
   const missingVerdict = await mkdtemp(join(tmpdir(), "mcp-sv3-missing-"));
   const configPath = join(missingVerdict, "mcp.json");

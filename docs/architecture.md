@@ -8,7 +8,7 @@ Models: Muse Glimmer 30B (open weights, NVIDIA Build) is the main coder; Muse
 Spark is fallback, planner and auditor. Every Muse Spark call uses
 `muse-spark-1.3-contributor`; Muse Code runs with
 `--model muse-spark-1.3-contributor --contributor-mode on`. Built by itself: see
-README.
+README. At runtime every model call goes to a Meta model: the provider schema allows only the ids in `config/providers/schema.json`.
 
 ## Flow
 

@@ -13,6 +13,7 @@ import {
   type HostStateLogEvent,
 } from "../../src/hoststate/collector.js";
 import { createMemoryHostStatePort } from "../../src/hoststate/memory-port.js";
+import type { HostStatePort } from "../../src/hoststate/port.js";
 import type { PlacementConfig } from "../../src/placement/config.js";
 import { placeObserved } from "../../src/placement/observed.js";
 import {
@@ -596,5 +597,33 @@ describe("collector error hygiene", () => {
     const error = new HostStateError("daemon-rejected", "route: north !!!");
     expect(error.code).toBeNull();
     expect(error.message).toBe("daemon-rejected");
+  });
+
+  test("duplicate hosts reject before any read (mutation: check after reads start)", async () => {
+    let reads = 0;
+    const port: HostStatePort = {
+      hosts: () => ["host-a", "host-a"],
+      read: () => {
+        reads += 1;
+        return Promise.reject(new HostStateError("host-unreachable", null));
+      },
+      close: () => Promise.resolve(),
+    };
+    const deps: CollectorDeps = {
+      port,
+      config: CONFIG,
+      now: () => new Date("2026-10-27T12:00:01.000Z"),
+      sleep: () => Promise.resolve(),
+      log: () => {},
+    };
+    const failure = await createCollector(deps)
+      .collect()
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("Duplicate host alias host-a");
+    expect(reads).toBe(0);
   });
 });

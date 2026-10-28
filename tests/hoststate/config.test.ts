@@ -179,7 +179,7 @@ describe("host-state package config", () => {
 
   test("long package.command throws", async () => {
     const path = await mutatePackage((pkg) => {
-      pkg["command"] = `${"a".repeat(33)}`;
+      pkg["command"] = "a".repeat(33);
     });
     expect(() => loadHostStateConfig(path)).toThrow(
       "config host-state.json: invalid package.command",

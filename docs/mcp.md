@@ -37,7 +37,7 @@ exits 1; a handler exception is a tool result, never an exit.
 `["2025-11-25","2025-06-18","2025-03-26","2024-11-05"]` is echoed, anything
 else falls back to `"2025-11-25"`. Only a non-string `clientInfo.name` is
 `-32602`; an empty name initializes with `client` null, like any other
-pattern mismatch. A hostile name fails the caller pattern and is logged
+pattern mismatch. A hostile name fails the client pattern `^[\x20-\x7e]{1,64}$` and is logged
 as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the

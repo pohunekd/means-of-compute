@@ -637,3 +637,57 @@ test("determinism: settle twice, restart, settle again", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("settleRequest closes an unbound grant and joins its calls", async () => {
+  // Open a grant and call it without binding: settleRequest closes the
+  // open grant and joins the call, so the stranded billing survives.
+  await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, events }) => {
+    await meter.openGrant({
+      requestId: "w3-demo:0",
+      workItemId: "w3-demo",
+      hostAlias: "laptop-a",
+      providerId: "meta-api",
+      model: "muse-spark-1.3-contributor",
+    });
+    const resp = await post(meter, meter.tokenFor("w3-demo:0"), chatBody());
+    expect(resp.status).toBe(200);
+    await resp.text();
+    const usage = await meter.settleRequest("w3-demo:0", "lost");
+    expect(usage?.tokens).toEqual([
+      {
+        provider: "meta-api",
+        model: "muse-spark-1.3-contributor",
+        inputTokens: 1200,
+        outputTokens: 80,
+        requests: 1,
+        source: "meter-proxy",
+      },
+    ]);
+    expect(events.filter((e) => e.event === "grant-closed")).toHaveLength(1);
+  });
+});
+
+test("settle and settleRequest share one memo", async () => {
+  await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, logPath }) => {
+    const { sessionId } = await openBoundGrant(meter);
+    const resp = await post(meter, meter.tokenFor("w1-demo:0"), chatBody());
+    expect(resp.status).toBe(200);
+    await resp.text();
+    const first = await meter.settle(sessionId, "finished");
+    const second = await meter.settleRequest("w1-demo:0", "finished");
+    expect(second).toEqual(first);
+    expect((await readLogLines(logPath)).filter((l) => l.includes('"kind":"grant-close"'))).toHaveLength(
+      1,
+    );
+  });
+});
+
+test("settleRequest on an unknown request returns null", async () => {
+  await withMeter("tests/meter/recordings/stream-ok.json", async ({ meter, events }) => {
+    const usage = await meter.settleRequest("w9-demo:0", "lost");
+    expect(usage).toBeNull();
+    const unknown = events.filter((e) => e.event === "unknown-grant");
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]).toMatchObject({ requestId: "w9-demo:0" });
+  });
+});

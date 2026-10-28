@@ -611,6 +611,28 @@ test("a refused unbind keeps the provisional path (A8)", async () => {
   }
 });
 
+test("a start void on a missing session rejects without unbinding", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({ prompt_delivered: false }));
+    fake.failNext("laptop-a", "session.stop", { errCode: "session_not_found", apply: false });
+    fake.failNext("laptop-a", "session.set_metadata", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "prompt-not-acknowledged" });
+    expect(fake.calls("laptop-a").map((call) => call.method)).not.toContain(
+      "session.set_metadata",
+    );
+    expect(eventsOf(log)).toContain("adapter-start-void");
+    expect(eventsOf(log)).not.toContain("adapter-connection-dropped");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("a refused session.new leaves no binding (A9)", async () => {
   const { fake, port } = setup();
   try {

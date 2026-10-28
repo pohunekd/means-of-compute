@@ -186,10 +186,11 @@ async function clientFor(port: PortInternals, alias: string): Promise<Client> {
   }
 }
 
-// Stop then unbind one session: V1 stops the session (a missing session
-// counts as stopped); V2 clears the binding with the five void keys (a
-// missing session counts as unbound). Any other error becomes
-// void-incomplete. Returns normally; callers decide what to throw or log.
+// Stop then unbind one session: V1 stops the session; a missing session
+// returns "absent" at once and V2 never runs. V2 clears the binding with
+// the five void keys (a missing session counts as unbound). Any other
+// error becomes void-incomplete. Returns "stopped" or "absent"; callers
+// decide what to throw or log.
 async function stopAndUnbind(
   port: PortInternals,
   client: Client,
@@ -198,16 +199,17 @@ async function stopAndUnbind(
   requestId: string,
   code: string,
   unbind: boolean,
-): Promise<void> {
+): Promise<"stopped" | "absent"> {
   try {
     await client.call("session.stop", sessionId);
   } catch (error) {
     if (!isSessionNotFound(error)) {
       throw await voidError(port, alias, error);
     }
+    return "absent";
   }
   if (!unbind) {
-    return;
+    return "stopped";
   }
   try {
     await client.call("session.set_metadata", {
@@ -225,6 +227,7 @@ async function stopAndUnbind(
       throw await voidError(port, alias, error);
     }
   }
+  return "stopped";
 }
 
 // Void path V (3.5): stop first, then unbind, so a session is never unbound

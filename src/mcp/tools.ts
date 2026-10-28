@@ -6,6 +6,7 @@ import { readRegistry } from "../dispatcher/registry.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
 import { createAuditResultsTool, createListWorkTool } from "./read-tools.js";
+import { createSubmitWorkTool } from "./submit.js";
 import type {
   ToolContext,
   ToolDefinition,
@@ -155,5 +156,10 @@ export function createFleetStatusTool(paths: ToolPaths): ToolDefinition {
 }
 
 export function createTools(paths: ToolPaths): readonly ToolDefinition[] {
-  return [createFleetStatusTool(paths), createListWorkTool(paths), createAuditResultsTool(paths)];
+  return [
+    createFleetStatusTool(paths),
+    createListWorkTool(paths),
+    createAuditResultsTool(paths),
+    createSubmitWorkTool(paths),
+  ];
 }

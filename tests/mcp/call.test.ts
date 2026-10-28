@@ -76,7 +76,7 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
     expect(await Bun.file(pidFile).exists()).toBe(true);
     const pid = Number((await Bun.file(pidFile).text()).trim());
     expect(Number.isInteger(pid)).toBe(true);
-    expect(() => process.kill(pid, 0)).toThrow();
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
     const [out, err] = await Promise.all([
       new Response(proc.stdout as ReadableStream).text(),
       new Response(proc.stderr as ReadableStream).text(),
@@ -208,6 +208,24 @@ test("O5 extra positional and duplicate --config exit 2 (O5)", async () => {
   expect(dup.code).toBe(2);
   expect(dup.stdout).toBe("");
   expect(dup.stderr).toBe(usage);
+});
+
+test("E2 spawned mcp:call submit_work --file cyclic exits 3 with the cycle edge (E2)", async () => {
+  const env = await createMcpTestEnv("mcp-e2-");
+  await Bun.write(
+    env.storePath,
+    JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
+  );
+  await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
+  const result = await spawnCall([
+    "submit_work",
+    "--file",
+    "tests/fixtures/mcp/cyclic-dag.json",
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(result.code).toBe(3);
+  expect(result.stdout).toContain("cycle edge demo-cyc-c -> demo-cyc-a");
 });
 
 test("C2 usage and config errors map to exits 2 and 4 (C2)", async () => {

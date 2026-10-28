@@ -43,7 +43,7 @@ export async function createMcpTestEnv(prefix = "mcp-test-"): Promise<McpTestEnv
   await writeJson(workConfigPath, {
     ...committedWork,
     storePath,
-    factorySpecsPath: join(process.cwd(), "config", "factory-specs.json"),
+    factorySpecsPath: join(process.cwd(), "tests", "fixtures", "mcp", "demo", "factory-specs.json"),
   });
   const committedAuditor = await readCommittedJson("config/auditor.json");
   await writeJson(auditorConfigPath, { ...committedAuditor, verdictDir });

@@ -5,7 +5,9 @@ import {
   Client,
   ClientError,
   type AgentActivity,
+  type CommandRunResult,
   type ControlChannel,
+  type ErrorDetails,
   type HostCapabilities,
   type SessionDiffResult,
   type SessionInfo,
@@ -32,6 +34,9 @@ type FakeFailure =
   | { readonly error: ClientError; readonly apply: boolean }
   | { readonly errCode: string; readonly apply: boolean };
 
+export type FakeCommandOutcome =
+  { readonly ok: CommandRunResult } | { readonly errCode: string; readonly details?: ErrorDetails };
+
 export interface FakeDaemon {
   readonly connector: HostConnector;
   setCapabilities(alias: string, caps: Partial<HostCapabilities>): void;
@@ -39,6 +44,7 @@ export interface FakeDaemon {
   setSession(alias: string, id: string, patch: SessionPatch): void;
   queueWaitTurn(alias: string, result: SessionWaitTurnResult): void;
   setDiff(alias: string, id: string, result: SessionDiffResult): void;
+  setCommand(alias: string, outcome: FakeCommandOutcome): void;
   failNext(alias: string, method: string, failure: FakeFailure): void;
   pauseNext(alias: string, method: string): Promise<{ release(): void }>;
   setUnreachable(alias: string, on: boolean): void;
@@ -67,6 +73,7 @@ interface AliasState {
   newOverride: ((params: SessionNewParams) => Partial<SessionNewResult>) | null;
   waitQueue: SessionWaitTurnResult[];
   diffs: Map<string, SessionDiffResult>;
+  commandOutcomes: Map<string, FakeCommandOutcome>;
   failures: Map<string, FakeFailure>;
   pauses: Map<string, PauseGate[]>;
   unreachable: boolean;
@@ -100,11 +107,16 @@ function defaultCaps(profile: string): HostCapabilities {
   };
 }
 
-function errLine(id: string, code: string): string {
+function errLine(id: string, code: string, details?: ErrorDetails): string {
   return JSON.stringify({
     v: 4,
     id,
-    err: { class: "daemon", code, msg: `fake daemon refused: ${code}` },
+    err: {
+      class: "daemon",
+      code,
+      msg: `fake daemon refused: ${code}`,
+      ...(details === undefined ? {} : { details }),
+    },
   });
 }
 
@@ -221,6 +233,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
       newOverride: null,
       waitQueue: [],
       diffs: new Map(),
+      commandOutcomes: new Map(),
       failures: new Map(),
       pauses: new Map(),
       unreachable: false,
@@ -422,6 +435,16 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
           truncated: false,
         } satisfies SessionDiffResult);
       }
+      case "command.run": {
+        const outcome = state.commandOutcomes.get(alias);
+        if (outcome !== undefined) {
+          if ("ok" in outcome) {
+            return okLine(request.id, outcome.ok);
+          }
+          return errLine(request.id, outcome.errCode, outcome.details);
+        }
+        return errLine(request.id, "fake_unscripted");
+      }
       default: {
         return errLine(request.id, "fake_unscripted");
       }
@@ -551,6 +574,9 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
     },
     setDiff(alias: string, id: string, result: SessionDiffResult): void {
       stateOf(alias).diffs.set(id, result);
+    },
+    setCommand(alias: string, outcome: FakeCommandOutcome): void {
+      stateOf(alias).commandOutcomes.set(alias, outcome);
     },
     failNext(alias: string, method: string, failure: FakeFailure): void {
       stateOf(alias).failures.set(method, failure);

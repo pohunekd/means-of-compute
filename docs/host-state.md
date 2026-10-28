@@ -67,13 +67,32 @@ Every fleet host carries its alias in `/etc/means-of-compute/host.json`:
 
 The fleet-wide path lives in the package as `config/plugin.json`; the host file
 itself stays outside the package, outside `HOME`, and outside the
-digest-pinned inputs. Writing it needs `sudo` once on every host. The launch
-`PATH` the daemon gives the plugin must provide `bun`, because the bundle
-starts with `#!/usr/bin/env bun`; on macOS that `PATH` must also contain
-`/usr/sbin`, which holds the system tools the probe calls. The plugin
+digest-pinned inputs. Writing it needs `sudo` once on every host.
+
+The launch `PATH` the daemon gives the plugin must provide `bun`, because the
+bundle starts with `#!/usr/bin/env bun`; on macOS that `PATH` must also
+contain `/usr/sbin`, which holds the system tools the probe calls.
+
+The plugin
 reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
+
+## Adapter
+
+`src/dispatcher/adapter/host-state-port.ts` reads plugin output through the
+daemon's `command.run`: one call per host with `package` set to the
+configured package id, `command` set to `host-state`, `timeout_ms` set to
+`limits.pluginTimeoutMs`, and `max_output_bytes` set to
+`limits.maxOutputBytes`. `requestTimeoutMs` is never sent to the daemon.
+SDK errors map to `HostStateError` through
+`src/dispatcher/adapter/host-state-map.ts`; anything unmapped is rethrown
+and the whole `collect()` rejects. A `host-unreachable` or `request-timeout`
+error drops the connection as best effort before the mapped error is thrown,
+so the next round re-resolves the route. `hosts()` returns the connector
+aliases in sorted order. The first `close()` marks the port closed and
+closes the connector; later `close()` calls return at once, and a later
+`read()` throws `host state port is closed`.
 
 ## Artifacts
 
@@ -127,9 +146,9 @@ With `c = config.collector`:
 
 - `pluginTimeoutMs` (`10000`): the daemon kills the plugin at this deadline.
 - `requestTimeoutMs` (`pluginTimeoutMs + transportMarginMs`): never sent to the
-  daemon. The SDK's own deadline ends a stuck run with `request-timeout`, the
-  adapter sets no timer of its own, and the collector guard below ends a call
-  that hangs past that.
+  daemon and never passed to the SDK. The SDK's own deadline ends a stuck run
+  with `request-timeout`, the adapter sets no timer of its own, and the
+  collector guard below ends a call that hangs past that.
 - `guardMs` (`pluginTimeoutMs + 2 * transportMarginMs`): the collector's own
   bound through `deps.sleep`, for an adapter that never settles.
 - `maxOutputBytes` (`16384`): passed to the daemon and re-checked by the

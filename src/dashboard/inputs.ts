@@ -4,6 +4,7 @@
 // rethrown and becomes a 500. Registry fields stay for PR 2: the type keeps
 // the error codes future steps need, while gatherInputs fills no registry.
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
+import type { RegistryEntry } from "../dispatcher/registry.js";
 import type { BudgetConfig } from "../budget/config.js";
 import { loadPricingForIds, type NanoPricing } from "../budget/pricing.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
@@ -44,7 +45,7 @@ export interface DashboardInputs {
   readonly verdicts: ReadonlyMap<string, Sourced<readonly AuditVerdict[]>>;
   readonly hosts: Sourced<readonly HostObservation[]>;
   readonly workItems: readonly WorkItem[] | null;
-  readonly registry: Sourced<readonly never[]>;
+  readonly registry: Sourced<readonly RegistryEntry[]>;
 }
 
 export interface DashboardSources {

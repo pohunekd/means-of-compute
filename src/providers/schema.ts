@@ -61,7 +61,7 @@ export async function loadProviderSchema(): Promise<ProviderSchema> {
   try {
     ajvInstance = new Ajv({ allErrors: true, strict: true });
     addFormats(ajvInstance);
-    validate = ajvInstance.compile(parsed as object);
+    validate = ajvInstance.compile(parsed);
   } catch (cause) {
     throw new Error(`${label} ${path}: invalid schema`, { cause });
   }

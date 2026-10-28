@@ -39,6 +39,7 @@ interface RegistryEntryBase {
   readonly lastSeenAt: string;
   readonly cancelReason: CancelReason | null;
   readonly terminal: RegistryTerminal | null;
+  readonly resolvedAt: string | null;
   readonly revision: number;
 }
 

@@ -770,6 +770,7 @@ export function createDispatcher(deps: DispatcherDeps): {
           lastSeenAt: t,
           cancelReason: null,
           terminal: null,
+          resolvedAt: null,
           revision: 0,
         };
         await insertRegistryEntry(deps.config.registryPath, provisional);

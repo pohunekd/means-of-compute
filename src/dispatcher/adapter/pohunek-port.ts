@@ -133,9 +133,10 @@ async function mappedError(
   throw new PortRejectedError("daemon-error");
 }
 
-// One inspected client per alias (S1): host.inspect runs once per Client
-// instance; a dropped client is inspected again on next use.
-async function clientFor(port: PortInternals, alias: string): Promise<Client> {
+// Client for the start path: host.inspect runs once per Client instance
+// with the per-Client preflight cache kept (S1, H2); a dropped client is
+// inspected again on next use.
+async function startClientFor(port: PortInternals, alias: string): Promise<Client> {
   let client: Client;
   try {
     client = await port.connector.client(alias);
@@ -163,6 +164,17 @@ async function clientFor(port: PortInternals, alias: string): Promise<Client> {
   }
   port.inspected.set(alias, client);
   return client;
+}
+
+// Client for wait, cancel and diff (H2): no preflight, so these paths work
+// even when the host later fails the start preflight. The connector still
+// throws for unknown aliases and unreachable hosts.
+async function clientFor(port: PortInternals, alias: string): Promise<Client> {
+  try {
+    return await port.connector.client(alias);
+  } catch (error) {
+    throw await mappedError(port, alias, error);
+  }
 }
 
 // Void path V (3.5): stop first, then unbind, so a session is never unbound
@@ -314,7 +326,7 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
     throw new PohunekAdapterError("closed");
   }
   const alias = req.hostAlias;
-  const client = await clientFor(port, alias);
+  const client = await startClientFor(port, alias);
   const digest = requestDigestOf(req);
   const bound = await listBound(port, client, alias, req.requestId);
   const decision = lookupDecision(bound, digest);

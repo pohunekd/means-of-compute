@@ -158,6 +158,40 @@ test("unknown-host-alias makes no connection", async () => {
   }
 });
 
+test("preflight failing after a reconnect still lets cancel stop and wait observe the session", async () => {
+  const { fake, log, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setUnreachable("laptop-a", true);
+    const unreachable: unknown = await port.wait(ref, 1000, null).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(unreachable).toBeInstanceOf(PortUnreachableError);
+    fake.setUnreachable("laptop-a", false);
+    fake.setCapabilities("laptop-a", {
+      runtimes: [{ agent: CONFIG.agentProfile, available: false }],
+    });
+    const cancelled = await port.cancel(ref, "operator");
+    expect(cancelled).toMatchObject({ state: "cancelled", sessionId: handle.sessionId });
+    expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
+    expect(
+      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
+    ).toHaveLength(1);
+    const observed = await port.wait(ref, 1000, null);
+    expect(observed).toEqual(cancelled);
+    const startError: unknown = await port.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(startError).toMatchObject({ code: "host-unsupported" });
+    expect(eventsOf(log)).toContain("adapter-host-unsupported");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("an unreachable host before session.new creates nothing (A1)", async () => {
   const { fake, port } = setup();
   try {

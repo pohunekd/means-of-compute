@@ -135,7 +135,6 @@ test("X1 approve on a review item records pending and lists the request (X1, A3,
   expect(ends[ends.length - 1]?.["code"]).toBeNull();
   const afterStore = await Bun.file(env.storePath).text();
   expect(afterStore).toBe(beforeStore);
-  expect(afterStore.length).toBe(beforeStore.length);
   expect(before).toBe("");
   const fleet = await fleetPayload(env, lines);
   const pending = (fleet["fleet"] as { pendingRequests: readonly unknown[] }).pendingRequests;

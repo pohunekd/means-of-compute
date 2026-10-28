@@ -1,13 +1,16 @@
-// MCP boundary test (matrix X4): the import closure of src/mcp/
-// never reaches the approvals decide module or the CLI, so no MCP
-// call can decide a request; no file under src/mcp/ names the atomic
-// writer, so no MCP call writes a file directly (A9).
+// MCP boundary test (matrix X4): the import closure of every file under
+// src/mcp/ never reaches the approvals decide module or the CLI, so no
+// MCP call can decide a request; no file under src/mcp/ names the atomic
+// writer or a CommonJS-style loader, so no MCP call writes a file
+// directly or loads decide outside the import closure (A9).
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const IMPORT_SPEC =
   /(?:from\s+["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["'])/g;
+
+const FORBIDDEN_TEXTS = ["writeFileAtomic", "require(", "import.meta.require", "createRequire"];
 
 function specOf(file: string): string[] {
   const text = readFileSync(file, "utf8");
@@ -23,12 +26,31 @@ function specOf(file: string): string[] {
   return specs;
 }
 
+function isFile(path: string): boolean {
+  return existsSync(path) && statSync(path).isFile();
+}
+
 function resolveSpec(fromFile: string, spec: string): string | null {
   if (!spec.startsWith(".")) {
     return null;
   }
-  const mapped = spec.endsWith(".js") ? `${spec.slice(0, -3)}.ts` : spec;
-  return resolve(dirname(fromFile), mapped);
+  const base = dirname(fromFile);
+  const candidates: string[] = [];
+  if (spec.endsWith(".ts")) {
+    candidates.push(resolve(base, spec));
+  } else if (spec.endsWith(".js")) {
+    candidates.push(resolve(base, `${spec.slice(0, -3)}.ts`));
+  } else {
+    candidates.push(resolve(base, spec));
+  }
+  candidates.push(resolve(base, `${spec}.ts`));
+  candidates.push(resolve(base, `${spec}/index.ts`));
+  for (const candidate of candidates) {
+    if (isFile(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`unresolved import "${spec}" in ${fromFile}`);
 }
 
 function importClosure(entries: string[]): Set<string> {
@@ -50,18 +72,24 @@ function importClosure(entries: string[]): Set<string> {
   return seen;
 }
 
-test("the src/mcp/ import closure never reaches decide or the CLI (X4, A9)", () => {
-  const dir = join(process.cwd(), "src", "mcp");
-  const entries = readdirSync(dir)
+function mcpFiles(dir: string): string[] {
+  return (readdirSync(dir, { recursive: true }) as string[])
     .filter((name) => name.endsWith(".ts"))
     .map((name) => join(dir, name));
+}
+
+test("the src/mcp/ import closure never reaches decide or the CLI (X4, A9)", () => {
+  const dir = join(process.cwd(), "src", "mcp");
+  const entries = mcpFiles(dir);
   const closure = importClosure(entries);
   const decide = join(process.cwd(), "src", "approvals", "decide.ts");
   const cli = join(process.cwd(), "src", "approvals", "cli.ts");
   expect(closure.has(decide)).toBe(false);
   expect(closure.has(cli)).toBe(false);
-  for (const name of readdirSync(dir)) {
-    const text = readFileSync(join(dir, name), "utf8");
-    expect(text).not.toContain("writeFileAtomic");
+  for (const file of entries) {
+    const text = readFileSync(file, "utf8");
+    for (const forbidden of FORBIDDEN_TEXTS) {
+      expect(text).not.toContain(forbidden);
+    }
   }
 });

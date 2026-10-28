@@ -15,7 +15,7 @@ after call-end 1).
 
 Startup: parse args (`--caller` exactly once, `--config` at most once,
 default `config/mcp.json`), load the MCP config, require the caller in
-`callers`, load the work, dispatcher and approvals configs plus factory
+`callers`, load the work, auditor, dispatcher and approvals configs plus factory
 specs, `requireWritableTarget` for the call log, store and approval
 requests paths, `requireInputDir` for the verdict dir, open the call log,
 append
@@ -178,11 +178,17 @@ error it is `null`, because the call-end line already carries `code`.
 1. The sensitive handlers call only `recordRequest`. That function can
    create `pending` entries only and has no parameter for `state`.
 2. `decideRequest` lives in its own module, `src/approvals/decide.ts`.
-   Test X4 collects the static and dynamic imports of every file under
-   `src/mcp/`, follows them transitively within `src/`, and fails if
+   Test X4 walks `src/mcp/` recursively and collects the static and
+   dynamic imports of every `*.ts` file, then follows them transitively
+   within `src/`. A relative spec resolves in this order: the spec as
+   written if it ends in `.ts`; `.js` mapped to `.ts`; the spec plus
+   `.ts`; the spec plus `/index.ts`. A relative spec that resolves to
+   no file fails X4 with `unresolved import "<spec>" in <file>`; bare
+   package specs are not followed. X4 fails if
    `src/approvals/decide.ts` or `src/approvals/cli.ts` is reachable;
    it also fails if any file under `src/mcp/` contains the text
-   `writeFileAtomic`. The existing ESLint rule already rejects a
+   `writeFileAtomic`, `require(`, `import.meta.require` or
+   `createRequire`. The existing ESLint rule already rejects a
    non-literal dynamic `import()`.
 3. No tool reads `/dev/tty`, and there is no MCP method that decides.
 

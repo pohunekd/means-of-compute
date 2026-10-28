@@ -42,8 +42,8 @@ as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the
 initialized flag are `-32600 "server not
-initialized"`. `tools/list` answers in PR order (read slice: only
-`fleet_status` so far). Unknown methods are `-32601`, unknown tools are
+initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results`.
+Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
 error response also appends a `protocol-error` line with `jsonrpcCode`.

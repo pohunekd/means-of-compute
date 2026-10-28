@@ -176,13 +176,17 @@ test("D2: diff of a finished session returns the pushed changes untruncated", as
 
 test("release with nothing bound returns []", async () => {
   const control = createMemoryPort();
+  const other = await control.port.start(
+    request({ requestId: "other:0", workItemId: "other", hostAlias: "laptop-b" }),
+  );
   const result = await control.port.release({
     requestId: "demo-item:0",
     hostAlias: "laptop-a",
     sessionId: null,
   });
   expect(result).toEqual({ sessionIds: [] });
-  expect(control.sessions()).toEqual([]);
+  expect(control.sessions()).toHaveLength(1);
+  expect(control.sessions()[0]?.handle.sessionId).toBe(other.sessionId);
   await control.port.close();
 });
 

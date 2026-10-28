@@ -1564,7 +1564,10 @@ test("a refused unbind is void-incomplete", async () => {
 test("release never prints the route", async () => {
   const { fake, port } = setup();
   try {
-    fake.setUnreachable("laptop-a", true);
+    fake.failNext("laptop-a", "session.list", {
+      error: fakeErrors.hostUnreachable("peer.example-route"),
+      apply: false,
+    });
     const error = await port
       .release({ requestId: "req-1", hostAlias: "laptop-a", sessionId: null })
       .then(

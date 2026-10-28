@@ -20,7 +20,9 @@ One JSON document at `config/work.json` `storePath`, validated by
 passes `isWorkItem`, item ids are unique, `submissionId`s are unique, every
 `itemIds` entry is a store item in exactly one submission, every dependency
 is a store item id, and `findCycle` is null. Items are never removed, so
-dependencies stay valid for later submissions.
+dependencies stay valid for later submissions. Writes also enforce rule
+(h), append-only: every stored item id stays present and every stored
+submission stays byte-equal at its index, checked on every write.
 
 An absent file with an existing parent reads as revision 0 with no items.
 A missing parent, a non-file path, or an I/O error is a `WorkStoreDataError`.
@@ -29,10 +31,14 @@ A missing parent, a non-file path, or an I/O error is a `WorkStoreDataError`.
 
 Every write is `updateWorkStore(path, fn)`: take the lock file
 `<storePath>.lock` with `withFileLock("work store lock", ...)`, read the
-store, run `fn`, write nothing when `next` is null, otherwise persist
-revision + 1 after `checkWorkStore` passes and return `r.value`. A held
-lock is `WorkStoreBusyError` for the caller to retry; a failed write is
-`WorkStoreWriteError`. Readers take no lock: rename is atomic.
+store, run `fn`, write nothing when `next` is null, otherwise check rule
+(h), persist revision + 1 after `checkWorkStore` passes and return
+`r.value`. Lock errors map as: a held lock is `WorkStoreBusyError` for the
+caller to retry; `open-failed` is `WorkStoreDataError` with the cause, the
+same class a missing parent gives on read; every other lock failure is
+`WorkStoreWriteError`, including a release failure after the write already
+committed, so a caller re-reads the store before it retries. Readers take
+no lock: rename is atomic.
 
 The lock body lives in `src/fs/lock.ts` (`withFileLock` plus `FileLockError`
 with the label in front of every message). `src/ledger/lock.ts` keeps the

@@ -127,6 +127,30 @@ test("SV2 a call followed by EOF is answered and the server exits 0 (SV2)", asyn
   expect(call.result.structuredContent.ok).toBe(true);
 });
 
+test("F1 a final call line without a newline is answered (F1, T3.2)", async () => {
+  const env = await createMcpTestEnv("mcp-f1-");
+  await Bun.write(
+    env.storePath,
+    JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
+  );
+  await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
+  const result = await spawnServer(env.dir, `${initLine(1)}\n${callLine(2)}`, [
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(result.code).toBe(0);
+  const lines = result.stdout.split("\n").filter((line) => line.length > 0);
+  expect(lines.length).toBe(2);
+  const call = JSON.parse(lines[1] as string) as {
+    id: number;
+    result: { structuredContent: { ok: boolean } };
+  };
+  expect(call.id).toBe(2);
+  expect(call.result.structuredContent.ok).toBe(true);
+  const logText = await Bun.file(env.callLogPath).text();
+  expect(logText).toContain('"event":"call-end"');
+});
+
 test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   const env = await createMcpTestEnv("mcp-sv3-");
   const noCaller = Bun.spawn([process.execPath, "src/mcp/serve.ts"], {

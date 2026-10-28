@@ -182,6 +182,8 @@ async function serve(caller: string, configPath: string): Promise<number> {
       splitter.push(chunk);
     });
     process.stdin.on("end", () => {
+      // A final line without a trailing newline is still a message (T3.2).
+      splitter.flush();
       resolve("eof");
     });
     process.on("SIGTERM", () => {

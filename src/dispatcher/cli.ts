@@ -230,13 +230,15 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
     const adapterConfig = await loadPohunekAdapterConfig();
     const ledgerConfig = await loadLedgerConfig();
     return await withFileLock("Dispatcher registry", config.registryPath, async () => {
-      const log = (source: string) => (event: object): void => {
-        mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
-        appendFileSync(
-          adapterConfig.resolveLogPath,
-          `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
-        );
-      };
+      const log =
+        (source: string) =>
+        (event: object): void => {
+          mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
+          appendFileSync(
+            adapterConfig.resolveLogPath,
+            `${JSON.stringify({ at: new Date().toISOString(), source, ...event })}\n`,
+          );
+        };
       const dispatcherLog = log("dispatcher");
       const adapterLog = log("adapter");
       const meterLog = log("meter");
@@ -265,7 +267,7 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
       try {
         return await runResolveCommand(
           dargs,
-          (use) => use(dispatcher.resolve),
+          (use) => use((requestId) => dispatcher.resolve(requestId)),
           {
             stdout: (line: string): void => {
               process.stdout.write(line);

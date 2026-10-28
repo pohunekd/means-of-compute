@@ -10,10 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BudgetGate } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
-import {
-  createDispatcher,
-  type ResolveOutcome,
-} from "../../src/dispatcher/dispatcher.js";
+import { createDispatcher, type ResolveOutcome } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import { FileLockError } from "../../src/fs/lock.js";
 import type { ModelSelection, ReleaseRef, ReleaseResult } from "../../src/dispatcher/port.js";
@@ -87,9 +84,8 @@ async function withCommandHarness(
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
-    const port = options.release === undefined
-      ? control.port
-      : { ...control.port, release: options.release };
+    const port =
+      options.release === undefined ? control.port : { ...control.port, release: options.release };
     const dispatcher = createDispatcher({
       port,
       budget: GATE,
@@ -238,7 +234,7 @@ test("a route never reaches the output", async () => {
 
 test("a busy registry exits 3", async () => {
   await withCommandHarness(async (h) => {
-    const busy = <T,>(): Promise<T> =>
+    const busy = <T>(): Promise<T> =>
       Promise.reject(new FileLockError("busy", "Dispatcher registry /tmp/x: busy"));
     const rc = await runResolveCommand(["--request", "demo-item:0"], busy, {
       stdout: (line) => h.stdout.push(line),
@@ -281,8 +277,6 @@ test("an unknown request exits 2", async () => {
     expect(rc).toBe(2);
     expect(h.stdout).toEqual([]);
     expect(h.stderr).toHaveLength(1);
-    expect(h.stderr[0]?.startsWith("dispatch: dispatcher precondition known-request: ")).toBe(
-      true,
-    );
+    expect(h.stderr[0]?.startsWith("dispatch: dispatcher precondition known-request: ")).toBe(true);
   });
 });

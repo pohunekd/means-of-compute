@@ -32,7 +32,7 @@ async function digestInputs(): Promise<string[]> {
   const scenarios = readdirSync(scenarioDir)
     .filter((f) => f.endsWith(".json"))
     .map((f) => join("config", "scenarios", f));
-  const extra = ["bun.lock", "config/probe.json", ...scenarios];
+  const extra = ["bun.lock", "config/plugin.json", "config/probe.json", ...scenarios];
   return [...new Set([...inputs, ...extra])].sort();
 }
 

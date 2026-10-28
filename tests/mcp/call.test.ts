@@ -45,7 +45,7 @@ test("C1 spawned mcp:call fleet_status exits 0 with ok true (C1)", async () => {
 test("O1 a server that never answers exits 4 within the bound (O1)", async () => {
   const env = await createMcpTestEnv("mcp-o1-");
   const raw = JSON.parse(await Bun.file(env.mcpConfigPath).text()) as Record<string, unknown>;
-  raw["clientTimeoutMs"] = 1000;
+  raw["clientTimeoutMs"] = 1500;
   await writeFile(env.mcpConfigPath, JSON.stringify(raw));
   await Bun.write(
     `${env.dir}/block.ts`,
@@ -53,13 +53,11 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
   );
   await Bun.write(`${env.dir}/bunfig.toml`, 'preload = ["./block.ts"]\n');
   const pidFile = `${env.dir}/server.pid`;
-  let serverPid: number | null = null;
   const watchPid = (async () => {
     for (let i = 0; i < 100; i += 1) {
       if (await Bun.file(pidFile).exists()) {
         const found = Number((await Bun.file(pidFile).text()).trim());
         if (Number.isInteger(found)) {
-          serverPid = found;
           return;
         }
       }
@@ -67,8 +65,9 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
     }
   })();
   const started = Date.now();
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
   try {
-    const proc = Bun.spawn(
+    proc = Bun.spawn(
       [
         process.execPath,
         join(process.cwd(), "src/mcp/call.ts"),
@@ -78,29 +77,54 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
       ],
       { cwd: env.dir, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     );
-    const [code, out, err] = await Promise.all([
-      proc.exited,
+    const [outcome, out, err] = await Promise.all([
+      Promise.race([
+        proc.exited.then(() => "exited" as const),
+        Bun.sleep(10000).then(() => "hang" as const),
+      ]),
       new Response(proc.stdout as ReadableStream).text(),
       new Response(proc.stderr as ReadableStream).text(),
     ]);
+    expect(outcome).toBe("exited");
+    const code = await proc.exited;
     const elapsed = Date.now() - started;
     await watchPid;
     expect(code).toBe(4);
     expect(out).toBe("");
-    expect(err).toBe("mcp:call: no answer within 1000 ms\n");
+    expect(err).toBe("mcp:call: no answer within 1500 ms\n");
+    expect(elapsed).toBeGreaterThanOrEqual(2900);
     expect(elapsed).toBeLessThan(5000);
     expect(await Bun.file(pidFile).exists()).toBe(true);
     const pid = Number((await Bun.file(pidFile).text()).trim());
     expect(Number.isInteger(pid)).toBe(true);
-    serverPid = pid;
     expect(() => process.kill(pid, 0)).toThrow();
   } finally {
-    if (serverPid !== null) {
+    const client = proc;
+    if (client !== null) {
       try {
-        process.kill(serverPid, "SIGKILL");
+        client.kill("SIGKILL");
       } catch {
-        // The client already reaped the blocked server.
+        // The client already exited.
       }
+      try {
+        await client.exited;
+      } catch {
+        // The client already exited.
+      }
+    }
+    try {
+      if (await Bun.file(pidFile).exists()) {
+        const leftover = Number((await Bun.file(pidFile).text()).trim());
+        if (Number.isInteger(leftover)) {
+          try {
+            process.kill(leftover, "SIGKILL");
+          } catch {
+            // The client already reaped the blocked server.
+          }
+        }
+      }
+    } catch {
+      // The pid file is gone with the test env.
     }
   }
 }, 20000);

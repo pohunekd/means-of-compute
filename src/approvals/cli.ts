@@ -51,6 +51,20 @@ async function runList(argv: readonly string[], deps: ApprovalsCliDeps): Promise
   return 0;
 }
 
+export class ApprovalsNotConfirmedError extends Error {
+  constructor(message = "approvals: confirmation was not entered") {
+    super(message);
+    this.name = "ApprovalsNotConfirmedError";
+  }
+}
+
+export class ApprovalsNoTerminalError extends Error {
+  constructor() {
+    super("approvals: decide needs an interactive terminal (/dev/tty)");
+    this.name = "ApprovalsNoTerminalError";
+  }
+}
+
 interface DecideArgs {
   readonly requestId: string;
   readonly decision: "approved" | "rejected";
@@ -123,7 +137,14 @@ async function runDecide(argv: readonly string[], deps: ApprovalsCliDeps): Promi
     throw new ApprovalsDataError(`approvals: unknown request "${parsed.requestId}"`);
   }
   const verb = parsed.decision === "approved" ? "approve" : "reject";
-  const typed = await deps.confirm(`Type ${parsed.requestId} to ${verb}: `);
+  let typed: string;
+  try {
+    typed = await deps.confirm(`Type ${parsed.requestId} to ${verb}: `);
+  } catch {
+    throw new ApprovalsNotConfirmedError(
+      `approvals: confirmation for "${parsed.requestId}" was not entered`,
+    );
+  }
   if (typed !== parsed.requestId) {
     deps.err(`approvals: confirmation does not match "${parsed.requestId}"`);
     return 3;
@@ -135,6 +156,9 @@ async function runDecide(argv: readonly string[], deps: ApprovalsCliDeps): Promi
     now: deps.now,
   });
   if (outcome.kind === "refused") {
+    if (outcome.code === "unknown-request") {
+      throw new ApprovalsDataError(`approvals: unknown request "${parsed.requestId}"`);
+    }
     deps.err(`approvals: request "${parsed.requestId}" is already decided`);
     return 3;
   }
@@ -151,10 +175,14 @@ async function runDecide(argv: readonly string[], deps: ApprovalsCliDeps): Promi
 }
 
 function exitOf(error: unknown): number {
-  if (error instanceof ApprovalsBusyError) {
+  if (error instanceof ApprovalsBusyError || error instanceof ApprovalsNotConfirmedError) {
     return 3;
   }
-  if (error instanceof ApprovalsDataError || error instanceof ApprovalsWriteError) {
+  if (
+    error instanceof ApprovalsNoTerminalError ||
+    error instanceof ApprovalsDataError ||
+    error instanceof ApprovalsWriteError
+  ) {
     return 2;
   }
   return 2;
@@ -185,7 +213,7 @@ async function confirmFromTty(requestLine: string, prompt: string): Promise<stri
   try {
     handle = await open("/dev/tty", "r+");
   } catch {
-    throw new Error("approvals: decide needs an interactive terminal (/dev/tty)");
+    throw new ApprovalsNoTerminalError();
   }
   try {
     await handle.write(`${requestLine}\n`);
@@ -193,7 +221,10 @@ async function confirmFromTty(requestLine: string, prompt: string): Promise<stri
     for await (const line of handle.readLines()) {
       return line;
     }
-    throw new Error("approvals: decide needs an interactive terminal (/dev/tty)");
+    // EOF (Ctrl-D) closes the stream with no line: this is a not-confirmed
+    // abort, not a missing terminal. Rejecting routes it to the mismatch
+    // branch (exit 3) instead of the terminal-unavailable branch (exit 2).
+    throw new ApprovalsNotConfirmedError();
   } finally {
     await handle.close();
   }

@@ -68,7 +68,8 @@ request whose state is `approved` and whose `args` match all three, else
 
 - `bun run approvals:list [--config <path>]` prints one JSON line per
   pending request: `{requestId, tool, args, caller, requestedAt}`. The
-  human's terminal shows the reason here and nowhere else. Exit 0.
+  human's terminal shows the reason here and in the `decide` prompt below,
+  and nowhere else: the reason never appears in an MCP result. Exit 0.
 - `bun run approvals:decide <requestId> (--approve|--reject) --author
 <handle> [--config <path>]`: exactly one of `--approve` and `--reject`
   is required; `--author` must be in `operators`; the request must exist;

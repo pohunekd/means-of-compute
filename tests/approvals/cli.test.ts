@@ -205,8 +205,9 @@ test("confirm returns another text: exit 3, file bytes unchanged (A9)", async ()
       "--config",
       harness.config,
     ]);
-    expect(spawned.rc).toBe(2);
+    expect(spawned.rc).toBe(3);
     expect(spawned.stdout).toBe("");
+    expect(spawned.stderr).toContain("was not entered");
   } finally {
     await rm(harness.dir, { recursive: true, force: true });
   }
@@ -306,6 +307,69 @@ test("an unknown request id exits 2", async () => {
       seen.deps,
     );
     expect(rc).toBe(2);
+  } finally {
+    await rm(harness.dir, { recursive: true, force: true });
+  }
+});
+
+test("a request decided between the prompt and the write exits 2 as unknown (L1)", async () => {
+  const harness = await writeHarness();
+  try {
+    const requestId = await recordedId(harness);
+    const seen = deps(async () => {
+      await rm(harness.requests, { force: true });
+      return requestId;
+    });
+    const rc = await runApprovalsCli(
+      ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
+      seen.deps,
+    );
+    expect(rc).toBe(2);
+    expect(seen.out).toHaveLength(0);
+    expect(seen.err.join("\n")).toContain(`unknown request "${requestId}"`);
+  } finally {
+    await rm(harness.dir, { recursive: true, force: true });
+  }
+});
+
+test("an already decided request exits 3 as already decided (L1)", async () => {
+  const harness = await writeHarness();
+  try {
+    const requestId = await recordedId(harness);
+    const first = deps(() => Promise.resolve(requestId));
+    expect(
+      await runApprovalsCli(
+        ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
+        first.deps,
+      ),
+    ).toBe(0);
+    const second = deps(() => Promise.resolve(requestId));
+    const rc = await runApprovalsCli(
+      ["decide", requestId, "--reject", "--author", "owner", "--config", harness.config],
+      second.deps,
+    );
+    expect(rc).toBe(3);
+    expect(second.out).toHaveLength(0);
+    expect(second.err.join("\n")).toContain("already decided");
+  } finally {
+    await rm(harness.dir, { recursive: true, force: true });
+  }
+});
+
+test("EOF at the prompt exits 3 as not confirmed (L2)", async () => {
+  const harness = await writeHarness();
+  try {
+    const requestId = await recordedId(harness);
+    const before = await readFile(harness.requests, "utf8");
+    const seen = deps(() => Promise.reject(new Error("closed without a line")));
+    const rc = await runApprovalsCli(
+      ["decide", requestId, "--approve", "--author", "owner", "--config", harness.config],
+      seen.deps,
+    );
+    expect(rc).toBe(3);
+    expect(seen.out).toHaveLength(0);
+    expect(seen.err.join("\n")).toContain("was not entered");
+    expect(await readFile(harness.requests, "utf8")).toBe(before);
   } finally {
     await rm(harness.dir, { recursive: true, force: true });
   }

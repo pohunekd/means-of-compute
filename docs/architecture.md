@@ -137,10 +137,7 @@ Join: one `PortUsage`, with one token per (provider, model), over the
 replayed-plus-appended index. A `call-start` without an end counts as one
 request with null counts.
 
-`settle` closes the grant, waits up to `drainTimeoutMs`, aborts the
-rest, awaits every end, then joins. `settleRequest(requestId, state)`
-finds the grant by request id and delegates to the shared memo of
-`settle`: it also closes an unbound grant (opened, never bound), so the
+`settle(sessionId, state)` finds the grant by session and delegates to `settleRequest(requestId)`, which owns one memoized `Promise<PortUsage | null>` per request id. After the close and the drain, the join is stable through replays and repeated calls. An unbound grant (opened, never bound) closes in `settleRequest`, so the
 stranded billing of a lost session survives.
 
 The dispatcher carries a required `lostUsage(requestId)` hook: the

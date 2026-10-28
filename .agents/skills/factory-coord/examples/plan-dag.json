@@ -1,0 +1,93 @@
+{
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "id": "greet-parser",
+      "repo": "example/demo-repo",
+      "title": "Parse greeting templates",
+      "goal": "Add src/greet/parser.ts that splits a template such as \"Hello, {name}!\" into text and placeholder parts, and tests/greet/parser.test.ts. An unclosed brace throws ParseError. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Templates parse into parts and an unclosed brace throws ParseError: bun test tests/greet/parser.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": [],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "greet-render",
+      "repo": "example/demo-repo",
+      "title": "Render greetings from parsed templates",
+      "goal": "Add src/greet/render.ts that fills the placeholders of parsed parts from a record, and tests/greet/render.test.ts. A missing value throws RenderError naming the placeholder. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Placeholders are filled and a missing value throws RenderError: bun test tests/greet/render.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["greet-parser"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "greet-cli",
+      "repo": "example/demo-repo",
+      "title": "Print a greeting from the command line",
+      "goal": "Add src/greet/cli.ts that takes a template and name=value pairs from argv and prints the rendered greeting, and tests/greet/cli.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "bun run src/greet/cli.ts \"Hi {name}\" name=Ada prints Hi Ada",
+          "done": false
+        },
+        {
+          "id": "D2",
+          "text": "Usage errors exit 2: bun test tests/greet/cli.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["greet-parser", "greet-render"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    }
+  ]
+}

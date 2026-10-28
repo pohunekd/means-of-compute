@@ -192,6 +192,28 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
   }
 });
 
+test("a thrown non-Error value rejects unchanged (L2)", async () => {
+  const { fake, port } = setup();
+  const throwing = {
+    ...fake.connector,
+    client: (): Promise<never> => Promise.reject("connector boom"),
+  };
+  const throwingPort = createPohunekPort(CONFIG, {
+    connector: throwing,
+    log: () => {},
+  });
+  try {
+    const caught: unknown = await throwingPort.start(request()).then(
+      (): unknown => "unexpected success",
+      (cause: unknown): unknown => cause,
+    );
+    expect(caught).toBe("connector boom");
+  } finally {
+    await throwingPort.close();
+    await teardown(fake, port);
+  }
+});
+
 test("an unreachable host before session.new creates nothing (A1)", async () => {
   const { fake, port } = setup();
   try {

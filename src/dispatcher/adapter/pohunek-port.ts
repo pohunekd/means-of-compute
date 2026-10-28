@@ -114,8 +114,9 @@ async function dropConnection(port: PortInternals, alias: string): Promise<void>
 
 // Every caught SDK error goes through portErrorOf (3.6). An unreachable error
 // drops the connection so the next call re-resolves the route; anything else
-// propagates unchanged. Callers throw the result, so control never continues
-// past a caught error.
+// propagates unchanged. A thrown non-Error value is rethrown unchanged (L2),
+// as 3.6 does for the null group. Callers throw the result, so control never
+// continues past a caught error.
 async function mappedError(
   port: PortInternals,
   alias: string,
@@ -129,10 +130,7 @@ async function mappedError(
   if (mapped instanceof PortRejectedError) {
     return mapped;
   }
-  if (error instanceof Error) {
-    throw error;
-  }
-  throw new PortRejectedError("daemon-error");
+  throw error;
 }
 
 // Client for the start path: host.inspect runs once per Client instance

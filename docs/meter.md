@@ -269,7 +269,7 @@ The factory (later the metered dispatcher port) drives each session's grant:
 
 ## Metered port
 
-`createMeteredPort(inner, meter)` wraps a `DispatcherPort`. `start` opens the grant, then calls `inner.start`, then binds the grant to the session.
+`createMeteredPort(inner, meter, log)` wraps a `DispatcherPort`. `start` opens the grant, then calls `inner.start`, then binds the grant to the session.
 
 Open fails with `grant-closed`: the port throws `PortUnreachableError` and logs `grant-closed-on-start`. Any other grant code: `PortRejectedError` with code `meter-<code>`. `MeterUnavailableError` and errors of `inner.start` pass through unchanged.
 

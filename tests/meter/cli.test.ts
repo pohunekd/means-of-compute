@@ -126,7 +126,7 @@ test("a missing log file exits 2 and creates nothing", async () => {
     expect(missing.stdout).toBe("");
     expect(missing.stderr.split("\n")).toHaveLength(2);
     expect(missing.stderr).toStartWith("meter: no log file");
-    expect(Bun.file(logPath).size).toBe(0);
+    expect(await Bun.file(logPath).exists()).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

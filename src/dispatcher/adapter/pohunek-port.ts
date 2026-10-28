@@ -84,13 +84,15 @@ function cachedTerminal(
 }
 
 // Put-if-absent: the first terminal stored wins; every caller gets the stored
-// value back (3.7).
+// value back (3.7). The cache keys on the sessionId parameter, never on
+// result.sessionId (M1).
 function storeTerminal(
   port: PortInternals,
   hostAlias: string,
+  sessionId: string,
   result: TerminalResult,
 ): TerminalResult {
-  const key = terminalKey(hostAlias, result.sessionId ?? "");
+  const key = terminalKey(hostAlias, sessionId);
   const stored = port.terminals.get(key);
   if (stored !== undefined) {
     return stored;
@@ -407,7 +409,7 @@ function lostTerminal(
   id: string,
   cursor: string,
 ): TerminalResult {
-  return storeTerminal(port, alias, {
+  return storeTerminal(port, alias, id, {
     state: "lost",
     sessionId: id,
     cursor,
@@ -456,7 +458,7 @@ async function markThenStop(
       detail,
     });
   }
-  return storeTerminal(port, alias, {
+  return storeTerminal(port, alias, id, {
     state,
     sessionId: id,
     cursor,
@@ -490,7 +492,7 @@ async function stopThenStoreTerminal(
       detail,
     });
   }
-  return storeTerminal(port, alias, {
+  return storeTerminal(port, alias, id, {
     state,
     sessionId: id,
     cursor,
@@ -566,7 +568,7 @@ async function waitSession(
       decision.detail,
     );
   }
-  return storeTerminal(port, alias, {
+  return storeTerminal(port, alias, id, {
     state: decision.state,
     sessionId: id,
     cursor: turn.cursor,

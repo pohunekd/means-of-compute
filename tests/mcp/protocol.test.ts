@@ -190,6 +190,30 @@ test("P6 unknown method and notification handling (P6)", async () => {
   expect(note).toBeNull();
 });
 
+test("F4 an oversized line is discarded while it streams (F4, P1)", async () => {
+  const { createLineSplitter } = await import("../../src/mcp/protocol.ts");
+  const delivered: string[] = [];
+  let tooLargeCount = 0;
+  const splitter = createLineSplitter(
+    1024,
+    (line: string) => {
+      delivered.push(line);
+    },
+    () => {
+      tooLargeCount += 1;
+    },
+  );
+  for (let n = 0; n < 64; n += 1) {
+    splitter.push("x".repeat(4096));
+  }
+  expect(tooLargeCount).toBe(1);
+  splitter.push("\n");
+  const valid = initLine();
+  splitter.push(`${valid}\n`);
+  expect(tooLargeCount).toBe(1);
+  expect(delivered).toEqual([valid]);
+});
+
 test("P7 unknown tool is a JSON-RPC error plus a protocol-error line (P7)", async () => {
   const entries: LogEntry[] = [];
   const env = await createMcpTestEnv("mcp-p7-");

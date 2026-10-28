@@ -174,6 +174,7 @@ export function createLineSplitter(
   onTooLarge: () => void,
 ): LineSplitter {
   let pending = "";
+  let discarding = false;
   function handleComplete(raw: string): void {
     let line = raw;
     if (line.endsWith("\r")) {
@@ -190,14 +191,41 @@ export function createLineSplitter(
   }
   return {
     push(chunk: string | Buffer): void {
-      pending += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      const parts = pending.split("\n");
-      pending = parts.pop() ?? "";
-      for (const raw of parts) {
+      let text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (discarding) {
+        // A line already reported as too large: skip input up to and
+        // including the next newline, so a runaway line stays bounded
+        // by maxBytes plus one chunk (P1).
+        const newlineAt = text.indexOf("\n");
+        if (newlineAt === -1) {
+          return;
+        }
+        discarding = false;
+        text = text.slice(newlineAt + 1);
+      }
+      pending += text;
+      let newlineAt = pending.indexOf("\n");
+      while (newlineAt !== -1) {
+        const raw = pending.slice(0, newlineAt);
+        pending = pending.slice(newlineAt + 1);
         handleComplete(raw);
+        newlineAt = pending.indexOf("\n");
+      }
+      // Without a newline the line is still incomplete: once its bytes
+      // exceed the limit, report it once, drop it, and discard input
+      // up to and including the next newline (P1).
+      if (Buffer.byteLength(pending, "utf8") > maxBytes) {
+        onTooLarge();
+        pending = "";
+        discarding = true;
       }
     },
     flush(): void {
+      if (discarding) {
+        pending = "";
+        discarding = false;
+        return;
+      }
       if (pending.length === 0) {
         return;
       }

@@ -77,7 +77,8 @@ export function checkWorkStore(value: unknown, path: string): WorkStore {
   };
   for (const item of doc.items) {
     if (!isWorkItem(item)) {
-      const id = (item as { id?: unknown }).id;
+      const id =
+        typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined;
       throw new WorkStoreDataError(`${label}: rule (b): item ${String(id)} is not a WorkItem`);
     }
   }

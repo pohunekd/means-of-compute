@@ -119,6 +119,23 @@ test("stored cycle names rule (g) (S4)", async () => {
   }
 });
 
+test("a null item is a data error naming rule (b) (M1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "work-store-"));
+  try {
+    const path = join(dir, "work-items.json");
+    await writeJson(path, { schemaVersion: "v1", revision: 1, items: [null], submissions: [] });
+    let message = "";
+    try {
+      await readWorkStore(path);
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("rule (b)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate item id names rule (c) (S5)", () => {
   const path = "unused-for-check";
   let message = "";

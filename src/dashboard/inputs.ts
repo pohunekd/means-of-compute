@@ -10,6 +10,7 @@ import type { HostObservation, HostStateCollector } from "../hoststate/collector
 import { LedgerDataError } from "../ledger/errors.js";
 import { readLedger, spendEntriesOf } from "../ledger/read.js";
 import type { LedgerContents } from "../ledger/types.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import { readVerdicts } from "../auditor/store.js";
 import { lstat } from "node:fs/promises";
 import { workRows } from "./model.js";
@@ -102,7 +103,7 @@ async function readPricingInput(
     }
   }
   try {
-    return { ok: true, value: await loadPricingForIds("config/providers", [...providers]) };
+    return { ok: true, value: await loadPricingForIds(PROVIDERS_DIR, [...providers]) };
   } catch (error: unknown) {
     if (!(error instanceof Error)) {
       throw error;

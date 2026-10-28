@@ -3,6 +3,7 @@
 // JSON model equals the auditor model. Any failure is a startup error
 // (exit 2 at the CLI).
 import { readInputText, statInputPath } from "../fs/input.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 
 export interface AuditorEntry {
   readonly providerId: string;
@@ -46,7 +47,7 @@ export function checkAuditorConfig(value: unknown): string | null {
 }
 
 async function providerModelOf(providerId: string): Promise<unknown> {
-  const path = `config/providers/${providerId}.json`;
+  const path = `${PROVIDERS_DIR}/${providerId}.json`;
   if ((await statInputPath("Auditor config", path)) === "absent") {
     throw new Error(`Auditor config ${AUDITOR_CONFIG_PATH}: missing provider file ${path}`);
   }
@@ -119,7 +120,7 @@ export async function loadAuditorConfig(
     const descriptorModel = await providerModelOf(providerId);
     if (descriptorModel !== model) {
       throw new Error(
-        `${label} ${path}: auditors[${String(index)}].model does not match config/providers/${providerId}.json`,
+        `${label} ${path}: auditors[${String(index)}].model does not match ${PROVIDERS_DIR}/${providerId}.json`,
       );
     }
     auditors.push({ providerId, model });

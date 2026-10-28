@@ -12,6 +12,7 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { readLedger } from "../ledger/read.js";
 import { appendPending } from "../ledger/store.js";
 import type { LedgerContents, PendingUsage, WriteOutcome } from "../ledger/types.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import type { DispatcherConfig } from "./config.js";
 import type {
   CancelReason,
@@ -239,7 +240,7 @@ async function checkProviderModel(model: ModelSelection): Promise<void> {
       `dispatcher precondition model-provider: invalid providerId "${model.providerId}"`,
     );
   }
-  const path = `config/providers/${model.providerId}.json`;
+  const path = `${PROVIDERS_DIR}/${model.providerId}.json`;
   const label = "Provider descriptor";
   let status: Awaited<ReturnType<typeof statInputPath>>;
   try {

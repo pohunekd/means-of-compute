@@ -1,5 +1,6 @@
-import { getProviders, providerDescriptorExists, ROUTE_PATH } from "./config.js";
+import { getProviders, providerDescriptorExists } from "./config.js";
 import { loadProviderRoute } from "./route.js";
+import { PROVIDER_ROUTE_PATH } from "./paths.js";
 import type { ProviderDescriptor } from "./types.js";
 
 export interface ModelCallResult {
@@ -110,8 +111,8 @@ async function callProvider(
       }),
       signal: controller.signal,
     });
-    // A 200 answer may be billed from this point on, so failures below
-    // append a ledger entry; the non-200 throw above never does.
+    // The provider has answered. The non-200 throw below is never billed; a
+    // later failure of a 200 may be, so it sets reachedProvider for the caller.
     state.responded = true;
     if (!resp.ok) {
       throw new ProviderCallError(
@@ -241,7 +242,7 @@ export async function callProviderOnce(
 
 export async function callWithFallback(request: ModelRequest): Promise<ModelCallResult> {
   const providers = await getProviders();
-  const route = await loadProviderRoute(ROUTE_PATH, providerDescriptorExists);
+  const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
   let lastReason: string | undefined;
   let lastError: unknown;
   for (const id of route) {

@@ -70,6 +70,10 @@ test("route: wrong shape (mutation: drop the only-key check)", async () => {
   await expectRule(JSON.stringify(["nvidia-build"]), 'needs exactly the key "providers"');
 });
 
+test("route: null content (mutation: drop the raw === null check)", async () => {
+  await expectRule("null", 'needs exactly the key "providers"');
+});
+
 test("route: non-string array (mutation: drop the string-array check)", async () => {
   await expectRule(
     JSON.stringify({ providers: "nvidia-build" }),

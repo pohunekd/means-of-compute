@@ -50,8 +50,11 @@ Each Muse session runs with only the `envPassthrough` names plus an
 isolated `HOME` (`<runDir>/home`) and its XDG dirs. The API key travels
 on stdin only, never in argv, env, files or logs. A timeout or abort
 kills the whole process group with `SIGTERM`, then `SIGKILL` after
-`killGraceMs`. After `exited`, `timeout` or `aborted`, the launcher runs
-the redacted `export`; the outcome is `exited`, `timeout`, `aborted` or
+`killGraceMs`. A `SIGTERM`/`SIGKILL` failure other than `ESRCH` is
+rethrown after the leader exits, before the export. After `exited`,
+`timeout` or `aborted`, the launcher runs
+the redacted `export`, except for an abort before the spawn, which runs
+no session and no export; the outcome is `exited`, `timeout`, `aborted` or
 `spawn-failed` with its stage and code. The log carries `session-start`
 (with the argv hash), `session-end` and `export` events, each starting
 with an ISO timestamp. `buildReport` folds call-ends, gates, sessions

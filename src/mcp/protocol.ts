@@ -62,7 +62,7 @@ export interface ProtocolDeps {
 
 export interface Protocol {
   handleLine(line: string): Promise<string | null>;
-  handleTooLarge(): Promise<string>;
+  handleTooLarge(): Promise<string | null>;
   abort(): void;
   drain(): Promise<void>;
 }
@@ -558,10 +558,13 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
   }
 
   return {
-    handleTooLarge(): Promise<string> {
-      const task = queue.then(() =>
-        aborted ? jsonError(null, -32600, "message too large") : handleTooLarge(),
-      );
+    // An aborted protocol answers no too-large line, as it answers
+    // no other line (H8, R2-7): serve writes nothing for null.
+    handleTooLarge(): Promise<string | null> {
+      if (aborted) {
+        return Promise.resolve(null);
+      }
+      const task = queue.then(() => (aborted ? null : handleTooLarge()));
       queue = task.then(
         () => undefined,
         () => undefined,

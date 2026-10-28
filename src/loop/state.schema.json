@@ -226,7 +226,11 @@
         "finalize",
         "auditAttempts",
         "mergeAttempts",
-        "backoffUntil"
+        "backoffUntil",
+        "retry",
+        "park",
+        "session",
+        "fallbackUsed"
       ],
       "properties": {
         "phase": {
@@ -296,7 +300,39 @@
         "mergeAttempts": {
           "anyOf": [{ "$ref": "#/$defs/attemptCount" }, { "type": "null" }]
         },
-        "backoffUntil": { "anyOf": [{ "$ref": "#/$defs/isoDateTime" }, { "type": "null" }] }
+        "backoffUntil": { "anyOf": [{ "$ref": "#/$defs/isoDateTime" }, { "type": "null" }] },
+        "retry": { "type": "integer", "minimum": 0 },
+        "park": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "reason", "code"],
+              "properties": {
+                "kind": { "enum": ["stall", "lost", "operator", "blocked"] },
+                "reason": { "type": "string", "minLength": 1 },
+                "code": { "type": ["string", "null"], "minLength": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["hostAlias", "providerId", "model"],
+              "properties": {
+                "hostAlias": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+                "providerId": { "type": "string", "minLength": 1 },
+                "model": { "type": "string", "minLength": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "fallbackUsed": { "type": "boolean" }
       }
     },
     "mergeHold": {

@@ -18,6 +18,10 @@ function idleItem(): Record<string, unknown> {
   return {
     phase: "idle",
     round: 0,
+    retry: 0,
+    park: null,
+    session: null,
+    fallbackUsed: false,
     start: null,
     requestId: null,
     pull: null,
@@ -171,6 +175,63 @@ test("a misspelled round outcome is rejected (F10)", async () => {
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
+  });
+});
+
+test("rule (f): a stall park with phase running fails (C1)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop-state.json");
+    let error: unknown;
+    try {
+      await updateLoopState(path, () =>
+        Promise.resolve({
+          next: {
+            ...emptyState(),
+            items: {
+              "gh-moc-5": {
+                ...idleItem(),
+                phase: "running",
+                requestId: "req-000001",
+                park: { kind: "stall", reason: "stalled: 3 rounds", code: null },
+              },
+            },
+          },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopStateDataError);
+    expect(String((error as Error).message)).toContain("rule (f)");
+  });
+});
+
+test("rule (f): a blocked park without a blocked finalize fails (C1)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop-state.json");
+    let error: unknown;
+    try {
+      await updateLoopState(path, () =>
+        Promise.resolve({
+          next: {
+            ...emptyState(),
+            items: {
+              "gh-moc-5": {
+                ...idleItem(),
+                phase: "idle",
+                park: { kind: "blocked", reason: "blocked: retries used", code: null },
+              },
+            },
+          },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopStateDataError);
+    expect(String((error as Error).message)).toContain("rule (f)");
   });
 });
 

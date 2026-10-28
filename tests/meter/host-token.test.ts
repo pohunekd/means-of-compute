@@ -148,6 +148,14 @@ test("missing env exits 1 naming the variable", async () => {
     expect(badTimeout.code).toBe(1);
     expect(badTimeout.stdout).toBe("");
     expect(badTimeout.stderr).toBe("meter-token: MOC_METER_TOKEN_TIMEOUT_MS is invalid\n");
+    expect(await Bun.file(argsFile).exists()).toBe(false);
+    const unsetTimeoutEnv = { ...baseEnv(argsFile) };
+    delete unsetTimeoutEnv["MOC_METER_TOKEN_TIMEOUT_MS"];
+    const unsetTimeout = await runHelper(unsetTimeoutEnv);
+    expect(unsetTimeout.code).toBe(1);
+    expect(unsetTimeout.stdout).toBe("");
+    expect(unsetTimeout.stderr).toBe("meter-token: MOC_METER_TOKEN_TIMEOUT_MS is not set\n");
+    expect(await Bun.file(argsFile).exists()).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

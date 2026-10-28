@@ -6,7 +6,7 @@
 // paths; no timers and no real host.
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { cp, existsSync } from "node:fs";
+import { cpSync, existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -295,12 +295,15 @@ async function runResolveCli(
   args: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<{ readonly stdout: string; readonly stderr: string; readonly rc: number }> {
-  const proc = Bun.spawn(["bun", join(process.cwd(), "src/dispatcher/cli.ts"), "resolve", ...args], {
-    cwd: dir,
-    env: { ...env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = Bun.spawn(
+    ["bun", join(process.cwd(), "src/dispatcher/cli.ts"), "resolve", ...args],
+    {
+      cwd: dir,
+      env: { ...env },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   const [stdout, stderr, rc] = await Promise.all([
     new Response(proc.stdout as ReadableStream).text(),
     new Response(proc.stderr as ReadableStream).text(),
@@ -312,15 +315,7 @@ async function runResolveCli(
 async function withConfigCopy(body: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-resolve-cli-"));
   try {
-    await new Promise<void>((resolve, reject) => {
-      cp(join(process.cwd(), "config"), join(dir, "config"), { recursive: true }, (error) => {
-        if (error === null || error === undefined) {
-          resolve();
-        } else {
-          reject(error);
-        }
-      });
-    });
+    cpSync(join(process.cwd(), "config"), join(dir, "config"), { recursive: true });
     await body(dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -362,11 +357,7 @@ test("a held registry lock exits 3", async () => {
     };
     const registryPath = join(dir, "logs", "dispatcher-sessions.json");
     await withFileLock("Dispatcher resolve test", registryPath, async () => {
-      const { stdout, stderr, rc } = await runResolveCli(
-        dir,
-        ["--request", "demo-item:0"],
-        env,
-      );
+      const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
       expect(rc).toBe(3);
       expect(stdout).toBe("");
       expect(stderr.split("\n")).toEqual(["dispatch: registry busy", ""]);

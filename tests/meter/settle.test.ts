@@ -35,6 +35,10 @@ interface CallEndRow {
   outcome: string;
   billed: boolean;
   status: number;
+  requestId?: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  ms?: number;
 }
 
 function readEnd(lines: readonly string[]): CallEndRow {

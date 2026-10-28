@@ -899,8 +899,10 @@ test("a grant whose provider left the routes gives 503 provider-not-routed", asy
     PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
   };
   const restoreEnv = (): void => {
-    for (const [key, value] of Object.entries(savedEnv)) {
+    for (const key of Object.keys(savedEnv)) {
+      const value = savedEnv[key];
       if (value === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete process.env[key];
       } else {
         process.env[key] = value;

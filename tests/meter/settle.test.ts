@@ -342,6 +342,63 @@ test("a settled grant returns its memo after a later latch", async () => {
   );
 });
 
+test("settleRequest after settle returns the memo across a latch", async () => {
+  // Settle grant A with settle(sessionIdA), latch the meter through the
+  // IO seam with grant B, then call settleRequest(requestIdA). It
+  // resolves deep-equal to the first result, with no error.
+  let failWrites = false;
+  const latchIo = (base: UsageLogIo): UsageLogIo => ({
+    async open(path: string) {
+      const real = await base.open(path);
+      return {
+        async write(text: string): Promise<void> {
+          if (failWrites) {
+            throw new Error("injected write failure");
+          }
+          await real.write(text);
+        },
+        async datasync(): Promise<void> {
+          await real.datasync();
+        },
+        async close(): Promise<void> {
+          await real.close();
+        },
+      };
+    },
+  });
+  await withMeter(
+    "tests/meter/recordings/stream-ok.json",
+    async ({ meter, events }) => {
+      const { requestId, token, sessionId } = await openBoundGrant(meter);
+      const resp = await post(meter, token, chatBody());
+      expect(resp.status).toBe(200);
+      await resp.text();
+      const first = await meter.settle(sessionId, "finished");
+      expect(first?.tokens[0]?.requests).toBe(1);
+      await meter.openGrant({
+        requestId: "w2-demo:0",
+        workItemId: "w2-demo",
+        hostAlias: "laptop-a",
+        providerId: "meta-api",
+        model: "muse-spark-1.3-contributor",
+      });
+      await meter.bindGrant("w2-demo:0", "sess-2");
+      const tokenB = meter.tokenFor("w2-demo:0");
+      failWrites = true;
+      const latched = await post(meter, tokenB, chatBody());
+      expect(latched.status).toBe(503);
+      expect(((await latched.json()) as { error: { code: string } }).error.code).toBe(
+        "meter-unavailable",
+      );
+      expect(events.some((e) => e.event === "usage-log-failed")).toBe(true);
+      failWrites = false;
+      const again = await meter.settleRequest(requestId, "finished");
+      expect(again).toEqual(first);
+    },
+    { logIo: latchIo(systemUsageLogIo) },
+  );
+});
+
 test("a latched call-end does not free a sibling slot twice", async () => {
   const overrides: MeterOverrides = {
     config: { maxInFlightPerSession: 2 },

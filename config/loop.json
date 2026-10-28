@@ -1,0 +1,85 @@
+{
+  "statePath": "logs/loop-state.json",
+  "logPath": "logs/loop.jsonl",
+  "resultsPath": "logs/loop-results.jsonl",
+  "workConfigPath": "config/work.json",
+  "dispatcherConfigPath": "config/dispatcher.json",
+  "auditorConfigPath": "config/auditor.json",
+  "ledgerConfigPath": "config/ledger.json",
+  "budgetGateConfigPath": "config/budget-gate.json",
+  "placementConfigPath": "config/placement.json",
+  "approvalsConfigPath": "config/approvals.json",
+  "meterConfigPath": "config/meter.json",
+  "adapterConfigPath": "config/pohunek-adapter.json",
+  "dashboardConfigPath": "config/dashboard.json",
+  "tickMs": 5000,
+  "maxActiveItems": 4,
+  "shutdownGraceMs": 30000,
+  "sessionTimeoutMs": 5400000,
+  "unreachableRetryMs": 30000,
+  "budgetBackoffMs": 600000,
+  "maxStartRejections": 3,
+  "maxBriefBytes": 65536,
+  "stall": {
+    "maxStagnantRounds": 3,
+    "maxRetries": 2
+  },
+  "routing": {
+    "models": {
+      "meta/muse-glimmer-30b": "nvidia-build",
+      "muse-spark-1.3-contributor": "meta-api"
+    },
+    "fallback": {
+      "meta/muse-glimmer-30b": "muse-spark-1.3-contributor"
+    },
+    "fallbackAfterFailures": 2,
+    "window": 20,
+    "minSamples": 5,
+    "minSuccessRate": 0.3
+  },
+  "github": {
+    "tokenEnv": "MOC_GITHUB_TOKEN",
+    "configDir": "logs/gh-config",
+    "factoryLogin": null,
+    "timeoutMs": 30000,
+    "ciPollMs": 30000,
+    "ciTimeoutMs": 3600000,
+    "mergeRetries": 3,
+    "trustedAssociations": ["OWNER", "MEMBER", "COLLABORATOR"],
+    "requiredChecks": ["gates", "macos-probe"],
+    "mergeMethod": "merge",
+    "intake": {
+      "enabled": true,
+      "optInLabel": "factory:auto",
+      "readyLabel": "readiness:ready",
+      "blockedLabel": "readiness:blocked",
+      "pollMs": 300000,
+      "defaultModel": "meta/muse-glimmer-30b",
+      "maxGoalChars": 12000
+    },
+    "followupLabels": ["factory:followup", "readiness:design-needed"],
+    "escalationLabel": "factory:escalation"
+  },
+  "repos": [
+    {
+      "repo": "pohunekd/means-of-compute",
+      "checkoutDir": "logs/checkouts/means-of-compute",
+      "idPrefix": "moc"
+    }
+  ],
+  "trialMerge": {
+    "scratchDir": "logs/trial",
+    "steps": [
+      ["bun", "install", "--frozen-lockfile"],
+      ["bun", "run", "gates"]
+    ],
+    "timeoutMs": 1200000
+  },
+  "audit": {
+    "retries": 2
+  },
+  "digest": {
+    "dir": "logs/digest",
+    "onExit": false
+  }
+}

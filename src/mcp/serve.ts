@@ -111,8 +111,8 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
 // false; a closed stream resolves false as well.
 async function writeStdout(text: string): Promise<boolean> {
   const line = `${text}\n`;
-  let accepted = true;
-  const flushed = new Promise<boolean>((resolve) => {
+  let accepted: boolean | null = null;
+  const flushedPromise = new Promise<boolean>((resolve) => {
     const done = (error: Error | null | undefined) => {
       resolve(error === null || error === undefined);
     };
@@ -122,7 +122,10 @@ async function writeStdout(text: string): Promise<boolean> {
       resolve(false);
     }
   });
-  if (!accepted) {
+  // The write callback above may run before write() returns, so accepted
+  // can be true here; a false return means the kernel buffer is full.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (accepted === false) {
     // Backpressure: wait until the kernel takes the buffered bytes (or the
     // stream goes away) before the transport queue moves on.
     await new Promise<void>((resolve) => {
@@ -144,7 +147,7 @@ async function writeStdout(text: string): Promise<boolean> {
       process.stdout.once("close", onGone);
     });
   }
-  const ok = await flushed;
+  const ok = await flushedPromise;
   if (!ok) {
     return false;
   }
@@ -276,9 +279,14 @@ async function serve(caller: string, configPath: string): Promise<number> {
   await protocol.drain();
   await transportTail;
   process.stdin.destroy();
+  // transportFailed is only assigned inside the serialized queue, so by
+  // this await its value is final; a failure skips server-stop (L1) and
+  // only sets the exit code.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!transportFailed) {
     await stop(reason === "stdout-closed" ? "stdout-closed" : reason);
   }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (transportFailed) {
     process.exitCode = 1;
     return 1;

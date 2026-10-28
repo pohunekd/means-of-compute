@@ -58,15 +58,6 @@ function initLine(id = 1, protocolVersion = "2025-11-25"): string {
   });
 }
 
-function callLineFor(id: number): string {
-  return JSON.stringify({
-    jsonrpc: "2.0",
-    id,
-    method: "tools/call",
-    params: { name: "fleet_status", arguments: {} },
-  });
-}
-
 async function init(protocol: Protocol, protocolVersion = "2025-11-25"): Promise<unknown> {
   const raw = await protocol.handleLine(initLine(1, protocolVersion));
   return JSON.parse(raw as string) as unknown;

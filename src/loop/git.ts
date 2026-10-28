@@ -392,6 +392,9 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   requireAbsoluteDir("dir", step, input.dir);
   requireAbsoluteDir("scratchDir", step, input.scratchDir);
   const wt = `${input.scratchDir}/${input.id}`;
+  // The J2 guard runs before any git call, spawn or removal, so a bad id
+  // throws before the try and never reaches step 6.
+  checkWorktreePath(wt, input.scratchDir, input.id);
   // One deadline, set at entry, covers steps 1 to 5.
   const deadline = Date.now() + input.timeoutMs;
   let cleanupFailed = false;
@@ -432,7 +435,7 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
 
   // Step 1 (leftover recovery and the absent-path prune) runs on the main
   // deadline: a deadline hit resolves to the timeout result, never a throw.
-  async function step1(): Promise<{ readonly timeout: true } | { readonly timeout: false }> {
+  async function step1(): Promise<void> {
     checkWorktreePath(wt, input.scratchDir, input.id);
     if (await pathExists(wt)) {
       const leftover = await checkedRunGit(input.dir, deadlineTimeout(deadline), [
@@ -473,7 +476,6 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
         cleanupFailed = true;
       }
     }
-    return { timeout: false };
   }
 
   async function step6(started: number): Promise<void> {
@@ -559,75 +561,72 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
       };
 
   // Steps 1 to 5 run inside one try; step 6 cleanup runs after and the
-  // result is built last so the cleanup flag reaches the caller (N1).
+  // result is built last so the cleanup flag reaches the caller (the
+  // return object is assembled after step 6 finishes).
   let outcome: TrialOutcome;
   try {
     // A bad head ref fails here, before the merge (H4).
-    const first = await step1();
-    if (first.timeout) {
+    await step1();
+    const second = await step2();
+    if (second.kind === "timeout") {
       outcome = { passed: false, reason: "timeout", step: null, rc: null };
+    } else if (second.kind === "added-failed") {
+      throw new GitError(
+        "failed",
+        step,
+        `${step}: worktree add exited ${String(second.addedRc)}`,
+        second.addedRc,
+        detailOf(second.addedStderr),
+      );
     } else {
-      const second = await step2();
-      if (second.kind === "timeout") {
-        outcome = { passed: false, reason: "timeout", step: null, rc: null };
-      } else if (second.kind === "added-failed") {
+      const merged = second.merged;
+      if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
+        outcome = {
+          passed: false,
+          reason: "conflict",
+          step: null,
+          rc: merged.rc,
+        };
+      } else if (merged.rc !== 0) {
         throw new GitError(
           "failed",
           step,
-          `${step}: worktree add exited ${String(second.addedRc)}`,
-          second.addedRc,
-          detailOf(second.addedStderr),
+          `${step}: merge exited ${String(merged.rc)}`,
+          merged.rc,
+          detailOf(merged.stderr),
         );
       } else {
-        const merged = second.merged;
-        if (merged.rc === 1 && merged.stdout.split("\n").includes(CONFLICT_LINE)) {
-          outcome = {
-            passed: false,
-            reason: "conflict",
-            step: null,
-            rc: merged.rc,
-          };
-        } else if (merged.rc !== 0) {
-          throw new GitError(
-            "failed",
-            step,
-            `${step}: merge exited ${String(merged.rc)}`,
-            merged.rc,
-            detailOf(merged.stderr),
-          );
-        } else {
-          let stepOutcome: TrialOutcome = { passed: true };
-          for (let index = 0; index < input.steps.length; index += 1) {
-            const argv = input.steps[index];
-            if (argv === undefined) {
-              continue;
-            }
-            const ran = await runTrialStep(
-              argv,
-              wt,
-              { PATH: input.PATH, HOME: input.HOME },
-              deadlineTimeout(deadline),
-            );
-            if (ran.type === "timeout") {
-              stepOutcome = { passed: false, reason: "timeout", step: index, rc: null };
-              break;
-            }
-            if (ran.rc === -2) {
-              stepOutcome = { passed: false, reason: "step-failed", step: index, rc: null };
-              break;
-            }
-            if (ran.rc !== 0) {
-              stepOutcome = {
-                passed: false,
-                reason: "step-failed",
-                step: index,
-                rc: ran.rc,
-              };
-              break;
-            }
+        let stepOutcome: TrialOutcome = { passed: true };
+        for (let index = 0; index < input.steps.length; index += 1) {
+          const argv = input.steps[index];
+          if (argv === undefined) {
+            continue;
           }
-          outcome = stepOutcome;
+          const ran = await runTrialStep(
+            argv,
+            wt,
+            { PATH: input.PATH, HOME: input.HOME },
+            deadlineTimeout(deadline),
+          );
+          if (ran.type === "timeout") {
+            stepOutcome = { passed: false, reason: "timeout", step: index, rc: null };
+            break;
+          }
+          if (ran.rc === -2) {
+            stepOutcome = { passed: false, reason: "step-failed", step: index, rc: null };
+            break;
+          }
+          if (ran.rc !== 0) {
+            stepOutcome = {
+              passed: false,
+              reason: "step-failed",
+              step: index,
+              rc: ran.rc,
+            };
+            break;
+          }
         }
+        outcome = stepOutcome;
       }
     }
   } catch (error: unknown) {

@@ -81,6 +81,7 @@ interface HarnessOptions {
   readonly lostAfterUnreachable?: number;
   readonly failLostUsageOnce?: Error;
   readonly port?: DispatcherPort;
+  readonly advanceClockInLostUsageMs?: number;
 }
 
 async function withHarness(
@@ -117,6 +118,13 @@ async function withHarness(
           const error = failLostUsage;
           failLostUsage = null;
           return Promise.reject(error);
+        }
+        // The R1/R2 hook runs after finishLost reads observedAt and
+        // before the marker is set, so advancing here gives a second
+        // clock read another instant.
+        const advanceMs = options.advanceClockInLostUsageMs ?? 0;
+        if (advanceMs !== 0) {
+          clock.now = new Date(clock.now.getTime() + advanceMs);
         }
         return Promise.resolve(null);
       },
@@ -161,7 +169,7 @@ function failUnreachableFirst(control: ReturnType<typeof createMemoryPort>): {
 }
 
 test("R1 a provisional with nothing bound ends lost with one line", async () => {
-  await withHarness({}, async ({ control, dispatcher, ledgerPath, lostUsageCalls }) => {
+  await withHarness({ advanceClockInLostUsageMs: 1000 }, async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
     control.setUnreachable("laptop-a", true);
     let startError: unknown = null;
     try {
@@ -188,6 +196,13 @@ test("R1 a provisional with nothing bound ends lost with one line", async () => 
     });
     const entries = await readRegistry(join(ledgerPath, "..", "registry.json"));
     expect(entries).toHaveLength(1);
+    const stored = entries[0];
+    if (stored?.terminal === null || stored?.terminal === undefined) {
+      throw new Error("expected a lost terminal");
+    }
+    expect(stored.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
+    expect(stored.resolvedAt).toBe(stored.terminal.observedAt);
+    expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
     expect(entries[0]).toEqual({
       requestId: "demo-item:0",
       workItemId: "demo-item",
@@ -251,7 +266,7 @@ test("R1 a provisional with nothing bound ends lost with one line", async () => 
 test("R2 a provisional with a live bound session is stopped, then one line", async () => {
   const control = createMemoryPort();
   const { port } = failUnreachableFirst(control);
-  await withHarness({ port }, async ({ dispatcher, ledgerPath, lostUsageCalls, dir }) => {
+  await withHarness({ port, advanceClockInLostUsageMs: 1000 }, async ({ dispatcher, ledgerPath, lostUsageCalls, dir, clock }) => {
     let startError: unknown = null;
     try {
       await dispatcher.start(
@@ -288,7 +303,9 @@ test("R2 a provisional with a live bound session is stopped, then one line", asy
     expect(resolvedEntry.terminal.state).toBe("lost");
     expect(resolvedEntry.terminal.detail).toBe("operator resolved");
     expect(resolvedEntry.terminal.ledgerAppended).toBe(true);
+    expect(resolvedEntry.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
     expect(resolvedEntry.resolvedAt).toBe(resolvedEntry.terminal.observedAt);
+    expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
     const lines = await readPending(ledgerPath);
     expect(lines).toHaveLength(1);
     expect((lines[0] as { entryId: string }).entryId).toBe("demo-item:demo-item:0");

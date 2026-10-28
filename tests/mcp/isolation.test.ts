@@ -74,7 +74,12 @@ function resolveSpec(fromFile: string, spec: string): string | null {
   throw new Error(`unresolved import "${spec}" in ${fromFile}`);
 }
 
-export function checkTarget(spec: string, file: string, target: string, root: string): "follow" | "skip" {
+export function checkTarget(
+  spec: string,
+  file: string,
+  target: string,
+  root: string,
+): "follow" | "skip" {
   if (target.includes("/node_modules/")) {
     return "skip";
   }
@@ -166,7 +171,7 @@ test("loaderUse allows plain property reads and identifiers (X4 Y2)", () => {
     "arequire(x)",
     "const required = 1",
     "const workers = 1",
-    "// require(\"x\")\nimport.meta.url",
+    '// require("x")\nimport.meta.url',
   ];
   for (const sample of clean) {
     expect(`${sample}: ${loaderUse(sample) ?? "clean"}`).toBe(`${sample}: clean`);
@@ -188,9 +193,9 @@ test("every closure file is checked for loader use (X4 Y3)", () => {
     checked.push(file);
   }
   expect(checked.sort()).toEqual([...closure].filter((file) => file.endsWith(".ts")).sort());
-  expect(
-    [...closure].filter((file) => !file.endsWith(".ts") && !file.endsWith(".json")),
-  ).toEqual([]);
+  expect([...closure].filter((file) => !file.endsWith(".ts") && !file.endsWith(".json"))).toEqual(
+    [],
+  );
   // Size reads the checked set: checking only src/mcp/ files fails here.
   expect(checked.length).toBeGreaterThan(entries.length);
   expect(checked.some((file) => !file.startsWith(`${dir}/`))).toBe(true);

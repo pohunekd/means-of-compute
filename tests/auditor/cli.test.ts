@@ -38,7 +38,13 @@ async function makeCliTree(): Promise<CliTree> {
   try {
     await mkdir(join(dir, "config", "providers"), { recursive: true });
     await mkdir(join(dir, "verdicts"), { recursive: true });
-    for (const name of ["meta-api.json", "nvidia-build.json", "route.json", "schema.json"]) {
+    for (const name of [
+      "meta-api.json",
+      "nvidia-build.json",
+      "meta-wonder.json",
+      "route.json",
+      "schema.json",
+    ]) {
       const source = await Bun.file(join(REPO_ROOT, "config", "providers", name)).text();
       await Bun.write(join(dir, "config", "providers", name), source);
     }
@@ -49,6 +55,7 @@ async function makeCliTree(): Promise<CliTree> {
           { providerId: "meta-api", model: "muse-spark-1.3-contributor" },
           { providerId: "nvidia-build", model: "meta/muse-glimmer-30b" },
         ],
+        mergeAuditor: { providerId: "meta-wonder", model: "muse-wonder-1.0" },
         verdictDir: join(dir, "verdicts"),
         maxDiffBytes: 200000,
         maxFindings: 50,
@@ -96,6 +103,7 @@ function cliEnv(port: number): Record<string, string> {
   // in a child can never reach a third-party endpoint.
   env["PROVIDER_META_API_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
   env["PROVIDER_NVIDIA_BUILD_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
+  env["PROVIDER_META_WONDER_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
   return env;
 }
 
@@ -542,6 +550,95 @@ test("L-5: a single-dash typo exits 2 with audit: unknown argument", async () =>
     ]);
     expect(run.code).toBe(2);
     expect(run.stderr).toContain("audit: unknown argument -pull");
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L1: --phase-critical requires --pull (mutation: drop the CLI check)", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    const server = await startLoopback("tests/auditor/recordings/wonder-clean.json");
+    let run: CliRun;
+    try {
+      const itemPath = join(tree.dir, "item.json");
+      const proc = Bun.spawn(
+        [
+          "bun",
+          CLI,
+          "--repo-dir",
+          repo.dir,
+          "--ref",
+          "demo-good",
+          "--base",
+          "main",
+          "--item",
+          itemPath,
+          "--authors",
+          "flags",
+          "--author-model",
+          "meta/muse-glimmer-30b",
+          "--phase-critical",
+          "yes",
+        ],
+        { cwd: tree.dir, stdout: "pipe", stderr: "pipe", env: cliEnv(server.port) },
+      );
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout as ReadableStream).text(),
+        new Response(proc.stderr as ReadableStream).text(),
+        proc.exited,
+      ]);
+      run = { code, stdout, stderr };
+    } finally {
+      void server.stop();
+    }
+    expect(run.code).toBe(2);
+    expect(run.stderr.trim()).toBe("audit: --phase-critical requires --pull");
+    // The flag check runs before any model call, so the loopback stub
+    // never started: parsing rejects before the env is even built.
+    expect(run.stdout).toBe("");
+  } finally {
+    tree.cleanup();
+    removeTempRepo(repo.dir);
+  }
+});
+
+test("L2: phase-critical re-post refuses a general verdict (mutation: drop the P10 check)", async () => {
+  const repo = await makeTempRepo();
+  const tree = await makeCliTree();
+  try {
+    await writeItem(tree, "demo-good");
+    const head = (await Bun.$`git -C ${repo.dir} rev-parse demo-good`.text()).trim();
+    await installFakeGh(tree, "ok");
+    // A first run stores a Spark verdict (Glimmer authored, no opt-in).
+    const first = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "7"],
+    );
+    expect(first.code).toBe(0);
+    const callsBefore = await ghCommentCalls(tree);
+    const ledgerBefore = await Bun.file(join(tree.dir, "ledger.jsonl")).text();
+    // The re-post with the opt-in refuses the stored Spark verdict:
+    // no model call, no gh call, no new ledger line.
+    const second = await runCliWithGh(
+      tree,
+      repo,
+      "demo-good",
+      "tests/auditor/recordings/clean.json",
+      ["--pull", "7", "--post", "yes", "--phase-critical", "yes"],
+    );
+    expect(second.code).toBe(3);
+    expect(second.stderr.trim()).toBe(
+      `audit: refused: stored verdict ${head} is by muse-spark-1.3-contributor, not the merge auditor muse-wonder-1.0`,
+    );
+    expect(await ghCommentCalls(tree)).toBe(callsBefore);
+    expect(await Bun.file(join(tree.dir, "ledger.jsonl")).text()).toBe(ledgerBefore);
   } finally {
     tree.cleanup();
     removeTempRepo(repo.dir);

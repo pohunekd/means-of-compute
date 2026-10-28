@@ -43,7 +43,7 @@ coordinator's daily digest channel.
   contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
   bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
   unmetered NVIDIA Build (0) come from those descriptors, never from
-  literals in code.
+  literals in code, and the Muse Wonder Standard prices (4.00 input, 0.20 cached input, 20.00 output USD per 1M; `config/providers/meta-wonder.json`; source https://dev.meta.ai/docs/pricing-rate-limits, read 2026-10-28).
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
   `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
   missing or unreadable file exits 2. Caps are validated JSON numbers

@@ -1,9 +1,12 @@
 // Typed loader for config/auditor.json. Every key is required, no extra
 // key is allowed. Each auditor's providerId names a descriptor file whose
-// JSON model equals the auditor model. Any failure is a startup error
-// (exit 2 at the CLI).
+// JSON model equals the auditor model, and the merge auditor names a
+// priced descriptor outside the provider route, so Wonder is never a
+// fallback. Any failure is a startup error (exit 2 at the CLI).
 import { readInputText, statInputPath } from "../fs/input.js";
-import { PROVIDERS_DIR } from "../providers/paths.js";
+import { loadProviderRoute } from "../providers/route.js";
+import { providerDescriptorExists } from "../providers/config.js";
+import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 
 export interface AuditorEntry {
   readonly providerId: string;
@@ -12,6 +15,7 @@ export interface AuditorEntry {
 
 export interface AuditorConfig {
   readonly auditors: readonly AuditorEntry[];
+  readonly mergeAuditor: AuditorEntry;
   readonly verdictDir: string;
   readonly maxDiffBytes: number;
   readonly maxFindings: number;
@@ -22,6 +26,7 @@ export const AUDITOR_CONFIG_PATH = "config/auditor.json";
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const ALLOWED_KEYS = new Set([
   "auditors",
+  "mergeAuditor",
   "verdictDir",
   "maxDiffBytes",
   "maxFindings",
@@ -46,7 +51,7 @@ export function checkAuditorConfig(value: unknown): string | null {
   return null;
 }
 
-async function providerModelOf(providerId: string): Promise<unknown> {
+async function providerRecordOf(providerId: string): Promise<Record<string, unknown>> {
   const path = `${PROVIDERS_DIR}/${providerId}.json`;
   if ((await statInputPath("Auditor config", path)) === "absent") {
     throw new Error(`Auditor config ${AUDITOR_CONFIG_PATH}: missing provider file ${path}`);
@@ -65,7 +70,7 @@ async function providerModelOf(providerId: string): Promise<unknown> {
       `Auditor config ${AUDITOR_CONFIG_PATH}: provider file ${path} is not an object`,
     );
   }
-  return (raw as Record<string, unknown>)["model"];
+  return raw as Record<string, unknown>;
 }
 
 export async function loadAuditorConfig(
@@ -117,7 +122,7 @@ export async function loadAuditorConfig(
       throw new Error(`${label} ${path}: duplicate auditor model "${model}"`);
     }
     models.add(model);
-    const descriptorModel = await providerModelOf(providerId);
+    const descriptorModel = (await providerRecordOf(providerId))["model"];
     if (descriptorModel !== model) {
       throw new Error(
         `${label} ${path}: auditors[${String(index)}].model does not match ${PROVIDERS_DIR}/${providerId}.json`,
@@ -125,6 +130,61 @@ export async function loadAuditorConfig(
     }
     auditors.push({ providerId, model });
   }
+
+  const mergeRaw = record["mergeAuditor"];
+  if (typeof mergeRaw !== "object" || mergeRaw === null || Array.isArray(mergeRaw)) {
+    throw new Error(`${label} ${path}: mergeAuditor needs exactly providerId and model strings`);
+  }
+  const mergeCandidate = mergeRaw as Record<string, unknown>;
+  if (
+    Object.keys(mergeCandidate).length !== 2 ||
+    typeof mergeCandidate["providerId"] !== "string" ||
+    typeof mergeCandidate["model"] !== "string"
+  ) {
+    throw new Error(`${label} ${path}: mergeAuditor needs exactly providerId and model strings`);
+  }
+  const { providerId: mergeProviderId, model: mergeModel } = mergeCandidate as unknown as {
+    providerId: string;
+    model: string;
+  };
+  // The Wonder price is an upper bound only because the descriptor is
+  // priced per token; a zero or missing price would silently count
+  // Wonder spend as $0, so the config refuses to load instead.
+  if (!MODEL_PATTERN.test(mergeModel) || mergeModel.includes(":")) {
+    throw new Error(`${label} ${path}: mergeAuditor.model is invalid`);
+  }
+  const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
+  if (route.includes(mergeProviderId)) {
+    throw new Error(
+      `${label} ${path}: mergeAuditor provider "${mergeProviderId}" must not be in ${PROVIDER_ROUTE_PATH}`,
+    );
+  }
+  const mergeDescriptor = await providerRecordOf(mergeProviderId);
+  if (mergeDescriptor["model"] !== mergeModel) {
+    throw new Error(
+      `${label} ${path}: mergeAuditor.model does not match ${PROVIDERS_DIR}/${mergeProviderId}.json`,
+    );
+  }
+  const mergePricing = mergeDescriptor["pricing"];
+  const mergeInputPer1M =
+    typeof mergePricing === "object" && mergePricing !== null && !Array.isArray(mergePricing)
+      ? (mergePricing as Record<string, unknown>)["inputPer1M"]
+      : undefined;
+  const mergeOutputPer1M =
+    typeof mergePricing === "object" && mergePricing !== null && !Array.isArray(mergePricing)
+      ? (mergePricing as Record<string, unknown>)["outputPer1M"]
+      : undefined;
+  if (
+    typeof mergeInputPer1M !== "number" ||
+    mergeInputPer1M <= 0 ||
+    typeof mergeOutputPer1M !== "number" ||
+    mergeOutputPer1M <= 0
+  ) {
+    throw new Error(
+      `${label} ${path}: mergeAuditor provider file ${PROVIDERS_DIR}/${mergeProviderId}.json must price inputPer1M and outputPer1M above 0`,
+    );
+  }
+  const mergeAuditor: AuditorEntry = { providerId: mergeProviderId, model: mergeModel };
 
   const verdictDir = record["verdictDir"];
   if (typeof verdictDir !== "string" || verdictDir.length === 0) {
@@ -144,6 +204,7 @@ export async function loadAuditorConfig(
   }
   return {
     auditors,
+    mergeAuditor,
     verdictDir,
     maxDiffBytes: record["maxDiffBytes"] as number,
     maxFindings: record["maxFindings"] as number,

@@ -1,0 +1,13 @@
+{
+  "id": "meta-wonder",
+  "name": "Meta Model API (Muse Wonder)",
+  "baseUrl": "https://api.meta.ai/v1",
+  "model": "muse-wonder-1.0",
+  "apiKeyEnv": "META_API_KEY",
+  "timeoutMs": 600000,
+  "pricing": {
+    "inputPer1M": 4,
+    "cachedInputPer1M": 0.2,
+    "outputPer1M": 20
+  }
+}

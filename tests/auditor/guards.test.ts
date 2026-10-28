@@ -75,6 +75,7 @@ test("empty authorModels refuses 3 with zero model calls (mutation: authors.leng
         ref: "demo-good",
         baseRef: "main",
         pullNumber: 99,
+        phaseCritical: false,
         authorModels: [],
       },
       {
@@ -123,6 +124,7 @@ test("refused budget admits nothing and makes zero model calls (mutation: false 
         ref: "demo-good",
         baseRef: "main",
         pullNumber: 99,
+        phaseCritical: false,
         authorModels: ["meta/muse-glimmer-30b"],
       },
       {
@@ -166,6 +168,7 @@ test("L2: an item without DoD fails isWorkItem with exit 2", async () => {
           ref: "demo-good",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {
@@ -205,6 +208,7 @@ test("L4: an unknown 40-hex sha exits 2 with the rev-parse message", async () =>
           ref: "0000000000000000000000000000000000000000",
           baseRef: "main",
           pullNumber: 99,
+          phaseCritical: false,
           authorModels: ["meta/muse-glimmer-30b"],
         },
         {

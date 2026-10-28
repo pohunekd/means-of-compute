@@ -1,6 +1,7 @@
 // CLI entry point: bun run audit --repo-dir <dir> --ref <ref> --base
 // <ref> --item <file> [--authors <source>]
-// [--author-model <id>...] [--pull <n>] [--post yes]. The WorkItem comes
+// [--author-model <id>...] [--pull <n>] [--post yes] [--phase-critical yes].
+// The WorkItem comes
 // only from --item, supplied by the caller. Exit 0 prints the verdict file
 // path, then the
 // rendered comment (or a note when there is no pull request). Exit 3 is a
@@ -79,6 +80,7 @@ function checkUnknownFlags(args: string[]): void {
     "--author-model",
     "--pull",
     "--post",
+    "--phase-critical",
   ]);
   let index = 0;
   while (index < args.length) {
@@ -99,6 +101,7 @@ interface CliOptions {
   authorModels: string[];
   pull: number | null;
   post: boolean;
+  phaseCritical: boolean;
 }
 
 function parseOptions(args: string[]): CliOptions {
@@ -110,6 +113,7 @@ function parseOptions(args: string[]): CliOptions {
   const authors = flagValue(args, "--authors");
   const pullRaw = flagValue(args, "--pull");
   const postRaw = flagValue(args, "--post");
+  const phaseCriticalRaw = flagValue(args, "--phase-critical");
   const authorModels = flagValues(args, "--author-model");
   const required: Readonly<Record<string, string | null>> = {
     "--repo-dir": repoDir,
@@ -157,6 +161,16 @@ function parseOptions(args: string[]): CliOptions {
   if (post && pull === null) {
     throw new Error(`audit: --post requires --pull`);
   }
+  let phaseCritical = false;
+  if (phaseCriticalRaw !== null) {
+    if (phaseCriticalRaw !== "yes") {
+      throw new Error(`audit: --phase-critical accepts only "yes"`);
+    }
+    phaseCritical = true;
+  }
+  if (phaseCritical && pull === null) {
+    throw new Error(`audit: --phase-critical requires --pull`);
+  }
   return {
     repoDir,
     ref,
@@ -166,6 +180,7 @@ function parseOptions(args: string[]): CliOptions {
     authorModels,
     pull,
     post,
+    phaseCritical,
   };
 }
 
@@ -302,6 +317,15 @@ async function run(): Promise<number> {
       const stored = await readVerdicts(config.verdictDir, item.id);
       const match = stored.find((verdict) => verdict.headSha === headSha) ?? null;
       if (match !== null) {
+        // A phase-critical re-post re-posts only a Wonder verdict: the
+        // coordinator must see a Wonder audit of the head, not a
+        // general verdict posted with the opt-in flag.
+        if (options.phaseCritical && match.auditorModel !== config.mergeAuditor.model) {
+          console.error(
+            `audit: refused: stored verdict ${headSha} is by ${match.auditorModel}, not the merge auditor ${config.mergeAuditor.model}`,
+          );
+          return 3;
+        }
         // The stored verdict belongs to a PR: re-post keeps the PR it
         // was stored for, or renders the marker for --pull when the
         // stored verdict has none. A verdict stored for another PR
@@ -333,6 +357,7 @@ async function run(): Promise<number> {
       ref: options.ref,
       baseRef: options.base,
       pullNumber: options.pull,
+      phaseCritical: options.phaseCritical,
       authorModels: [...authors],
     };
     const outcome = await runAudit(input, {

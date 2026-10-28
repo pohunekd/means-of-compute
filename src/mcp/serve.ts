@@ -104,11 +104,10 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
   return { protocol, callLog, maxMessageBytes: config.maxMessageBytes, run, caller };
 }
 
-// Every response travels through one serialized transport queue below.
-// H1 guards the round-1 shape: the write callback (and drain under
-// backpressure) is awaited before the queue moves on, so awaiting the
-// queue covers written bytes. Serialization also means at most one drain
-// listener is ever pending. A failed write resolves false; a closed
+// Every response travels through one serialized transport queue below:
+// the write callback (and drain under backpressure) is awaited before the
+// queue moves on, so awaiting the queue covers written bytes.
+// Serialization also means at most one drain listener is ever pending. A failed write resolves false; a closed
 // stream resolves false as well.
 async function writeStdout(text: string): Promise<boolean> {
   const line = `${text}\n`;
@@ -221,8 +220,8 @@ async function serve(caller: string, configPath: string): Promise<number> {
   // "transport-failed" through the resolver shared with the stdin, signal
   // and stdout listeners, so the shutdown below wakes even though stdin
   // never ends after destroy(). Each branch prints one stderr line, aborts
-  // the protocol and stops reading stdin. No path reaches this with
-  // fleet_status today (H7, R2-6).
+  // the protocol and stops reading stdin. No client line is known to reach
+  // this: too-deep arguments are refused in the protocol.
   let resolveDone: (reason: string) => void = () => undefined;
   async function handleTransportLine(line: string): Promise<void> {
     let response: string | null;
@@ -267,10 +266,10 @@ async function serve(caller: string, configPath: string): Promise<number> {
     },
   );
   process.stdin.setEncoding("utf8");
-  // H2 signals only after the first call-end: the abort in this branch
-  // drops every queued line while the message in flight finishes first
-  // (T3.4). A signal aborts the protocol even when stdin already ended,
-  // and the reason read after the drain still becomes "signal".
+  // A signal aborts the protocol: queued lines that have not started are
+  // dropped while the message in flight finishes (T3.4). A signal aborts
+  // the protocol even when stdin already ended, and the reason read after
+  // the drain still becomes "signal".
   let sawSignal: boolean = false;
   const done = new Promise<string>((resolve) => {
     resolveDone = resolve;

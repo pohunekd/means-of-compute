@@ -184,10 +184,11 @@ test("a large response survives a slow reader (H1, F2, T3.2)", async () => {
   const env = await createMcpTestEnv("mcp-f2-");
   await writeLargeRegistry(env);
   // The pipe reader sleeps before draining, so the server must keep the
-  // whole response buffered until stdout accepts it; exiting early or
-  // resolving the write without its callback truncates the response.
-  // The brace group records the server's own exit status: the pipeline
-  // rc alone only covers the reader.
+  // whole response buffered until stdout accepts it. This catches the
+  // round-1 shape (write without callback or drain, end stdout, exit at
+  // once); exiting early alone or resolving the write early alone is not
+  // caught. The brace group records the server's own exit status: the
+  // pipeline rc alone only covers the reader.
   const rcfile = join(env.dir, "server.rc");
   const slowReaderCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | (sleep 1; cat)`;
   const proc = Bun.spawn(["sh", "-c", slowReaderCmd], {
@@ -234,10 +235,9 @@ test("SIGTERM after EOF drops queued calls (H2, T3.4)", async () => {
   // Stdout through (sleep 2; cat) fills the pipe, so the first large
   // response stays in flight while the rest queue behind it. The server
   // pid comes from its own server-start line, so SIGTERM hits the server
-  // alone, not the reader. Stdin closes at once (EOF), then SIGTERM
-  // arrives once the call log shows the first call-start.
-  // The brace group records the server's own exit status: the pipeline
-  // rc alone only covers the reader.
+  // alone, not the reader. Stdin closes at once (EOF), then SIGTERM is
+  // sent after the first call-end. The brace group records the server's
+  // own exit status: the pipeline rc alone only covers the reader.
   const rcfile = join(env.dir, "server.rc");
   const queuedCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; } | (sleep 2; cat)`;
   const proc = Bun.spawn(["sh", "-c", queuedCmd], {

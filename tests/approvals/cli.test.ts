@@ -2,6 +2,7 @@
 // spawned process. confirm injection covers the typed-line mismatch;
 // the busy row spawns a lock-holder subprocess (AM3-5).
 import { expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -81,21 +82,42 @@ function deps(confirm: (prompt: string) => Promise<string>): {
   };
 }
 
-async function runCli(args: readonly string[]): Promise<{
+interface SpawnedCli {
   readonly stdout: string;
   readonly stderr: string;
   readonly rc: number;
-}> {
-  const proc = Bun.spawn(["bun", "run", "src/approvals/cli.ts", ...args], {
+}
+
+// The child starts in a new session with no controlling terminal, so the
+// decide prompt fails fast instead of blocking on the test's terminal.
+async function runCli(args: readonly string[]): Promise<SpawnedCli> {
+  const child = spawn("bun", ["run", "src/approvals/cli.ts", ...args], {
     cwd: process.cwd(),
-    stdout: "pipe",
-    stderr: "pipe",
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  const [stdout, stderr, rc] = await Promise.all([
-    new Response(proc.stdout as ReadableStream).text(),
-    new Response(proc.stderr as ReadableStream).text(),
-    proc.exited,
-  ]);
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString("utf8");
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  });
+  const rc = await new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`approvals CLI timed out: ${args.join(" ")}`));
+    }, 30_000);
+    child.on("error", (error: Error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code: number | null) => {
+      clearTimeout(timer);
+      resolve(code ?? 1);
+    });
+  });
   return { stdout, stderr, rc };
 }
 

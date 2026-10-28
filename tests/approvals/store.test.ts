@@ -13,6 +13,7 @@ import {
   readApprovals,
   recordRequest,
 } from "../../src/approvals/store.js";
+import { decideRequest } from "../../src/approvals/decide.js";
 import type { ApprovalsDocument } from "../../src/approvals/store.js";
 
 const APPROVE_ARGS = {
@@ -40,17 +41,38 @@ async function recordApprove(path: string, overrides: Record<string, unknown> = 
   });
 }
 
-test("record approve gives req-000001 with seq 1 and nextSeq 2 (A1)", async () => {
+test("record, decide, then record gives req-000003 with seq 3 and nextSeq 4 (A1)", async () => {
   const path = requestsPath();
-  const outcome = await recordApprove(path);
-  if (outcome.kind !== "recorded") {
-    throw new Error(`expected recorded, got ${outcome.kind}`);
+  const first = await recordApprove(path);
+  if (first.kind !== "recorded") {
+    throw new Error(`expected recorded, got ${first.kind}`);
   }
-  expect(outcome.request.requestId).toBe("req-000001");
-  expect(outcome.request.seq).toBe(1);
+  expect(first.request.requestId).toBe("req-000001");
+  expect(first.request.seq).toBe(1);
+  const decided = await decideRequest(path, {
+    requestId: first.request.requestId,
+    decision: "approved",
+    author: "owner",
+    now: fixedNow(),
+  });
+  if (decided.kind !== "decided") {
+    throw new Error(`expected decided, got ${decided.kind}`);
+  }
+  const second = await recordRequest(path, {
+    tool: "approve",
+    args: { ...APPROVE_ARGS, pullNumber: 13 },
+    caller: "coordinator",
+    now: fixedNow(),
+    maxPending: 20,
+  });
+  if (second.kind !== "recorded") {
+    throw new Error(`expected recorded, got ${second.kind}`);
+  }
+  expect(second.request.requestId).toBe("req-000003");
+  expect(second.request.seq).toBe(3);
   const doc = await readApprovals(path);
-  expect(doc.nextSeq).toBe(2);
-  expect(doc.requests).toHaveLength(1);
+  expect(doc.nextSeq).toBe(4);
+  expect(doc.requests).toHaveLength(2);
 });
 
 test("an identical record returns the same id (A2)", async () => {

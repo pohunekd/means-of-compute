@@ -198,18 +198,14 @@ async function runDiff(dargs: readonly string[]): Promise<number> {
         `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
       );
     };
-    return await runDiffCommand(
-      dargs,
-      () => openPohunekPort(config, log, process.env),
-      {
-        stdout: (text: string): void => {
-          process.stdout.write(text);
-        },
-        stderr: (line: string): void => {
-          console.error(line);
-        },
+    return await runDiffCommand(dargs, () => openPohunekPort(config, log, process.env), {
+      stdout: (text: string): void => {
+        process.stdout.write(text);
       },
-    );
+      stderr: (line: string): void => {
+        console.error(line);
+      },
+    });
   } catch (error: unknown) {
     console.error(`dispatch: ${error instanceof Error ? error.message : String(error)}`);
     return 2;

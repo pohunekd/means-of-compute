@@ -2,11 +2,7 @@
 // port, print the daemon diff. Flag errors exit 2 without opening the port;
 // unreachable and rejected ports exit 2 with one line; anything else
 // propagates. The port closes on every path once opened.
-import {
-  PortRejectedError,
-  PortUnreachableError,
-  type DispatcherPort,
-} from "./port.js";
+import { PortRejectedError, PortUnreachableError, type DispatcherPort } from "./port.js";
 
 export interface DiffCommandIo {
   readonly stdout: (text: string) => void;

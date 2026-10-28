@@ -10,11 +10,7 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import type {
-  ModelSelection,
-  SessionRef,
-  WaitResult,
-} from "../../src/dispatcher/port.js";
+import type { ModelSelection, SessionRef, WaitResult } from "../../src/dispatcher/port.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readLedger } from "../../src/ledger/read.js";
 

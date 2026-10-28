@@ -1,8 +1,8 @@
-// Coordinator config tests (C1-C13): missing keys, literal pins, guard
+// Coordinator config tests (C1-C15): missing keys, literal pins, guard
 // exclusions, seed shapes, committed bytes and the unexpected-key rule.
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -267,6 +267,73 @@ test("an extra top-level key is unexpected (C13)", async () => {
   });
   try {
     await fails(path, 'unexpected key "evidenceDenyPatterns"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the first of two bad keys wins (C14)", async () => {
+  const first = await tempConfig((value) => {
+    value["museCommand"] = [];
+    value["mcpConfigPath"] = "";
+  });
+  try {
+    await fails(first.path, 'invalid required key "museCommand"');
+  } finally {
+    rmSync(first.dir, { recursive: true, force: true });
+  }
+  const second = await tempConfig((value) => {
+    value["envPassthrough"] = ["HOME"];
+    value["skillDir"] = "";
+  });
+  try {
+    await fails(second.path, 'invalid required key "envPassthrough"');
+  } finally {
+    rmSync(second.dir, { recursive: true, force: true });
+  }
+  const third = await tempConfig((value) => {
+    value["seed"] = { stateDir: "", storeSeedPath: "" };
+  });
+  try {
+    await fails(third.path, 'invalid required key "seed.stateDir"');
+  } finally {
+    rmSync(third.dir, { recursive: true, force: true });
+  }
+});
+
+test("a parsed non-object is not a JSON object (C15)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "coord-config-"));
+  try {
+    for (const [name, body] of [
+      ["list.json", "[]\n"],
+      ["text.json", '"x"\n'],
+      ["empty.json", "null\n"],
+    ] as const) {
+      const path = join(dir, name);
+      await Bun.write(path, body);
+      await fails(path, "must be a JSON object");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a descriptor directory wraps the input error once (X3)", async () => {
+  const descriptorPath = join("config", "providers", "meta-api.json");
+  const backupPath = join(tmpdir(), `coord-descriptor-backup-${String(process.pid)}.json`);
+  const { dir, path } = await tempConfig(() => {});
+  try {
+    renameSync(descriptorPath, backupPath);
+    try {
+      mkdirSync(descriptorPath);
+      await fails(
+        path,
+        `invalid required key "providerId" (Provider descriptor ${descriptorPath}: not a regular file)`,
+      );
+    } finally {
+      rmSync(descriptorPath, { recursive: true, force: true });
+      renameSync(backupPath, descriptorPath);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

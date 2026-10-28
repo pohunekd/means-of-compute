@@ -2,7 +2,7 @@
 // request for out-of-band confirmation. Neither tool executes anything;
 // decisions are taken only by the approvals CLI (A9).
 import Ajv from "ajv/dist/2020";
-import { loadApprovalsConfig } from "../approvals/config.js";
+import { loadApprovalsConfig, type ApprovalsConfig } from "../approvals/config.js";
 import {
   ApprovalsBusyError,
   ApprovalsDataError,
@@ -14,25 +14,15 @@ import {
 } from "../approvals/store.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
-import type {
-  ToolContext,
-  ToolDefinition,
-  ToolError,
-  ToolOutcome,
-  ToolPayload,
-} from "./protocol.js";
+import type { ToolContext, ToolDefinition, ToolOutcome, ToolPayload } from "./protocol.js";
 import type { ToolPaths } from "./tools.js";
 
 function refusedPayload(code: string, message: string): ToolPayload {
   return { ok: false, error: { code, message, retryable: false } };
 }
 
-function okPayload(requestId: string): ToolPayload {
-  return { ok: true, requestId, state: "pending", outcome: "recorded" };
-}
-
-function existingPayload(requestId: string): ToolPayload {
-  return { ok: true, requestId, state: "pending", outcome: "existing" };
+function okPayload(kind: "recorded" | "existing", requestId: string): ToolPayload {
+  return { ok: true, requestId, state: "pending", outcome: kind };
 }
 
 function errorPayload(
@@ -40,11 +30,11 @@ function errorPayload(
   message: string,
   retryable: boolean,
   detail: Record<string, unknown>,
-): ErrorPayload {
+): ToolPayload {
   return { ok: false, error: { code, message, retryable, ...detail } };
 }
 
-function unavailablePayload(source: string): ErrorPayload {
+function unavailablePayload(source: string): ToolPayload {
   return errorPayload("source-unreadable", `${source} unreadable`, false, { source });
 }
 
@@ -52,10 +42,7 @@ function outcomePayload(outcome: RecordOutcome): ToolPayload {
   if (outcome.kind === "refused") {
     return refusedPayload(outcome.code, outcome.message);
   }
-  if (outcome.kind === "existing") {
-    return existingPayload(outcome.request.requestId);
-  }
-  return okPayload(outcome.request.requestId);
+  return okPayload(outcome.kind, outcome.request.requestId);
 }
 
 function outcomeSummary(outcome: RecordOutcome): Record<string, unknown> | null {
@@ -63,34 +50,6 @@ function outcomeSummary(outcome: RecordOutcome): Record<string, unknown> | null 
     return null;
   }
   return { requestId: outcome.request.requestId, outcome: outcome.kind };
-}
-
-type ErrorPayload = { readonly ok: false; readonly error: ToolError };
-
-interface RecordError {
-  readonly payload: ErrorPayload;
-  readonly busy: boolean;
-}
-
-function recordError(error: unknown): RecordError {
-  if (error instanceof ApprovalsBusyError) {
-    return {
-      payload: errorPayload("store-busy", "requests store busy, retry", true, {
-        store: "requests",
-      }),
-      busy: true,
-    };
-  }
-  if (error instanceof ApprovalsDataError) {
-    return { payload: unavailablePayload("requests"), busy: false };
-  }
-  if (error instanceof ApprovalsWriteError) {
-    return {
-      payload: errorPayload("store-write-failed", "requests store write failed", false, {}),
-      busy: false,
-    };
-  }
-  throw error;
 }
 
 function errorDetail(error: unknown): string {
@@ -177,7 +136,7 @@ async function checkReason(
   paths: ToolPaths,
   args: { readonly reason: string },
 ): Promise<
-  | { readonly approvals: { readonly requestsPath: string; readonly maxPendingRequests: number } }
+  | { readonly approvals: ApprovalsConfig }
   | { readonly payload: ToolPayload; readonly detail: string | null }
 > {
   let approvals;
@@ -205,38 +164,41 @@ async function checkReason(
 
 async function record(
   tool: ApprovalTool,
-  paths: ToolPaths,
+  approvals: ApprovalsConfig,
   ctx: ToolContext,
   args: ApprovalArgs,
-  maxPending: number,
 ): Promise<ToolOutcome> {
-  let requestsPath: string;
-  try {
-    requestsPath = (await loadApprovalsConfig(paths.approvalsConfigPath)).requestsPath;
-  } catch (error: unknown) {
-    return { payload: unavailablePayload("requests"), summary: null, detail: errorDetail(error) };
-  }
   let outcome: RecordOutcome;
   try {
-    outcome = await recordRequest(requestsPath, {
+    outcome = await recordRequest(approvals.requestsPath, {
       tool,
       args,
       caller: ctx.caller,
       now: ctx.now,
-      maxPending,
+      maxPending: approvals.maxPendingRequests,
     });
   } catch (error: unknown) {
-    if (
-      error instanceof ApprovalsBusyError ||
-      error instanceof ApprovalsDataError ||
-      error instanceof ApprovalsWriteError
-    ) {
-      const mapped = recordError(error);
-      // store-busy retries with no message; every other failure carries one.
+    if (error instanceof ApprovalsBusyError) {
       return {
-        payload: mapped.payload,
+        payload: errorPayload("store-busy", "requests store busy, retry", true, {
+          store: "requests",
+        }),
         summary: null,
-        detail: mapped.busy ? null : errorDetail(error),
+        detail: null,
+      };
+    }
+    if (error instanceof ApprovalsDataError) {
+      return {
+        payload: unavailablePayload("requests"),
+        summary: null,
+        detail: errorDetail(error),
+      };
+    }
+    if (error instanceof ApprovalsWriteError) {
+      return {
+        payload: errorPayload("store-write-failed", "requests store write failed", false, {}),
+        summary: null,
+        detail: errorDetail(error),
       };
     }
     throw error;
@@ -289,7 +251,7 @@ async function runApprove(args: unknown, ctx: ToolContext, paths: ToolPaths): Pr
       detail: null,
     };
   }
-  return record("approve", paths, ctx, { ...submitted }, checked.approvals.maxPendingRequests);
+  return record("approve", checked.approvals, ctx, { ...submitted });
 }
 
 async function runPauseFleet(
@@ -303,7 +265,7 @@ async function runPauseFleet(
     return { payload: checked.payload, summary: null, detail: checked.detail };
   }
   const submitted = args as { readonly action: "pause" | "resume"; readonly reason: string };
-  return record("pause_fleet", paths, ctx, { ...submitted }, checked.approvals.maxPendingRequests);
+  return record("pause_fleet", checked.approvals, ctx, { ...submitted });
 }
 
 export function createApproveTool(paths: ToolPaths): ToolDefinition {

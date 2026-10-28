@@ -44,17 +44,20 @@ function reviewItem(id: string, pullNumber: number): Record<string, unknown> {
 
 const HEAD_SHA = "a".repeat(40);
 
-async function setupEnv(prefix: string): Promise<{ env: McpTestEnv; lines: unknown[] }> {
+async function setupEnv(
+  prefix: string,
+): Promise<{ env: McpTestEnv; lines: unknown[]; storeText: string }> {
   const env = await createMcpTestEnv(prefix);
   const lines: unknown[] = [];
-  await writeTestFile(env.storePath, {
+  const store = {
     schemaVersion: "v1",
     revision: 1,
     items: [reviewItem("demo-review", 7)],
     submissions: [],
-  });
+  };
+  await writeTestFile(env.storePath, store);
   await writeTestFile(env.registryPath, { sessions: [] });
-  return { env, lines };
+  return { env, lines, storeText: await Bun.file(env.storePath).text() };
 }
 
 async function callTool(
@@ -111,7 +114,7 @@ async function fleetPayload(env: McpTestEnv, lines: unknown[]): Promise<Record<s
 }
 
 test("X1 approve on a review item records pending and lists the request (X1, A3, A4)", async () => {
-  const { env, lines } = await setupEnv("mcp-x1-");
+  const { env, lines, storeText: beforeStore } = await setupEnv("mcp-x1-");
   const before = await Bun.file(env.requestsPath)
     .text()
     .catch(() => "");
@@ -121,24 +124,16 @@ test("X1 approve on a review item records pending and lists the request (X1, A3,
     headSha: HEAD_SHA,
     reason: "Ship the demo change.",
   });
-  expect(structured["ok"]).toBe(true);
-  const requestId = structured["requestId"];
-  expect(typeof requestId).toBe("string");
   expect(structured).toEqual({
     ok: true,
-    requestId,
+    requestId: "req-000001",
     state: "pending",
     outcome: "recorded",
   });
+  const requestId = "req-000001";
   expect(ends[ends.length - 1]?.["summary"]).toEqual({ requestId, outcome: "recorded" });
   expect(ends[ends.length - 1]?.["code"]).toBeNull();
-  const storeText = await Bun.file(env.storePath).text();
-  expect(JSON.parse(storeText) as unknown).toEqual({
-    schemaVersion: "v1",
-    revision: 1,
-    items: [reviewItem("demo-review", 7)],
-    submissions: [],
-  });
+  expect(await Bun.file(env.storePath).text()).toBe(beforeStore);
   expect(before).toBe("");
   const fleet = await fleetPayload(env, lines);
   const pending = (fleet["fleet"] as { pendingRequests: readonly unknown[] }).pendingRequests;
@@ -153,8 +148,13 @@ test("X2 pause_fleet records pending and only pauses after a decision (X2, A5)",
     action: "pause",
     reason: "Freeze new starts for the demo.",
   });
-  expect(structured["ok"]).toBe(true);
-  const requestId = structured["requestId"] as string;
+  expect(structured).toEqual({
+    ok: true,
+    requestId: "req-000001",
+    state: "pending",
+    outcome: "recorded",
+  });
+  const requestId = "req-000001";
   const paused = (await fleetPayload(env, lines))["fleet"] as {
     paused: boolean;
     pausedBy: unknown;

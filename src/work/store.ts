@@ -128,7 +128,7 @@ export function checkWorkStore(value: unknown, path: string): WorkStore {
       `${label}: rule (g): cycle edge ${cycle.from} -> ${cycle.to} (${cycle.cycle.join(" -> ")})`,
     );
   }
-  const store = value as WorkStore;
+  const store = value as unknown as WorkStore;
   return { schemaVersion: "v1", revision: store.revision, items, submissions: store.submissions };
 }
 

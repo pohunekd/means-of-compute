@@ -15,7 +15,8 @@ README.
 1. The **loop runner** picks the next ready issue and drives the loop: place,
    run, audit, merge by rule, stall/retry, follow-ups, daily digest (#17). A goal reaches the
    **coordinator** (Muse Code on Muse Spark), which calls the
-   **MCP server**: `submit_work` with a DAG of `WorkItem`s.
+   **MCP server**: `submit_work` with a DAG of `WorkItem`s, kept in the
+   work store; see [work-store.md](work-store.md).
 2. **Placement** reads each host's `HostCapacity` from its **host probe** and returns a
    `PlacementDecision` with the reason. A host is idle when it is inside the policy
    window, on AC power, its battery is above the configured threshold (or it has

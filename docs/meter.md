@@ -290,3 +290,30 @@ The provisional lost path runs only when `port.start` is unreachable; there `los
 ## Usage CLI
 
 `bun run meter:usage -- --log <path> --request <id>` prints the `joinUsage` row of one request as one JSON line (exit 0). The CLI replays the log read-only; a torn tail is ignored and the file is never modified. A request without a grant prints `meter: no grant for <id>` on stderr (exit 3). A usage error (bad flags, missing values, a repeated or unknown flag, a validation failure) or no log file prints one `meter:` line on stderr (exit 2).
+
+## Host setup
+
+The factory's agent profile is a pi profile with `--provider moc-meter --model moc-session`. Its env holds:
+
+- `PI_CODING_AGENT_DIR` set to a host-local dir (for example `~/.config/means-of-compute/pi-agent/`);
+- `MOC_METER_TOKEN_TIMEOUT_MS`;
+- no provider key variable.
+
+That dir holds `models.json`, shaped as `config/host-agent/pi-models.example.json`, with the real proxy URL, and a copy of `scripts/host/meter-token.mjs`. The URL and the dir are host-local and never committed.
+
+`node` and `pohunek` must be on `PATH`.
+
+The adapter puts the token into `session.new` metadata `moc.meterToken`. The helper reads it with `pohunek session inspect <own id> --json` and prints it, and pi sends it as `Authorization: Bearer`.
+
+Metadata is readable by every client of that daemon. Source binding (A5) and the grant lifetime (A3) bound that exposure. A voided start clears the key.
+
+The helper's stderr lines, each with exit 1 and empty stdout:
+
+- `meter-token: POHUNEK_SESSION_ID is not set` or `meter-token: POHUNEK_SESSION_ID is invalid`;
+- `meter-token: MOC_METER_TOKEN_TIMEOUT_MS is not set` or `meter-token: MOC_METER_TOKEN_TIMEOUT_MS is invalid`;
+- `meter-token: pohunek failed to start`, `meter-token: pohunek timed out`, `meter-token: pohunek exited <code>`, or `meter-token: pohunek <signal>`;
+- `meter-token: inspect output is not JSON`;
+- `meter-token: no meter token in session metadata`;
+- `meter-token: meter token is malformed`.
+
+The host precondition is checked per host in W3.1.

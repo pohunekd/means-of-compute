@@ -41,7 +41,7 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
   in-process. Tests use it; it never touches the network.
 - The Pohunek adapter (`src/dispatcher/adapter/pohunek-port.ts` `createPohunekPort`) drives
   real daemons through the SDK behind `openPohunekPort`
-  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). It is the only code that
+  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`; `start` writes the token into `moc.meterToken`; a `null` port refuses `start` with `no-meter`; a voided start clears the key. It is the only code that
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
 

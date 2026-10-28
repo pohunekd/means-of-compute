@@ -42,7 +42,7 @@ as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the
 initialized flag are `-32600 "server not
-initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results`.
+initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results, submit_work`.
 Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
@@ -99,6 +99,48 @@ unreadable; invalid arguments are `invalid-arguments`.
    `{headSha}` `"verdict <sha> counts disagree with its findings"`; 4)
    otherwise `{"ok":true,"workItemId":id,"verdicts":[...]}` in
    `readVerdicts` order (by `headSha`). Zero verdicts is `[]`.
+
+## `submit_work`
+
+`submit_work` (`[write]`, `{"items":[...]}`): queues a DAG of
+WorkItems after validation. The advertised `inputSchema` embeds the
+WorkItem schema per item with no `maxItems`; `validate` checks only
+the envelope (`items` array, `minItems` 1). The description notes the
+`maxItemsPerSubmit` limit from `config/work.json`. `run` loads the
+work config, then the factory specs (`source-unreadable` naming
+`work-store` or `factory-specs` with the message in `detail`), refuses
+more than `maxItemsPerSubmit` items as `invalid-arguments` at `/items`
+(`maxItems`), runs the S2 predicates in order, and folds steps 7-12
+through `updateWorkStore`. The tool never reads the pause state, so
+intake continues while paused.
+
+Predicates, first failure wins: `item-too-large` (`index`, `limit`)
+when `Buffer.byteLength(canonicalJson(item))` exceeds `maxItemBytes`;
+`contract-invalid` (`index`, `path`, `keyword`) from the first
+`contractErrors("work-item")` error; `loop-state-not-initial`
+(`index`, `id`, `field`) for any non-initial queue field (`status`,
+`statusReason`, `assignedHostAlias`, `branch`, `pullNumber`,
+`retryCount`, `stallRounds`, `modelRouting.attempts`,
+`modelRouting.fallbackUsed`, first `dod[k].done`); `repo-not-configured`
+(`index`, `id`, `repo`); `model-not-allowed` (`index`, `id`, `model`);
+`duplicate-id` (`id`, `indices:[i,j]` for the first `i < j` pair);
+replay (`replayed:true` with the stored `submissionId`, no write) when
+`sha256:` plus the canonical digest matches a stored submission; `id-exists`
+(`ids` in submission order, no write); `unknown-dependency` (`edge`) for
+the first dependency naming neither a sibling nor a store id;
+`dag-cycle` (`edge`, `cycle`) from `findCycle` over submission edges
+only; `store-full` (`limit`) past `maxStoreItems`. On ok the tool appends
+the items and one submission `{submissionId:"sub-" plus 16 hex,
+digest:"sha256:" plus 64 hex, itemIds, caller, submittedAt}` and
+returns `{submissionId, itemIds, replayed}`. Store errors map as
+`store-busy` (retryable, `{store:"work"}`), `source-unreadable`
+(`work-store`), and `store-write-failed`; a lock release failure after a
+committed write is a write failure, so a retry replays.
+
+Summary on ok is `{submissionId, itemIds, replayed}`; on `dag-cycle` and
+`unknown-dependency` it is `{edge}`; on other refusals `{index}` or
+`{ids}`. Item ids are synthetic slugs, never brief text. The call log
+carries only the summary, never the arguments.
 
 ## Client `mcp:call`
 

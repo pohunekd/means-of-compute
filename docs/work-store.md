@@ -28,6 +28,23 @@ change on disk), checked on every write.
 An absent file with an existing parent reads as revision 0 with no items.
 A missing parent, a non-file path, or an I/O error is a `WorkStoreDataError`.
 
+## Submissions
+
+Submissions arrive through `submit_work` (`src/work/submit.ts`, steps S2
+1-12). Steps 1-6 are pure and run before the lock: byte size over
+`maxItemBytes`, the WorkItem contract, initial loop state, repo in the
+factory specs, model in `models`, and duplicate ids in submission order.
+Steps 7-12 run inside `updateWorkStore`: replay on a matching
+`sha256:` digest (no write), `id-exists`, `unknown-dependency` (a
+sibling or a stored id), `dag-cycle` over submission edges only, and
+`store-full` past `maxStoreItems`. All pass appends the items in order
+and one submission at revision + 1 with `caller` and `submittedAt`.
+A dependency may name a sibling in the same submission or an item
+already in the store, which supports follow-ups that wait on an
+existing item; a stored item cannot depend on a new id, so cycles only
+use submission edges. The predicates run in order and the first failure
+is returned; item ids are synthetic slugs.
+
 ## Writes
 
 Every write is `updateWorkStore(path, fn)`: take the lock file

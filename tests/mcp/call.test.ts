@@ -183,6 +183,21 @@ test("O3 --file rejects a directory and a path under a missing dir (O3)", async 
   );
 });
 
+test("O5 extra positional and duplicate --config exit 2 (O5)", async () => {
+  const env = await createMcpTestEnv("mcp-o5-");
+  const usage = "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]\n";
+
+  const extra = await spawnCall(["fleet_status", "extra", "--config", env.mcpConfigPath]);
+  expect(extra.code).toBe(2);
+  expect(extra.stdout).toBe("");
+  expect(extra.stderr).toBe(usage);
+
+  const dup = await spawnCall(["fleet_status", "--config", "a", "--config", "b"]);
+  expect(dup.code).toBe(2);
+  expect(dup.stdout).toBe("");
+  expect(dup.stderr).toBe(usage);
+});
+
 test("C2 usage and config errors map to exits 2 and 4 (C2)", async () => {
   const bogus = await spawnCall(["fleet_status", "--bogus"]);
   expect(bogus.code).toBe(2);

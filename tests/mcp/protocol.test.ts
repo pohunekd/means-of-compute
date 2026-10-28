@@ -215,6 +215,33 @@ test("P6 unknown method and notification handling (P6)", async () => {
   expect(note).toBeNull();
 });
 
+test("a CRLF line split before the LF is framed the same (H9, R2-8)", async () => {
+  const { createLineSplitter } = await import("../../src/mcp/protocol.ts");
+  const oneChunk: string[] = [];
+  const split: string[] = [];
+  const first = createLineSplitter(
+    8,
+    (line: string) => {
+      oneChunk.push(line);
+    },
+    () => {},
+  );
+  const second = createLineSplitter(
+    8,
+    (line: string) => {
+      split.push(line);
+    },
+    () => {},
+  );
+  // A CRLF line split so the CR arrives without the LF is still one
+  // line: the size check leaves out one trailing CR (H9, R2-8).
+  first.push("abcdefgh\r\n");
+  second.push("abcdefgh\r");
+  second.push("\n");
+  expect(split).toEqual(oneChunk);
+  expect(split).toEqual(["abcdefgh"]);
+});
+
 test("F4 an oversized line is discarded while it streams (F4, P1)", async () => {
   const { createLineSplitter } = await import("../../src/mcp/protocol.ts");
   const delivered: string[] = [];

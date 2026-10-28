@@ -80,13 +80,25 @@ export async function openLoopLog(
   let closed = false;
   let chain: Promise<void> = Promise.resolve();
 
+  let handleOpen = true;
+  function takeHandle(): FileHandle | null {
+    if (!handleOpen) {
+      return null;
+    }
+    handleOpen = false;
+    return handle;
+  }
   async function writeOnce(event: LoopLogEvent): Promise<void> {
     const line = `${JSON.stringify({ ts: now().toISOString(), ...event })}\n`;
     try {
       await handle.write(line);
       await handle.sync();
     } catch {
+      // A leaked handle trips the runtime GC guard under the full
+      // gates run, so the latched write closes it right away.
       latched = true;
+      closed = true;
+      await takeHandle()?.close();
     }
   }
 
@@ -107,8 +119,16 @@ export async function openLoopLog(
     },
     async close(): Promise<void> {
       closed = true;
-      await chain;
-      await handle.close();
+      try {
+        await chain;
+      } finally {
+        const owned = takeHandle();
+        if (owned === null) {
+          await handle.close().catch(() => {});
+        } else {
+          await owned.close();
+        }
+      }
     },
   };
 }

@@ -189,10 +189,9 @@
               { "type": "null" },
               {
                 "type": "object",
-                "required": ["state", "usage"],
+                "required": ["state"],
                 "properties": {
-                  "state": { "const": "lost" },
-                  "usage": { "type": "null" }
+                  "state": { "const": "lost" }
                 }
               }
             ]

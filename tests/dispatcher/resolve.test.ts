@@ -169,160 +169,166 @@ function failUnreachableFirst(control: ReturnType<typeof createMemoryPort>): {
 }
 
 test("R1 a provisional with nothing bound ends lost with one line", async () => {
-  await withHarness({ advanceClockInLostUsageMs: 1000 }, async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
-    control.setUnreachable("laptop-a", true);
-    let startError: unknown = null;
-    try {
-      await dispatcher.start(
-        queuedItem("demo-item") as never,
-        decision("demo-item", "laptop-a") as never,
-        MODEL,
-        "Do the work.",
-      );
-    } catch (error: unknown) {
-      startError = error;
-    }
-    expect(startError).toBeInstanceOf(PortUnreachableError);
-    control.setUnreachable("laptop-a", false);
-    const outcome = await dispatcher.resolve("demo-item:0");
-    expect(outcome).toEqual({
-      requestId: "demo-item:0",
-      hostAlias: "laptop-a",
-      outcome: "resolved",
-      from: "provisional",
-      state: "lost",
-      stopped: [],
-      ledger: "appended",
-    });
-    const entries = await readRegistry(join(ledgerPath, "..", "registry.json"));
-    expect(entries).toHaveLength(1);
-    const stored = entries[0];
-    if (stored?.terminal === null || stored?.terminal === undefined) {
-      throw new Error("expected a lost terminal");
-    }
-    expect(stored.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
-    expect(stored.resolvedAt).toBe(stored.terminal.observedAt);
-    expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
-    expect(entries[0]).toEqual({
-      requestId: "demo-item:0",
-      workItemId: "demo-item",
-      repo: "example/demo",
-      hostAlias: "laptop-a",
-      branch: "moc/demo-item",
-      baseRef: "origin/main",
-      resume: false,
-      model: MODEL,
-      briefSha256: expect.any(String) as string,
-      sessionId: null,
-      worktree: null,
-      baseCommit: null,
-      startedAt: "2026-10-27T10:00:00.000Z",
-      cursor: null,
-      unreachableCount: 1,
-      lastSeenState: "starting",
-      lastSeenAt: "2026-10-27T10:00:00.000Z",
-      cancelReason: null,
-      terminal: {
-        state: "lost",
-        observedAt: "2026-10-27T10:00:00.000Z",
-        seconds: 0,
-        usage: null,
-        usageValid: true,
-        detail: "operator resolved",
-        ledgerAppended: true,
-      },
-      resolvedAt: "2026-10-27T10:00:00.000Z",
-      revision: 3,
-    });
-    const lines = await readPending(ledgerPath);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toEqual({
-      entryId: "demo-item:demo-item:0",
-      kind: "session",
-      workItemId: "demo-item",
-      finishedAt: "2026-10-27T10:00:00.000Z",
-      startModel: MODEL.model,
-      tokens: [
-        {
-          provider: MODEL.providerId,
-          model: MODEL.model,
-          inputTokens: null,
-          outputTokens: null,
-          requests: null,
-          source: "usage-unreported",
-        },
-      ],
-      session: {
+  await withHarness(
+    { advanceClockInLostUsageMs: 1000 },
+    async ({ control, dispatcher, ledgerPath, lostUsageCalls, clock }) => {
+      control.setUnreachable("laptop-a", true);
+      let startError: unknown = null;
+      try {
+        await dispatcher.start(
+          queuedItem("demo-item") as never,
+          decision("demo-item", "laptop-a") as never,
+          MODEL,
+          "Do the work.",
+        );
+      } catch (error: unknown) {
+        startError = error;
+      }
+      expect(startError).toBeInstanceOf(PortUnreachableError);
+      control.setUnreachable("laptop-a", false);
+      const outcome = await dispatcher.resolve("demo-item:0");
+      expect(outcome).toEqual({
+        requestId: "demo-item:0",
         hostAlias: "laptop-a",
-        seconds: 0,
-        source: "dispatcher-clock",
-        result: "lost",
-      },
-    });
-    expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
-  });
+        outcome: "resolved",
+        from: "provisional",
+        state: "lost",
+        stopped: [],
+        ledger: "appended",
+      });
+      const entries = await readRegistry(join(ledgerPath, "..", "registry.json"));
+      expect(entries).toHaveLength(1);
+      const stored = entries[0];
+      if (stored?.terminal === null || stored?.terminal === undefined) {
+        throw new Error("expected a lost terminal");
+      }
+      expect(stored.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
+      expect(stored.resolvedAt).toBe(stored.terminal.observedAt);
+      expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
+      expect(entries[0]).toEqual({
+        requestId: "demo-item:0",
+        workItemId: "demo-item",
+        repo: "example/demo",
+        hostAlias: "laptop-a",
+        branch: "moc/demo-item",
+        baseRef: "origin/main",
+        resume: false,
+        model: MODEL,
+        briefSha256: expect.any(String) as string,
+        sessionId: null,
+        worktree: null,
+        baseCommit: null,
+        startedAt: "2026-10-27T10:00:00.000Z",
+        cursor: null,
+        unreachableCount: 1,
+        lastSeenState: "starting",
+        lastSeenAt: "2026-10-27T10:00:00.000Z",
+        cancelReason: null,
+        terminal: {
+          state: "lost",
+          observedAt: "2026-10-27T10:00:00.000Z",
+          seconds: 0,
+          usage: null,
+          usageValid: true,
+          detail: "operator resolved",
+          ledgerAppended: true,
+        },
+        resolvedAt: "2026-10-27T10:00:00.000Z",
+        revision: 3,
+      });
+      const lines = await readPending(ledgerPath);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toEqual({
+        entryId: "demo-item:demo-item:0",
+        kind: "session",
+        workItemId: "demo-item",
+        finishedAt: "2026-10-27T10:00:00.000Z",
+        startModel: MODEL.model,
+        tokens: [
+          {
+            provider: MODEL.providerId,
+            model: MODEL.model,
+            inputTokens: null,
+            outputTokens: null,
+            requests: null,
+            source: "usage-unreported",
+          },
+        ],
+        session: {
+          hostAlias: "laptop-a",
+          seconds: 0,
+          source: "dispatcher-clock",
+          result: "lost",
+        },
+      });
+      expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+    },
+  );
 });
 
 test("R2 a provisional with a live bound session is stopped, then one line", async () => {
   const control = createMemoryPort();
   const { port } = failUnreachableFirst(control);
-  await withHarness({ port, advanceClockInLostUsageMs: 1000 }, async ({ dispatcher, ledgerPath, lostUsageCalls, dir, clock }) => {
-    let startError: unknown = null;
-    try {
-      await dispatcher.start(
+  await withHarness(
+    { port, advanceClockInLostUsageMs: 1000 },
+    async ({ dispatcher, ledgerPath, lostUsageCalls, dir, clock }) => {
+      let startError: unknown = null;
+      try {
+        await dispatcher.start(
+          queuedItem("demo-item") as never,
+          decision("demo-item", "laptop-a") as never,
+          MODEL,
+          "Do the work.",
+        );
+      } catch (error: unknown) {
+        startError = error;
+      }
+      expect(startError).toBeInstanceOf(PortUnreachableError);
+      const registryBefore = await readRegistry(join(dir, "registry.json"));
+      expect(registryBefore).toHaveLength(1);
+      const outcome = await dispatcher.resolve("demo-item:0");
+      expect(outcome).toEqual({
+        requestId: "demo-item:0",
+        hostAlias: "laptop-a",
+        outcome: "resolved",
+        from: "provisional",
+        state: "lost",
+        stopped: ["mem-1"],
+        ledger: "appended",
+      });
+      const sessions = control.sessions();
+      expect(sessions.map((entry) => entry.handle.sessionId)).toEqual(["mem-1"]);
+      expect(sessions.map((entry) => entry.state)).toEqual(["cancelled"]);
+      const registryAfter = await readRegistry(join(dir, "registry.json"));
+      expect(registryAfter).toHaveLength(1);
+      const resolvedEntry = registryAfter[0];
+      if (resolvedEntry?.terminal === null || resolvedEntry?.terminal === undefined) {
+        throw new Error("expected a lost terminal after resolve");
+      }
+      expect(resolvedEntry.terminal.state).toBe("lost");
+      expect(resolvedEntry.terminal.detail).toBe("operator resolved");
+      expect(resolvedEntry.terminal.ledgerAppended).toBe(true);
+      expect(resolvedEntry.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
+      expect(resolvedEntry.resolvedAt).toBe(resolvedEntry.terminal.observedAt);
+      expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
+      const lines = await readPending(ledgerPath);
+      expect(lines).toHaveLength(1);
+      expect((lines[0] as { entryId: string }).entryId).toBe("demo-item:demo-item:0");
+      expect((lines[0] as { session: { result: string } }).session.result).toBe("lost");
+      expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
+      const retry = await dispatcher.start(
         queuedItem("demo-item") as never,
         decision("demo-item", "laptop-a") as never,
         MODEL,
         "Do the work.",
       );
-    } catch (error: unknown) {
-      startError = error;
-    }
-    expect(startError).toBeInstanceOf(PortUnreachableError);
-    const registryBefore = await readRegistry(join(dir, "registry.json"));
-    expect(registryBefore).toHaveLength(1);
-    const outcome = await dispatcher.resolve("demo-item:0");
-    expect(outcome).toEqual({
-      requestId: "demo-item:0",
-      hostAlias: "laptop-a",
-      outcome: "resolved",
-      from: "provisional",
-      state: "lost",
-      stopped: ["mem-1"],
-      ledger: "appended",
-    });
-    const sessions = control.sessions();
-    expect(sessions.map((entry) => entry.handle.sessionId)).toEqual(["mem-1"]);
-    expect(sessions.map((entry) => entry.state)).toEqual(["cancelled"]);
-    const registryAfter = await readRegistry(join(dir, "registry.json"));
-    expect(registryAfter).toHaveLength(1);
-    const resolvedEntry = registryAfter[0];
-    if (resolvedEntry?.terminal === null || resolvedEntry?.terminal === undefined) {
-      throw new Error("expected a lost terminal after resolve");
-    }
-    expect(resolvedEntry.terminal.state).toBe("lost");
-    expect(resolvedEntry.terminal.detail).toBe("operator resolved");
-    expect(resolvedEntry.terminal.ledgerAppended).toBe(true);
-    expect(resolvedEntry.terminal.observedAt).toBe("2026-10-27T10:00:00.000Z");
-    expect(resolvedEntry.resolvedAt).toBe(resolvedEntry.terminal.observedAt);
-    expect(clock.now.toISOString()).toBe("2026-10-27T10:00:01.000Z");
-    const lines = await readPending(ledgerPath);
-    expect(lines).toHaveLength(1);
-    expect((lines[0] as { entryId: string }).entryId).toBe("demo-item:demo-item:0");
-    expect((lines[0] as { session: { result: string } }).session.result).toBe("lost");
-    expect(lostUsageCalls).toEqual([{ requestId: "demo-item:0" }]);
-    const retry = await dispatcher.start(
-      queuedItem("demo-item") as never,
-      decision("demo-item", "laptop-a") as never,
-      MODEL,
-      "Do the work.",
-    );
-    expect(retry.kind).toBe("started");
-    if (retry.kind !== "started") {
-      throw new Error("expected a started session");
-    }
-    expect(retry.request.requestId).toBe("demo-item:1");
-  });
+      expect(retry.kind).toBe("started");
+      if (retry.kind !== "started") {
+        throw new Error("expected a started session");
+      }
+      expect(retry.request.requestId).toBe("demo-item:1");
+    },
+  );
 });
 
 test("R3 a watch-path lost is stopped with no second line", async () => {

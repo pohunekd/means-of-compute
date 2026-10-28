@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "../src/probe/config.ts";
+import { loadConfig, loadPluginConfig } from "../src/probe/config.ts";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const probe = join(repoRoot, "factory-probe.ts");
@@ -207,5 +207,64 @@ describe.skipIf(process.platform !== "linux")("sysfsRoot validation", () => {
         expect(doc.idleReason).toContain("EISDIR");
       },
     );
+  });
+});
+
+describe("loadPluginConfig", () => {
+  test("valid file loads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-config-"));
+    try {
+      const path = join(dir, "plugin.json");
+      await Bun.write(path, JSON.stringify({ hostFile: "/etc/means-of-compute/host.json" }));
+      expect(loadPluginConfig(path)).toEqual({ hostFile: "/etc/means-of-compute/host.json" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("extra key throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-config-"));
+    try {
+      const path = join(dir, "plugin.json");
+      await Bun.write(
+        path,
+        JSON.stringify({ hostFile: "/etc/means-of-compute/host.json", extra: true }),
+      );
+      expect(() => loadPluginConfig(path)).toThrow("config plugin.json: invalid hostFile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("relative hostFile throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-config-"));
+    try {
+      const path = join(dir, "plugin.json");
+      await Bun.write(path, JSON.stringify({ hostFile: "etc/x.json" }));
+      expect(() => loadPluginConfig(path)).toThrow("config plugin.json: invalid hostFile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("numeric hostFile throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-config-"));
+    try {
+      const path = join(dir, "plugin.json");
+      await Bun.write(path, JSON.stringify({ hostFile: 42 }));
+      expect(() => loadPluginConfig(path)).toThrow("config plugin.json: invalid hostFile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("missing file throws ENOENT with the path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-config-"));
+    try {
+      const path = join(dir, "plugin.json");
+      expect(() => loadPluginConfig(path)).toThrow(`${path}: ENOENT`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -106,6 +106,26 @@ export function assertSysfsRoot(root: unknown, label: string): void {
   }
 }
 
+export type PluginConfig = {
+  readonly hostFile: string;
+};
+
+export function loadPluginConfig(path: string): PluginConfig {
+  const raw = readJson<unknown>(path);
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("config plugin.json: invalid hostFile");
+  }
+  const fields = raw as Record<string, unknown>;
+  if (Object.keys(fields).length !== 1 || !("hostFile" in fields)) {
+    throw new Error("config plugin.json: invalid hostFile");
+  }
+  const hostFile = fields["hostFile"];
+  if (typeof hostFile !== "string" || !hostFile.startsWith("/")) {
+    throw new Error("config plugin.json: invalid hostFile");
+  }
+  return { hostFile };
+}
+
 export function loadHostAlias(configDir: string, hostnameVal: string): string {
   const hostsRaw = readJson<HostMap>(join(configDir, "hosts.json"));
   const alias = (hostsRaw as Record<string, unknown>)[hostnameVal];

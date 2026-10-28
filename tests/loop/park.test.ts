@@ -1,5 +1,6 @@
-// Park slice tests (rows P1-P9): escalate, finalize, stall retry and
-// block, the lost and operator parks, and the label journal.
+// Park slice tests (rows P1-P9, P11, P12): escalate, finalize, stall retry
+// and block, the lost and operator parks, the busy store, the exact
+// escalation body, and the label journal.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -499,7 +500,7 @@ test("a lost park waits and unparks queued on the next tick (P8)", async () => {
   await withTempDir(async (dir) => {
     const fake = new FakeGitHub();
     const { ctx, events } = makeCtx(dir, fake);
-    const entry = item();
+    const entry = item({ stallRounds: 2 });
     await writeLoopState(ctx.statePath, loopItem({ phase: "idle" }));
     await writeStore(ctx.storePath, entry);
     await parkLost(ctx, entry);
@@ -531,6 +532,7 @@ test("an operator park holds while advancePark never unparks (P9)", async () => 
         phase: "ci",
         session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
         requestId: "req-1",
+        pull: { number: 7, headSha: "abc123" },
       }),
     );
     await writeStore(ctx.storePath, entry);
@@ -538,7 +540,8 @@ test("an operator park holds while advancePark never unparks (P9)", async () => 
     const li = await readItem(ctx.statePath);
     expect(li.phase).toBe("idle");
     expect(li.requestId).toBe(null);
-    expect(li.pull).toBe(null);
+    expect(li.session).toBe(null);
+    expect(li.pull).toEqual({ number: 7, headSha: "abc123" });
     expect(li.park).toMatchObject({ kind: "operator", reason: "operator: pull-closed" });
     const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
     expect(store.items[0]?.status).toBe("parked");
@@ -550,5 +553,48 @@ test("an operator park holds while advancePark never unparks (P9)", async () => 
       expect(await advancePark(ctx, entry)).toBe("done");
       expect((await readItem(ctx.statePath)).park?.kind).toBe("operator");
     }
+  });
+});
+
+// L3: the O4 escalation body is fixed template text with codes only:
+// no goal, DoD or issue text, with a Pull request line when a pull exists.
+test("the escalation body is exact template text (P12)", async () => {
+  await withTempDir(async (dir) => {
+    const fake = new FakeGitHub();
+    const { ctx } = makeCtx(dir, fake);
+    const entry = item();
+    await writeLoopState(
+      ctx.statePath,
+      loopItem({
+        phase: "ci",
+        session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
+        requestId: "req-1",
+        pull: { number: 7, headSha: "abc123" },
+      }),
+    );
+    await writeStore(ctx.storePath, entry);
+    expect(await parkOperator(ctx, entry, "pull-closed")).toBe("done");
+    expect(fake.callsOf("postComment")[0]?.args[2]).toBe(
+      `${escalationMarker("op:gh-moc-5:pull-closed")}\n` +
+        "Escalation for work item gh-moc-5, retry 0: operator: pull-closed.\n" +
+        "Rounds: none\n" +
+        "Pull request: #7",
+    );
+  });
+  await withTempDir(async (dir) => {
+    const fake = new FakeGitHub();
+    const { ctx } = makeCtx(dir, fake);
+    const entry = item();
+    await writeLoopState(ctx.statePath, loopItem({ round: 3, retry: 1 }));
+    await writeStore(ctx.storePath, entry);
+    await redRounds(ctx, entry, 3);
+    const body = fake.callsOf("postComment")[0]?.args[2] as string;
+    expect(body).toBe(
+      `${escalationMarker("stall:gh-moc-5:1")}\n` +
+        "Escalation for work item gh-moc-5, retry 1: " +
+        "stalled: 3 rounds without a newly met DoD item.\n" +
+        "Rounds: 3:red-ci, 4:red-ci, 5:red-ci",
+    );
+    expect(body).not.toContain("Goal of gh-moc-5");
   });
 });

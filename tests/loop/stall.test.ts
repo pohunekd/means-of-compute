@@ -18,7 +18,7 @@ function record(outcome: RoundOutcome, retry: number, extra?: string): RoundReco
   return {
     round: 0,
     retry,
-    requestId: `req-${outcome}-${retry}${extra ?? ""}`,
+    requestId: `req-${outcome}-${String(retry)}${extra ?? ""}`,
     model: "meta/muse-glimmer-30b",
     providerId: "nvidia-build",
     hostAlias: "host-a",

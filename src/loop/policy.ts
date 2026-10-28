@@ -113,16 +113,16 @@ export function stallDecision(
       kind: "park",
       then: "retry",
       stallRounds,
-      escalationKey: `stall:${id}:${retry}`,
-      statusReason: `stalled: ${stall.maxStagnantRounds} rounds without a newly met DoD item`,
+      escalationKey: `stall:${id}:${String(retry)}`,
+      statusReason: `stalled: ${String(stall.maxStagnantRounds)} rounds without a newly met DoD item`,
     };
   }
   return {
     kind: "park",
     then: "block",
     stallRounds,
-    escalationKey: `stall:${id}:${retry}`,
-    blockedReason: `blocked: ${stall.maxRetries} retries used`,
+    escalationKey: `stall:${id}:${String(retry)}`,
+    blockedReason: `blocked: ${String(stall.maxRetries)} retries used`,
   };
 }
 

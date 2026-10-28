@@ -121,16 +121,27 @@ test("an invalid second line names line 2 without its content (L12, B4)", async 
   });
 });
 
-test("key and routing mismatches fail R-a and R-b (L12b, B4)", async () => {
-  await withTempDir(async (dir) => {
+test("key and routing mismatches fail R-a and R-b (L12b, B4)", () =>
+  withTempDir(async (dir) => {
     const ra = join(dir, "ra.jsonl");
     writeFileSync(ra, `${JSON.stringify({ ...line(2, "merged", "success"), key: "demo-c:1" })}\n`);
-    await expect(readResults(ra)).rejects.toBeInstanceOf(LoopResultsDataError);
+    let raError: unknown;
+    try {
+      await readResults(ra);
+    } catch (thrown: unknown) {
+      raError = thrown;
+    }
+    expect(raError).toBeInstanceOf(LoopResultsDataError);
     const rb = join(dir, "rb.jsonl");
     writeFileSync(rb, `${JSON.stringify(line(0, "ci-timeout", "failure"))}\n`);
-    await expect(readResults(rb)).rejects.toBeInstanceOf(LoopResultsDataError);
-  });
-});
+    let rbError: unknown;
+    try {
+      await readResults(rb);
+    } catch (thrown: unknown) {
+      rbError = thrown;
+    }
+    expect(rbError).toBeInstanceOf(LoopResultsDataError);
+  }));
 
 test("an append truncates a 7-byte torn tail and keeps earlier lines (L12c, B4)", async () => {
   await withTempDir(async (dir) => {

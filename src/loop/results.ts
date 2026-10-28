@@ -129,13 +129,16 @@ export async function readResults(path: string): Promise<readonly ResultLine[]> 
     return [];
   }
   const segments = text.split("\n");
-  const last = segments[segments.length - 1] as string;
+  const last: string | undefined = segments[segments.length - 1];
   // A non-empty last segment is a torn tail: ignored, left in place.
   const body = last === "" ? segments.slice(0, -1) : segments.slice(0, -1);
   const lines: ResultLine[] = [];
   const seen = new Set<string>();
-  body.forEach((segment, index) => {
-    const parsed = parseLine(segment as string, path, index + 1);
+  body.forEach((segment: string | undefined, index) => {
+    if (segment === undefined || segment === "") {
+      throw new LoopResultsDataError(`loop results ${path}: line ${String(index + 1)}: empty`);
+    }
+    const parsed = parseLine(segment, path, index + 1);
     if (!seen.has(parsed.key)) {
       seen.add(parsed.key);
       lines.push(parsed);
@@ -183,13 +186,11 @@ async function appendOnce(
     });
   } finally {
     if (handle !== null) {
-      try {
-        await handle.close();
-      } catch (error: unknown) {
+      await handle.close().catch((error: unknown) => {
         throw new LoopResultsWriteError(`loop results ${path}: cannot close (${errnoOf(error)})`, {
           cause: error,
         });
-      }
+      });
     }
   }
   return { truncatedBytes };

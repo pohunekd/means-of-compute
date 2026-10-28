@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildBrief, type BriefInput, type BriefResult } from "../../src/loop/brief.js";
+import { buildBrief, type BriefInput } from "../../src/loop/brief.js";
 
 function fullInput(): BriefInput {
   return {
@@ -70,24 +70,24 @@ function fullInput(): BriefInput {
 
 function fullSize(input: BriefInput): number {
   const full = buildBrief(input, 1 << 20);
-  if (full.kind !== "ok") {
-    throw new Error("expected an ok brief");
+  expect(full.kind).toBe("ok");
+  if (full.kind === "ok") {
+    return Buffer.byteLength(full.brief, "utf8");
   }
-  return Buffer.byteLength(full.brief, "utf8");
+  throw new Error("expected an ok brief");
 }
 
 test("a full brief matches the fixture byte for byte (L13, B5)", () => {
   const result = buildBrief(fullInput(), 65536);
   expect(result.kind).toBe("ok");
-  if (result.kind !== "ok") {
-    throw new Error("expected an ok brief");
+  if (result.kind === "ok") {
+    const expected = readFileSync(
+      join(import.meta.dir, "..", "fixtures", "loop", "brief-expected.txt"),
+      "utf8",
+    );
+    expect(result.brief).toBe(expected);
+    expect(result.omittedFindings).toBe(0);
   }
-  const expected = readFileSync(
-    join(import.meta.dir, "..", "fixtures", "loop", "brief-expected.txt"),
-    "utf8",
-  );
-  expect(result.brief).toBe(expected);
-  expect(result.omittedFindings).toBe(0);
 });
 
 test("a tight limit drops findings from the end with an omission line (L13b, B5)", () => {
@@ -108,41 +108,45 @@ test("a tight limit drops findings from the end with an omission line (L13b, B5)
   };
   const smallest = buildBrief(input, 0);
   expect(smallest.kind).toBe("too-large");
-  if (smallest.kind !== "too-large") {
-    throw new Error("expected a too-large brief");
-  }
-  const withTen = buildBrief(input, 1 << 20);
-  expect(withTen.kind).toBe("ok");
-  if (withTen.kind !== "ok") {
-    throw new Error("expected an ok brief");
-  }
-  expect(withTen.omittedFindings).toBe(0);
-  let fits: BriefResult = smallest;
-  for (let limit = smallest.bytes; fits.kind !== "ok" || fits.omittedFindings !== 50; limit += 1) {
-    fits = buildBrief(input, limit);
-    if (limit > smallest.bytes + 100000) {
-      throw new Error("no limit keeps exactly 10 findings");
+  if (smallest.kind === "too-large") {
+    const floor = smallest.bytes;
+    const withTen = buildBrief(input, 1 << 20);
+    expect(withTen.kind).toBe("ok");
+    if (withTen.kind === "ok") {
+      expect(withTen.omittedFindings).toBe(0);
+      let limit = floor;
+      let kept = buildBrief(input, limit);
+      for (; ; limit += 1) {
+        if (kept.kind === "ok" && kept.omittedFindings === 50) {
+          break;
+        }
+        if (kept.kind === "ok" && kept.omittedFindings !== 50) {
+          kept = buildBrief(input, limit + 1);
+          continue;
+        }
+        kept = buildBrief(input, limit + 1);
+        if (limit > floor + 100000) {
+          throw new Error("no limit keeps exactly 10 findings");
+        }
+      }
+      expect(kept.kind).toBe("ok");
+      const size = Buffer.byteLength(kept.brief, "utf8");
+      expect(kept.omittedFindings).toBe(50);
+      expect(kept.brief).toContain("(50 more findings omitted)");
+      expect(size).toBeLessThanOrEqual(fullSize(input));
     }
   }
-  expect(fits.kind).toBe("ok");
-  if (fits.kind !== "ok") {
-    throw new Error("expected an ok brief");
-  }
-  const limit = Buffer.byteLength(fits.brief, "utf8");
-  expect(fits.omittedFindings).toBe(50);
-  expect(fits.brief).toContain("(50 more findings omitted)");
-  expect(limit).toBeLessThanOrEqual(fullSize(input));
 });
 
 test("a goal larger than the limit is too large (L13c, B5)", () => {
   const input: BriefInput = { ...fullInput(), previous: null };
   const over = { ...input, item: { ...input.item, goal: "g".repeat(70000) } };
-  const result = buildBrief(over, 65536);
-  expect(result).toEqual({
-    kind: "too-large",
-    bytes: Buffer.byteLength(
-      (buildBrief(over, 1 << 30) as { kind: "ok"; brief: string }).brief,
-      "utf8",
-    ),
-  });
+  const full = buildBrief(over, 1 << 30);
+  expect(full.kind).toBe("ok");
+  if (full.kind === "ok") {
+    expect(buildBrief(over, 65536)).toEqual({
+      kind: "too-large",
+      bytes: Buffer.byteLength(full.brief, "utf8"),
+    });
+  }
 });

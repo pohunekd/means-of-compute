@@ -3,6 +3,7 @@
 // naming an unknown caller exits 4.
 import { expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createMcpTestEnv } from "./env.js";
 
 interface SpawnResult {
@@ -40,6 +41,69 @@ test("C1 spawned mcp:call fleet_status exits 0 with ok true (C1)", async () => {
   const parsed = JSON.parse(lines[0] as string) as { ok: boolean };
   expect(parsed.ok).toBe(true);
 });
+
+test("O1 a server that never answers exits 4 within the bound (O1)", async () => {
+  const env = await createMcpTestEnv("mcp-o1-");
+  const raw = JSON.parse(await Bun.file(env.mcpConfigPath).text()) as Record<string, unknown>;
+  raw["clientTimeoutMs"] = 1000;
+  await writeFile(env.mcpConfigPath, JSON.stringify(raw));
+  await Bun.write(
+    `${env.dir}/block.ts`,
+    'if (process.argv.includes("--caller")) { await Bun.write("server.pid", String(process.pid)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); }\n',
+  );
+  await Bun.write(`${env.dir}/bunfig.toml`, 'preload = ["./block.ts"]\n');
+  const pidFile = `${env.dir}/server.pid`;
+  let serverPid: number | null = null;
+  const watchPid = (async () => {
+    for (let i = 0; i < 100; i += 1) {
+      if (await Bun.file(pidFile).exists()) {
+        const found = Number((await Bun.file(pidFile).text()).trim());
+        if (Number.isInteger(found)) {
+          serverPid = found;
+          return;
+        }
+      }
+      await Bun.sleep(100);
+    }
+  })();
+  const started = Date.now();
+  try {
+    const proc = Bun.spawn(
+      [
+        process.execPath,
+        join(process.cwd(), "src/mcp/call.ts"),
+        "fleet_status",
+        "--config",
+        env.mcpConfigPath,
+      ],
+      { cwd: env.dir, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+    );
+    const [code, out, err] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout as ReadableStream).text(),
+      new Response(proc.stderr as ReadableStream).text(),
+    ]);
+    const elapsed = Date.now() - started;
+    await watchPid;
+    expect(code).toBe(4);
+    expect(out).toBe("");
+    expect(err).toBe("mcp:call: no answer within 1000 ms\n");
+    expect(elapsed).toBeLessThan(5000);
+    expect(await Bun.file(pidFile).exists()).toBe(true);
+    const pid = Number((await Bun.file(pidFile).text()).trim());
+    expect(Number.isInteger(pid)).toBe(true);
+    serverPid = pid;
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    if (serverPid !== null) {
+      try {
+        process.kill(serverPid, "SIGKILL");
+      } catch {
+        // The client already reaped the blocked server.
+      }
+    }
+  }
+}, 20000);
 
 test("O2 large list_work result drains via slow reader without truncation (O2)", async () => {
   const env = await createMcpTestEnv("mcp-o2-");

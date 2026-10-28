@@ -5,9 +5,9 @@ All model traffic from fleet sessions flows through the metering proxy
 its caller token through session metadata, and the token is valid only
 while its grant is open, and the proxy records
 per-session
-token usage into an append-only log. PR A delivers the proxy itself; the
-dispatcher port wiring, the usage CLI, and the host token helper land in
-later PRs of issue #35.
+token usage into an append-only log. PR A delivers the proxy itself; this PR (B) delivers the dispatcher port
+wiring (the metered port) and the usage CLI. The host token helper
+lands in a later PR of issue #35.
 
 ## Proxy
 
@@ -273,7 +273,70 @@ The factory (later the metered dispatcher port) drives each session's grant:
    counts, else null. Settle is memoized per request id and deterministic
    across restarts: after the close and the drain, the join is stable
    through replays and repeated calls.
+5. `settleRequest(requestId, state)` — finds the grant by request id
+   (grant-close never names a session, so the stranded billing of a
+   lost session survives) and delegates to the shared memo of `settle`:
+   the memo holds both the open-grant payload and the closed join, in
+   one slot. An unbound grant (opened, never bound) closes here and
+   joins its calls: the first settle step in the design. An unknown
+   request id returns `null` and logs `unknown-grant`.
+
+## Metered port
+
+`createMeteredPort(inner, meter, log)` adapts a dispatcher port so that
+fleet sessions run behind the proxy while the budget and ledger see
+real metered counts. On a settled port result (`openGrant` before
+`inner.start`, `bindGrant` after it), the port's `usage` is replaced by
+the `settleRequest` join for `finished`, `failed`, and `lost` (a `wait`
+or `cancel` result): on success the usage source is `meter-proxy`, and
+on a `null` join it stays unreported, exactly as the port returned it.
+The port never fabricates a usage row: when the port reports no usage
+(synthetic or unknown) and `settleRequest` returns `null`, the
+surrounding terminal keeps `usage: null`.
+
+- `start` calls `openGrant`, then the inner `start`, then `bindGrant`.
+  A `grant-closed` from `openGrant` becomes `PortUnreachableError`; any
+other grant error becomes `PortRejectedError` with the meter code, so
+the caller idles and the item is retried, and a dispatcher-level
+`request-conflict` reaches the caller as `PortRejectedError`
+`request-conflict`. A hard port failure after a bound grant returns
+lost through the provisional-lost path with a measured zero row (the
+design: only `finished`/`failed`/`lost` reach the budget, so the queue
+moves).
+- `wait` settles every terminal result. Settle errors do not map:
+  a latched meter rethrows `MeterUnavailableError`, so a failed settle
+  never silently stores an estimate as real usage. A lost (or other
+  failed) port `diff` after settle logs `port-usage-ignored` and keeps
+  the metered join.
+- `diff` and `close` delegate to the inner port unchanged.
 
 `close()` stops the listener, aborts in-flight calls with `closed-abort`,
 awaits each `call-end` append, and closes the log handle. Grants survive a
 restart because they are durable.
+
+## Lost usage
+
+`createDispatcher` takes a required `lostUsage(requestId)` hook: the
+first step of `finishLost`, before the first registry write, reads back
+the durable usage through this hook with `meter.settleRequest`, so the
+meter settles before the terminal exists. An invalid row stores `null`
+(`usage-invalid` event, `usage-invalid` token source) instead of the
+fabricated counts, and the budget guard refuses unknown spend — never
+a measured zero. The coordinator owns the meter instance and passes the
+hook (constructor injection); the design fixes this shape, and the
+dispatcher never imports the meter. The dispatcher mutating hook is a
+wrong-way dependency the other way: the metered port owns the adapter
+above, not the dispatcher.
+
+## Usage CLI
+
+`bun run meter:usage -- --log <path> --request <id>` prints the
+`joinUsage` row of one request as one JSON line (exit 0), without ever
+writing to the log — the read appendix is read-only, and the CLI uses
+`replayUsageLog` for both reads and writes. A request without a grant
+prints `meter: no grant for <id>` on stderr (exit 3); a usage error
+(bad flags, missing values, a repeated or unknown flag, a validation
+failure, or a missing or unreadable file) prints one line on stderr
+starting with `meter:` (exit 2). The CLI never speaks of `grant-open`
+and never reaches for `raw`: it is pure join, so a torn tail is just
+cut, never surfaced.

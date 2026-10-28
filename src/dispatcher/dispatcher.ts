@@ -726,7 +726,11 @@ export function createDispatcher(deps: DispatcherDeps): {
     return { result, attempt: attemptOf("lost", appended.cancelReason), ledger };
   }
 
-  async function finishRejected(entry: RegistryEntry, code: string, usage: PortUsage): Promise<void> {
+  async function finishRejected(
+    entry: RegistryEntry,
+    code: string,
+    usage: PortUsage,
+  ): Promise<void> {
     // A rejection with a grant becomes a terminal failed attempt: the
     // hook already closed the grant, so the usage below is the measured
     // join. Seconds reuse the finishLost computation; a provisional

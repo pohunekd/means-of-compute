@@ -11,11 +11,7 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import type {
-  DispatcherPort,
-  ModelSelection,
-  StartRequest,
-} from "../../src/dispatcher/port.js";
+import type { DispatcherPort, ModelSelection, StartRequest } from "../../src/dispatcher/port.js";
 import { PortRejectedError } from "../../src/dispatcher/port.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import * as registryModule from "../../src/dispatcher/registry.js";
@@ -105,7 +101,11 @@ test("a rejection with a grant ledgers a failure and the retry starts on n + 1",
         const ledgerPath = join(dir, "ledger.jsonl");
         const registryPath = join(dir, "registry.json");
         const control = createMemoryPort();
-        const port = createMeteredPort(rejectOn("laptop-a", "host-unsupported")(control), meter, () => {});
+        const port = createMeteredPort(
+          rejectOn("laptop-a", "host-unsupported")(control),
+          meter,
+          () => {},
+        );
         const events: Array<Record<string, unknown>> = [];
         const dispatcher = createDispatcher({
           port,
@@ -147,8 +147,7 @@ test("a rejection with a grant ledgers a failure and the retry starts on n + 1",
         expect(
           events.some(
             (event) =>
-              event["event"] === "start-rejected-ledgered" &&
-              event["requestId"] === "w56-demo:0",
+              event["event"] === "start-rejected-ledgered" && event["requestId"] === "w56-demo:0",
           ),
         ).toBe(true);
         // The failure consumed n = 0, so the retry on another host gets a
@@ -215,7 +214,11 @@ test("a crash between the settle and the registry write replays through lost", a
       const ledgerPath = join(dir, "ledger.jsonl");
       const registryPath = join(dir, "registry.json");
       const control = createMemoryPort();
-      const port = createMeteredPort(rejectOn("laptop-a", "host-unsupported")(control), meter, () => {});
+      const port = createMeteredPort(
+        rejectOn("laptop-a", "host-unsupported")(control),
+        meter,
+        () => {},
+      );
       const dispatcher = createDispatcher({
         port,
         budget: GATE,

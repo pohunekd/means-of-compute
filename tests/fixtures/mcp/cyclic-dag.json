@@ -1,1 +1,70 @@
-{"items":[{"schemaVersion":"v1","id":"demo-cyc-a","repo":"example/demo-repo","title":"Cycle member A","goal":"Cycle member A for the demo run","issue":21,"dod":[{"id":"D1","text":"Reviewed","done":false}],"dependencies":["demo-cyc-b"],"status":"queued","statusReason":null,"assignedHostAlias":null,"branch":null,"pullNumber":null,"modelRouting":{"preferredModel":"meta/muse-glimmer-30b","attempts":0,"fallbackUsed":false},"retryCount":0,"stallRounds":0},{"schemaVersion":"v1","id":"demo-cyc-b","repo":"example/demo-repo","title":"Cycle member B","goal":"Cycle member B for the demo run","issue":22,"dod":[{"id":"D1","text":"Reviewed","done":false}],"dependencies":["demo-cyc-c"],"status":"queued","statusReason":null,"assignedHostAlias":null,"branch":null,"pullNumber":null,"modelRouting":{"preferredModel":"meta/muse-glimmer-30b","attempts":0,"fallbackUsed":false},"retryCount":0,"stallRounds":0},{"schemaVersion":"v1","id":"demo-cyc-c","repo":"example/demo-repo","title":"Cycle member C","goal":"Cycle member C for the demo run","issue":23,"dod":[{"id":"D1","text":"Reviewed","done":false}],"dependencies":["demo-cyc-a"],"status":"queued","statusReason":null,"assignedHostAlias":null,"branch":null,"pullNumber":null,"modelRouting":{"preferredModel":"meta/muse-glimmer-30b","attempts":0,"fallbackUsed":false},"retryCount":0,"stallRounds":0}]}
+{
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "id": "demo-cyc-a",
+      "repo": "example/demo-repo",
+      "title": "Cycle member A",
+      "goal": "Cycle member A for the demo run",
+      "issue": 21,
+      "dod": [{ "id": "D1", "text": "Reviewed", "done": false }],
+      "dependencies": ["demo-cyc-b"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "demo-cyc-b",
+      "repo": "example/demo-repo",
+      "title": "Cycle member B",
+      "goal": "Cycle member B for the demo run",
+      "issue": 22,
+      "dod": [{ "id": "D1", "text": "Reviewed", "done": false }],
+      "dependencies": ["demo-cyc-c"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "demo-cyc-c",
+      "repo": "example/demo-repo",
+      "title": "Cycle member C",
+      "goal": "Cycle member C for the demo run",
+      "issue": 23,
+      "dod": [{ "id": "D1", "text": "Reviewed", "done": false }],
+      "dependencies": ["demo-cyc-a"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    }
+  ]
+}

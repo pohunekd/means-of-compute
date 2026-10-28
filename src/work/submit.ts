@@ -48,12 +48,12 @@ function initialField(item: WorkItem): string | null {
   if (item.modelRouting.attempts !== 0) {
     return "modelRouting.attempts";
   }
-  if (item.modelRouting.fallbackUsed !== false) {
+  if (item.modelRouting.fallbackUsed) {
     return "modelRouting.fallbackUsed";
   }
   for (let index = 0; index < item.dod.length; index += 1) {
     const entry = item.dod[index];
-    if (entry !== undefined && entry.done !== false) {
+    if (entry !== undefined && entry.done) {
       return `dod[${String(index)}].done`;
     }
   }
@@ -78,15 +78,15 @@ export function checkItems(
   for (let index = 0; index < items.length; index += 1) {
     const item: unknown = items[index];
     if (!isWorkItem(item)) {
-      const errors = contractErrors("work-item", item) as readonly {
-        readonly instancePath?: string;
-        readonly keyword?: string;
-      }[] | null;
+      const errors = contractErrors("work-item", item) as
+        | readonly {
+            readonly instancePath?: string;
+            readonly keyword?: string;
+          }[]
+        | null;
       const first = errors?.[0];
       const path =
-        first?.instancePath === "" || first?.instancePath === undefined
-          ? "/"
-          : first.instancePath;
+        first?.instancePath === "" || first?.instancePath === undefined ? "/" : first.instancePath;
       const keyword = String(first?.keyword);
       return {
         code: "contract-invalid",
@@ -228,10 +228,7 @@ export function applySubmission(
   return {
     next: {
       items: [...store.items, ...items],
-      submissions: [
-        ...store.submissions,
-        { submissionId, digest, itemIds, caller, submittedAt },
-      ],
+      submissions: [...store.submissions, { submissionId, digest, itemIds, caller, submittedAt }],
     },
     value: { kind: "ok", submissionId, itemIds, revision: store.revision + 1, replayed: false },
   };

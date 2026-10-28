@@ -30,12 +30,6 @@ async function loadFixture(path: string): Promise<{ items: Record<string, unknow
   return JSON.parse(text) as { items: Record<string, unknown>[] };
 }
 
-function goodItems(): { items: Record<string, unknown>[] } {
-  return JSON.parse(readFileSync("tests/fixtures/mcp/good-dag.json", "utf8")) as {
-    items: Record<string, unknown>[];
-  };
-}
-
 async function setup(submitArgs: unknown): Promise<{
   readonly structured: Record<string, unknown>;
   readonly store: Record<string, unknown> | null;
@@ -206,7 +200,7 @@ test("U3 same ids with a changed title are refused as id-exists (U3)", async () 
   );
   const changed = fixture.items.map((entry) =>
     entry["id"] === "demo-a" ? { ...entry, title: "Changed title" } : entry,
-  ) as Record<string, unknown>[];
+  );
   const raw = await protocol.handleLine(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -229,7 +223,7 @@ test("U3 same ids with a changed title are refused as id-exists (U3)", async () 
 
 test("U4 cyclic dag is refused and the store file stays absent (U4)", async () => {
   const env = await createMcpTestEnv("mcp-u4-");
-  const { log, lines } = memoryLog();
+  const { log } = memoryLog();
   const tools = createTools({
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
@@ -270,14 +264,13 @@ test("U4 cyclic dag is refused and the store file stays absent (U4)", async () =
   expect(parsed.result.structuredContent["ok"]).toBe(false);
   expect(errorOf(parsed.result.structuredContent)).toEqual({
     code: "dag-cycle",
-    message: "cycle edge demo-cyc-c -> demo-cyc-a (demo-cyc-a -> demo-cyc-b -> demo-cyc-c -> demo-cyc-a)",
+    message:
+      "cycle edge demo-cyc-c -> demo-cyc-a (demo-cyc-a -> demo-cyc-b -> demo-cyc-c -> demo-cyc-a)",
     retryable: false,
     edge: { from: "demo-cyc-c", to: "demo-cyc-a" },
     cycle: ["demo-cyc-a", "demo-cyc-b", "demo-cyc-c", "demo-cyc-a"],
   });
   expect(existsSync(env.storePath)).toBe(false);
-  void goodItems;
-  void lines;
 });
 
 test("U5 unknown dependency is refused (U5)", async () => {
@@ -363,9 +356,9 @@ test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
 });
 
 function fieldCase(field: string, value: unknown): Record<string, unknown>[] {
-  const base = JSON.parse(
-    readFileSync("tests/fixtures/mcp/good-dag.json", "utf8"),
-  ) as { items: Record<string, unknown>[] };
+  const base = JSON.parse(readFileSync("tests/fixtures/mcp/good-dag.json", "utf8")) as {
+    items: Record<string, unknown>[];
+  };
   const first = { ...(base.items[0] as Record<string, unknown>) };
   if (field === "modelRouting.attempts" || field === "modelRouting.fallbackUsed") {
     const routing = { ...((first["modelRouting"] ?? {}) as Record<string, unknown>) };
@@ -376,10 +369,9 @@ function fieldCase(field: string, value: unknown): Record<string, unknown>[] {
     }
     first["modelRouting"] = routing;
   } else if (field.startsWith("dod[")) {
-    const dod = [{ ...(((first["dod"] ?? []) as unknown[])[0] as Record<string, unknown>) }] as Record<
-      string,
-      unknown
-    >[];
+    const dod = [
+      { ...(((first["dod"] ?? []) as unknown[])[0] as Record<string, unknown>) },
+    ] as Record<string, unknown>[];
     const head = dod[0] as Record<string, unknown>;
     head["done"] = value;
     first["dod"] = dod;
@@ -626,9 +618,9 @@ test("U11 the U4 call-end carries dag-cycle with an edge summary and no goal tex
       },
     }),
   );
-  const fixture = JSON.parse(
-    readFileSync("tests/fixtures/mcp/cyclic-dag.json", "utf8"),
-  ) as { items: Record<string, unknown>[] };
+  const fixture = JSON.parse(readFileSync("tests/fixtures/mcp/cyclic-dag.json", "utf8")) as {
+    items: Record<string, unknown>[];
+  };
   const goalText = String((fixture.items[0] as Record<string, unknown>)["goal"]);
   expect(goalText.length).toBeGreaterThan(0);
   await protocol.handleLine(

@@ -117,6 +117,6 @@ test("the failure branches are spelled out (K5)", async () => {
     '6. When `approve` or `pause_fleet` returns `"ok": false`, report its code for that entry and do not call it again.',
   );
   expect(text).toContain(
-    'If `audit_results` returns `"ok": false`, or step 2 collects no finding, do not call `submit_work` for this entry;',
+    '3. If `audit_results` returns `"ok": false`, or step 2 collects no finding, do not call `submit_work` for this entry; report the entry\'s `workItemId` with the code, or with `no findings`.',
   );
 });

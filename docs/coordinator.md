@@ -23,5 +23,7 @@ failure throws `GoalError`.
 `loadSkill` reads the skill body and both examples. `renderPlanPrompt` builds
 the plan session prompt; `renderReactPrompt` adds the attention list. Fences
 grow past any backticks inside the payload. The Goal and Attention blocks
-are exactly `JSON.stringify` with two-space indent, so the committed
-prompts stay byte-identical through Prettier.
+are exactly `JSON.stringify` with two-space indent. `.prettierignore`
+excludes `tests/fixtures/coord/prompt-*-expected.md`, so Prettier never
+rewrites the committed prompts; any new byte-exact `.md` fixture needs
+its own ignore line.

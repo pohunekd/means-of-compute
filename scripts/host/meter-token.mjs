@@ -4,7 +4,7 @@
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { setTimeout as setTimer } from "node:timers";
+import { clearTimeout, setTimeout as setTimer } from "node:timers";
 
 const SESSION_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
 const TIMEOUT_PATTERN = /^[1-9][0-9]*$/;
@@ -66,7 +66,11 @@ child.on("close", (code, signal) => {
   finished = true;
   clearTimeout(timer);
   if (code !== 0) {
-    fail(signal !== null && signal !== undefined ? `pohunek ${signal}` : `pohunek exited ${String(code)}`);
+    fail(
+      signal !== null && signal !== undefined
+        ? `pohunek ${signal}`
+        : `pohunek exited ${String(code)}`,
+    );
   }
   let parsed;
   try {

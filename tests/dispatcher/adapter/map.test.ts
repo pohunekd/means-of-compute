@@ -217,7 +217,12 @@ test("new params send the base branch without the origin prefix", () => {
 });
 
 test("input is the only params field holding the brief", () => {
-  const params = sessionNewParams(request({ brief: "uniquely worded brief text" }), CONFIG, "d", "moc1.tok");
+  const params = sessionNewParams(
+    request({ brief: "uniquely worded brief text" }),
+    CONFIG,
+    "d",
+    "moc1.tok",
+  );
   expect(params.input).toContain("uniquely worded brief text");
   const rest = JSON.stringify({ ...params, input: undefined });
   expect(rest).not.toContain("uniquely worded brief text");

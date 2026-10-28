@@ -16,7 +16,7 @@ interface RunResult {
 
 async function runHelper(env: Record<string, string>): Promise<RunResult> {
   const proc = Bun.spawn([process.execPath, HELPER], {
-    env: { PATH: env["PATH"] ?? "", HOME: env["HOME"] ?? "" , ...env },
+    env: { PATH: env["PATH"] ?? "", HOME: env["HOME"] ?? "", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });

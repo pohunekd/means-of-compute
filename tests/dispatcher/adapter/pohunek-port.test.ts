@@ -114,7 +114,12 @@ test("a resume start sends branch_source remote and reports the base commit", as
   const { fake, port } = setup();
   try {
     const req = request({ resume: true });
-    const params = sessionNewParams(req, CONFIG, requestDigestOf(req), "moc1." + req.requestId + ".T");
+    const params = sessionNewParams(
+      req,
+      CONFIG,
+      requestDigestOf(req),
+      "moc1." + req.requestId + ".T",
+    );
     expect(params.branch_source).toBe("remote");
     expect("base_branch" in params).toBe(false);
     const handle = await port.start(req);

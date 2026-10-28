@@ -96,10 +96,10 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
     } catch {
       throw new ClientError(4, "mcp:call: malformed response");
     }
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    const candidate = raw;
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
       throw new ClientError(4, "mcp:call: malformed response");
     }
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     return raw as JsonRpcResponse;
   }
   try {
@@ -132,7 +132,12 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
       throw new ClientError(4, `mcp:call: server error ${String(callRaw.error.message)}`);
     }
     const structured = callRaw.result?.structuredContent;
-    if (structured === undefined) {
+    if (
+      typeof structured !== "object" ||
+      structured === null ||
+      Array.isArray(structured) ||
+      typeof (structured as Record<string, unknown>)["ok"] !== "boolean"
+    ) {
       throw new ClientError(4, "mcp:call: malformed response");
     }
     return structured;

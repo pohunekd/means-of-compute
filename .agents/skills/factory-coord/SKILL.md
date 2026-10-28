@@ -27,6 +27,7 @@ of every tool call you made and its result.
    attention list, with the reason template below, word for word.
 4. Stop calling `submit_work` when the session's limit in "This run" is reached.
 5. A pending request is not a decision. Never describe it as approved.
+6. When `approve` or `pause_fleet` returns `"ok": false`, report its code for that entry and do not call it again.
 
 ## Plan session: goal to DAG
 
@@ -80,7 +81,8 @@ preferredModel>, "attempts": 0, "fallbackUsed": false}`.
   2. Take every verdict whose `pullNumber` equals the entry's `pullNumber` and whose
      `counts.high` or `counts.medium` is above 0. Collect their high and medium
      findings.
-  3. Call `submit_work` with one item shaped like the follow-up example:
+  3. If `audit_results` returns `"ok": false`, or step 2 collects no finding, do not call `submit_work` for this entry; report the entry's `workItemId` with the code, or with `no findings`.
+  4. Call `submit_work` with one item shaped like the follow-up example:
      - `id`: the entry's `workItemId` followed by `-fu`; `dependencies`: `[]`;
        `issue`: the entry's `issue`;
      - `title`: `Follow-up (<workItemId>): <location of the first finding> at <first 8 characters of its headSha>`;
@@ -90,7 +92,7 @@ preferredModel>, "attempts": 0, "fallbackUsed": false}`.
        by the command that shows it;
      - `preferredModel`: `muse-spark-1.3-contributor` when the entry's
        `fallbackUsed` is true, else the goal's `preferredModel`.
-  4. `id-exists` for that id means the follow-up is already filed.
+  5. `id-exists` for that id means the follow-up is already filed.
 - `approve`: a clean audit in a repository that merges by human approval. Call
   `approve` with the entry's `workItemId`, `pullNumber` and `headSha` and the reason
   `Clean audit at <headSha> by <auditorModel>; the merge needs a human decision.`

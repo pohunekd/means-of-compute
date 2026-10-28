@@ -61,7 +61,7 @@
       "id": "greet-cli",
       "repo": "example/demo-repo",
       "title": "Print a greeting from the command line",
-      "goal": "Add src/greet/cli.ts that takes a template and name=value pairs from argv and prints the rendered greeting, and tests/greet/cli.ts. Change no other file.",
+      "goal": "Add src/greet/cli.ts that takes a template and name=value pairs from argv and prints the rendered greeting, and tests/greet/cli.test.ts. Change no other file.",
       "issue": null,
       "dod": [
         {

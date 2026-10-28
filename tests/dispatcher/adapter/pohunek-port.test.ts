@@ -174,17 +174,28 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
     fake.setCapabilities("laptop-a", {
       runtimes: [{ agent: CONFIG.agentProfile, available: false }],
     });
+    fake.setDiff("laptop-a", handle.sessionId, {
+      diff: "diff --git a\n",
+      base: "origin/main",
+      truncated: false,
+    });
+    const diffed = await port.diff(ref, "origin/main");
+    expect(diffed).toEqual({
+      sessionId: handle.sessionId,
+      base: "origin/main",
+      unifiedDiff: "diff --git a\n",
+      truncated: false,
+    });
     const cancelled = await port.cancel(ref, "operator");
     expect(cancelled).toMatchObject({ state: "cancelled", sessionId: handle.sessionId });
     expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
     expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(1);
     const observed = await port.wait(ref, 1000, null);
     expect(observed).toEqual(cancelled);
-    const freshLog: AdapterLogEvent[] = [];
     const fresh = createPohunekPort(CONFIG, {
       connector: fake.connector,
       log: (event) => {
-        freshLog.push(event);
+        log.push(event);
       },
     });
     try {
@@ -196,8 +207,8 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
         (cause: unknown): unknown => cause,
       );
       expect(noBound).toMatchObject({ code: "host-unsupported" });
-      expect(eventsOf(freshLog)).toContain("adapter-host-unsupported");
-      expect(freshLog.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
+      expect(eventsOf(log)).toContain("adapter-host-unsupported");
+      expect(log.find((entry) => entry.event === "adapter-host-unsupported")?.detail).toBe(
         "agent_runtime",
       );
     } finally {

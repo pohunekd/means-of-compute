@@ -44,6 +44,10 @@ const CALL_END_KEYS: readonly string[] = [
   "detail",
 ];
 
+function isSummaryRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseCallEnd(value: Record<string, unknown>): CoordCallEnd | null {
   if (Object.keys(value).length !== CALL_END_KEYS.length) {
     return null;
@@ -64,57 +68,27 @@ function parseCallEnd(value: Record<string, unknown>): CoordCallEnd | null {
   const durationMs: unknown = value["durationMs"];
   const summary: unknown = value["summary"];
   const detail: unknown = value["detail"];
-  if (typeof ts !== "string") {
+  if (
+    typeof ts !== "string" ||
+    value["event"] !== "call-end" ||
+    typeof run !== "string" ||
+    typeof callId !== "number" ||
+    !Number.isInteger(callId) ||
+    callId < 1 ||
+    typeof caller !== "string" ||
+    caller.length === 0 ||
+    typeof tool !== "string" ||
+    tool.length === 0 ||
+    (toolClass !== "read" && toolClass !== "write" && toolClass !== "sensitive") ||
+    (outcome !== "ok" && outcome !== "refused" && outcome !== "error") ||
+    (code !== null && typeof code !== "string") ||
+    typeof durationMs !== "number" ||
+    !Number.isInteger(durationMs) ||
+    durationMs < 0 ||
+    (summary !== null && !isSummaryRecord(summary)) ||
+    (detail !== null && typeof detail !== "string")
+  ) {
     return null;
-  }
-  if (value["event"] !== "call-end") {
-    return null;
-  }
-  if (typeof run !== "string") {
-    return null;
-  }
-  if (typeof callId !== "number" || !Number.isInteger(callId) || callId < 1) {
-    return null;
-  }
-  if (typeof caller !== "string" || caller.length === 0) {
-    return null;
-  }
-  if (typeof tool !== "string" || tool.length === 0) {
-    return null;
-  }
-  if (toolClass !== "read" && toolClass !== "write" && toolClass !== "sensitive") {
-    return null;
-  }
-  if (outcome !== "ok" && outcome !== "refused" && outcome !== "error") {
-    return null;
-  }
-  if (code !== null && typeof code !== "string") {
-    return null;
-  }
-  if (typeof durationMs !== "number" || !Number.isInteger(durationMs) || durationMs < 0) {
-    return null;
-  }
-  if (summary !== null && (typeof summary !== "object" || Array.isArray(summary))) {
-    return null;
-  }
-  let summaryRecord: Readonly<Record<string, unknown>> | null = null;
-  if (summary !== null) {
-    if (typeof summary !== "object" || Array.isArray(summary)) {
-      return null;
-    }
-    const entries = Object.entries(summary);
-    const rebuilt: Record<string, unknown> = {};
-    for (const [key, entry] of entries) {
-      rebuilt[key] = entry;
-    }
-    summaryRecord = rebuilt;
-  }
-  let detailText: string | null = null;
-  if (detail !== null) {
-    if (typeof detail !== "string") {
-      return null;
-    }
-    detailText = detail;
   }
   return {
     ts,
@@ -127,8 +101,8 @@ function parseCallEnd(value: Record<string, unknown>): CoordCallEnd | null {
     outcome,
     code,
     durationMs,
-    summary: summaryRecord,
-    detail: detailText,
+    summary,
+    detail,
   };
 }
 

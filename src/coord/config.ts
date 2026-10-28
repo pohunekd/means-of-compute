@@ -242,50 +242,52 @@ function requiredStringList(
 async function readDescriptorApiKeyEnv(path: string): Promise<string> {
   const file = join(PROVIDERS_DIR, "meta-api.json");
   const label = "Provider descriptor";
-  const failure = (reason: string, cause?: unknown): CoordConfigError =>
-    new CoordConfigError(
-      `Coordinator config ${path}: invalid required key "providerId" (descriptor ${file}: ${reason})`,
-      cause === undefined ? undefined : { cause },
-    );
   let text: string;
   try {
     if ((await statInputPath(label, file)) === "absent") {
-      throw failure("file is missing");
+      throw new CoordConfigError(`${label} ${file}: file is missing`);
     }
     text = await readInputText(label, file);
   } catch (error: unknown) {
-    if (error instanceof CoordConfigError) {
-      throw error;
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    throw failure(`cannot read descriptor (${message})`, error);
+    throw wrapped(path, "providerId", error);
   }
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw failure("not valid JSON");
+    throw wrapped(path, "providerId", new Error(`${label} ${file}: not valid JSON`));
   }
   let errors: string | null;
   try {
     errors = (await loadProviderSchema()).descriptorErrors(raw);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw failure(`cannot load schema (${message})`, error);
+    throw wrapped(path, "providerId", error);
   }
   if (errors !== null) {
-    throw failure(errors);
+    throw wrapped(path, "providerId", new Error(`${label} ${file}: ${errors}`));
   }
   const descriptor = raw as Record<string, unknown>;
   if (descriptor["id"] !== COORD_PROVIDER_ID) {
-    throw failure("id is not meta-api");
+    throw wrapped(
+      path,
+      "providerId",
+      new Error(`${label} ${file}: id is not meta-api`),
+    );
   }
   if (descriptor["model"] !== COORD_MODEL) {
-    throw failure("model is not muse-spark-1.3-contributor");
+    throw wrapped(
+      path,
+      "providerId",
+      new Error(`${label} ${file}: model is not muse-spark-1.3-contributor`),
+    );
   }
   const apiKeyEnv = descriptor["apiKeyEnv"];
   if (typeof apiKeyEnv !== "string" || !ENV_NAME_PATTERN.test(apiKeyEnv)) {
-    throw failure("apiKeyEnv is not a variable name");
+    throw wrapped(
+      path,
+      "providerId",
+      new Error(`${label} ${file}: apiKeyEnv is not a variable name`),
+    );
   }
   return apiKeyEnv;
 }
@@ -402,11 +404,12 @@ function parseSeed(value: unknown, path: string): CoordSeedConfig | null {
   }
   const record = asRecord(value, path, "seed");
   checkKeys(record, ["stateDir", "storeSeedPath"], path, "seed");
+  const stateDir = requiredStateDir(record, path);
   const storeSeedPath = record["storeSeedPath"];
   if (storeSeedPath !== null && (typeof storeSeedPath !== "string" || storeSeedPath.length === 0)) {
     throw invalid(path, "seed.storeSeedPath");
   }
-  return { stateDir: requiredStateDir(record, path), storeSeedPath };
+  return { stateDir, storeSeedPath };
 }
 
 export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> {
@@ -432,11 +435,16 @@ export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> 
   } catch {
     throw new CoordConfigError(`${label} ${path}: not valid JSON`);
   }
-  const record = asRecord(raw, path, "");
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new CoordConfigError(`${label} ${path}: must be a JSON object`);
+  }
+  const record = raw as Record<string, unknown>;
   checkKeys(record, TOP_LEVEL_KEYS, path, "");
+  const museCommand = requiredStringList(record, path, "", "museCommand", 1);
   if (record["providerId"] !== COORD_PROVIDER_ID) {
     throw invalid(path, "providerId");
   }
+  const apiKeyEnv = await readDescriptorApiKeyEnv(path);
   if (record["model"] !== COORD_MODEL) {
     throw invalid(path, "model");
   }
@@ -450,7 +458,7 @@ export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> 
   ) {
     throw invalid(path, "approvalMode");
   }
-  const apiKeyEnv = await readDescriptorApiKeyEnv(path);
+  const envPassthrough = requiredEnvPassthrough(record, path, apiKeyEnv);
   const mcpConfigPath = requiredString(record, path, "", "mcpConfigPath");
   let mcp: McpConfig;
   try {
@@ -476,17 +484,18 @@ export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> 
   } catch (error: unknown) {
     throw wrapped(path, "skillDir", error);
   }
+  const runsDir = requiredString(record, path, "", "runsDir");
   const config: CoordConfig = {
-    museCommand: requiredStringList(record, path, "", "museCommand", 1),
+    museCommand,
     providerId: COORD_PROVIDER_ID,
     model: COORD_MODEL,
     contributorMode: "on",
     approvalMode: approvalMode as ApprovalMode,
-    envPassthrough: requiredEnvPassthrough(record, path, apiKeyEnv),
+    envPassthrough,
     mcpConfigPath,
     budgetGateConfigPath,
     skillDir,
-    runsDir: requiredString(record, path, "", "runsDir"),
+    runsDir,
     maxRunsPerDay: requiredInteger(record, path, "", "maxRunsPerDay", 1, 50),
     maxOutcomeChars: requiredInteger(record, path, "", "maxOutcomeChars", 100, 50000),
     maxToolOutputBytes: requiredInteger(record, path, "", "maxToolOutputBytes", 1024, 1048576),

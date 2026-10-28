@@ -114,6 +114,67 @@ test("an update writes revision n+1 and a re-read is deep-equal (L3)", async () 
   });
 });
 
+test("an item key outside the work-item id shape is rejected (F4)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop-state.json");
+    let error: unknown;
+    try {
+      await updateLoopState(path, () =>
+        Promise.resolve({
+          next: { ...emptyState(), items: { Bad_Id: idleItem() } },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopStateDataError);
+  });
+});
+
+test("a misspelled round outcome is rejected (F10)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop-state.json");
+    let error: unknown;
+    try {
+      await updateLoopState(path, () =>
+        Promise.resolve({
+          next: {
+            ...emptyState(),
+            items: {
+              "gh-moc-5": {
+                ...idleItem(),
+                rounds: [
+                  {
+                    round: 0,
+                    retry: 0,
+                    requestId: null,
+                    model: "meta/muse-glimmer-30b",
+                    providerId: "nvidia-build",
+                    hostAlias: null,
+                    attempt: "success",
+                    outcome: "red_ci",
+                    headSha: null,
+                    failingChecks: [],
+                    verdict: null,
+                    newlyMet: [],
+                    at: "2026-10-28T00:00:00.000Z",
+                    baseRace: false,
+                  },
+                ],
+              },
+            },
+          },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopStateDataError);
+  });
+});
+
 test("phase starting with start null fails and writes nothing (L4)", async () => {
   await withTempDir(async (dir) => {
     const path = join(dir, "loop-state.json");

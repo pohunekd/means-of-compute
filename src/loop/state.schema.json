@@ -18,6 +18,7 @@
     "revision": { "type": "integer", "minimum": 0 },
     "items": {
       "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
       "additionalProperties": { "$ref": "#/$defs/loopItem" }
     },
     "resolvedApprovals": {
@@ -119,8 +120,23 @@
         "model": { "type": "string", "minLength": 1 },
         "providerId": { "type": "string", "minLength": 1 },
         "hostAlias": { "type": ["string", "null"], "minLength": 1 },
-        "attempt": { "type": "string", "minLength": 1 },
-        "outcome": { "type": "string", "minLength": 1 },
+        "attempt": { "enum": ["success", "failure", "stalled", "lost"] },
+        "outcome": {
+          "enum": [
+            "merged",
+            "findings",
+            "red-ci",
+            "no-push",
+            "no-new-commit",
+            "empty-diff",
+            "diff-too-large",
+            "session-failed",
+            "ci-timeout",
+            "trial-failed",
+            "lost",
+            "start-rejected"
+          ]
+        },
         "headSha": { "type": ["string", "null"], "minLength": 1 },
         "failingChecks": { "type": "array", "items": { "type": "string" } },
         "verdict": {

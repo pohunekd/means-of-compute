@@ -1,6 +1,7 @@
 // Loop state: the durable journal of the loop runner. Every write takes
-// the state lock, reads the file, applies the fold, checks the schema
-// plus rules (a) to (e), and persists with one atomic write.
+// the state lock, reads the file, applies the fold, checks the id shape
+// plus rules (b) to (e), and persists with one atomic write. Rule (a)
+// membership in the work store is checked by the later recovery slice.
 import Ajv from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { readInputText, statInputPath } from "../fs/input.js";

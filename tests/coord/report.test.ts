@@ -286,7 +286,7 @@ test("snapshot parsing accepts the captured shapes (R6)", () => {
   });
 });
 
-test("approve summaries land in requests and bad summaries throw (R7)", () => {
+test("an ok approve summary lands in requests, a refused line without a code throws (R7, R9)", () => {
   const input = minimalInput({
     calls: [
       callEnd({
@@ -308,4 +308,46 @@ test("approve summaries land in requests and bad summaries throw (R7)", () => {
     thrown = error;
   }
   expect(thrown).toBeInstanceOf(ReportDataError);
+  const missingCode = minimalInput({
+    calls: [
+      callEnd({
+        tool: "submit_work",
+        class: "write",
+        outcome: "refused",
+        code: null,
+        summary: null,
+      }),
+    ],
+  });
+  let codeThrown: unknown = null;
+  try {
+    buildReport(missingCode);
+  } catch (error: unknown) {
+    codeThrown = error;
+  }
+  expect(codeThrown).toBeInstanceOf(ReportDataError);
+  expect((codeThrown as Error).message).toBe(
+    `Report: call ${missingCode.calls[0]?.run}/${String(missingCode.calls[0]?.callId)} has an invalid submit_work summary`,
+  );
+});
+
+test("a pipe in a refusal code stays inside its cell (R8)", () => {
+  const input = minimalInput({
+    calls: [
+      callEnd({
+        tool: "submit_work",
+        class: "write",
+        outcome: "refused",
+        code: "a|b",
+        summary: null,
+      }),
+    ],
+  });
+  const rendered = renderReportMd(buildReport(input));
+  expect(rendered.includes("| submit_work | a\\|b | 1 |")).toBe(true);
+  for (const line of rendered.split("\n")) {
+    if (line.includes("submit_work") && line.startsWith("|")) {
+      expect(line.split("|").length).toBe(6);
+    }
+  }
 });

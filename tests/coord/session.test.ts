@@ -1,4 +1,4 @@
-// Muse session tests (S1-S9): env isolation, tools/call round trip,
+// Muse session tests (S1-S10): env isolation, tools/call round trip,
 // process-group kill, export gating, env failures and log shapes.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
@@ -118,7 +118,11 @@ async function setupEnvFresh(
   env: CoordTestEnv,
   runDir: string,
   script: string,
-): Promise<{ opts: MuseSessionOpts; deps: MuseSessionDeps; entries: Record<string, unknown>[] }> {
+): Promise<{
+  opts: MuseSessionOpts;
+  deps: MuseSessionDeps;
+  entries: Record<string, unknown>[];
+}> {
   const { config } = await loadCoordConfig(env.configPath);
   const session: MuseSession = {
     kind: "plan",
@@ -128,12 +132,13 @@ async function setupEnvFresh(
     checkoutDir: env.checkoutDir,
     bunPath: process.execPath,
   };
+  const scriptName = script.includes("/") || script.includes("\\") ? script : scriptPath(script);
   const entries: Record<string, unknown>[] = [];
   const deps: MuseSessionDeps = {
     env: {
       PATH: process.env["PATH"],
       FAKE_MUSE_RECORD: env.recordPath,
-      FAKE_MUSE_SCRIPT: scriptPath(script),
+      FAKE_MUSE_SCRIPT: scriptName,
       META_API_KEY: "test-key",
     },
     log: {
@@ -251,11 +256,10 @@ test("a nonzero exit still exports, and a failed export is recorded (S4)", async
   const fresh = await createRunDir(setup.env, `${RUN_ID}-s4b`);
   const failingName = "exit7-fails.json";
   await Bun.write(
-    join(FAKE_DIR, failingName),
+    join(setup.env.dir, failingName),
     '{"calls":[],"exit":7,"hang":false,"exportFails":true}',
   );
-  try {
-    const second = await setupEnvFresh(setup.env, fresh, failingName);
+  const second = await setupEnvFresh(setup.env, fresh, join(setup.env.dir, failingName));
     const secondResult = await runMuseSession(second.opts, second.deps);
     expect(secondResult.exportOk).toBe(false);
     const exports = second.entries.filter((entry) => entry["event"] === "export");
@@ -266,10 +270,33 @@ test("a nonzero exit still exports, and a failed export is recorded (S4)", async
     expect(line["ok"]).toBe(false);
     expect(line["reason"]).toBe("exit");
     expect(line["rc"]).toBe(5);
-  } finally {
-    const { rm } = await import("node:fs/promises");
-    await rm(join(FAKE_DIR, failingName), { force: true });
-  }
+}, 30000);
+
+test("an abort during setup is reported as aborted (S10)", async () => {
+  const setup = await setupEnv("hang.json");
+  const controller = new AbortController();
+  const seen: string[] = [];
+  const log: CallLog = {
+    append(entry: Record<string, unknown>): Promise<void> {
+      seen.push(String(entry["event"]));
+      if (seen.length === 1) {
+        controller.abort();
+      }
+      setup.entries.push(entry);
+      return Promise.resolve();
+    },
+  };
+  const opts: MuseSessionOpts = {
+    ...setup.opts,
+    timeoutMs: 3000,
+    signal: controller.signal,
+  };
+  const deps: MuseSessionDeps = { ...setup.deps, log };
+  const started = Date.now();
+  const result = await runMuseSession(opts, deps);
+  const elapsed = Date.now() - started;
+  expect(result.outcome).toEqual({ kind: "aborted" });
+  expect(elapsed).toBeLessThan(2000);
 }, 30000);
 
 test("a missing key rejects before any event, dir or spawn (S5)", async () => {

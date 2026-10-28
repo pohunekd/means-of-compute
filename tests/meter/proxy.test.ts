@@ -207,7 +207,7 @@ test("an oversize body gives 413", async () => {
   // value alone, before reading the body.
   await withMeter(
     "tests/meter/recordings/stream-ok.json",
-    async ({ meter, tokenFor, events, loopback, buildState, usageIndex }) => {
+    async ({ meter, tokenFor, events, loopback, internals }) => {
       const { requestId } = await openBoundGrant(meter);
       // Bun's own transport cap answers before the handler when the
       // real bytes exceed it, so this row calls handleMeterRequest
@@ -223,7 +223,13 @@ test("an oversize body gives 413", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(req.headers.get("content-length")).toBe("2000");
-      const resp = await handleMeterRequest(buildState(), req, null, "127.0.0.1", usageIndex);
+      const resp = await handleMeterRequest(
+        internals.buildState(),
+        req,
+        null,
+        "127.0.0.1",
+        internals.usageIndex,
+      );
       expect(resp.status).toBe(413);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(
         "body-too-large",

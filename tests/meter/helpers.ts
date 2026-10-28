@@ -7,14 +7,14 @@ import { randomBytes } from "node:crypto";
 import { loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import {
-  startMeter,
+  startMeterWithInternals,
   type Meter,
+  type MeterInternals,
   type MeterLiveView,
   type MeterLogEvent,
 } from "../../src/meter/meter.js";
-import type { UsageIndex, UsageLogIo } from "../../src/meter/usage-log.js";
+import type { UsageLogIo } from "../../src/meter/usage-log.js";
 import { systemUsageLogIo } from "../../src/meter/usage-log.js";
-import type { ProxyState } from "../../src/meter/proxy.js";
 import { resetProvidersCache } from "../../src/providers/config.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { createManualTimers, type ManualTimers } from "./manual-timers.js";
@@ -28,8 +28,7 @@ export interface MeterFixture {
   readonly timers: ManualTimers;
   readonly tokenFor: (requestId: string) => string;
   readonly waitForEvent: (match: (e: MeterLogEvent) => boolean) => Promise<MeterLogEvent>;
-  readonly buildState: () => ProxyState;
-  readonly usageIndex: UsageIndex;
+  readonly internals: MeterInternals;
 }
 
 const META_MODEL = "muse-spark-1.3-contributor";
@@ -113,7 +112,7 @@ export async function withMeter(
       });
       const { getProviders } = await import("../../src/providers/config.js");
       const providers = await getProviders();
-      const meter = await startMeter({
+      const { meter, internals } = await startMeterWithInternals({
         config,
         env,
         providers,
@@ -141,8 +140,7 @@ export async function withMeter(
           timers,
           tokenFor: (requestId: string) => meter.tokenFor(requestId),
           waitForEvent,
-          buildState: () => meter.buildState(),
-          usageIndex: meter.usageIndex,
+          internals,
         });
       } finally {
         loopback.release();

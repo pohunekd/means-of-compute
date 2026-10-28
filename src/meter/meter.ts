@@ -89,11 +89,14 @@ export interface MeterLiveView {
   readonly liveCount: (requestId: string) => number;
 }
 
+export interface MeterInternals {
+  buildState(): ProxyState;
+  readonly usageIndex: UsageIndex;
+}
+
 export interface Meter extends MeterLiveView {
   readonly port: number;
   tokenFor(requestId: string): string;
-  buildState(): ProxyState;
-  readonly usageIndex: UsageIndex;
   openGrant(spec: GrantSpec): Promise<void>;
   bindGrant(requestId: string, sessionId: string): Promise<void>;
   settle(sessionId: string, state: TerminalState): Promise<PortUsage | null>;
@@ -112,7 +115,10 @@ function checkFailed(appender: UsageAppender): void {
   }
 }
 
-export async function startMeter(deps: MeterDeps): Promise<Meter> {
+export async function startMeterWithInternals(deps: MeterDeps): Promise<{
+  meter: Meter;
+  internals: MeterInternals;
+}> {
   const { config, env, providers, now, log, timers, logIo } = deps;
   const index = await replayUsageLog(config.usageLogPath, "repair", log);
   const appender = await openUsageAppender(config.usageLogPath, index, log, logIo);
@@ -445,18 +451,23 @@ export async function startMeter(deps: MeterDeps): Promise<Meter> {
   }
 
   return {
-    get port(): number {
-      return server.port;
+    meter: {
+      get port(): number {
+        return server.port;
+      },
+      tokenFor: mintToken,
+      openGrant,
+      bindGrant,
+      settle,
+      close,
+      liveCount: readLiveCount,
     },
-    tokenFor: mintToken,
-    buildState,
-    usageIndex: index,
-    openGrant,
-    bindGrant,
-    settle,
-    close,
-    liveCount: readLiveCount,
+    internals: { buildState, usageIndex: index },
   };
+}
+
+export async function startMeter(deps: MeterDeps): Promise<Meter> {
+  return (await startMeterWithInternals(deps)).meter;
 }
 
 export { handleMeterRequest };

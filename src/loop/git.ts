@@ -435,11 +435,12 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
   async function step1(): Promise<{ readonly timeout: true } | { readonly timeout: false }> {
     checkWorktreePath(wt, input.scratchDir, input.id);
     if (await pathExists(wt)) {
-      const leftover = await checkedRunGit(
-        input.dir,
-        deadlineTimeout(deadline),
-        ["worktree", "remove", "--force", wt],
-      );
+      const leftover = await checkedRunGit(input.dir, deadlineTimeout(deadline), [
+        "worktree",
+        "remove",
+        "--force",
+        wt,
+      ]);
       if (leftover.rc !== 0 && leftover.rc !== 128) {
         throw new GitError(
           "failed",
@@ -479,15 +480,28 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
     // Step 6 cleanup shares one budget that starts when step 6 starts.
     const cleanupDeadline = started + input.timeoutMs;
     const budget = (): number => deadlineTimeout(cleanupDeadline);
+    const seen = await pathExists(wt);
     try {
-      const removed = await runGit(
-        input.dir,
-        { PATH: input.PATH, timeoutMs: budget() },
-        step,
-        ["worktree", "remove", "--force", wt],
-      );
-      if (removed.rc !== 0) {
-        cleanupFailed = true;
+      if (seen) {
+        const removed = await runGit(input.dir, { PATH: input.PATH, timeoutMs: budget() }, step, [
+          "worktree",
+          "remove",
+          "--force",
+          wt,
+        ]);
+        // rc 128 means no registered worktree (a plain leftover dir);
+        // the fallback below removes the path and prunes.
+        if (removed.rc !== 0 && removed.rc !== 128) {
+          cleanupFailed = true;
+        }
+      } else {
+        const pruned = await runGit(input.dir, { PATH: input.PATH, timeoutMs: budget() }, step, [
+          "worktree",
+          "prune",
+        ]);
+        if (pruned.rc !== 0) {
+          cleanupFailed = true;
+        }
       }
     } catch {
       cleanupFailed = true;
@@ -495,12 +509,10 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
     try {
       if (await pathExists(wt)) {
         await removePath(wt, input.scratchDir, input.id);
-        const pruned = await runGit(
-          input.dir,
-          { PATH: input.PATH, timeoutMs: budget() },
-          step,
-          ["worktree", "prune"],
-        );
+        const pruned = await runGit(input.dir, { PATH: input.PATH, timeoutMs: budget() }, step, [
+          "worktree",
+          "prune",
+        ]);
         if (pruned.rc !== 0) {
           cleanupFailed = true;
         }
@@ -524,11 +536,13 @@ export async function trialMerge(input: TrialInput): Promise<TrialResult> {
       }
       throw error;
     }
-    const added = await checkedRunGit(
-      input.dir,
-      deadlineTimeout(deadline),
-      ["worktree", "add", "--detach", wt, input.baseSha],
-    );
+    const added = await checkedRunGit(input.dir, deadlineTimeout(deadline), [
+      "worktree",
+      "add",
+      "--detach",
+      wt,
+      input.baseSha,
+    ]);
     if (added.rc !== 0) {
       return { kind: "added-failed", addedRc: added.rc, addedStderr: added.stderr };
     }

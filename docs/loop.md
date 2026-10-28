@@ -89,13 +89,11 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `src/loop/git.ts` runs the loop's git calls with a fixed env, no shell,
 each child in its own process group killed at the deadline, and exports
 `fetchRefs`, `remoteBranchSha`, `revParse`, `isAncestor` and
-`trialMerge`. `trialMerge` needs absolute `dir` and `scratchDir`, runs
-steps 2 to 5 under one `start + timeoutMs` deadline with group kills
-and `try/finally` cleanup, reports a deadline hit as `reason: "timeout"`,
-an unspawnable step as `step-failed` with `rc: null`, a merge rc 1
-without the conflict line as `GitError`, and marks `cleanupFailed` on a
-non-zero cleanup rc. `src/loop/stub/github.ts` implements `GitHubPort`
-over a sandbox `origin.git` with absolute dirs, byte-safe `detail`,
-async ports, unknown ref or sha as `rejected` and other git failures as
-`unavailable`. The gh `stderrPrefix` cuts on UTF-8 boundaries after
-redacting the token.
+`trialMerge`. `trialMerge` builds the result, runs step-6 cleanup, then returns it
+with the `cleanupFailed` the cleanup set; it needs absolute `dir` and
+`scratchDir`, runs steps 1 to 5 under one `start + timeoutMs`
+deadline, and reports a deadline hit as `reason: "timeout"` with
+`step: null`. Step 6 cleanup shares one `cleanupStart + timeoutMs`
+budget. A `GitError` from `git.ts` maps to `rejected` (`failed`,
+rc 128) or `unavailable` (other); a failure of the stub's own git
+commands is `rejected`.

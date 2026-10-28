@@ -575,7 +575,27 @@ test("a marked live session is stopped and finished (WC2)", async () => {
     fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
     const second = await port.wait(ref, 1000, "cursor-1");
     expect(second).toMatchObject({ state: "finished", detail: "turn completed" });
-    expect(fake.sessions("laptop-a")[0]?.state).toBe("running");
+    expect(fake.sessions("laptop-a")[0]?.state).toBe("stopped");
+    expect(
+      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
+    ).toHaveLength(1);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a terminal whose decision has stop false sends no session.stop", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setSession("laptop-a", handle.sessionId, { state: "done", exit_code: 0 });
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toMatchObject({ state: "finished", detail: "exited 0" });
+    expect(
+      fake.calls("laptop-a").filter((call) => call.method === "session.stop"),
+    ).toHaveLength(0);
   } finally {
     await teardown(fake, port);
   }

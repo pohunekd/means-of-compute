@@ -453,6 +453,40 @@ async function markThenStop(
   });
 }
 
+// Non-mark terminal with stop: the outcome metadata is already present, so
+// there is nothing to mark; stop a live session, then cache the terminal
+// (H1). A stop failure is logged as adapter-stop-failed, as in W5, and the
+// terminal is still returned.
+async function stopThenStoreTerminal(
+  port: PortInternals,
+  client: Client,
+  alias: string,
+  id: string,
+  cursor: string,
+  state: TerminalState,
+  detail: string,
+): Promise<TerminalResult> {
+  try {
+    await client.call("session.stop", id);
+  } catch (error) {
+    port.log({
+      level: "error",
+      event: "adapter-stop-failed",
+      hostAlias: alias,
+      sessionId: id,
+      code: error instanceof Error ? error.constructor.name : "unknown",
+      detail,
+    });
+  }
+  return storeTerminal(port, alias, {
+    state,
+    sessionId: id,
+    cursor,
+    usage: null,
+    detail,
+  });
+}
+
 async function waitSession(
   port: PortInternals,
   ref: SessionRef,
@@ -508,6 +542,17 @@ async function waitSession(
   }
   if (decision.mark) {
     return markThenStop(port, client, alias, id, turn.cursor, decision.state, decision.detail);
+  }
+  if (decision.stop) {
+    return stopThenStoreTerminal(
+      port,
+      client,
+      alias,
+      id,
+      turn.cursor,
+      decision.state,
+      decision.detail,
+    );
   }
   return storeTerminal(port, alias, {
     state: decision.state,

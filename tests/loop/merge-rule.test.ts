@@ -162,7 +162,13 @@ describe("m1", () => {
 describe("mergeStep", () => {
   test("L19c: ci decides before the verdict, approval gates ready", () => {
     const base = {
-      view: { state: "OPEN", headRefOid: shaH, baseRefName: "main", isDraft: false },
+      view: {
+        state: "OPEN" as const,
+        headRefOid: shaH,
+        baseRefName: "main",
+        isDraft: false,
+        mergeCommit: null,
+      },
       headSha: shaH,
       baseBranch: "main",
       ci: "pending" as const,

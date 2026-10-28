@@ -465,16 +465,30 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
       row.mergedHead = headSha;
       row.mergeCommit = nextSha;
     } finally {
-      await runStubGit(options.originDir, options.git, "mergePull", [
-        "worktree",
-        "remove",
-        "--force",
-        wt,
-      ]);
-      if (await pathExists(wt)) {
-        await rm(wt, { recursive: true, force: true });
+      // Best effort: the scratch worktree is sandbox state, and a later
+      // `worktree prune` reclaims a leftover, so cleanup never replaces the call's outcome.
+      try {
+        await runStubGit(options.originDir, options.git, "mergePull", [
+          "worktree",
+          "remove",
+          "--force",
+          wt,
+        ]);
+      } catch {
+        // Ignored: see the best-effort note above.
       }
-      await runStubGit(options.originDir, options.git, "mergePull", ["worktree", "prune"]);
+      try {
+        if (await pathExists(wt)) {
+          await rm(wt, { recursive: true, force: true });
+        }
+      } catch {
+        // Ignored: see the best-effort note above.
+      }
+      try {
+        await runStubGit(options.originDir, options.git, "mergePull", ["worktree", "prune"]);
+      } catch {
+        // Ignored: see the best-effort note above.
+      }
     }
   }
 

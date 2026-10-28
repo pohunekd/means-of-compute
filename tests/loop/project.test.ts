@@ -228,8 +228,9 @@ test("reconcile on an unknown id throws the rule (a) text (C6)", async () => {
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
-    expect(String(error)).toContain('rule (a): item "gh-moc-9"');
-    expect(String(error)).toContain(`work store ${storePath}: rule (a)`);
+    expect((error as Error).message).toBe(
+      `work store ${storePath}: rule (a): item "gh-moc-9" is not in the work store`,
+    );
   });
 });
 

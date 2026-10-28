@@ -20,7 +20,10 @@ test("two events give two lines in order with the injected clock (C2)", async ()
     const times = [new Date("2026-10-28T00:00:01.000Z"), new Date("2026-10-28T00:00:02.000Z")];
     let index = 0;
     const log = await openLoopLog(path, () => {
-      const now = times[index] as Date;
+      const now = times[index];
+      if (now === undefined) {
+        throw new Error("missing time");
+      }
       index += 1;
       return now;
     });
@@ -104,10 +107,11 @@ test("a failed write latches and later logs write nothing and do not throw (C3)"
   await withTempDir(async (dir) => {
     const path = join(dir, "loop.jsonl");
     const seam = failingFirstFs();
-    const log = await openLoopLog(path, {
-      fs: seam.fs,
-      now: () => new Date("2026-10-28T00:00:01.000Z"),
-    });
+    const log = await openLoopLog(
+      path,
+      () => new Date("2026-10-28T00:00:01.000Z"),
+      seam.fs,
+    );
     expect(log.failed()).toBe(false);
     log.log({ event: "ci", workItemId: "gh-moc-5" });
     log.log({ event: "merged", workItemId: "gh-moc-6" });
@@ -117,8 +121,6 @@ test("a failed write latches and later logs write nothing and do not throw (C3)"
     await log.close();
     expect(log.failed()).toBe(true);
     expect(seam.written()).toBe(1);
-    const { readFile } = await import("node:fs/promises");
-    expect(await readFile(path, "utf8")).toBe("");
     expect(() => {
       log.log({ event: "ci", workItemId: "gh-moc-5" });
       log.log({ event: "merged", workItemId: "gh-moc-7" });

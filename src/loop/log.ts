@@ -63,42 +63,23 @@ const nodeLogFs: LoopLogFs = {
   },
 };
 
-export async function openLoopLog(path: string, now?: () => Date): Promise<LoopLog>;
 export async function openLoopLog(
   path: string,
-  options: { readonly fs?: LoopLogFs; readonly now?: () => Date },
-): Promise<LoopLog>;
-export async function openLoopLog(
-  path: string,
-  nowOrOptions?: (() => Date) | { readonly fs?: LoopLogFs; readonly now?: () => Date },
+  now: () => Date,
+  fs: LoopLogFs = nodeLogFs,
 ): Promise<LoopLog> {
-  const options = typeof nowOrOptions === "function" ? { now: nowOrOptions } : (nowOrOptions ?? {});
-  const now = options.now ?? ((): Date => new Date());
-  const fs = options.fs ?? nodeLogFs;
   const handle: FileHandle = await fs.open(path, 0o600);
   let latched = false;
   let closed = false;
   let chain: Promise<void> = Promise.resolve();
 
-  let handleOpen = true;
-  function takeHandle(): FileHandle | null {
-    if (!handleOpen) {
-      return null;
-    }
-    handleOpen = false;
-    return handle;
-  }
   async function writeOnce(event: LoopLogEvent): Promise<void> {
     const line = `${JSON.stringify({ ts: now().toISOString(), ...event })}\n`;
     try {
       await handle.write(line);
       await handle.sync();
     } catch {
-      // A leaked handle trips the runtime GC guard under the full
-      // gates run, so the latched write closes it right away.
       latched = true;
-      closed = true;
-      await takeHandle()?.close();
     }
   }
 
@@ -122,12 +103,7 @@ export async function openLoopLog(
       try {
         await chain;
       } finally {
-        const owned = takeHandle();
-        if (owned === null) {
-          await handle.close().catch(() => {});
-        } else {
-          await owned.close();
-        }
+        await handle.close();
       }
     },
   };

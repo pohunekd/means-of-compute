@@ -6,7 +6,7 @@ import type { ModelRouting } from "../../contracts/v1/types.js";
 import { canonicalJson } from "../work/canonical.js";
 import { updateWorkStore, WorkStoreBusyError } from "../work/store.js";
 import { LoopStateDataError } from "./state.js";
-import { OUTCOME_CLASSES, attemptsOnPreferred, stallRoundsOf } from "./policy.js";
+import { attemptsOnPreferred, stallRoundsOf } from "./policy.js";
 import type { LoopItem } from "./types.js";
 
 export interface ProjectionContext {
@@ -59,10 +59,12 @@ export function project(item: WorkItem, li: LoopItem, ctx: ProjectionContext): W
     pullNumber: li.pull?.number ?? null,
     modelRouting: {
       preferredModel: item.modelRouting.preferredModel,
-      // Rounds with an excluded routing never count toward attempts.
+      // start-rejected and lost rounds never count toward attempts; refused closes no round.
       attempts: attemptsOnPreferred(
         item,
-        li.rounds.filter((record) => OUTCOME_CLASSES[record.outcome].routing !== "excluded"),
+        li.rounds.filter(
+          (record) => record.outcome !== "start-rejected" && record.outcome !== "lost",
+        ),
         li.session?.model ?? null,
       ),
       fallbackUsed: li.fallbackUsed,

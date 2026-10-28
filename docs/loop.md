@@ -85,10 +85,10 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 `src/loop/start.ts` drives work item starts from claim to timeout:
 
-- `claimStart` checks the rejection bound, snapshots the store entry, creates the loop item with `initialLoopItem`, and writes the state before reconciling the store. `driveStart` passes the stored start intent to `dispatcher.start` untouched.
-- `rejectStart` logs `start-rejected`, excludes the host, and closes a start-rejected round; when the transaction rejections reach `maxStartRejections`, a second rejection parks the item as operator `start-rejected` instead of recording another round.
-- Refused starts idle with a `budgetBackoffMs` backoff; a failing gate logs `budget-gate-error`. An unreachable host sleeps `unreachableRetryMs` once, then proceeds with the same intent.
-- `watchSession` classifies results through the terminal table and skips stale results whose request id no longer matches the loop run. `checkSessionTimeout` reads the durable registry `startedAt` and cancels the overdue session before the watch closes the round.
+- `claimStart` parks the item as operator `start-rejected` when its rejection count is already at `maxStartRejections`. Otherwise it creates the loop item with `initialLoopItem` for a fresh store item and writes the start intent with the request id derived from the ledger. It makes no store write, because `starting` projects to `queued`. `driveStart` derives the request id again before it calls `dispatcher.start` with the stored intent.
+- `rejectStart` closes a `start-rejected` round, and `closeRound` excludes the host and raises `startRejections` in the same write. When the count reaches `maxStartRejections`, the item parks as operator `start-rejected` after that round. The rejection code stays in the dispatcher: in the registry terminal detail for a ledgered rejection, and in the dispatcher's `start-rejected` log event otherwise.
+- A refused start returns to idle with a `budgetBackoffMs` backoff, and a failing gate logs `budget-gate-error`. On an unreachable host, `driveStart` sleeps `unreachableRetryMs` and retries the same intent until the dispatcher returns `lost`.
+- `watchSession` applies the terminal table. It drops a result when the item is no longer `running` with the same request id. `checkSessionTimeout` reads the durable registry `startedAt` and cancels an overdue session; the next watch replays `stalled` and moves the item to `publishing`. On a request drift, `driveStart` cancels every live session of the item before the operator park.
 
 ## Driver park (PR 5b)
 

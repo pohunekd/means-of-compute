@@ -5,7 +5,7 @@
 // malformed, or there is no answer within clientTimeoutMs.
 import { ClientError, runClientCall } from "./client.js";
 import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
-import { readInputText, statInputPath } from "../fs/input.js";
+import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 
 function parseFlags(args: readonly string[]): { file: string | null; configPath: string } {
   let file: string | null = null;
@@ -63,6 +63,9 @@ async function readArgsFile(path: string): Promise<unknown> {
   } catch (error: unknown) {
     if (error instanceof ClientError) {
       throw error;
+    }
+    if (error instanceof InputPathError) {
+      throw new ClientError(2, error.message, { cause: error });
     }
     throw new ClientError(
       2,

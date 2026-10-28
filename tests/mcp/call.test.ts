@@ -155,6 +155,34 @@ test("O2 large list_work result drains via slow reader without truncation (O2)",
   expect(await Bun.file(rcFile).text()).toBe("0\n");
 }, 25000);
 
+test("O3 --file rejects a directory and a path under a missing dir (O3)", async () => {
+  const env = await createMcpTestEnv("mcp-o3-");
+  const dirCase = await spawnCall([
+    "fleet_status",
+    "--file",
+    env.dir,
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(dirCase.code).toBe(2);
+  expect(dirCase.stdout).toBe("");
+  expect(dirCase.stderr).toBe(`mcp:call file ${env.dir}: not a regular file\n`);
+
+  const missing = `${env.dir}/missing/x.json`;
+  const missingCase = await spawnCall([
+    "fleet_status",
+    "--file",
+    missing,
+    "--config",
+    env.mcpConfigPath,
+  ]);
+  expect(missingCase.code).toBe(2);
+  expect(missingCase.stdout).toBe("");
+  expect(missingCase.stderr).toBe(
+    `mcp:call file ${missing}: cannot stat parent (ENOENT)\n`,
+  );
+});
+
 test("C2 usage and config errors map to exits 2 and 4 (C2)", async () => {
   const bogus = await spawnCall(["fleet_status", "--bogus"]);
   expect(bogus.code).toBe(2);

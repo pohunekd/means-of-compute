@@ -2,7 +2,7 @@
 // missing parent, write revision, null write, busy lock, write check and
 // the ready set.
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkItem } from "../../contracts/v1/types.js";
@@ -124,13 +124,14 @@ test("a null item is a data error naming rule (b) (M1)", async () => {
   try {
     const path = join(dir, "work-items.json");
     await writeJson(path, { schemaVersion: "v1", revision: 1, items: [null], submissions: [] });
-    let message = "";
+    let error: unknown;
     try {
       await readWorkStore(path);
-    } catch (error: unknown) {
-      message = error instanceof Error ? error.message : String(error);
+    } catch (thrown: unknown) {
+      error = thrown;
     }
-    expect(message).toContain("rule (b)");
+    expect(error).toBeInstanceOf(WorkStoreDataError);
+    expect(error instanceof Error ? error.message : String(error)).toContain("rule (b)");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -143,19 +144,24 @@ test("an update that drops an item is refused by rule (h) (M2)", async () => {
     const doc = storeOf([item("a"), item("b", { dependencies: ["a"] })]);
     await writeJson(path, doc);
     const before = readFileSync(path, "utf8");
-    let message = "";
+    let error: unknown;
     try {
       await updateWorkStore(path, (store) =>
         Promise.resolve({
-          next: { items: [item("a")], submissions: store.submissions },
+          next: {
+            items: [item("a")],
+            submissions: store.submissions.map((entry) => ({ ...entry, itemIds: ["a"] })),
+          },
           value: undefined,
         }),
       );
-    } catch (error: unknown) {
-      message = error instanceof Error ? error.message : String(error);
+    } catch (thrown: unknown) {
+      error = thrown;
     }
+    const message = error instanceof Error ? error.message : String(error);
+    expect(error).toBeInstanceOf(WorkStoreDataError);
     expect(message).toContain("rule (h)");
-    expect(message).toContain("b");
+    expect(message).toContain('item "b"');
     expect(readFileSync(path, "utf8")).toBe(before);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -168,7 +174,7 @@ test("an update that changes a submission is refused by rule (h) (M2)", async ()
     const path = join(dir, "work-items.json");
     await writeJson(path, storeOf([item("a")]));
     const before = readFileSync(path, "utf8");
-    let message = "";
+    let error: unknown;
     try {
       await updateWorkStore(path, (store) =>
         Promise.resolve({
@@ -181,10 +187,11 @@ test("an update that changes a submission is refused by rule (h) (M2)", async ()
           value: undefined,
         }),
       );
-    } catch (error: unknown) {
-      message = error instanceof Error ? error.message : String(error);
+    } catch (thrown: unknown) {
+      error = thrown;
     }
-    expect(message).toContain("rule (h)");
+    expect(error).toBeInstanceOf(WorkStoreDataError);
+    expect(error instanceof Error ? error.message : String(error)).toContain("rule (h)");
     expect(readFileSync(path, "utf8")).toBe(before);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -230,13 +237,7 @@ test("an update with a missing parent is a data error (L3)", async () => {
     error = thrown;
   }
   expect(error).toBeInstanceOf(WorkStoreDataError);
-  let absent = false;
-  try {
-    readFileSync(dir, "utf8");
-  } catch {
-    absent = true;
-  }
-  expect(absent).toBe(true);
+  expect(existsSync(dir)).toBe(false);
 });
 
 test("duplicate item id names rule (c) (S5)", () => {

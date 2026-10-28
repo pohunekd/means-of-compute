@@ -310,7 +310,7 @@ test("D1: invalid work item is reported before phase-critical check", async () =
     try {
       await runAudit(
         {
-          item: { id: "bad" } as any,
+          item: { id: "bad" } as unknown as AuditInput["item"],
           repoDir: setup.repoDir,
           ref: "demo-good",
           baseRef: "main",

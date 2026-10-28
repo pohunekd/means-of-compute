@@ -231,6 +231,8 @@ test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   expect(noCallerCode).toBe(2);
   expect(noCallerOut).toBe("");
   expect(noCallerErr.trim()).toBe("mcp: --caller <name> is required exactly once");
+  // Thrown messages carry no prefix; the printer adds it once (T3.1).
+  expect(noCallerErr).not.toContain("mcp: mcp:");
 
   const badCaller = Bun.spawn(
     [process.execPath, "src/mcp/serve.ts", "--caller", "intruder", "--config", env.mcpConfigPath],

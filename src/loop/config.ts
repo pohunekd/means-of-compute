@@ -1,6 +1,8 @@
 // Typed loader for config/loop.json and config/loop-demo.json. Every key is
 // required and no extra key is allowed: a missing file or key fails naming
-// the key. In stub mode the paths the factory writes must stay inside the stub sandbox; the stub section is required in stub mode and forbidden in production.
+// the key. In stub mode the paths the factory writes must stay inside the
+// stub sandbox; the stub section is required in stub mode and forbidden in
+// production.
 import { join, resolve } from "node:path";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";

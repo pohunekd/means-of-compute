@@ -57,7 +57,17 @@ This slice adds the pure policy the later driver calls:
   model choice (rule F: used fallback, failure count, result steering).
 - `src/loop/results.ts` reads and appends `logs/loop-results.jsonl`: a torn
   tail is ignored on read and repaired on append, duplicate keys keep the
-  first line, and rules R-a (key equals `<workItemId>:<round>`) and R-b (routing match) guard every
-  line.
+  first line, and rules R-a (key equals `<workItemId>:<round>`) and R-b
+  (routing match) guard every line.
 - `src/loop/brief.ts` builds the session brief byte-exactly and drops audit
   findings from the end when the `maxBriefBytes` limit requires it.
+
+## GitHub port (PR 3)
+
+`src/loop/github.ts` exposes `GitHubPort` with `createGhPort`: every gh
+call goes through one runner with a fixed env, a bounded wait, and
+body files under the config dir. `src/loop/merge-rule.ts` holds the
+pure checks `ciStatus`, `pullDecision`, `verdictCheck`, `markerMatches`,
+`m1`, `mergeStep`, and `baseCheck`. They encode repo rules 1, 2, and 4:
+green checks, valid audit verdicts with matching markers, and merges
+pinned with `--match-head-commit`; rule 3 stays in PR 5.

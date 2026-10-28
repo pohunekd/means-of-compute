@@ -59,6 +59,9 @@ test("fences grow past backticks inside the goal (P3)", async () => {
   });
   expect(rendered).not.toContain("name: factory-coord");
   const goalBlock = rendered.slice(rendered.indexOf("### Goal"));
-  expect(goalBlock).toContain("````json");
-  expect(goalBlock).not.toMatch(/^```json$/m);
+  const blockLines = goalBlock.split("\n");
+  expect(blockLines).toContain("````json");
+  expect(blockLines.filter((line) => line === "````json").length).toBe(1);
+  const closing = blockLines.filter((line) => /^`+$/.test(line));
+  expect(closing).toEqual(["````"]);
 });

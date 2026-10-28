@@ -53,6 +53,13 @@ test("the plan DAG submits cleanly (K1)", async () => {
   await loadFactorySpecs("tests/fixtures/mcp/demo/factory-specs.json");
   const items = await planItems();
   expect(checkItems(items, 16384, work.models, new Set(["example/demo-repo"]))).toBeNull();
+  for (const item of items) {
+    const paths = [...item.dod.flatMap((entry) => entry.text.match(/bun test \S+/g) ?? [])];
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) {
+      expect(item.goal).toContain(path.replace("bun test ", ""));
+    }
+  }
   const result = applySubmission(
     { schemaVersion: "v1", revision: 0, items: [], submissions: [] },
     items,
@@ -102,4 +109,14 @@ test("the frontmatter names the factory-coord skill (K4)", async () => {
   const description = front.find((line) => line.startsWith("description: "));
   expect(description).toBeDefined();
   expect((description as string).length).toBeGreaterThan("description: ".length);
+});
+
+test("the failure branches are spelled out (K5)", async () => {
+  const text = await Bun.file(".agents/skills/factory-coord/SKILL.md").text();
+  expect(text).toContain(
+    '6. When `approve` or `pause_fleet` returns `"ok": false`, report its code for that entry and do not call it again.',
+  );
+  expect(text).toContain(
+    'If `audit_results` returns `"ok": false`, or step 2 collects no finding, do not call `submit_work` for this entry;',
+  );
 });

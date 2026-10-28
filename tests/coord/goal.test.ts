@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadGoal, type GoalContext } from "../../src/coord/goal.js";
+import { GoalError, loadGoal, type GoalContext } from "../../src/coord/goal.js";
 import { loadFactorySpecs } from "../../src/work/specs.js";
 import { loadWorkConfig } from "../../src/work/config.js";
 
@@ -59,9 +59,9 @@ test("an unconfigured repo names the repo (G2)", async () => {
       string,
       unknown
     >;
-    const path = join(dir, "repo.json");
+    const path = join(dir, "g2.json");
     await Bun.write(path, `${JSON.stringify({ ...raw, repo: "pohunekd/means-of-compute" })}\n`);
-    await failsWith(path, ctx, "repo");
+    await failsWith(path, ctx, `Goal ${path}: repo pohunekd/means-of-compute is not configured`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -117,6 +117,37 @@ test("outcome is measured in code points (G5)", async () => {
     const over = join(dir, "over.json");
     await Bun.write(over, `${JSON.stringify({ ...raw, outcome: "😀".repeat(101) })}\n`);
     await failsWith(over, small, "outcome");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a directory and a missing parent both throw GoalError once (G6)", async () => {
+  const ctx = await context();
+  const dir = mkdtempSync(join(tmpdir(), "goal-"));
+  try {
+    const { mkdirSync } = await import("node:fs");
+    const directory = join(dir, "goals");
+    mkdirSync(directory);
+    let directoryMessage = "";
+    try {
+      await loadGoal(directory, ctx);
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(GoalError);
+      directoryMessage = error instanceof Error ? error.message : "";
+    }
+    expect(directoryMessage.startsWith(`Goal ${directory}: `)).toBe(true);
+    expect(directoryMessage.split(directory).length).toBe(2);
+    const missing = join(dir, "missing", "g.json");
+    let missingMessage = "";
+    try {
+      await loadGoal(missing, ctx);
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(GoalError);
+      missingMessage = error instanceof Error ? error.message : "";
+    }
+    expect(missingMessage.startsWith(`Goal ${missing}: `)).toBe(true);
+    expect(missingMessage.split(missing).length).toBe(2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

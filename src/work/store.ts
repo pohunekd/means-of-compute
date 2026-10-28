@@ -202,7 +202,6 @@ export async function updateWorkStore<T>(
       if (r.next === null) {
         return r;
       }
-      checkAppendOnly(`work store ${path}`, store, r.next);
       const next: WorkStore = {
         schemaVersion: "v1",
         revision: store.revision + 1,
@@ -210,6 +209,7 @@ export async function updateWorkStore<T>(
         submissions: r.next.submissions,
       };
       checkWorkStore(next, path);
+      checkAppendOnly(`work store ${path}`, store, r.next);
       try {
         await writeFileAtomic("work store", path, `${JSON.stringify(next)}\n`);
       } catch (error: unknown) {

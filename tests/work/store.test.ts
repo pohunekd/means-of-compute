@@ -191,6 +191,34 @@ test("an update that changes a submission is refused by rule (h) (M2)", async ()
   }
 });
 
+test("an update with a null item is refused by rule (b)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "work-store-"));
+  try {
+    const path = join(dir, "work-items.json");
+    await writeJson(path, storeOf([item("a")]));
+    const before = readFileSync(path, "utf8");
+    let error: unknown;
+    try {
+      await updateWorkStore(path, (store) =>
+        Promise.resolve({
+          next: {
+            items: [item("a"), null as unknown as WorkItem],
+            submissions: store.submissions,
+          },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(WorkStoreDataError);
+    expect(error instanceof Error ? error.message : String(error)).toContain("rule (b)");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("an update with a missing parent is a data error (L3)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "work-store-"));
   rmSync(dir, { recursive: true, force: true });

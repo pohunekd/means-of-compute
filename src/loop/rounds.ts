@@ -60,6 +60,14 @@ export async function closeRound(
       baseRace: close.baseRace,
     };
     const rounds = [...li.rounds, record];
+    const excludedHosts =
+      (close.outcome === "start-rejected" || close.outcome === "lost") &&
+      close.hostAlias !== null &&
+      !li.excludedHosts.includes(close.hostAlias)
+        ? [...li.excludedHosts, close.hostAlias]
+        : li.excludedHosts;
+    const startRejections =
+      close.outcome === "start-rejected" ? li.startRejections + 1 : li.startRejections;
     // A close from phase starting keeps rule (b): the intent is gone.
     const nextItem: Record<string, unknown> = {
       ...li,
@@ -70,6 +78,8 @@ export async function closeRound(
       phase: "idle",
       start: null,
       rounds,
+      excludedHosts,
+      startRejections,
     };
     return Promise.resolve({
       next: { ...state, items: { ...state.items, [item.id]: nextItem } },

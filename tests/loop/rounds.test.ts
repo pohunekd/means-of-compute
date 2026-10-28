@@ -369,6 +369,103 @@ test("the third stagnant close at retry 1 parks with the retry 1 key (F4)", asyn
   });
 });
 
+test("start-rejected twice keeps one exclusion and counts two rejections (U14)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({ phase: "starting", session: null, start: STORED_INTENT }),
+    );
+    const close = {
+      outcome: "start-rejected",
+      attempt: "failure",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    } as const;
+    await closeRound(ctx, item(), { ...close });
+    await writeState(
+      ctx.statePath,
+      loopItem({
+        phase: "starting",
+        session: null,
+        start: STORED_INTENT,
+        round: 1,
+        rounds: [record({ round: 0, outcome: "start-rejected", attempt: "failure" })],
+        excludedHosts: ["host-a"],
+        startRejections: 1,
+      }),
+    );
+    await closeRound(ctx, item(), { ...close, requestId: "req-000002" });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.excludedHosts).toEqual(["host-a"]);
+    expect(li.startRejections).toBe(2);
+  });
+});
+
+test("lost adds the host without raising startRejections (U14)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({
+        phase: "starting",
+        session: null,
+        start: STORED_INTENT,
+        excludedHosts: ["host-b"],
+        startRejections: 1,
+      }),
+    );
+    await closeRound(ctx, item(), {
+      outcome: "lost",
+      attempt: "lost",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.excludedHosts).toEqual(["host-b", "host-a"]);
+    expect(li.startRejections).toBe(1);
+  });
+});
+
+test("red-ci changes neither excludedHosts nor startRejections (U14)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({ excludedHosts: ["host-a"], startRejections: 2 }),
+    );
+    await closeRound(ctx, item(), {
+      outcome: "red-ci",
+      attempt: "failure",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: ["gates"],
+      verdict: null,
+      baseRace: false,
+    });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.excludedHosts).toEqual(["host-a"]);
+    expect(li.startRejections).toBe(2);
+  });
+});
 test("appendMissingResults repairs one deleted line and is then a no-op (C9)", async () => {
   await withTempDir(async (dir) => {
     const { ctx } = ctxFor(dir);

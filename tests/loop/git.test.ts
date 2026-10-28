@@ -1,7 +1,7 @@
-// Git runner tests (PR 4 matrix rows L23a-L23i): real git in temp repos,
+// Git runner tests (PR 4 matrix rows L23a-L23m): real git in temp repos,
 // J4 line shapes, branch checks, ancestry and the full trial lifecycle.
-import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, test } from "bun:test";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,59 @@ import {
   type GitDeps,
   type TrialInput,
 } from "../../src/loop/git.js";
+
+const trackedPids: number[] = [];
+
+afterEach(() => {
+  for (const pid of trackedPids.splice(0)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process already exited.
+    }
+  }
+});
+
+async function waitGone(pid: number): Promise<boolean> {
+  const start = Date.now();
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch (error: unknown) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+    if (Date.now() - start > 2000) {
+      return false;
+    }
+    await Bun.sleep(25);
+  }
+}
+
+// A fake git on PATH execs the real git except for one faked subcommand.
+async function fakeGitDir(
+  realPath: string,
+  subcommand: string,
+  script: string,
+): Promise<{ dir: string; fakePath: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "fake-git-"));
+  await writeFile(join(dir, "git"), `#!/bin/sh\nREAL_GIT="${realPath}/git"\n${script}\n`, "utf8");
+  await chmod(join(dir, "git"), 0o755);
+  void subcommand;
+  return { dir, fakePath: `${dir}:${realPath}` };
+}
+
+async function realGitPath(): Promise<string> {
+  const proc = Bun.spawn(["sh", "-c", "command -v git"], {
+    stdout: "pipe",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  const text = await new Response(proc.stdout as ReadableStream).text();
+  await proc.exited;
+  const line = text.split("\n")[0] ?? "";
+  const slash = line.lastIndexOf("/");
+  return slash > 0 ? line.slice(0, slash) : "/usr/bin";
+}
 
 const GIT_PATH = process.env["PATH"] ?? "/usr/bin:/bin";
 const GIT_ENV = {
@@ -180,6 +233,7 @@ describe("git runner", () => {
       other = error;
     }
     expect(other).toBeInstanceOf(GitError);
+    expect((other as GitError).kind).toBe("invalid-output");
   });
 
   test("L23c: revParse reads and isAncestor maps rc 0, 1 and 128", async () => {
@@ -194,6 +248,7 @@ describe("git runner", () => {
         (error: unknown) => error,
       );
       expect(failed).toBeInstanceOf(GitError);
+      expect((failed as GitError).kind).toBe("failed");
       expect((failed as GitError).rc).toBe(128);
       const bad = await isAncestor(
         repos.factory,
@@ -218,11 +273,9 @@ describe("git runner", () => {
       const result = await trialMerge(trial);
       expect(result).toEqual({ passed: true, cleanupFailed: false });
       const wt = join(trial.scratchDir, trial.id);
-      expect(
-        await Bun.file(wt)
-          .exists()
-          .catch(() => false),
-      ).toBe(false);
+      const seen = await stat(wt).catch((error: unknown) => error);
+      expect(seen).toBeInstanceOf(Error);
+      expect((seen as NodeJS.ErrnoException).code).toBe("ENOENT");
       expect(await worktreeCount(repos.factory)).toBe(1);
     } finally {
       await repos.cleanup();
@@ -265,6 +318,29 @@ describe("git runner", () => {
       expect(unknown).toBeInstanceOf(GitError);
       expect((unknown as GitError).kind).toBe("failed");
       expect(await worktreeCount(repos.factory)).toBe(1);
+      // A merge rc 1 without the conflict line is a failure, not a conflict.
+      const realDir = await realGitPath();
+      const fake = await fakeGitDir(
+        realDir,
+        "merge",
+        `for a in "$@"; do\n  if [ "$a" = "merge" ]; then\n    echo "error: Your local changes to the following files would be overwritten by merge:" >&2\n    exit 1\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+      );
+      try {
+        const notConflict = await trialMerge(
+          baseTrial(repos.factory, repos.root, base, head, [], {
+            id: "demo-fake",
+            PATH: fake.fakePath,
+          }),
+        ).catch((error: unknown) => error);
+        expect(notConflict).toBeInstanceOf(GitError);
+        expect((notConflict as GitError).kind).toBe("failed");
+        const wt = join(repos.root, "scratch", "demo-fake");
+        const gone = await stat(wt).catch((error: unknown) => error);
+        expect((gone as NodeJS.ErrnoException).code).toBe("ENOENT");
+        expect(await worktreeCount(repos.factory)).toBe(1);
+      } finally {
+        await rm(fake.dir, { recursive: true, force: true });
+      }
     } finally {
       await repos.cleanup();
     }
@@ -308,21 +384,29 @@ describe("git runner", () => {
     const repos = await makeRepos();
     try {
       const { base, head } = await pushBranch(repos, "moc/demo-a");
+      const pidFile = join(repos.root, "step.pid");
+      const grandFile = join(repos.root, "grand.pid");
       const result = await trialMerge(
-        baseTrial(
-          repos.factory,
-          repos.root,
-          base,
-          head,
-          [[process.execPath, "-e", "setInterval(() => {}, 1000)"]],
-          { id: "demo-slow", timeoutMs: 400 },
-        ),
+        baseTrial(repos.factory, repos.root, base, head, [
+          [
+            process.execPath,
+            "-e",
+            `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));` +
+              `require("node:child_process").spawn("sleep", ["30"], {detached: true, stdio: "ignore"}).unref();` +
+              `setInterval(() => {}, 1000)`,
+          ],
+        ], { id: "demo-slow", timeoutMs: 3000 }),
       );
       expect(result.passed).toBe(false);
       if (!result.passed) {
         expect(result.reason).toBe("timeout");
         expect(result.step).toBe(0);
       }
+      const pid = Number(await readFile(pidFile, "utf8"));
+      trackedPids.push(pid);
+      expect(await waitGone(pid)).toBe(true);
+      expect(await worktreeCount(repos.factory)).toBe(1);
+      void grandFile;
     } finally {
       await repos.cleanup();
     }
@@ -341,8 +425,129 @@ describe("git runner", () => {
       const result = await trialMerge(trial);
       expect(result).toEqual({ passed: true, cleanupFailed: false });
       expect(await worktreeCount(repos.factory)).toBe(1);
+      await mkdir(join(repos.root, "x", "keep"), { recursive: true });
       const bad = await trialMerge({ ...trial, id: "../x" }).catch((error: unknown) => error);
       expect(bad).toBeInstanceOf(GitError);
+      const keep = await stat(join(repos.root, "x", "keep")).catch((error: unknown) => error);
+      expect((keep as { isDirectory(): boolean }).isDirectory()).toBe(true);
+    } finally {
+      await repos.cleanup();
+    }
+  });
+
+  test("L23j: a fetch that holds the pipes still fails fast and kills the group", async () => {
+    const repos = await makeRepos();
+    const realDir = await realGitPath();
+    const pidFile = join(repos.root, "sleep.pid");
+    const fake = await fakeGitDir(
+      realDir,
+      "fetch",
+      `for a in "$@"; do\n  if [ "$a" = "fetch" ]; then\n    sleep 30 > /dev/null 2>&1 &\n    echo $! > ${pidFile}\n    wait\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+    );
+    try {
+      const start = Date.now();
+      const failed = await fetchRefs(repos.factory, { PATH: fake.fakePath, timeoutMs: 300 }, [
+        "+refs/heads/main:refs/remotes/origin/main",
+      ]).catch((error: unknown) => error);
+      const elapsed = Date.now() - start;
+      expect(failed).toBeInstanceOf(GitError);
+      expect((failed as GitError).kind).toBe("timeout");
+      expect(elapsed).toBeLessThan(2000);
+      const pid = Number(await readFile(pidFile, "utf8"));
+      trackedPids.push(pid);
+      expect(await waitGone(pid)).toBe(true);
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+      await repos.cleanup();
+    }
+  });
+
+  test("L23k: a step that cannot spawn is step-failed and still cleans up", async () => {
+    const repos = await makeRepos();
+    try {
+      const { base, head } = await pushBranch(repos, "moc/demo-a");
+      const trial = baseTrial(repos.factory, repos.root, base, head, [
+        ["moc-no-such-binary", "x"],
+      ]);
+      const result = await trialMerge(trial);
+      expect(result).toEqual({
+        passed: false,
+        reason: "step-failed",
+        step: 0,
+        rc: null,
+        cleanupFailed: false,
+      });
+      const wt = join(trial.scratchDir, trial.id);
+      const gone = await stat(wt).catch((error: unknown) => error);
+      expect((gone as NodeJS.ErrnoException).code).toBe("ENOENT");
+      expect(await worktreeCount(repos.factory)).toBe(1);
+    } finally {
+      await repos.cleanup();
+    }
+  });
+
+  test("L23l: one deadline covers the merge", async () => {
+    const repos = await makeRepos();
+    const realDir = await realGitPath();
+    const fake = await fakeGitDir(
+      realDir,
+      "worktree",
+      `for a in "$@"; do\n  if [ "$a" = "worktree" ] || [ "$a" = "merge" ]; then\n    sleep 0.6\n  fi\ndone\nexec "$REAL_GIT" "$@"`,
+    );
+    try {
+      const { base, head } = await pushBranch(repos, "moc/demo-a");
+      const trial = baseTrial(repos.factory, repos.root, base, head, [
+        [process.execPath, "-e", "process.exit(0)"],
+      ], { id: "demo-deadline", timeoutMs: 1000, PATH: fake.fakePath });
+      const result = await trialMerge(trial);
+      expect(result).toEqual({
+        passed: false,
+        reason: "timeout",
+        step: null,
+        rc: null,
+        cleanupFailed: false,
+      });
+      const gone = await stat(join(trial.scratchDir, trial.id)).catch(
+        (error: unknown) => error,
+      );
+      expect((gone as NodeJS.ErrnoException).code).toBe("ENOENT");
+      expect(await worktreeCount(repos.factory)).toBe(1);
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+      await repos.cleanup();
+    }
+  });
+
+  test("L23m: a relative scratch dir throws before any removal", async () => {
+    const repos = await makeRepos();
+    try {
+      const { base, head } = await pushBranch(repos, "moc/demo-a");
+      const trial = baseTrial(repos.factory, repos.root, base, head, [], {
+        scratchDir: "logs/trial",
+      });
+      const failed = await trialMerge(trial).catch((error: unknown) => error);
+      expect(failed).toBeInstanceOf(GitError);
+      expect((failed as GitError).kind).toBe("failed");
+      expect((failed as GitError).rc).toBeNull();
+      expect((failed as GitError).message).toContain("scratchDir");
+      expect((failed as GitError).message).toContain("absolute");
+      const created = await stat(join(repos.factory, "logs", "trial")).catch(
+        (error: unknown) => error,
+      );
+      expect((created as NodeJS.ErrnoException).code).toBe("ENOENT");
+    } finally {
+      await repos.cleanup();
+    }
+  });
+
+  test("L23: args with -c push are refused by the allowlist", async () => {
+    const repos = await makeRepos();
+    try {
+      const failed = await fetchRefs(repos.factory, repos.deps, ["-c", "k=v", "push"]).catch(
+        (error: unknown) => error,
+      );
+      expect(failed).toBeInstanceOf(GitError);
+      expect((failed as GitError).kind).toBe("failed");
     } finally {
       await repos.cleanup();
     }

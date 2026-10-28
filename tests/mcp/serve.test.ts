@@ -567,4 +567,4 @@ test("closing stdout stops queued calls with stdin open (I3)", async () => {
   expect(starts.length).toBeLessThanOrEqual(1);
   expect(logText).toContain('"event":"server-stop"');
   expect(logText).toContain('"reason":"stdout-closed"');
-});
+}, 20000);

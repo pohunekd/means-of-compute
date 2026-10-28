@@ -767,7 +767,7 @@ interface GatedHarness {
 }
 
 async function withGatedHarness(
-  gated: ReadonlySet<"release" | "start">,
+  gated: ReadonlySet<"release" | "start" | "cancel">,
   body: (h: GatedHarness) => Promise<void>,
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-resolve-j-"));
@@ -954,7 +954,7 @@ test("J4 watch before and after resolve returns the same result", async () => {
 });
 
 test("J5 resolve of a settled active entry leaves cancel unaffected", async () => {
-  await withGatedHarness(new Set([]), async ({ dispatcher }) => {
+  await withGatedHarness(new Set(["cancel"]), async ({ gate, dispatcher, dir }) => {
     const started = await dispatcher.start(
       queuedItem("demo-item") as never,
       decision("demo-item", "laptop-a") as never,
@@ -964,6 +964,9 @@ test("J5 resolve of a settled active entry leaves cancel unaffected", async () =
     if (started.kind !== "started") {
       throw new Error("expected a started session");
     }
+    const cancelPromise = dispatcher.cancel("demo-item:0", "operator");
+    const parkedCancel = await gate.next("cancel");
+    const before = await readRegistry(join(dir, "registry.json"));
     let resolveError: unknown = null;
     try {
       await dispatcher.resolve("demo-item:0");
@@ -972,7 +975,9 @@ test("J5 resolve of a settled active entry leaves cancel unaffected", async () =
     }
     expect(resolveError).toBeInstanceOf(DispatchStateError);
     expect((resolveError as DispatchStateError).code).toBe("request-active");
-    const cancelled = await dispatcher.cancel("demo-item:0", "operator");
+    expect(await readRegistry(join(dir, "registry.json"))).toEqual(before);
+    await parkedCancel.release();
+    const cancelled = await cancelPromise;
     expect(cancelled.result.state).toBe("cancelled");
     expect(cancelled.attempt).toBe("failure");
   });

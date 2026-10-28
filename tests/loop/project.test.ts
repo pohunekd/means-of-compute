@@ -130,6 +130,29 @@ test("the status table holds for every row of L3 (C4)", () => {
   expect(project(base, loopItem({ phase: "finalizing" }), CTX).status).toBe("queued");
 });
 
+test("a start-rejected round on the preferred model never counts toward attempts (F5)", () => {
+  const base = item();
+  const li = loopItem({
+    retry: 0,
+    session: { hostAlias: "host-a", providerId: "nvidia-build", model: PREFERRED },
+    rounds: [
+      record({ round: 0, retry: 0, model: PREFERRED }),
+      record({
+        round: 1,
+        retry: 0,
+        model: PREFERRED,
+        outcome: "start-rejected",
+        attempt: "failure",
+      }),
+      record({ round: 2, retry: 0, model: PREFERRED, outcome: "lost", attempt: "lost" }),
+    ],
+  });
+  const p = project(base, li, CTX);
+  // One failure-routed round plus the open preferred session; the
+  // excluded routings never count.
+  expect(p.modelRouting.attempts).toBe(2);
+});
+
 test("attempts count the open session once, stall counts the retry only, branch needs a head (C5)", () => {
   const base = item();
   const li = loopItem({
@@ -206,6 +229,7 @@ test("reconcile on an unknown id throws the rule (a) text (C6)", async () => {
     }
     expect(error).toBeInstanceOf(LoopStateDataError);
     expect(String(error)).toContain('rule (a): item "gh-moc-9"');
+    expect(String(error)).toContain(`work store ${storePath}: rule (a)`);
   });
 });
 

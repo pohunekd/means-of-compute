@@ -6,7 +6,7 @@ import type { ModelRouting } from "../../contracts/v1/types.js";
 import { canonicalJson } from "../work/canonical.js";
 import { updateWorkStore, WorkStoreBusyError } from "../work/store.js";
 import { LoopStateDataError } from "./state.js";
-import { attemptsOnPreferred, stallRoundsOf } from "./policy.js";
+import { OUTCOME_CLASSES, attemptsOnPreferred, stallRoundsOf } from "./policy.js";
 import type { LoopItem } from "./types.js";
 
 export interface ProjectionContext {
@@ -59,7 +59,12 @@ export function project(item: WorkItem, li: LoopItem, ctx: ProjectionContext): W
     pullNumber: li.pull?.number ?? null,
     modelRouting: {
       preferredModel: item.modelRouting.preferredModel,
-      attempts: attemptsOnPreferred(item, li.rounds, li.session?.model ?? null),
+      // Rounds with an excluded routing never count toward attempts.
+      attempts: attemptsOnPreferred(
+        item,
+        li.rounds.filter((record) => OUTCOME_CLASSES[record.outcome].routing !== "excluded"),
+        li.session?.model ?? null,
+      ),
       fallbackUsed: li.fallbackUsed,
     },
     retryCount: li.retry,
@@ -96,7 +101,7 @@ export async function reconcile(
       const item = store.items.find((entry) => entry.id === id);
       if (item === undefined) {
         throw new LoopStateDataError(
-          `loop state ${storePath}: rule (a): item "${id}" is not in the work store`,
+          `work store ${storePath}: rule (a): item "${id}" is not in the work store`,
         );
       }
       const next = applyProjection(item, project(item, li, ctx));

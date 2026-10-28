@@ -54,6 +54,21 @@ function record(overrides: Partial<RoundRecord> = {}): RoundRecord {
   };
 }
 
+const STORED_INTENT: LoopItem["start"] = {
+  round: 0,
+  decision: {
+    schemaVersion: "v1",
+    workItemId: "gh-moc-5",
+    chosenHostAlias: "host-a",
+    reason: "only idle host",
+    candidates: [{ hostAlias: "host-a", score: 1, reason: "idle", excluded: false }],
+  },
+  model: { providerId: PROVIDER, model: PREFERRED },
+  brief: "Stored intent",
+  itemBranch: null,
+  requestId: "req-000001",
+};
+
 function loopItem(overrides: Partial<LoopItem> = {}): LoopItem {
   return {
     phase: "running",
@@ -174,12 +189,73 @@ test("closeRound appends the record and returns continue (C7)", async () => {
   });
 });
 
+test("a starting start-rejected close clears the intent and stays idle (C8)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    // The D2 outcome state: starting with a stored intent and no session.
+    await writeState(
+      ctx.statePath,
+      loopItem({ phase: "starting", session: null, start: STORED_INTENT }),
+    );
+    const rejected = await closeRound(ctx, item(), {
+      outcome: "start-rejected",
+      attempt: "failure",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: null,
+      headSha: null,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
+    expect(rejected).toEqual({ kind: "continue", stallRounds: 0 });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.phase).toBe("idle");
+    expect(li.start).toBe(null);
+    expect(li.rounds).toHaveLength(1);
+    expect(li.rounds[0]).toMatchObject({ outcome: "start-rejected", retry: 0 });
+  });
+});
+
+test("a starting lost close clears the intent and stays idle (C8)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({ phase: "starting", session: null, start: STORED_INTENT }),
+    );
+    const lost = await closeRound(ctx, item(), {
+      outcome: "lost",
+      attempt: "lost",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: null,
+      headSha: null,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
+    expect(lost).toEqual({ kind: "continue", stallRounds: 0 });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.phase).toBe("idle");
+    expect(li.start).toBe(null);
+    expect(li.rounds[0]).toMatchObject({ outcome: "lost", attempt: "lost" });
+  });
+});
+
 test("a start-rejected close is excluded and the third stagnant close parks (C8)", async () => {
   await withTempDir(async (dir) => {
     const { ctx } = ctxFor(dir);
     await writeState(
       ctx.statePath,
-      loopItem({ round: 2, rounds: [record({ round: 0 }), record({ round: 1 })] }),
+      loopItem({
+        round: 2,
+        rounds: [record({ round: 0 }), record({ round: 1 })],
+      }),
     );
     const rejected = await closeRound(ctx, item(), {
       outcome: "start-rejected",
@@ -215,30 +291,115 @@ test("a start-rejected close is excluded and the third stagnant close parks (C8)
     const li = state.items["gh-moc-5"] as unknown as LoopItem;
     // Only the failure-routed close raises the count.
     expect(li.failures[PREFERRED]).toBe(1);
+    expect(li.start).toBe(null);
+  });
+});
+
+test("a close at retry 1 keeps retry 1 in the record, line and park key (F4)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({
+        round: 2,
+        retry: 1,
+        rounds: [record({ round: 0, retry: 0 }), record({ round: 1, retry: 0 })],
+      }),
+    );
+    const decision = await closeRound(ctx, item(), {
+      outcome: "red-ci",
+      attempt: "failure",
+      requestId: "req-000003",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: ["gates"],
+      verdict: null,
+      baseRace: false,
+    });
+    expect(decision).toEqual({ kind: "continue", stallRounds: 1 });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.rounds).toHaveLength(3);
+    expect(li.rounds[2]).toMatchObject({ round: 2, retry: 1 });
+    const lines = readFileSync(ctx.resultsPath, "utf8")
+      .split("\n")
+      .filter((line) => line !== "");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string)).toMatchObject({ key: "gh-moc-5:2", retry: 1 });
+  });
+});
+
+test("the third stagnant close at retry 1 parks with the retry 1 key (F4)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(
+      ctx.statePath,
+      loopItem({
+        round: 4,
+        retry: 1,
+        rounds: [
+          record({ round: 0, retry: 0 }),
+          record({ round: 1, retry: 0 }),
+          record({ round: 2, retry: 1 }),
+          record({ round: 3, retry: 1 }),
+        ],
+      }),
+    );
+    const decision = await closeRound(ctx, item(), {
+      outcome: "red-ci",
+      attempt: "failure",
+      requestId: "req-000005",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: ["gates"],
+      verdict: null,
+      baseRace: false,
+    });
+    expect(decision.kind).toBe("park");
+    if (decision.kind === "park") {
+      expect(decision.escalationKey).toBe("stall:gh-moc-5:1");
+    }
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.rounds[4]).toMatchObject({ round: 4, retry: 1 });
   });
 });
 
 test("appendMissingResults repairs one deleted line and is then a no-op (C9)", async () => {
   await withTempDir(async (dir) => {
     const { ctx } = ctxFor(dir);
-    await writeState(
-      ctx.statePath,
-      loopItem({
-        phase: "idle",
-        round: 2,
-        session: null,
-        requestId: null,
-        rounds: [record({ round: 0 }), record({ round: 1 })],
-      }),
-    );
-    expect(await appendMissingResults(ctx, [item()])).toBe(2);
-    expect(await appendMissingResults(ctx, [item()])).toBe(0);
-    await Bun.write(ctx.resultsPath, "");
-    expect(await appendMissingResults(ctx, [item()])).toBe(2);
+    await writeState(ctx.statePath, loopItem({ phase: "idle", session: null, requestId: null }));
+    const redCi = {
+      outcome: "red-ci",
+      attempt: "failure",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: null,
+      failingChecks: ["gates"],
+      verdict: null,
+      baseRace: false,
+    } as const;
+    await closeRound(ctx, item(), { ...redCi, requestId: "req-000001" });
+    await closeRound(ctx, item(), { ...redCi, requestId: "req-000002" });
+    const before = readFileSync(ctx.resultsPath, "utf8")
+      .split("\n")
+      .filter((line) => line !== "");
+    expect(before).toHaveLength(2);
+    // Simulate a crash between the L write and the result line write:
+    // the last record has no line yet.
+    await Bun.write(ctx.resultsPath, `${before[0] as string}\n`);
+    expect(await appendMissingResults(ctx, [item()])).toBe(1);
     expect(await appendMissingResults(ctx, [item()])).toBe(0);
     const lines = readFileSync(ctx.resultsPath, "utf8")
       .split("\n")
       .filter((line) => line !== "");
     expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe(before[1]);
   });
 });

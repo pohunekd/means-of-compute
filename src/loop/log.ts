@@ -51,8 +51,31 @@ export interface LoopLog {
   close(): Promise<void>;
 }
 
-export async function openLoopLog(path: string, now: () => Date): Promise<LoopLog> {
-  const handle: FileHandle = await open(path, "a", 0o600);
+// The seam the C3 latch test needs: the first write can fail while a
+// later write would succeed, which the real filesystem cannot express.
+export interface LoopLogFs {
+  open(path: string, mode: number): Promise<FileHandle>;
+}
+
+const nodeLogFs: LoopLogFs = {
+  open(path: string, mode: number): Promise<FileHandle> {
+    return open(path, "a", mode);
+  },
+};
+
+export async function openLoopLog(path: string, now?: () => Date): Promise<LoopLog>;
+export async function openLoopLog(
+  path: string,
+  options: { readonly fs?: LoopLogFs; readonly now?: () => Date },
+): Promise<LoopLog>;
+export async function openLoopLog(
+  path: string,
+  nowOrOptions?: (() => Date) | { readonly fs?: LoopLogFs; readonly now?: () => Date },
+): Promise<LoopLog> {
+  const options = typeof nowOrOptions === "function" ? { now: nowOrOptions } : (nowOrOptions ?? {});
+  const now = options.now ?? ((): Date => new Date());
+  const fs = options.fs ?? nodeLogFs;
+  const handle: FileHandle = await fs.open(path, 0o600);
   let latched = false;
   let closed = false;
   let chain: Promise<void> = Promise.resolve();

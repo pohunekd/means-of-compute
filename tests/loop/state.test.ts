@@ -207,6 +207,35 @@ test("rule (f): a stall park with phase running fails (C1)", async () => {
   });
 });
 
+test("rule (f): a blocked finalize with a null park fails (C1 reverse direction)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop-state.json");
+    let error: unknown;
+    try {
+      await updateLoopState(path, () =>
+        Promise.resolve({
+          next: {
+            ...emptyState(),
+            items: {
+              "gh-moc-5": {
+                ...idleItem(),
+                phase: "idle",
+                park: null,
+                finalize: { result: "blocked", done: false },
+              },
+            },
+          },
+          value: undefined,
+        }),
+      );
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopStateDataError);
+    expect(String(error)).toContain("rule (f)");
+  });
+});
+
 test("rule (f): a blocked park without a blocked finalize fails (C1)", async () => {
   await withTempDir(async (dir) => {
     const path = join(dir, "loop-state.json");

@@ -60,6 +60,7 @@ export async function closeRound(
       baseRace: close.baseRace,
     };
     const rounds = [...li.rounds, record];
+    // A close from phase starting keeps rule (b): the intent is gone.
     const nextItem: Record<string, unknown> = {
       ...li,
       failures: failuresAfter(li.failures, record),
@@ -67,6 +68,7 @@ export async function closeRound(
       session: null,
       requestId: null,
       phase: "idle",
+      start: null,
       rounds,
     };
     return Promise.resolve({

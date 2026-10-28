@@ -1,10 +1,11 @@
 // In-memory GitHub stub over a sandbox origin.git: PRs, issues and
 // comments live in maps while refs and merges run real git commands.
 import { rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { isAncestor, revParse, type GitDeps } from "../git.js";
+import { isAbsolute, join } from "node:path";
+import { GitError, isAncestor, revParse, type GitDeps } from "../git.js";
 import {
   GitHubError,
+  utf8Prefix,
   type CheckRun,
   type CommentFirstLine,
   type GitHubPort,
@@ -77,7 +78,18 @@ interface StubGitOutput {
   readonly stderr: string;
 }
 
+// A git failure maps to the port kinds: unknown ref or sha is rejected,
+// any other failure is unavailable. The original message goes to detail.
+function mapGitError(step: string, error: unknown): GitHubError {
+  if (error instanceof GitError) {
+    const kind = error.kind === "failed" && error.rc === 128 ? "rejected" : "unavailable";
+    return new GitHubError(kind, step, `${step}: ${error.message}`, error.message);
+  }
+  throw error;
+}
+
 // The stub allowlist adds update-ref and rev-list next to the leaf set.
+// The identity flags travel in the prefix, so args[0] is the subcommand.
 async function runStubGit(
   dir: string,
   deps: GitDeps,
@@ -85,11 +97,7 @@ async function runStubGit(
   args: readonly string[],
   prefix: readonly string[] = [],
 ): Promise<StubGitOutput> {
-  let index = 0;
-  while (args[index] === "-c") {
-    index += 3;
-  }
-  const sub = args[index];
+  const sub = args[0];
   const leaf = new Set(["fetch", "ls-remote", "rev-parse", "merge-base", "worktree", "merge"]);
   if (sub === undefined || (!leaf.has(sub) && !EXTRA_ALLOWED.has(sub))) {
     throw new GitHubError("rejected", step, `${step}: blocked subcommand`);
@@ -105,24 +113,69 @@ async function runStubGit(
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
+    detached: true,
   });
-  const state = { timedOut: false };
-  const timer = setTimeout(() => {
-    state.timedOut = true;
+  const outReader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+  const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
+  const outText = (async (): Promise<string> => {
+    const chunks: Uint8Array[] = [];
     try {
-      proc.kill("SIGKILL");
+      for (;;) {
+        const next = await outReader.read();
+        if (next.done) {
+          break;
+        }
+        if (next.value) {
+          chunks.push(next.value);
+        }
+      }
+    } finally {
+      outReader.releaseLock();
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  })();
+  const errText = (async (): Promise<string> => {
+    const chunks: Uint8Array[] = [];
+    try {
+      for (;;) {
+        const next = await errReader.read();
+        if (next.done) {
+          break;
+        }
+        if (next.value) {
+          chunks.push(next.value);
+        }
+      }
+    } finally {
+      errReader.releaseLock();
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  })();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      process.kill(-proc.pid, "SIGKILL");
     } catch {
       // The child already exited; the timeout error below carries the failure.
     }
+    try {
+      void outReader.cancel();
+    } catch {
+      // The pipe already closed; the collected chunks carry the output.
+    }
+    try {
+      void errReader.cancel();
+    } catch {
+      // The pipe already closed; the collected chunks carry the output.
+    }
   }, deps.timeoutMs);
   try {
-    const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
-    const stderrPromise = new Response(proc.stderr as ReadableStream).text();
     const rc = await proc.exited;
-    const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-    if (state.timedOut) {
+    if (timedOut) {
       throw new GitHubError("unavailable", step, `${step}: timed out`);
     }
+    const [stdout, stderr] = await Promise.all([outText, errText]);
     return { rc, stdout, stderr };
   } finally {
     clearTimeout(timer);
@@ -156,7 +209,7 @@ export async function casUpdateRef(
       "rejected",
       "mergePull",
       `mergePull: update-ref exited ${String(rc)}`,
-      stderr.slice(0, 300),
+      utf8Prefix(stderr, 300),
     );
   }
 }
@@ -164,6 +217,17 @@ export async function casUpdateRef(
 export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
   snapshot(): StubGitHubSnapshot;
 } {
+  if (!isAbsolute(options.originDir)) {
+    throw new GitError("failed", "createStubGitHub", "createStubGitHub: originDir must be absolute", null);
+  }
+  if (!isAbsolute(options.scratchDir)) {
+    throw new GitError(
+      "failed",
+      "createStubGitHub",
+      "createStubGitHub: scratchDir must be absolute",
+      null,
+    );
+  }
   let next = 1;
   let checkId = 0;
   const pulls = new Map<number, StubPull>();
@@ -229,9 +293,13 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
   async function checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]> {
     requireRepo("checkRuns", repo);
     const baseRef = `refs/heads/${options.baseBranch}`;
-    if (await isAncestor(options.originDir, options.git, sha, baseRef)) {
-      checkId += 1;
-      return [{ id: checkId, name: "gates", status: "completed", conclusion: "success" }];
+    try {
+      if (await isAncestor(options.originDir, options.git, sha, baseRef)) {
+        checkId += 1;
+        return [{ id: checkId, name: "gates", status: "completed", conclusion: "success" }];
+      }
+    } catch (error: unknown) {
+      throw mapGitError("checkRuns", error);
     }
     const outcome = options.ci(sha);
     if (outcome === "pending") {
@@ -241,19 +309,21 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     return [{ id: checkId, name: "gates", status: "completed", conclusion: outcome }];
   }
 
-  function commentFirstLines(repo: string, number: number): Promise<readonly CommentFirstLine[]> {
+  async function commentFirstLines(
+    repo: string,
+    number: number,
+  ): Promise<readonly CommentFirstLine[]> {
     requireRepo("commentFirstLines", repo);
     if (!pulls.has(number) && !issues.has(number)) {
       throw new GitHubError("rejected", "commentFirstLines", "commentFirstLines: unknown number");
     }
-    const rows = (comments.get(number) ?? []).map((comment) => ({
+    return (comments.get(number) ?? []).map((comment) => ({
       login: comment.login,
       first: comment.body.split("\n")[0] ?? "",
     }));
-    return Promise.resolve(rows);
   }
 
-  function postComment(repo: string, number: number, body: string): Promise<void> {
+  async function postComment(repo: string, number: number, body: string): Promise<void> {
     requireRepo("postComment", repo);
     if (!pulls.has(number) && !issues.has(number)) {
       throw new GitHubError("rejected", "postComment", "postComment: unknown number");
@@ -261,11 +331,14 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     const list = comments.get(number) ?? [];
     list.push({ number, login: options.factoryLogin, body });
     comments.set(number, list);
-    return Promise.resolve();
   }
 
-  async function liveHead(branch: string): Promise<string> {
-    return revParse(options.originDir, options.git, `refs/heads/${branch}`);
+  async function liveHead(step: string, branch: string): Promise<string> {
+    try {
+      return await revParse(options.originDir, options.git, `refs/heads/${branch}`);
+    } catch (error: unknown) {
+      throw mapGitError(step, error);
+    }
   }
 
   async function pullsForBranch(repo: string, branch: string): Promise<readonly PullRow[]> {
@@ -276,7 +349,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
         continue;
       }
       const headRefOid =
-        pull.state === "MERGED" ? (pull.mergedHead as string) : await liveHead(branch);
+        pull.state === "MERGED" ? (pull.mergedHead as string) : await liveHead("pullsForBranch", branch);
       rows.push({
         number: pull.number,
         state: pull.state,
@@ -299,9 +372,12 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
   ): Promise<number> {
     requireRepo("createPull", repo);
     try {
-      await liveHead(head);
-    } catch {
-      throw new GitHubError("rejected", "createPull", "createPull: unknown branch");
+      await liveHead("createPull", head);
+    } catch (error: unknown) {
+      if (error instanceof GitHubError && error.kind === "rejected") {
+        throw new GitHubError("rejected", "createPull", "createPull: unknown branch");
+      }
+      throw error;
     }
     const number = next;
     next += 1;
@@ -322,7 +398,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     requireRepo("viewPull", repo);
     const row = requirePull("viewPull", pull);
     const headRefOid =
-      row.state === "MERGED" ? (row.mergedHead as string) : await liveHead(row.head);
+      row.state === "MERGED" ? (row.mergedHead as string) : await liveHead("viewPull", row.head);
     return {
       state: row.state,
       headRefOid,
@@ -338,11 +414,16 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     if (row.state !== "OPEN") {
       throw new GitHubError("rejected", "mergePull", "mergePull: pull is not open");
     }
-    const live = await liveHead(row.head);
+    const live = await liveHead("mergePull", row.head);
     if (live !== headSha) {
       throw new GitHubError("rejected", "mergePull", "mergePull: head moved");
     }
-    const old = await revParse(options.originDir, options.git, `refs/heads/${row.base}`);
+    let old: string;
+    try {
+      old = await revParse(options.originDir, options.git, `refs/heads/${row.base}`);
+    } catch (error: unknown) {
+      throw mapGitError("mergePull", error);
+    }
     const wt = join(options.scratchDir, `stub-merge-${String(pull)}`);
     const added = await runStubGit(options.originDir, options.git, "mergePull", [
       "worktree",
@@ -401,7 +482,11 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
 
   async function baseSha(repo: string, baseBranch: string): Promise<string> {
     requireRepo("baseSha", repo);
-    return revParse(options.originDir, options.git, `refs/heads/${baseBranch}`);
+    try {
+      return await revParse(options.originDir, options.git, `refs/heads/${baseBranch}`);
+    } catch (error: unknown) {
+      throw mapGitError("baseSha", error);
+    }
   }
 
   async function commitParents(repo: string, sha: string): Promise<readonly string[]> {
@@ -419,7 +504,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     return stdout.trim().split(/\s+/).slice(1);
   }
 
-  function createIssue(
+  async function createIssue(
     repo: string,
     title: string,
     body: string,
@@ -429,22 +514,21 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     const number = next;
     next += 1;
     issues.set(number, { number, title, body, labels: [...labels] });
-    return Promise.resolve(number);
+    return number;
   }
 
-  function factoryIssues(repo: string, label: string): Promise<readonly IssueFirstLine[]> {
+  async function factoryIssues(repo: string, label: string): Promise<readonly IssueFirstLine[]> {
     requireRepo("factoryIssues", repo);
-    const rows = [...issues.values()]
+    return [...issues.values()]
       .filter((issue) => issue.labels.includes(label))
       .sort((a, b) => a.number - b.number)
       .map((issue) => ({
         number: issue.number,
         first: issue.body.split("\n")[0] ?? "",
       }));
-    return Promise.resolve(rows);
   }
 
-  function editIssueLabels(
+  async function editIssueLabels(
     repo: string,
     issue: number,
     add: readonly string[],
@@ -458,7 +542,6 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
       }
     }
     row.labels = row.labels.filter((label) => !remove.includes(label));
-    return Promise.resolve();
   }
 
   return {

@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { revParse, type GitDeps } from "../../src/loop/git.js";
+import { GitError, revParse, type GitDeps } from "../../src/loop/git.js";
 import { GitHubError } from "../../src/loop/github.js";
 import { casUpdateRef, createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
 
@@ -147,7 +147,7 @@ describe("stub github", () => {
     }
   });
 
-  test("L22: a stale head is rejected and the base stays", async () => {
+  test("L22M5: a stale head is rejected; unknown refs are GitHubError", async () => {
     const sandbox = await makeSandbox();
     try {
       const stub = createStubGitHub(stubOptions(sandbox.origin, sandbox.scratchDir));
@@ -231,6 +231,48 @@ describe("stub github", () => {
       expect(await revParse(options.originDir, options.git, "refs/heads/main")).toBe(moved);
       await casUpdateRef(options.originDir, options.git, "refs/heads/main", head, moved);
       expect(await revParse(options.originDir, options.git, "refs/heads/main")).toBe(head);
+    } finally {
+      await sandbox.cleanup();
+    }
+  });
+
+  test("L22M5b: unknown refs are GitHubError rejected", async () => {
+    const sandbox = await makeSandbox();
+    try {
+      const options = stubOptions(sandbox.origin, sandbox.scratchDir);
+      const stub = createStubGitHub(options);
+      await pushEmpty(sandbox.seed, "moc/demo-f");
+      await stub.createPull("factory/demo", "moc/demo-f", "main", "t", "b");
+      const unknownSha = "0123456789012345678901234567890123456789";
+      const runs = await stub.checkRuns("factory/demo", unknownSha).catch(
+        (error: unknown) => error,
+      );
+      expect(runs).toBeInstanceOf(GitHubError);
+      expect((runs as GitHubError).kind).toBe("rejected");
+      await git(sandbox.seed, ["push", "origin", ":refs/heads/moc/demo-f"]);
+      const view = await stub.viewPull("factory/demo", 1).catch((error: unknown) => error);
+      expect(view).toBeInstanceOf(GitHubError);
+      expect((view as GitHubError).kind).toBe("rejected");
+      const base = await stub.baseSha("factory/demo", "nope").catch((error: unknown) => error);
+      expect(base).toBeInstanceOf(GitHubError);
+      expect((base as GitHubError).kind).toBe("rejected");
+    } finally {
+      await sandbox.cleanup();
+    }
+  });
+
+  test("L22M7: a relative stub scratch dir throws before any use", async () => {
+    const sandbox = await makeSandbox();
+    try {
+      let failed: unknown = null;
+      try {
+        createStubGitHub({ ...stubOptions(sandbox.origin, sandbox.scratchDir), scratchDir: "scratch/x" });
+      } catch (error: unknown) {
+        failed = error;
+      }
+      expect(failed).toBeInstanceOf(GitError);
+      expect((failed as GitError).message).toContain("scratchDir");
+      expect((failed as GitError).message).toContain("absolute");
     } finally {
       await sandbox.cleanup();
     }

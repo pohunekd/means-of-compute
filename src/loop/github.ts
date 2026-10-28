@@ -93,7 +93,7 @@ function redact(token: string, value: string): string {
 }
 
 // R2-1 keeps at most 300 bytes and never ends in a cut-made U+FFFD.
-function utf8Prefix(text: string, max: number): string {
+export function utf8Prefix(text: string, max: number): string {
   const buf = Buffer.from(text, "utf8");
   if (buf.length <= max) {
     return text;

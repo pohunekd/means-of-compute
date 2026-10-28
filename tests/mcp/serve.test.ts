@@ -212,19 +212,25 @@ test("F2 a large response is written whole before exit (F2, T3.2)", async () => 
 
 test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   const env = await createMcpTestEnv("mcp-sv3-");
-  const noCaller = Bun.spawn([process.execPath, "src/mcp/serve.ts"], {
-    cwd: process.cwd(),
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  // The temp config is passed, so a defaulted caller would start serving.
+  const noCaller = Bun.spawn(
+    [process.execPath, "src/mcp/serve.ts", "--config", env.mcpConfigPath],
+    {
+      cwd: process.cwd(),
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   (noCaller.stdin as unknown as { end(): void }).end();
-  const [noCallerCode, noCallerOut] = await Promise.all([
+  const [noCallerCode, noCallerOut, noCallerErr] = await Promise.all([
     noCaller.exited,
     new Response(noCaller.stdout).text(),
+    new Response(noCaller.stderr).text(),
   ]);
   expect(noCallerCode).toBe(2);
   expect(noCallerOut).toBe("");
+  expect(noCallerErr.trim()).toBe("mcp: --caller <name> is required exactly once");
 
   const badCaller = Bun.spawn(
     [process.execPath, "src/mcp/serve.ts", "--caller", "intruder", "--config", env.mcpConfigPath],

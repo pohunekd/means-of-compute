@@ -28,24 +28,24 @@ function parseArgs(args: readonly string[]): { caller: string; configPath: strin
     if (arg === "--caller") {
       const value = args[index + 1];
       if (value === undefined || value.startsWith("--") || caller !== null) {
-        throw new Error("mcp: --caller <name> is required exactly once");
+        throw new Error("--caller <name> is required exactly once");
       }
       caller = value;
       index += 1;
     } else if (arg === "--config") {
       const value = args[index + 1];
       if (value === undefined || value.startsWith("--") || configSeen) {
-        throw new Error("mcp: --config <path> is allowed at most once");
+        throw new Error("--config <path> is allowed at most once");
       }
       configPath = value;
       configSeen = true;
       index += 1;
     } else {
-      throw new Error(`mcp: unknown argument "${arg}"`);
+      throw new Error(`unknown argument "${arg}"`);
     }
   }
   if (caller === null) {
-    throw new Error("mcp: --caller <name> is required exactly once");
+    throw new Error("--caller <name> is required exactly once");
   }
   return { caller, configPath };
 }
@@ -61,7 +61,7 @@ interface Startup {
 async function startup(caller: string, configPath: string): Promise<Startup> {
   const config = await loadMcpConfig(configPath);
   if (!config.callers.includes(caller)) {
-    throw new Error(`mcp: unknown caller "${caller}"`);
+    throw new Error(`unknown caller "${caller}"`);
   }
   const workConfig = await loadWorkConfig(config.workConfigPath);
   await loadFactorySpecs(workConfig.factorySpecsPath);
@@ -87,7 +87,7 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
     );
   if (!started) {
     await callLog.close().catch(() => undefined);
-    throw new Error("mcp: call log unavailable");
+    throw new Error("call log unavailable");
   }
   const tools = createTools({
     workConfigPath: config.workConfigPath,

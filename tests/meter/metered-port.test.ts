@@ -87,9 +87,7 @@ test("an unrouted provider is rejected before the inner start", async () => {
     const port = createMeteredPort(control.port, meter, () => {});
     let error: unknown;
     try {
-      await port.start(
-        startReq({ model: { providerId: "local", model: "local-model" } }),
-      );
+      await port.start(startReq({ model: { providerId: "local", model: "local-model" } }));
     } catch (caught: unknown) {
       error = caught;
     }
@@ -139,7 +137,11 @@ test("a latched meter passes MeterUnavailableError through", async () => {
       expect(error).toBeInstanceOf(MeterUnavailableError);
       expect(control.sessions()).toHaveLength(0);
     },
-    { logIo: createFaultyIo(systemUsageLogIo, { failWhen: (l) => l.includes('"kind":"grant-open"') }) },
+    {
+      logIo: createFaultyIo(systemUsageLogIo, {
+        failWhen: (l) => l.includes('"kind":"grant-open"'),
+      }),
+    },
   );
 });
 
@@ -155,8 +157,8 @@ test("cancel and wait return deep-equal terminals", async () => {
     const cancelled = await port.cancel(ref, "host-left");
     expect(second).toEqual(first);
     expect(cancelled).toEqual(first);
-    expect((await readLogLines(logPath)).filter((l) => l.includes('"kind":"grant-close"'))).toHaveLength(
-      1,
-    );
+    expect(
+      (await readLogLines(logPath)).filter((l) => l.includes('"kind":"grant-close"')),
+    ).toHaveLength(1);
   });
 });

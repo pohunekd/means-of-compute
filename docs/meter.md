@@ -296,13 +296,13 @@ surrounding terminal keeps `usage: null`.
 
 - `start` calls `openGrant`, then the inner `start`, then `bindGrant`.
   A `grant-closed` from `openGrant` becomes `PortUnreachableError`; any
-other grant error becomes `PortRejectedError` with the meter code, so
-the caller idles and the item is retried, and a dispatcher-level
-`request-conflict` reaches the caller as `PortRejectedError`
-`request-conflict`. A hard port failure after a bound grant returns
-lost through the provisional-lost path with a measured zero row (the
-design: only `finished`/`failed`/`lost` reach the budget, so the queue
-moves).
+  other grant error becomes `PortRejectedError` with the meter code, so
+  the caller idles and the item is retried, and a dispatcher-level
+  `request-conflict` reaches the caller as `PortRejectedError`
+  `request-conflict`. A hard port failure after a bound grant returns
+  lost through the provisional-lost path with a measured zero row (the
+  design: only `finished`/`failed`/`lost` reach the budget, so the queue
+  moves).
 - `wait` settles every terminal result. Settle errors do not map:
   a latched meter rethrows `MeterUnavailableError`, so a failed settle
   never silently stores an estimate as real usage. A lost (or other

@@ -676,9 +676,9 @@ test("settle and settleRequest share one memo", async () => {
     const first = await meter.settle(sessionId, "finished");
     const second = await meter.settleRequest("w1-demo:0", "finished");
     expect(second).toEqual(first);
-    expect((await readLogLines(logPath)).filter((l) => l.includes('"kind":"grant-close"'))).toHaveLength(
-      1,
-    );
+    expect(
+      (await readLogLines(logPath)).filter((l) => l.includes('"kind":"grant-close"')),
+    ).toHaveLength(1);
   });
 });
 

@@ -41,7 +41,11 @@ function item(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     assignedHostAlias: null,
     branch: null,
     pullNumber: null,
-    modelRouting: { preferredModel: "muse-spark-1.3-contributor", attempts: 0, fallbackUsed: false },
+    modelRouting: {
+      preferredModel: "muse-spark-1.3-contributor",
+      attempts: 0,
+      fallbackUsed: false,
+    },
     retryCount: 0,
     stallRounds: 0,
     ...overrides,

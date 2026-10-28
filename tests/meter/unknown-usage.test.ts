@@ -40,7 +40,11 @@ function item(): Record<string, unknown> {
     assignedHostAlias: null,
     branch: null,
     pullNumber: null,
-    modelRouting: { preferredModel: "muse-spark-1.3-contributor", attempts: 0, fallbackUsed: false },
+    modelRouting: {
+      preferredModel: "muse-spark-1.3-contributor",
+      attempts: 0,
+      fallbackUsed: false,
+    },
     retryCount: 0,
     stallRounds: 0,
   };
@@ -140,16 +144,19 @@ test("a reply without usage refuses as spend unknown", async () => {
           nvidiaProviderId: "nvidia-build",
         }),
       );
-      for (const name of ["meta-api.json", "nvidia-build.json", "local.json", "route.json", "schema.json"]) {
+      for (const name of [
+        "meta-api.json",
+        "nvidia-build.json",
+        "local.json",
+        "route.json",
+        "schema.json",
+      ]) {
         await Bun.write(
           join(sandbox, "config", "providers", name),
           Bun.file(join("config", "providers", name)),
         );
       }
-      await Bun.write(
-        join(sandbox, "config", "ledger.json"),
-        JSON.stringify({ ledgerPath }),
-      );
+      await Bun.write(join(sandbox, "config", "ledger.json"), JSON.stringify({ ledgerPath }));
       const gate = createCliBudgetGate({
         command: ["bun", resolve("src/budget/check.ts")],
         timeoutMs: 30000,

@@ -174,7 +174,7 @@ test("shared address refused", async () => {
 });
 
 test("listen port below 1 and above 65535 refused", async () => {
-  // M5: the listen port comes from the env, not the config file: port
+  // The listen port comes from the env, not the config file: port
   // 0 is the test wildcard and both edges refuse without echoing.
   for (const listen of ["127.0.0.1:-1", "127.0.0.1:65536"]) {
     const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
@@ -199,7 +199,7 @@ test("listen port below 1 and above 65535 refused", async () => {
 });
 
 test("non-canonical base64 secret refused", async () => {
-  // M5: trailing `=` dropped from a padded encoding stays valid
+  // Trailing `=` dropped from a padded encoding stays valid
   // base64 but re-encodes with the padding back, so it refuses on
   // the strict check with the padding restored.
   const strict = Buffer.from("x".repeat(32)).toString("base64");
@@ -223,7 +223,7 @@ test("non-canonical base64 secret refused", async () => {
 });
 
 test("every 2.1 integer key refused at min-1 and max+1", async () => {
-  // M5: one refusal per edge of every integer rule in section 2.1.
+  // One refusal per edge of every integer rule in section 2.1.
   const edges: Array<{ key: keyof MeterConfig; min: number; max: number }> = [
     { key: "maxRequestBytes", min: 1024, max: 67108864 },
     { key: "maxUsageScanBytes", min: 1024, max: 67108864 },
@@ -261,7 +261,7 @@ test("no error text contains the env value", async () => {
 });
 
 test("secret values stay out of config errors", async () => {
-  // M04: echoing the secret in its error would leak it. One secret
+  // Echoing the secret in its error would leak it. One secret
   // fails the strict base64 check, the other decodes to 16 bytes.
   for (const secret of ["not-base64-SECRETMARK", "c2hvcnQtU0VDUkVUTUFSSw=="]) {
     let message = "";
@@ -279,7 +279,7 @@ test("secret values stay out of config errors", async () => {
 });
 
 test("invalid IP refused", async () => {
-  // M06: dropping the invalid-IP check would accept these.
+  // Dropping the invalid-IP check would accept these.
   let listenMessage = "";
   try {
     await resolveMeterEnv(baseConfig(), envWith({ MOC_METER_LISTEN: "999.1.1.1:8787" }));
@@ -306,7 +306,7 @@ test("invalid IP refused", async () => {
 });
 
 test("duplicate address in one alias refused", async () => {
-  // M07: dropping the in-alias duplicate check would accept this.
+  // Dropping the in-alias duplicate check would accept this.
   const dir = mkdtempSync(join(tmpdir(), "meter-hosts-"));
   const file = join(dir, "hosts.json");
   await Bun.write(file, JSON.stringify({ "laptop-a": ["127.0.0.1", "127.0.0.1"] }));

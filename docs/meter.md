@@ -1,9 +1,9 @@
 # Metering proxy
 
 All model traffic from fleet sessions flows through the metering proxy
-(`src/meter/`). The proxy holds the provider keys: the host environment
-carries only a short-lived caller token, valid only while its grant is
-open and delivered through session metadata, and the proxy records
+(`src/meter/`). The proxy holds the provider keys: the session receives
+its caller token through session metadata, and the token is valid only
+while its grant is open, and the proxy records
 per-session
 token usage into an append-only log. PR A delivers the proxy itself; the
 dispatcher port wiring, the usage CLI, and the host token helper land in
@@ -38,7 +38,7 @@ nothing goes upstream:
    cause is the meter's own route config, not the caller. When the
    provider is routed but its key variable is empty at this moment, the
    answer is 503 `provider-key-missing`.
-6. Record `call-start` through the guarded append: S6 validate runs
+6. Record `call-start` through the guarded append: validation runs
    first (`checkRecord`, no write, no latch), then the write, then
    `datasync`, then the in-memory commit. A validation failure rejects
    with `MeterLogError`, logs `usage-log-rejected`, and the caller gets
@@ -82,7 +82,7 @@ carries `clientGone: true` with the observed usage. The pump order is
 fixed: tap end, then `finishEnd` (the `call-end` append), then the live
 registry release, then the caller stream close or error. The caller
 stream is errored only through one helper, which first logs
-`caller-stream-errored` (new event) and then errors the stream.
+`caller-stream-errored` and then errors the stream.
 
 Every error the proxy itself answers with status `>= 400` logs exactly
 one `request-rejected` event with the code and status, plus the

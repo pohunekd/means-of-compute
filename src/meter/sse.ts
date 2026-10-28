@@ -44,7 +44,7 @@ function payloadOfLine(line: string): string | null {
   return rest.startsWith(" ") ? rest.slice(1) : rest;
 }
 
-// F5: the tap works on bytes. Raw chunks split on byte 0x0A (UTF-8 never
+// The tap works on bytes. Raw chunks split on byte 0x0A (UTF-8 never
 // has 0x0A inside a sequence); the current line accumulates as byte
 // parts, with lineBytes excluding the \n. Past the limit, overflow sticks
 // for the whole stream and bytes drop up to the next 0x0A. A complete line
@@ -87,7 +87,7 @@ export function createSseUsageTap(maxLineBytes: number): UsageTap {
       let start = 0;
       for (let i = 0; i < chunk.length; i += 1) {
         if (chunk[i] === 0x0a) {
-          // F5: the limit counts the bytes of every line part the moment
+          // The limit counts the bytes of every line part the moment
           // it arrives, including a completed line still in this chunk.
           parts.push(chunk.slice(start, i));
           lineBytes += i - start;

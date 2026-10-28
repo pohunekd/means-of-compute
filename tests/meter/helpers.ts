@@ -1,5 +1,5 @@
 // Shared meter test setup: a meter on 127.0.0.1:0 with the host map
-// {"laptop-a": ["127.0.0.1"]} and placeholder keys from the router tests.
+// {"laptop-a": ["127.0.0.1"]} and stub keys from the router tests.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +47,7 @@ export async function withMeter(
   run: (fixture: MeterFixture) => Promise<void>,
   overrides: MeterOverrides = {},
 ): Promise<void> {
-  // L4: every variable set below is saved first and restored in the
+  // Every variable set below is saved first and restored in the
   // finally: a value that was set keeps its earlier value, one that
   // was unset is deleted again. The env, the loopback and the temp
   // dir are all created inside the try, after the saves.

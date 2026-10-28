@@ -1,6 +1,5 @@
 // Proxy tests: one row per design rule of sections 1.5, 3.1 to 3.8, 4.2
-// to 4.6 and 5.1 to 5.8, plus one test per surviving mutation named in
-// the round-2 decisions.
+// to 4.6 and 5.1 to 5.8, plus one regression test per fixed defect.
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -58,7 +57,7 @@ test("auth order: no token gives 401 and the loopback sees nothing", async () =>
       });
       expect(resp.status).toBe(401);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("unauthorized");
-      // M08b + L6: nothing upstream, no record; the 401 fired before
+      // Nothing upstream, no record; the 401 fired before
       // A1, so the event carries no requestId.
       expect(loopback.requests().length).toBe(0);
       expect(await readLogLines(logPath)).toEqual([]);
@@ -78,7 +77,7 @@ test("auth order: a token for an unknown grant gives 403", async () => {
       const resp = await post(meter, tokenFor("w9-unknown:0"), chatBody());
       expect(resp.status).toBe(403);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("no-grant");
-      // M08b + L6: nothing upstream, no record; A1 held, so the event
+      // Nothing upstream, no record; A1 held, so the event
       // carries the requestId.
       expect(loopback.requests().length).toBe(0);
       expect(await readLogLines(logPath)).toEqual([]);
@@ -180,7 +179,7 @@ for (const row of [
         const resp = await fetch(meterUrl(meter, row.path ?? "/v1/chat/completions"), init);
         expect(resp.status).toBe(row.status);
         expect(((await resp.json()) as { error: { code: string } }).error.code).toBe(row.code);
-        // M6: nothing upstream, and exactly one request-rejected log
+        // Nothing upstream, and exactly one request-rejected log
         // with this code and status.
         expect(loopback.requests().length).toBe(0);
         const rejected = events.filter((event) => event.event === "request-rejected");
@@ -201,7 +200,7 @@ for (const row of [
 }
 
 test("an oversize body gives 413", async () => {
-  // M6: Bun's own transport cap answers before the handler when the
+  // Bun's own transport cap answers before the handler when the
   // real bytes exceed it, so this row calls handleMeterRequest with a
   // lying Content-Length header. The branch answers on the header
   // value alone, before reading the body.
@@ -253,7 +252,7 @@ test("wrong host gives 403", async () => {
       const resp = await post(meter, tokenFor(requestId), chatBody());
       expect(resp.status).toBe(403);
       expect(((await resp.json()) as { error: { code: string } }).error.code).toBe("wrong-host");
-      // L6: nothing upstream; the grant-open record stays. A1 held, so
+      // Nothing upstream; the grant-open record stays. A1 held, so
       // the event carries the requestId. Through the live state this
       // also covers the owner-of lookup: dropping it leaves the alias
       // unknown and this test fails.
@@ -284,7 +283,7 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
         providerId: "meta-api",
         model: "muse-spark-1.3-contributor",
       });
-      // M10: the TTL runs from the last open, so T0+2000 is past the
+      // The TTL runs from the last open, so T0+2000 is past the
       // 1000 ms TTL of the T0 open.
       now = new Date(openedAt.getTime() + 2000);
       const denied = await post(meter, tokenFor("w1-demo:0"), chatBody());
@@ -292,7 +291,7 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
       expect(((await denied.json()) as { error: { code: string } }).error.code).toBe(
         "grant-unbound",
       );
-      // M10: a reopen refreshes the last-open time, so this call is
+      // A reopen refreshes the last-open time, so this call is
       // admitted even though T0 is past the TTL.
       await meter.openGrant({
         requestId: "w1-demo:0",
@@ -315,8 +314,9 @@ test("unbound grant past TTL gives 403, then 200 after bind", async () => {
       const allowed = await post(meter, tokenFor("w1-demo:0"), chatBody());
       expect(allowed.status).toBe(200);
       await allowed.text();
-      // M10 kills the from-the-first-open mutation only with the exact
-      // grant-unbound code on both denials and no call-start for them.
+      // Only the exact T0+1100/T0+2000 spacing distinguishes the correct
+      // TTL from a from-the-first-open reading: both denials below carry
+      // grant-unbound and write no call-start for them.
       const unbound = events.filter(
         (event) => event.event === "request-rejected" && event.code === "grant-unbound",
       );
@@ -375,7 +375,7 @@ test("caller model is rejected and the grant model is forwarded", async () => {
       expect(rejected.length).toBe(1);
       expect(rejected[0]?.status).toBe(400);
       expect(rejected[0]?.requestId).toBe(requestId);
-      // M12: a correct call forwards the grant model, not the caller one.
+      // A correct call forwards the grant model, not the caller one.
       const good = await post(meter, tokenFor(requestId), chatBody({ stream: false }));
       expect(good.status).toBe(200);
       await good.text();
@@ -398,7 +398,7 @@ test("key handling: upstream sees the provider key, never the caller token", asy
       expect(seen.length).toBe(1);
       expect(seen[0]?.headers["authorization"]).toBe("Bearer test-meta-key");
       expect(seen[0]?.headers["x-caller-probe"]).toBeUndefined();
-      // M4: no upstream header value carries the caller token, under
+      // No upstream header value carries the caller token, under
       // any name.
       for (const value of Object.values(seen[0]?.headers ?? {})) {
         expect(value.includes(token)).toBe(false);
@@ -420,11 +420,11 @@ test("include_usage is forced on streamed calls", async () => {
     await resp.text();
     const sent = JSON.parse(loopback.requests()[0]?.body ?? "{}") as Record<string, unknown>;
     expect((sent["stream_options"] as Record<string, unknown>)["include_usage"]).toBe(true);
-    // L6: call-finished carries the host alias for the billing join.
+    // call-finished carries the host alias for the billing join.
     const finished = events.find((event) => event.event === "call-finished");
     expect(finished?.hostAlias).toBe("laptop-a");
     expect(finished?.requestId).toBe(requestId);
-    // L6: even a billed 200 logs no request-rejected.
+    // Even a billed 200 logs no request-rejected.
     expect(events.some((event) => event.event === "request-rejected")).toBe(false);
   });
 });
@@ -449,7 +449,7 @@ test("no failover and no budget import: 429 passes through unbilled", async () =
       expect(end["outcome"]).toBe("upstream-status");
       expect(end["billed"]).toBe(false);
       expect(end["inputTokens"]).toBeNull();
-      // M15: no failover means exactly the one recorded attempt.
+      // No failover means exactly the one recorded attempt.
       expect(loopback.requests().length).toBe(1);
       expect(events.some((event) => event.event === "request-rejected")).toBe(false);
     },
@@ -489,7 +489,7 @@ test("call-end ms comes from the monotonic clock", async () => {
       const { requestId } = await openBoundGrant(meter);
       const pending = post(meter, tokenFor(requestId), chatBody());
       await loopback.waitHeld(1);
-      // M1b: the only clock the meter reads is the injected one.
+      // The only clock the meter reads is the injected one.
       timers.advance(250);
       loopback.release();
       const resp = await pending;
@@ -582,7 +582,7 @@ test("idle timeout aborts a slow stream", async () => {
       timers.advance(4001);
       await reader.read().catch(() => ({ done: true, value: undefined }));
       expect(resp.status).toBe(200);
-      // M2a: the record is read only after call-finished, never from a
+      // The record is read only after call-finished, never from a
       // half-written log.
       await waitForEvent((e) => e.event === "call-finished");
       const end = readEnd(await readLogLines(logPath));
@@ -699,7 +699,7 @@ test("concurrency limit admits exactly one of five concurrent calls", async () =
       }
       const lines = await readLogLines(logPath);
       expect(lines.filter((l) => l.includes('"kind":"call-start"')).length).toBe(1);
-      // L6: every rejection above 400 logs exactly one request-rejected.
+      // Every rejection above 400 logs exactly one request-rejected.
       const concurrency = events.filter(
         (e) => e.event === "request-rejected" && e.code === "session-concurrency",
       );
@@ -753,7 +753,7 @@ test("a failed call-start write forwards nothing and latches", async () => {
       expect(((await first.json()) as { error: { code: string } }).error.code).toBe(
         "meter-unavailable",
       );
-      // M19: no fetch started, no record written, and the latch holds for
+      // No fetch started, no record written, and the latch holds for
       // the next call too.
       const second = await post(meter, tokenFor(requestId), chatBody());
       expect(second.status).toBe(503);
@@ -784,7 +784,7 @@ test("call-end is durable before the caller stream errors", async () => {
       expect(resp.status).toBe(200);
       // Do not touch the caller body at all here: nobody pulls, the
       // pump stalls on the gate, the idle timer fires, and the pump
-      // errors the untouched caller stream. The F4 order is then
+      // the untouched caller stream. The order is then
       // observable on the events alone.
       await loopback.waitHeld(1);
       // The idle timer armed at the headers; the 4001ms timer must be
@@ -795,7 +795,7 @@ test("call-end is durable before the caller stream errors", async () => {
       const finished = await waitForEvent((e) => e.event === "call-finished");
       expect(finished.outcome).toBe("idle-timeout");
       const errored = await waitForEvent((e) => e.event === "caller-stream-errored");
-      // F4: call-finished (the call-end is already durable) precedes the
+      // call-finished (the call-end is already durable) precedes the
       // stream error for the same call.
       const finishedAt = events.findIndex((e) => e.event === "call-finished");
       const erroredAt = events.findIndex((e) => e.event === "caller-stream-errored");
@@ -833,7 +833,7 @@ test("a caller error frees the session slot first", async () => {
       const finished = await waitForEvent((e) => e.event === "call-finished");
       expect(finished.outcome).toBe("idle-timeout");
       loopback.release();
-      // F4: the slot is free before the second call starts: finish() ran
+      // The slot is free before the second call starts: finish() ran
       // before the stream errored, so this returns 200, not 429.
       const second = await post(meter, token, chatBody());
       expect(second.status).toBe(200);
@@ -856,7 +856,7 @@ test("caller disconnect still records usage with clientGone", async () => {
         body: JSON.stringify(chatBody()),
       });
       expect(resp.status).toBe(200);
-      // M2b: hold the loopback before the usage frame, cancel the
+      // Hold the loopback before the usage frame, cancel the
       // caller's reader, await caller-gone, then release. The log event
       // proves the pump observed the disconnect, so no counted yields
       // remain.
@@ -892,6 +892,21 @@ test("a grant whose provider left the routes gives 503 provider-not-routed", asy
   const hostsFile = join(dir, "hosts.json");
   await Bun.write(hostsFile, JSON.stringify({ "laptop-a": ["127.0.0.1"] }));
   resetProvidersCache();
+  const savedEnv: Record<string, string | undefined> = {
+    META_API_KEY: process.env.META_API_KEY,
+    NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
+    PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+  };
+  const restoreEnv = (): void => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
   process.env.META_API_KEY = "test-meta-key";
   process.env.NVIDIA_API_KEY = "test-nvidia-key";
   const loopback = await startLoopback("tests/meter/recordings/json-ok.json");
@@ -961,10 +976,7 @@ test("a grant whose provider left the routes gives 503 provider-not-routed", asy
     }
     await loopback.stop();
     resetProvidersCache();
-    delete process.env.META_API_KEY;
-    delete process.env.NVIDIA_API_KEY;
-    delete process.env.PROVIDER_META_API_BASE_URL;
-    delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+    restoreEnv();
     rmSync(dir, { recursive: true, force: true });
   }
 });

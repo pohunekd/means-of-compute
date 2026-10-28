@@ -2,8 +2,8 @@
 // loopback holds, the injected manual timers, or the fixture event waiter.
 // setImmediate yields are transport propagation, not time, so they stay
 // allowed; the ban covers setTimeout, Bun.sleep and the hold-free loopback
-// delays. The scan covers only tests/meter/ and src/meter/ (decision S3
-// keeps delayMs in the loopback for other suites, e.g. the auditor).
+// delays. The scan covers only tests/meter/ and src/meter/ (the loopback
+// keeps delayMs for other suites, e.g. the auditor).
 import { expect, test } from "bun:test";
 
 const BANNED = ["setTimeout(", "Bun.sleep(", "delayMs", "chunkDelayMs"];

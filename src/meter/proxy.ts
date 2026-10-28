@@ -328,7 +328,7 @@ export async function handleMeterRequest(
   }
   // The LiveCall passes into forwardCall, which owns its finish(): the
   // outermost finally in forwardCall runs after the pump's call-end
-  // append settles (L8). The handler catch also finishes it for throws
+  // append settles. The handler catch also finishes it for throws
   // before the response; finish is idempotent.
   const call = holder.reserved;
   if (call === null) {
@@ -351,7 +351,7 @@ export async function handleMeterRequest(
   }
 }
 
-// F1: a call joins the live set inside its call-start chain step, when
+// A call joins the live set inside its call-start chain step, when
 // the guard passes and before the write. It leaves when its call-end
 // append settles; a failed call-start write removes it.
 export function callStartGuard(
@@ -416,7 +416,7 @@ async function forwardCall(
     abortWith("closed-abort");
   });
   const m0 = state.timers.elapsedMs();
-  // L1: the first-byte timer is cancelled at the headers, the idle timer
+  // The first-byte timer is cancelled at the headers, the idle timer
   // is armed at the headers and re-armed after each chunk, and the total
   // timer is armed once at t0 and cancelled only after the pump ends.
   const cancelFirstByte = state.timers.after(state.config.firstByteTimeoutMs, () => {
@@ -536,7 +536,7 @@ async function forwardCall(
     cancelFirstByte();
     cancelPumpTimers();
     const ms = Math.round(state.timers.elapsedMs() - m0);
-    // The early paths use the F4 order: finishEnd, then finish, then the
+    // The early paths use this order: finishEnd, then finish, then the
     // error answer.
     if (abortState.reason !== null) {
       const out: CallOutcome = abortState.reason;
@@ -595,7 +595,7 @@ async function forwardCall(
   let streamClosed = false;
   const callerStream = new ReadableStream<Uint8Array>({
     async start(streamController) {
-      // F4 order: the pump catch only records the outcome; after the pump
+      // The pump catch only records the outcome; after the pump
       // loop ends, for any reason, run exactly tap.end, finishEnd,
       // call.finish, then either errorCaller or close.
       try {
@@ -652,7 +652,7 @@ async function forwardCall(
         let inputTokens: number | null;
         let outputTokens: number | null;
         if (!is2xx) {
-          // F2: whatever happens to the body, the end is upstream-status,
+          // Whatever happens to the body, the end is upstream-status,
           // unbilled, with null counts.
           finalOutcome = "upstream-status";
           billed = false;

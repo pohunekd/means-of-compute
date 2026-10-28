@@ -261,7 +261,7 @@ export async function startMeterWithInternals(deps: MeterDeps): Promise<{
     } catch (error: unknown) {
       throw new MeterUnavailableError("meter: usage log rejected a record", { cause: error });
     }
-    // F5: a byte-identical reopen settles nothing and logs grant-opened
+    // A byte-identical reopen settles nothing and logs grant-opened
     // again; a conflicting reopen throws request-conflict.
     checkFailed(appender);
     if (openVerdict === "request-conflict") {

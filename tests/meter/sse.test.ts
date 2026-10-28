@@ -54,10 +54,10 @@ test("an earlier overflow nulls a later usage", () => {
 
 test("the limit counts bytes, not characters", () => {
   const tap = createSseUsageTap(64);
-  // This usage line is 61 bytes and fits under the 64-byte limit.
+  // This usage line is 25 bytes and fits under the 64-byte limit.
   tap.push(chunk('data: {"usage": {"p": 1}}\n'));
   // `data: ` plus 30 `€` chars is 6 + 90 + 1 = 97 bytes but only
-  // 6 + 30 + 1 = 37 UTF-16 units: a unit-counting tap would stay
+  // 6 + 30 + 1 = 37 UTF-16 units, and the `€` line itself is 96 bytes:
   // under the limit, a byte-counting tap overflows and stays unseen.
   tap.push(chunk(`data: ${"€".repeat(30)}\n`));
   tap.push(chunk('data: {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}\n\n'));

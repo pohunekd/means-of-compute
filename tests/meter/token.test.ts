@@ -43,7 +43,7 @@ test("strict decode rejects malformed bearers", () => {
 });
 
 test("a padded part 1 spelling is rejected", () => {
-  // M02: a plain decoder accepts padding; the strict decoder must not.
+  // A plain decoder accepts padding; the strict decoder must not.
   const requestId = "demo-item:0";
   const token = tokenFor(KEY_A, requestId);
   const [, encoded, mac] = token.split(".");
@@ -51,7 +51,7 @@ test("a padded part 1 spelling is rejected", () => {
 });
 
 test("a sibling part 1 spelling of the same bytes is rejected", () => {
-  // M02: moving the last char of part 1 to the next alphabet char keeps
+  // Moving the last char of part 1 to the next alphabet char keeps
   // the decoded bytes (unused low bits) but changes the spelling.
   const requestId = "demo-item:0";
   const token = tokenFor(KEY_A, requestId);
@@ -64,7 +64,7 @@ test("a sibling part 1 spelling of the same bytes is rejected", () => {
 });
 
 test("a sibling mac spelling of the same bytes is rejected", () => {
-  // L3: the MAC gets a re-encode round trip, so a non-canonical spelling
+  // The MAC gets a re-encode round trip, so a non-canonical spelling
   // of the same 32 bytes is rejected even though the bytes match.
   const requestId = "demo-item:0";
   const token = tokenFor(KEY_A, requestId);

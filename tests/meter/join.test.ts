@@ -1,7 +1,6 @@
 // Join tests: the unknown, unbilled, orphan and zero rules of section 4.4.
-// L5 settles a real grant with zero billed calls and expects one
-// all-zero row back, instead of hand-building records.
-// Uses the live meter through the fixture.
+// The first test settles a real grant with zero billed calls through the
+// live meter and expects one all-zero row back.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,7 +79,7 @@ async function joinOf(
   }
 }
 
-test("L5: settle with zero billed calls returns one all-zero row", async () => {
+test("settle with zero billed calls returns one all-zero row", async () => {
   await withMeter("tests/meter/recordings/json-ok.json", async ({ meter }) => {
     const { sessionId } = await openBoundGrant(meter);
     const usage = await meter.settle(sessionId, "finished");

@@ -85,7 +85,7 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
       const head = await post(meter, token, chatBody());
       expect(head.status).toBe(200);
       expect(await readFirstChunk(head)).toContain("prompt_tokens");
-      // F3: the grant-close is durable once the 30 s drain timer arms;
+      // The grant-close is durable once the 30 s drain timer arms;
       // advancing it fires the abort, and the usage joins after the end.
       const settling = meter.settle(sessionId, "finished");
       await timers.waitForTimer(30000);
@@ -109,7 +109,7 @@ test("drain: settle aborts a slow call and waits for its end", async () => {
       expect(end.billed).toBe(true);
       expect(end.inputTokens).toBe(7);
       expect(end.outputTokens).toBe(3);
-      // M32: the usage the caller saw is the replayed join, computed
+      // The usage the caller saw is the replayed join, computed
       // only after every end went durable.
       const replayed = await replayUsageLog(logPath, "read-only", () => {});
       if (usage === null) {
@@ -153,7 +153,7 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
       ]);
       const lines8500 = await readLogLines(logPath);
       const end8500 = readEnd(lines8500);
-      // F2: a non-2xx end is upstream-status, unbilled, with null
+      // A non-2xx end is upstream-status, unbilled, with null
       // counts, whatever happened to the body. The manual clock ran
       // only to the drain, so ms is 777.
       expect(end8500.outcome).toBe("upstream-status");
@@ -167,7 +167,14 @@ test("a non-2xx body that stalls is aborted at drain and not billed", async () =
       await waitForEvent((e) => e.event === "call-finished");
       await meter.close();
     },
-    { config: { idleTimeoutMs: 60001, firstByteTimeoutMs: 60001, totalTimeoutMs: 60001, drainTimeoutMs: 777 } },
+    {
+      config: {
+        idleTimeoutMs: 60001,
+        firstByteTimeoutMs: 60001,
+        totalTimeoutMs: 60001,
+        drainTimeoutMs: 777,
+      },
+    },
   );
 });
 
@@ -175,18 +182,20 @@ test("close aborts a held call without release", async () => {
   await withMeter(
     "tests/meter/recordings/status-500-hold.json",
     async ({ meter, logPath, loopback, waitForEvent }) => {
-      const { token } = await openBoundGrant(meter);
+      const { requestId, token } = await openBoundGrant(meter);
       const resp = await post(meter, token, chatBody());
       expect(resp.status).toBe(500);
-      // The body stalls behind the gate and the hold is never
-      // released: close must still abort the live call and return.
+      // The call is held upstream, and meter.close() below aborts it
+      // without the hold ever being released: close must still return.
       await loopback.waitHeld(1);
       await meter.close();
       await waitForEvent((e) => e.event === "call-finished");
       const lines = await readLogLines(logPath);
       const end = readEnd(lines);
       expect(end.billed).toBe(false);
-      expect(token.length).toBeGreaterThan(0);
+      expect(end.outcome).toBe("upstream-status");
+      expect(end.status).toBe(500);
+      expect(end.requestId).toBe(requestId);
     },
   );
 });
@@ -226,13 +235,14 @@ test("drain with drainTimeoutMs 0 still awaits the end", async () => {
 });
 
 test("close race: concurrent calls are either counted or refused", async () => {
-  // L2: ten calls hang inside call-start, racing a close that cannot
-  // interleave until each either commits or refuses.
+  // Ten calls are live and held upstream; ten more calls are sent
+  // before the drain timer below is awaited, racing a close the chain
+  // step cannot interleave until each either commits or refuses.
   await withMeter(
     "tests/meter/recordings/stream-hold-after-first.json",
     async ({ meter, loopback, timers }) => {
       const { token, sessionId } = await openBoundGrant(meter);
-      // Ten calls reach the upstream hold: every one is live and held.
+      // Ten calls reach the upstream hold and stay there.
       const pendings = Array.from({ length: 10 }, () => post(meter, token, chatBody()));
       await loopback.waitHeld(10);
       const timerArmed = timers.waitForTimer(999);
@@ -267,7 +277,7 @@ test("close race: concurrent calls are either counted or refused", async () => {
 });
 
 test("a settled grant returns its memo after a later latch", async () => {
-  // L9: settle A, latch the meter through the IO seam with grant B,
+  // Settle A, latch the meter through the IO seam with grant B,
   // then settle A again. The resolved memo wins over the latch.
   let failWrites = false;
   const latchIo = (base: UsageLogIo): UsageLogIo => ({
@@ -487,7 +497,7 @@ test("a taken port fails with the alias and the code only", async () => {
       log,
     });
     started.push(meterA);
-    // L4: the second listener names its alias and the errno code only;
+    // The second listener names its alias and the errno code only;
     // the Bun message with the taken port never surfaces.
     const configB: MeterConfig = {
       ...base,

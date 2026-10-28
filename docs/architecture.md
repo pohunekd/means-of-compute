@@ -110,11 +110,9 @@ host, 2 on any input or config error.
 ## Metering proxy
 
 All model traffic from worker sessions flows through the metering proxy
-(`src/meter/`). The proxy holds the provider keys: the host environment
-carries only a short-lived caller token (`moc1.` + base64url grant id +
-HMAC) from `meter.tokenFor(requestId)` — deterministic, and `openGrant`
-mints nothing. The token is valid only while its grant is open and is
-delivered through session metadata. Provider keys never appear in the usage
+(`src/meter/`). The proxy holds the provider keys: the session receives
+its caller token through session metadata, and the token is valid only
+while its grant is open. Provider keys never appear in the usage
 log, the factory log, or error responses. See [meter.md](meter.md) for the proxy, the
 config keys, the env vars, the usage-log format, and the operator secret
 command.

@@ -114,8 +114,7 @@ function withDir(run: (dir: string) => Promise<void>): () => Promise<void> {
 }
 
 // One row per 4.3 predicate: replay must reject with MeterLogError
-// naming the line and the given text. Rows M23 and M26 kill their
-// mutations at the round-2 head.
+// naming the line and the given text.
 const replayRows: ReadonlyArray<{
   readonly name: string;
   readonly records: () => UsageLogRecord[];
@@ -307,6 +306,21 @@ test(
       events.push(e);
     };
     resetProvidersCache();
+    const savedEnv: Record<string, string | undefined> = {
+      META_API_KEY: process.env.META_API_KEY,
+      NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+      PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
+      PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+    };
+    const restoreEnv = (): void => {
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    };
     process.env.META_API_KEY = "test-meta-key";
     process.env.NVIDIA_API_KEY = "test-nvidia-key";
     process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:1";
@@ -337,7 +351,7 @@ test(
           providerId: "meta-api",
           model: "muse-spark-1.3-contributor",
         });
-        // M1a: the schema check in checkRecord refuses the empty
+        // The schema check in checkRecord refuses the empty
         // session id on the rejection path — usage-log-rejected, no
         // latch, no write — and the meter stays usable.
         let message = "";
@@ -367,10 +381,7 @@ test(
       await meter2.close();
     } finally {
       resetProvidersCache();
-      delete process.env.META_API_KEY;
-      delete process.env.NVIDIA_API_KEY;
-      delete process.env.PROVIDER_META_API_BASE_URL;
-      delete process.env.PROVIDER_NVIDIA_BUILD_BASE_URL;
+      restoreEnv();
     }
   }),
 );
@@ -379,7 +390,7 @@ test(
   "torn tail after a non-ASCII session id is cut at the byte boundary",
   withDir(async (dir) => {
     const path = join(dir, "usage.jsonl");
-    // L5: two complete lines, then a torn tail without a newline. The cut
+    // Two complete lines, then a torn tail without a newline. The cut
     // and the dropped count are in bytes, not UTF-16 units.
     await writeLog(path, [openGrant(), bind({ sessionId: "séance-1" })], '{"kind":"call-st');
     const events: MeterLogEvent[] = [];
@@ -429,7 +440,7 @@ test(
 
 test("write-ahead: the fsync precedes the in-memory apply in source order", async () => {
   // A failing fsync must not leave an applied-but-undurable record behind.
-  // The order is structural, so assert it structurally: the S6 split runs
+  // The order is structural, so assert it structurally: the split runs
   // checkRecord (validate) before the write, then write, then datasync,
   // then commitRecord (apply) — all inside the append step. The datasync
   // in the append step is the second datasync site in the file (the

@@ -280,7 +280,7 @@ function commitRecord(mutable: MutableIndex, record: UsageLogRecord): void {
   }
 }
 
-// L5: the torn-tail cut and the dropped count are in bytes.
+// The torn-tail cut and the dropped count are in bytes.
 function readTornTail(text: string): {
   readonly body: string;
   readonly dropped: number;

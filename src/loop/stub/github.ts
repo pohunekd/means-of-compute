@@ -423,6 +423,32 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
       throw mapGitError("mergePull", error);
     }
     const wt = join(options.scratchDir, `stub-merge-${String(pull)}`);
+    // Best effort, like `trialMerge` step 1: a leftover of this pull's own
+    // scratch path is cleared before the add, and the next `mergePull` of
+    // the same pull clears a leftover the same way, so no registered
+    // leftover survives here; the `worktree add` failure below stays `rejected`.
+    try {
+      await runStubGit(options.originDir, options.git, "mergePull", [
+        "worktree",
+        "remove",
+        "--force",
+        wt,
+      ]);
+    } catch {
+      // Ignored: the add below decides the outcome.
+    }
+    try {
+      if (await pathExists(wt)) {
+        await rm(wt, { recursive: true, force: true });
+      }
+    } catch {
+      // Ignored: the add below decides the outcome.
+    }
+    try {
+      await runStubGit(options.originDir, options.git, "mergePull", ["worktree", "prune"]);
+    } catch {
+      // Ignored: the add below decides the outcome.
+    }
     const added = await runStubGit(options.originDir, options.git, "mergePull", [
       "worktree",
       "add",
@@ -465,8 +491,9 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
       row.mergedHead = headSha;
       row.mergeCommit = nextSha;
     } finally {
-      // Best effort: the scratch worktree is sandbox state, and a later
-      // `worktree prune` reclaims a leftover, so cleanup never replaces the call's outcome.
+      // Best effort: the scratch worktree is sandbox state, so cleanup
+      // after the merge never replaces the call's outcome, and the next
+      // `mergePull` of the same pull clears a leftover before its add.
       try {
         await runStubGit(options.originDir, options.git, "mergePull", [
           "worktree",

@@ -112,15 +112,19 @@ function killGroup(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
 }
 
 function exitRc(exitCode: number | null, signalCode: unknown): number {
-  if (exitCode !== null) {
+  if (typeof exitCode === "number") {
     return exitCode;
   }
   if (typeof signalCode === "string") {
     const table: Readonly<Record<string, number>> = constants.signals;
-    const offset: number = table[signalCode] ?? 0;
-    return 128 + offset;
+    const offset: number | undefined = table[signalCode];
+    if (typeof offset === "number") {
+      return 128 + offset;
+    }
   }
-  return 1;
+  throw new Error(
+    `coord: unknown exit signal exitCode=${String(exitCode)} signalCode=${String(signalCode)}`,
+  );
 }
 
 async function appendSpawnFailed(
@@ -185,8 +189,6 @@ async function runSessionExport(
   let rc: number;
   try {
     rc = await proc.exited;
-  } catch {
-    rc = Number.NaN;
   } finally {
     clearTimeout(timer);
   }
@@ -202,14 +204,14 @@ async function runSessionExport(
     });
     return false;
   }
-  if (Number.isNaN(rc) || rc !== 0) {
+  if (rc !== 0) {
     await log.append({
       ts: at.toISOString(),
       event: "export",
       k,
       ok: false,
       reason: "exit",
-      rc: Number.isNaN(rc) ? 1 : rc,
+      rc,
     });
     return false;
   }
@@ -246,9 +248,8 @@ export async function runMuseSession(
   const home = join(session.runDir, "home");
   const childEnv = museEnv(config.envPassthrough, session.runDir, env);
   const argvSha256 = sha256Hex(JSON.stringify(museArgv(config, session)));
-  const start = now();
   await log.append({
-    ts: start.toISOString(),
+    ts: t0.toISOString(),
     event: "session-start",
     k,
     kind: session.kind,
@@ -311,49 +312,71 @@ export async function runMuseSession(
   const killState: {
     killed: "timeout" | "aborted" | null;
     done: Promise<void> | null;
-  } = { killed: null, done: null };
+    killError: unknown;
+  } = { killed: null, done: null, killError: null };
+  const recordKillError = (error: unknown): void => {
+    if (killState.killError === null) {
+      killState.killError = error;
+    }
+  };
   const armKill = (): void => {
     killState.done = new Promise<void>((resolve) => {
       setTimeout(() => {
-        killGroup(pid, "SIGKILL");
-        resolve();
+        try {
+          killGroup(pid, "SIGKILL");
+        } catch (error: unknown) {
+          recordKillError(error);
+        } finally {
+          resolve();
+        }
       }, opts.killGraceMs);
     });
   };
   const onTimeout = (): void => {
     if (killState.killed === null) {
       killState.killed = "timeout";
-      killGroup(pid, "SIGTERM");
+      try {
+        killGroup(pid, "SIGTERM");
+      } catch (error: unknown) {
+        recordKillError(error);
+      }
       armKill();
     }
   };
   const onAbort = (): void => {
     if (killState.killed === null) {
       killState.killed = "aborted";
-      killGroup(pid, "SIGTERM");
+      try {
+        killGroup(pid, "SIGTERM");
+      } catch (error: unknown) {
+        recordKillError(error);
+      }
       armKill();
     }
   };
   const timeoutTimer = setTimeout(onTimeout, opts.timeoutMs);
   opts.signal.addEventListener("abort", onAbort, { once: true });
-  const waitState = { failed: false };
+  if (opts.signal.aborted) {
+    onAbort();
+  }
   try {
     await proc.exited;
-  } catch {
-    waitState.failed = true;
+  } finally {
+    clearTimeout(timeoutTimer);
+    opts.signal.removeEventListener("abort", onAbort);
+    if (killState.done !== null) {
+      await killState.done;
+    }
+    await jsonl.close();
+    await stderrHandle.close();
   }
-  clearTimeout(timeoutTimer);
-  opts.signal.removeEventListener("abort", onAbort);
-  if (killState.done !== null) {
-    await killState.done;
+  if (killState.killError !== null) {
+    throw killState.killError;
   }
-  await jsonl.close();
-  await stderrHandle.close();
   const end = now();
   const durationMs = end.getTime() - t0.getTime();
-  const outcome: SessionOutcome = waitState.failed
-    ? { kind: "exited", rc: 1 }
-    : killState.killed === null
+  const outcome: SessionOutcome =
+    killState.killed === null
       ? { kind: "exited", rc: exitRc(proc.exitCode, proc.signalCode) }
       : { kind: killState.killed };
   await log.append({

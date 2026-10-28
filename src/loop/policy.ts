@@ -36,6 +36,7 @@ export type StallDecision =
       readonly then: "block";
       readonly stallRounds: number;
       readonly escalationKey: string;
+      readonly statusReason: string;
       readonly blockedReason: string;
     };
 
@@ -122,6 +123,7 @@ export function stallDecision(
     then: "block",
     stallRounds,
     escalationKey: `stall:${id}:${String(retry)}`,
+    statusReason: `stalled: ${String(stall.maxStagnantRounds)} rounds without a newly met DoD item`,
     blockedReason: `blocked: ${String(stall.maxRetries)} retries used`,
   };
 }

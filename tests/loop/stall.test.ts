@@ -101,6 +101,7 @@ test("a third retry blocks with the retries reason (L8, O4)", () => {
     then: "block",
     stallRounds: 3,
     escalationKey: "stall:demo-a:2",
+    statusReason: "stalled: 3 rounds without a newly met DoD item",
     blockedReason: "blocked: 2 retries used",
   });
 });

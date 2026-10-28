@@ -68,15 +68,6 @@ function fullInput(): BriefInput {
   };
 }
 
-function fullSize(input: BriefInput): number {
-  const full = buildBrief(input, 1 << 20);
-  expect(full.kind).toBe("ok");
-  if (full.kind === "ok") {
-    return Buffer.byteLength(full.brief, "utf8");
-  }
-  throw new Error("expected an ok brief");
-}
-
 test("a full brief matches the fixture byte for byte (L13, B5)", () => {
   const result = buildBrief(fullInput(), 65536);
   expect(result.kind).toBe("ok");
@@ -106,35 +97,50 @@ test("a tight limit drops findings from the end with an omission line (L13b, B5)
       findings: { headSha: "0123456789abcdef0123456789abcdef01234567", list: findings },
     },
   };
-  const smallest = buildBrief(input, 0);
-  expect(smallest.kind).toBe("too-large");
-  if (smallest.kind === "too-large") {
-    const floor = smallest.bytes;
-    const withTen = buildBrief(input, 1 << 20);
-    expect(withTen.kind).toBe("ok");
-    if (withTen.kind === "ok") {
-      expect(withTen.omittedFindings).toBe(0);
-      let limit = floor;
-      let kept = buildBrief(input, limit);
-      for (; ; limit += 1) {
-        if (kept.kind === "ok" && kept.omittedFindings === 50) {
-          break;
-        }
-        if (kept.kind === "ok" && kept.omittedFindings !== 50) {
-          kept = buildBrief(input, limit + 1);
-          continue;
-        }
-        kept = buildBrief(input, limit + 1);
-        if (limit > floor + 100000) {
-          throw new Error("no limit keeps exactly 10 findings");
-        }
-      }
-      expect(kept.kind).toBe("ok");
-      const size = Buffer.byteLength(kept.brief, "utf8");
-      expect(kept.omittedFindings).toBe(50);
-      expect(kept.brief).toContain("(50 more findings omitted)");
-      expect(size).toBeLessThanOrEqual(fullSize(input));
-    }
+  const head = [
+    "Work item demo-d: Repair the demo widget",
+    "Repository example/demo-repo. Branch factory/demo-d from main.",
+    "",
+    "Goal:",
+    "The widget renders within one second.",
+    "",
+    "Definition of done:",
+    "- [ ] D1: Widget renders.",
+    "- [ ] D2: Render takes under a second.",
+    "",
+    "Rules: Commit on factory/demo-d and push it to origin. Do not open a pull request. Do not push to main.",
+    "",
+    "Previous round: red-ci.",
+    "Audit findings at 0123456789ab:",
+    ...findings.slice(0, 10).map(
+      (finding) =>
+        `- [${finding.severity}] ${finding.location}: ${finding.defect} Fix: ${finding.fixDirection}`,
+    ),
+    "(50 more findings omitted)",
+  ];
+  const expected = `${head.join("\n")}\n`;
+  const limit = Buffer.byteLength(expected, "utf8");
+  const kept = buildBrief(input, limit);
+  expect(kept.kind).toBe("ok");
+  if (kept.kind === "ok") {
+    expect(kept.omittedFindings).toBe(50);
+    expect(kept.brief).toBe(expected);
+    expect(kept.brief).toContain("(50 more findings omitted)");
+    expect(kept.brief).not.toContain("src/widget.ts:11");
+    expect(kept.brief.match(/^- \[low\]/gm)).toHaveLength(10);
+    expect(Buffer.byteLength(kept.brief, "utf8")).toBeLessThanOrEqual(limit);
+  } else {
+    throw new Error("expected an ok brief at the hand-computed limit");
+  }
+  const tighter = buildBrief(input, limit - 1);
+  expect(tighter.kind).toBe("ok");
+  if (tighter.kind === "ok") {
+    expect(tighter.omittedFindings).toBe(51);
+    expect(tighter.brief).not.toContain("src/widget.ts:10");
+    expect(tighter.brief.match(/^- \[low\]/gm)).toHaveLength(9);
+    expect(Buffer.byteLength(tighter.brief, "utf8")).toBeLessThanOrEqual(limit - 1);
+  } else {
+    throw new Error("expected an ok brief one byte below the limit");
   }
 });
 

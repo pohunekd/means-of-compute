@@ -115,9 +115,7 @@ test("an invalid second line names line 2 without its content (L12, B4)", async 
       error = thrown;
     }
     expect(error).toBeInstanceOf(LoopResultsDataError);
-    const message = (error as Error).message;
-    expect(message).toContain("line 2");
-    expect(message).not.toContain("{broken");
+    expect((error as Error).message).toBe(`loop results ${path}: line 2: not JSON`);
   });
 });
 
@@ -132,6 +130,7 @@ test("key and routing mismatches fail R-a and R-b (L12b, B4)", () =>
       raError = thrown;
     }
     expect(raError).toBeInstanceOf(LoopResultsDataError);
+    expect((raError as Error).message).toBe(`loop results ${ra}: line 1: rule R-a`);
     const rb = join(dir, "rb.jsonl");
     writeFileSync(rb, `${JSON.stringify(line(0, "ci-timeout", "failure"))}\n`);
     let rbError: unknown;
@@ -141,6 +140,7 @@ test("key and routing mismatches fail R-a and R-b (L12b, B4)", () =>
       rbError = thrown;
     }
     expect(rbError).toBeInstanceOf(LoopResultsDataError);
+    expect((rbError as Error).message).toBe(`loop results ${rb}: line 1: rule R-b`);
   }));
 
 test("an append truncates a 7-byte torn tail and keeps earlier lines (L12c, B4)", async () => {

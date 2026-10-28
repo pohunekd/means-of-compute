@@ -1,5 +1,6 @@
-// In-memory GitHubPort double: records calls, fails a named method
+// In-memory GitHubPort double: records every call, fails a named method
 // once with a given GitHubError, and stores comments with a login.
+// Methods the park tests never call throw instead of succeeding.
 import type {
   CheckRun,
   CommentFirstLine,
@@ -29,10 +30,8 @@ interface StoredIssue {
   readonly labels: readonly string[];
 }
 
-function keep(value: unknown): void {
-  if (value === null) {
-    throw new Error("unreachable");
-  }
+function unused(): never {
+  throw new Error("not used by the park tests");
 }
 
 export class FakeGitHub implements GitHubPort {
@@ -70,12 +69,13 @@ export class FakeGitHub implements GitHubPort {
   }
 
   viewerLogin(): Promise<string> {
+    this.calls.push({ method: "viewerLogin", args: [] });
     return Promise.resolve(this.login);
   }
 
   checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]> {
-    keep(`${repo}${sha}`);
-    return Promise.resolve([]);
+    this.calls.push({ method: "checkRuns", args: [repo, sha] });
+    return unused();
   }
 
   commentFirstLines(repo: string, number: number): Promise<readonly CommentFirstLine[]> {
@@ -93,8 +93,8 @@ export class FakeGitHub implements GitHubPort {
   }
 
   pullsForBranch(repo: string, branch: string): Promise<readonly PullRow[]> {
-    keep(`${repo}${branch}`);
-    return Promise.resolve([]);
+    this.calls.push({ method: "pullsForBranch", args: [repo, branch] });
+    return unused();
   }
 
   createPull(
@@ -104,34 +104,28 @@ export class FakeGitHub implements GitHubPort {
     title: string,
     body: string,
   ): Promise<number> {
-    keep(`${repo}${head}${base}${title}${body}`);
-    return Promise.resolve(1);
+    this.calls.push({ method: "createPull", args: [repo, head, base, title, body] });
+    return unused();
   }
 
   viewPull(repo: string, pull: number): Promise<PullView> {
-    keep(`${repo}${String(pull)}`);
-    return Promise.resolve({
-      state: "OPEN",
-      headRefOid: "0".repeat(40),
-      baseRefName: "main",
-      isDraft: false,
-      mergeCommit: null,
-    });
+    this.calls.push({ method: "viewPull", args: [repo, pull] });
+    return unused();
   }
 
   mergePull(repo: string, pull: number, headSha: string): Promise<void> {
-    keep(`${repo}${String(pull)}${headSha}`);
-    return Promise.resolve();
+    this.calls.push({ method: "mergePull", args: [repo, pull, headSha] });
+    return unused();
   }
 
   baseSha(repo: string, baseBranch: string): Promise<string> {
-    keep(`${repo}${baseBranch}`);
-    return Promise.resolve("0".repeat(40));
+    this.calls.push({ method: "baseSha", args: [repo, baseBranch] });
+    return unused();
   }
 
   commitParents(repo: string, sha: string): Promise<readonly string[]> {
-    keep(`${repo}${sha}`);
-    return Promise.resolve([]);
+    this.calls.push({ method: "commitParents", args: [repo, sha] });
+    return unused();
   }
 
   createIssue(

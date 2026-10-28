@@ -179,12 +179,10 @@ the committed names. Every error names the variable, never its value.
 Generate the secret and store it without printing it:
 
 ```sh
-( set -eu; : "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"; install -d -m 0700 "$XDG_RUNTIME_DIR/moc"; chmod 0700 "$XDG_RUNTIME_DIR/moc"; ( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" ); chmod 0600 "$XDG_RUNTIME_DIR/moc/meter-secret"; export MOC_METER_SECRET="$(cat "$XDG_RUNTIME_DIR/moc/meter-secret")"; test -n "$MOC_METER_SECRET" && echo set )
+( set -eu; : "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set}"; install -d -m 0700 "$XDG_RUNTIME_DIR/moc"; chmod 0700 "$XDG_RUNTIME_DIR/moc"; ( umask 077 && openssl rand -base64 32 > "$XDG_RUNTIME_DIR/moc/meter-secret" ); chmod 0600 "$XDG_RUNTIME_DIR/moc/meter-secret" ) && export MOC_METER_SECRET="$(cat "$XDG_RUNTIME_DIR/moc/meter-secret")" && test -n "$MOC_METER_SECRET" && echo set
 ```
 
-The snippet is one subshell with `set -eu`: an unset `XDG_RUNTIME_DIR`
-stops the whole block, also when it is pasted into an interactive shell.
-The explicit `chmod`s make the modes hold even when the directory or the
+The file is created in a subshell with `set -eu`, so an unset `XDG_RUNTIME_DIR` stops it, also when pasted; the `&&` chain then skips the export; the export runs in the current shell. The explicit `chmod`s make the modes hold even when the directory or the
 file already exists. The secret file lives outside the repository,
 never under `logs/`.
 

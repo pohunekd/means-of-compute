@@ -5,7 +5,7 @@
     "": {
       "name": "means-of-compute",
       "dependencies": {
-        "@pohunek/sdk": "https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-sdk-0.37.0.tgz",
+        "@pohunek/sdk": "https://github.com/zajca/pohunek/releases/download/v0.38.1/pohunek-ts-sdk-0.38.1.tgz",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
       },
@@ -54,9 +54,9 @@
 
     "@keyv/serialize": ["@keyv/serialize@1.1.1", "", {}, "sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA=="],
 
-    "@pohunek/protocol": ["@pohunek/protocol@https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-protocol-0.37.0.tgz", {}, "sha512-VCQw2goZf8rcGZRZrZuiFo5mn+z7ZbHoewDuJKiUu79+G6RYaISYGWttJ2s9R/NFzLpqC7zxNmHQFxZ7XOG81w=="],
+    "@pohunek/protocol": ["@pohunek/protocol@https://github.com/zajca/pohunek/releases/download/v0.38.1/pohunek-ts-protocol-0.38.1.tgz", {}, "sha512-lzXI41patDY8hqQitx2RtGdz1P1TbKTlGyibF/mLV0tEalusKan7vKBiNhoh8cTIqZdroJ5PNwpVF8wDNghVQQ=="],
 
-    "@pohunek/sdk": ["@pohunek/sdk@https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-sdk-0.37.0.tgz", { "dependencies": { "@pohunek/protocol": "https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-protocol-0.37.0.tgz" } }, "sha512-aVKD4DE+8AYBzdfmseqF6LwCdB24jf7OOoiK9wlWRO69087gEhf6rxypQo8EksuVSkYCn3ROfLgfyIVc9P1FUA=="],
+    "@pohunek/sdk": ["@pohunek/sdk@https://github.com/zajca/pohunek/releases/download/v0.38.1/pohunek-ts-sdk-0.38.1.tgz", { "dependencies": { "@pohunek/protocol": "https://github.com/zajca/pohunek/releases/download/v0.38.1/pohunek-ts-protocol-0.38.1.tgz" } }, "sha512-WSXkYFaFrM/2ODGFIj7HFUvToctGX2AmQj2hJLsl0dD2ODWfGWjjTLialqvdjlcJmznOZmzN9xHDJdbs4AY8jw=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 

@@ -156,7 +156,7 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
         new Promise<void>((resolve) => {
           setTimeout(() => {
             resolve();
-          }, options.clientTimeoutMs);
+          }, 1000);
         }),
       ]);
     } catch {

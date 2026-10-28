@@ -41,6 +41,58 @@ test("C1 spawned mcp:call fleet_status exits 0 with ok true (C1)", async () => {
   expect(parsed.ok).toBe(true);
 });
 
+test("O2 large list_work result drains via slow reader without truncation (O2)", async () => {
+  const env = await createMcpTestEnv("mcp-o2-");
+  const items: unknown[] = [];
+  for (let n = 0; n < 600; n += 1) {
+    items.push({
+      schemaVersion: "v1",
+      id: `w-${String(n).padStart(4, "0")}`,
+      repo: "example/demo-repo",
+      title: `Item ${String(n)} ${"x".repeat(200)}`,
+      goal: "Goal",
+      issue: n + 1,
+      dod: [{ id: "D1", text: "Done", done: false }],
+      dependencies: [],
+      status: "queued",
+      statusReason: null,
+      assignedHostAlias: null,
+      branch: null,
+      pullNumber: null,
+      modelRouting: { preferredModel: "meta/muse-glimmer-30b", attempts: 0, fallbackUsed: false },
+      retryCount: 0,
+      stallRounds: 0,
+    });
+  }
+  await Bun.write(
+    env.storePath,
+    JSON.stringify({ schemaVersion: "v1", revision: 1, items, submissions: [] }),
+  );
+  await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
+  await Bun.write(
+    "tests/fixtures/mcp/list-all.json",
+    JSON.stringify({ status: ["queued", "running", "review", "parked", "blocked", "done"] }),
+  );
+  const rcFile = `${env.dir}/rc`;
+  const shCmd = `{ ${process.execPath} src/mcp/call.ts list_work --file tests/fixtures/mcp/list-all.json --config "${env.mcpConfigPath}"; echo $? > "${rcFile}"; } | (sleep 1; cat)`;
+  const proc = Bun.spawn(["sh", "-c", shCmd], {
+    cwd: process.cwd(),
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [code, out] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout as ReadableStream).text(),
+  ]);
+  expect(code).toBe(0);
+  expect(out.length).toBeGreaterThan(200000);
+  const parsed = JSON.parse(out.split("\n")[0] as string) as { ok: boolean; items: unknown[] };
+  expect(parsed.ok).toBe(true);
+  expect(parsed.items.length).toBe(600);
+  expect(await Bun.file(rcFile).text()).toBe("0\n");
+}, 25000);
+
 test("C2 usage and config errors map to exits 2 and 4 (C2)", async () => {
   const bogus = await spawnCall(["fleet_status", "--bogus"]);
   expect(bogus.code).toBe(2);

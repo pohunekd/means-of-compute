@@ -1,8 +1,8 @@
 // MCP call log (L1-L3): one append-only JSONL file per server run.
-// Opened once with open(path, "a", 0o600); each entry is one write of one
-// JSON line followed by datasync, serialized through a single in-process
-// chain. A failed append latches the log: later appends throw
-// CallLogUnavailableError and serve.ts reports call-log-unavailable.
+// Opened once; each entry is one write of one JSON line followed by
+// datasync, serialized through a single in-process chain. A failed append
+// latches the log: later appends throw CallLogUnavailableError, which
+// protocol.ts reports as call-log-unavailable.
 import { open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 

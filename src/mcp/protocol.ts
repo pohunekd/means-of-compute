@@ -1,6 +1,7 @@
-// MCP JSON-RPC protocol (P1-P9 without transport).
-// Framing lives in serve.ts; this module owns message semantics and the
-// in-process serialization (T4). Tool results never carry exception text.
+// MCP JSON-RPC protocol (P1-P10 without transport).
+// Line framing (createLineSplitter) and message semantics live here;
+// serve.ts only moves bytes between stdio and the queue (T4). Tool results
+// never carry exception text.
 import { canonicalJson, sha256Hex } from "../work/canonical.js";
 import type { CallLog } from "./call-log.js";
 import type { McpServerInfo } from "./config.js";

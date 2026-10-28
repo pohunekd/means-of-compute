@@ -1,4 +1,4 @@
-// MCP server transport tests (matrix SV1-SV3, C1): the spawned server
+// MCP server transport tests (matrix SV1-SV3): the spawned server
 // answers over stdio (initialize, tools/list, fleet_status), keeps stdout
 // free of diagnostics, answers a call before EOF and exits 0, and exits 2
 // with empty stdout on startup failures.
@@ -40,11 +40,7 @@ interface SpawnResult {
   readonly stderr: string;
 }
 
-async function spawnServer(
-  envDir: string,
-  input: string,
-  extraArgs: readonly string[] = [],
-): Promise<SpawnResult> {
+async function spawnServer(input: string, extraArgs: readonly string[] = []): Promise<SpawnResult> {
   const proc = Bun.spawn(
     [process.execPath, "src/mcp/serve.ts", "--caller", "coordinator", ...extraArgs],
     {
@@ -52,12 +48,8 @@ async function spawnServer(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, MCP_TEST_DIR: envDir },
     },
   );
-  if (envDir.length === 0) {
-    throw new Error("test env dir is missing");
-  }
   const sink = proc.stdin as unknown as {
     write(chunk: string): void;
     end(): void;
@@ -79,7 +71,7 @@ test("SV1 stdout carries only JSON-RPC responses (SV1, D1)", async () => {
     JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
   );
   await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
-  const result = await spawnServer(env.dir, `${initLine(1)}\n${listLine(2)}\n${callLine(3)}\n`, [
+  const result = await spawnServer(`${initLine(1)}\n${listLine(2)}\n${callLine(3)}\n`, [
     "--config",
     env.mcpConfigPath,
   ]);
@@ -112,7 +104,7 @@ test("SV2 a call followed by EOF is answered and the server exits 0 (SV2)", asyn
     JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
   );
   await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
-  const result = await spawnServer(env.dir, `${initLine(1)}\n${callLine(2)}\n`, [
+  const result = await spawnServer(`${initLine(1)}\n${callLine(2)}\n`, [
     "--config",
     env.mcpConfigPath,
   ]);
@@ -134,7 +126,7 @@ test("F1 a final call line without a newline is answered (F1, T3.2)", async () =
     JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
   );
   await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
-  const result = await spawnServer(env.dir, `${initLine(1)}\n${callLine(2)}`, [
+  const result = await spawnServer(`${initLine(1)}\n${callLine(2)}`, [
     "--config",
     env.mcpConfigPath,
   ]);
@@ -188,7 +180,7 @@ test("F2 a large response is written whole before exit (F2, T3.2)", async () => 
   await writeTestFile(env.registryPath, { sessions });
   // Stdin closes right after the call; stdout is read only after the
   // child has exited, so any truncation fails the parse below.
-  const result = await spawnServer(env.dir, `${initLine(1)}\n${callLine(2)}\n`, [
+  const result = await spawnServer(`${initLine(1)}\n${callLine(2)}\n`, [
     "--config",
     env.mcpConfigPath,
   ]);

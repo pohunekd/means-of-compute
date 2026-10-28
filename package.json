@@ -12,6 +12,7 @@
     "ledger:record": "bun run src/ledger/cli.ts record",
     "ledger:query": "bun run src/ledger/cli.ts query",
     "factory:serve": "bun run src/factory/serve.ts",
+    "dispatch:start": "bun run src/dispatcher/cli.ts start",
     "place": "bun run src/placement/cli.ts",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",
@@ -21,6 +22,7 @@
     "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**"
   },
   "dependencies": {
+    "@pohunek/sdk": "https://github.com/zajca/pohunek/releases/download/v0.37.0/pohunek-ts-sdk-0.37.0.tgz",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1"
   },

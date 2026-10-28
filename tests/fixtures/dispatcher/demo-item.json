@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "v1",
+  "id": "demo-item",
+  "repo": "example/demo",
+  "title": "Demo item for the dispatcher dry-run",
+  "goal": "Show the dry-run start request for one queued item",
+  "issue": 10,
+  "dod": [{ "id": "D1", "text": "Dry-run prints the start request", "done": false }],
+  "dependencies": [],
+  "status": "queued",
+  "statusReason": null,
+  "assignedHostAlias": null,
+  "branch": null,
+  "pullNumber": null,
+  "modelRouting": {
+    "preferredModel": "meta/muse-glimmer-30b",
+    "attempts": 0,
+    "fallbackUsed": false
+  },
+  "retryCount": 0,
+  "stallRounds": 0
+}

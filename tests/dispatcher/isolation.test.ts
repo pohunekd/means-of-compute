@@ -115,7 +115,17 @@ test("no tracked file outside the adapter names the SDK specifier", async () => 
     if (!extensions.has(extname(path))) {
       continue;
     }
-    const text = await readFile(join(process.cwd(), path), "utf8");
+    const text = await readFile(join(process.cwd(), path), "utf8").catch((error: unknown) => {
+      // A path listed by git but missing on disk is an unstaged deletion:
+      // it carries no specifier text, so it cannot match.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    });
+    if (text === null) {
+      continue;
+    }
     if (specifier.test(text)) {
       hits.push(path);
     }

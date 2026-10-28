@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "v1",
+  "workItemId": "demo-item",
+  "chosenHostAlias": "laptop-a",
+  "reason": "demo hand-written decision",
+  "candidates": [
+    {
+      "hostAlias": "laptop-a",
+      "score": 0.9,
+      "reason": "idle demo host",
+      "excluded": false
+    }
+  ]
+}

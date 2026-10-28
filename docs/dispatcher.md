@@ -119,12 +119,12 @@ terminal entry. It runs under the item lock, so a concurrent `start`,
 `watch`, `cancel` or `resolve` waits for it. The outcome names which case
 ran, in the order of design 2.3:
 
-| First match | Port | Registry | Ledger | Returns |
-| --- | --- | --- | --- | --- |
-| Q1: `resolvedAt !== null` | none | replays the unappended line, if any (`dispatcher.ts:1079`) | that replay's outcome, else none | `already-resolved` (`dispatcher.ts:1085`); the replay completes an unappended line |
-| Q2: settled active entry | none, no write | none | none | `request-active` (`dispatcher.ts:1092`) |
-| Q3: unresolved terminal | `release` over the request's host (`dispatcher.ts:1121`), then one write | replays the entry's own line first if it is unappended (`dispatcher.ts:1111`), then marks `resolvedAt` (`dispatcher.ts:1138`) | the replay's outcome, else none | `resolved`, `from: "terminal"` (`dispatcher.ts:1154`) |
-| Q4: unresolved provisional | `release` (`dispatcher.ts:1165`), then the meter closes the grant through `lostUsage` | one new `lost` terminal with `resolvedAt` (`dispatcher.ts:702`, `dispatcher.ts:1175`) | exactly one new line, `entryId` `<item>:<requestId>` | `resolved`, `from: "provisional"` (`dispatcher.ts:1187`) |
+| First match                | Port                                                                                  | Registry                                                                                                                      | Ledger                                               | Returns                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Q1: `resolvedAt !== null`  | none                                                                                  | replays the unappended line, if any (`dispatcher.ts:1079`)                                                                    | that replay's outcome, else none                     | `already-resolved` (`dispatcher.ts:1085`); the replay completes an unappended line |
+| Q2: settled active entry   | none, no write                                                                        | none                                                                                                                          | none                                                 | `request-active` (`dispatcher.ts:1092`)                                            |
+| Q3: unresolved terminal    | `release` over the request's host (`dispatcher.ts:1121`), then one write              | replays the entry's own line first if it is unappended (`dispatcher.ts:1111`), then marks `resolvedAt` (`dispatcher.ts:1138`) | the replay's outcome, else none                      | `resolved`, `from: "terminal"` (`dispatcher.ts:1154`)                              |
+| Q4: unresolved provisional | `release` (`dispatcher.ts:1165`), then the meter closes the grant through `lostUsage` | one new `lost` terminal with `resolvedAt` (`dispatcher.ts:702`, `dispatcher.ts:1175`)                                         | exactly one new line, `entryId` `<item>:<requestId>` | `resolved`, `from: "provisional"` (`dispatcher.ts:1187`)                           |
 
 `resolvedAt` (`src/dispatcher/registry.ts` `RegistryEntryBase`) is `null` until
 `resolve` marks the entry, and stays set afterwards, so a second run is a

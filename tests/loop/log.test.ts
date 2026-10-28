@@ -75,22 +75,25 @@ function failingFirstFs(): { fs: LoopLogFs; written: () => number } {
     written: () => writes,
     fs: {
       async open(target: string): Promise<FileHandle> {
+        // Create the file so the empty-content assertion holds, but hand
+        // back an in-memory handle: proxying a real FileHandle would leave
+        // the inner handle unclosed and trip the runtime GC guard.
         const { open } = await import("node:fs/promises");
-        const inner = await open(target, "a", 0o600);
+        const creator = await open(target, "a", 0o600);
+        await creator.close();
         let calls = 0;
-        const failing = Object.create(
-          Object.getPrototypeOf(inner) as object,
-          Object.getOwnPropertyDescriptors(inner),
-        ) as FileHandle;
-        failing.write = (async (data: Uint8Array): Promise<unknown> => {
-          calls += 1;
-          writes += 1;
-          if (calls === 1) {
-            throw new Error("ENOSPC: no space left on device");
-          }
-          const pending = (await inner.write(data)) as unknown;
-          return pending;
-        }) as typeof failing.write;
+        const failing = {
+          write(): Promise<unknown> {
+            calls += 1;
+            writes += 1;
+            if (calls === 1) {
+              return Promise.reject(new Error("ENOSPC: no space left on device"));
+            }
+            return Promise.resolve(undefined);
+          },
+          async sync(): Promise<void> {},
+          async close(): Promise<void> {},
+        } as unknown as FileHandle;
         return failing;
       },
     },

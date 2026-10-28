@@ -41,8 +41,11 @@ test("committed goals load and maxItems is bounded by the config (G1)", async ()
   const dir = mkdtempSync(join(tmpdir(), "goal-"));
   try {
     const path = await copyToTemp(dir, "tests/fixtures/coord/goals/notes.json", "notes.json");
-    await failsWith(path, { ...ctx, workConfig: { ...ctx.workConfig, maxItemsPerSubmit: 3 } },
-      `Goal ${path}: maxItems exceeds maxItemsPerSubmit 3`);
+    await failsWith(
+      path,
+      { ...ctx, workConfig: { ...ctx.workConfig, maxItemsPerSubmit: 3 } },
+      `Goal ${path}: maxItems exceeds maxItemsPerSubmit 3`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

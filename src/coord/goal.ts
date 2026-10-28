@@ -71,6 +71,9 @@ export async function loadGoal(path: string, ctx: GoalContext): Promise<Goal> {
     }
     seen.add(issue.number);
   }
+  // Counting code points matches the G5 test; a grapheme split
+  // would need Intl.Segmenter instead of the spread.
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- code points, not graphemes
   if ([...goal.outcome].length > ctx.maxOutcomeChars) {
     throw new GoalError(`${label}: outcome exceeds ${String(ctx.maxOutcomeChars)} characters`);
   }

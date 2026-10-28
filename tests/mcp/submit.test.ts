@@ -343,12 +343,7 @@ test("U6 a new item depending on a stored item is accepted (U6)", async () => {
 
 test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
   const fixture = await loadFixture("tests/fixtures/mcp/good-dag.json");
-  const items = [
-    fixture.items[0],
-    fixture.items[1],
-    { ...(fixture.items[0] as Record<string, unknown>), dependencies: ["demo-a"] },
-    { ...(fixture.items[1] as Record<string, unknown>), id: "demo-d" },
-  ];
+  const items = [fixture.items[0], fixture.items[1], fixture.items[0], fixture.items[1]];
   const { structured, store, lines } = await setup({ items });
   expect(structured["ok"]).toBe(false);
   expect(errorOf(structured)).toEqual({

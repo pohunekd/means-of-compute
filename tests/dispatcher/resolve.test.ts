@@ -21,6 +21,7 @@ import type {
 } from "../../src/dispatcher/port.js";
 import { PortRejectedError, PortUnreachableError } from "../../src/dispatcher/port.js";
 import { gatePort } from "./gated-port.js";
+import type { GatedMethod } from "./gated-port.js";
 
 const MODEL: ModelSelection = { providerId: "nvidia-build", model: "meta/muse-glimmer-30b" };
 
@@ -766,6 +767,22 @@ interface GatedHarness {
   readonly dir: string;
 }
 
+// Yields event-loop turns while the racing operation stays quiet at the
+// gate. The parked predecessor still holds the item lock, so a correct
+// run exhausts the budget without a single gated call and the count
+// assertion after it is deterministic; a run where the lock does not hold
+// the racer back trips the count early and fails that assertion. Every
+// turn yields immediately: no wall-clock wait.
+async function settleWhileQuiet(
+  gate: ReturnType<typeof gatePort>,
+  method: GatedMethod,
+  before: number,
+): Promise<void> {
+  for (let i = 0; i < 1000 && gate.calls(method) === before; i += 1) {
+    await Bun.sleep(0);
+  }
+}
+
 async function withGatedHarness(
   gated: ReadonlySet<"release" | "start" | "cancel">,
   body: (h: GatedHarness) => Promise<void>,
@@ -833,7 +850,7 @@ test("J1 a start replay waits while resolve holds the lock across release", asyn
         MODEL,
         "Do the work.",
       );
-      await Bun.sleep(10);
+      await settleWhileQuiet(gate, "start", startsBefore);
       // The replay is parked on the item lock: no port.start runs while
       // the release call is parked.
       expect(gate.calls("start")).toBe(startsBefore);
@@ -869,7 +886,7 @@ test("J2 resolve waits while a start holds the lock across port.start", async ()
     );
     const parkedStart = await gate.next("start");
     const resolvePromise = dispatcher.resolve("demo-item:0");
-    await Bun.sleep(10);
+    await settleWhileQuiet(gate, "release", 0);
     // Resolve is parked on the item lock: no release runs while the
     // start call is parked.
     expect(gate.calls("release")).toBe(0);
@@ -909,7 +926,7 @@ test("J3 two racing resolves give one resolved and one already-resolved", async 
       const firstPromise = dispatcher.resolve("demo-item:0");
       const parkedFirst = await gate.next("release");
       const secondPromise = dispatcher.resolve("demo-item:0");
-      await Bun.sleep(10);
+      await settleWhileQuiet(gate, "release", 1);
       // The second resolve waits on the item lock; only one release runs.
       expect(gate.calls("release")).toBe(1);
       await parkedFirst.release();

@@ -133,10 +133,6 @@ test("O2 large list_work result drains via slow reader without truncation (O2)",
     JSON.stringify({ schemaVersion: "v1", revision: 1, items, submissions: [] }),
   );
   await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
-  await Bun.write(
-    "tests/fixtures/mcp/list-all.json",
-    JSON.stringify({ status: ["queued", "running", "review", "parked", "blocked", "done"] }),
-  );
   const rcFile = `${env.dir}/rc`;
   const shCmd = `{ ${process.execPath} src/mcp/call.ts list_work --file tests/fixtures/mcp/list-all.json --config "${env.mcpConfigPath}"; echo $? > "${rcFile}"; } | (sleep 1; cat)`;
   const proc = Bun.spawn(["sh", "-c", shCmd], {
@@ -154,6 +150,8 @@ test("O2 large list_work result drains via slow reader without truncation (O2)",
   const parsed = JSON.parse(out.split("\n")[0] as string) as { ok: boolean; items: unknown[] };
   expect(parsed.ok).toBe(true);
   expect(parsed.items.length).toBe(600);
+  expect(out.endsWith("\n")).toBe(true);
+  expect(out.split("\n").length).toBe(2);
   expect(await Bun.file(rcFile).text()).toBe("0\n");
 }, 25000);
 

@@ -4,12 +4,12 @@
 // exits before answering, a JSON-RPC error comes back, a response is
 // malformed, or there is no answer within clientTimeoutMs.
 import { ClientError, runClientCall } from "./client.js";
-import { loadMcpConfig } from "./config.js";
+import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 
 function parseFlags(args: readonly string[]): { file: string | null; configPath: string } {
   let file: string | null = null;
-  let configPath = "config/mcp.json";
+  let configPath = MCP_CONFIG_PATH;
   let seenFile = false;
   let seenConfig = false;
   let index = 0;

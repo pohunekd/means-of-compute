@@ -135,7 +135,7 @@ async function loadCollectorFixture(): Promise<CollectorFixture> {
   ) as unknown;
   const identity = {
     packageId: "moc.host-state",
-    version: "0.1.0",
+    version: config.package.version,
     digest: config.package.sourceDigest,
   };
   control.set("desktop", { kind: "reply", reply: { identity, stdout: JSON.stringify(desktop) } });

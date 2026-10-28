@@ -792,6 +792,38 @@ test("a failed terminal stop logs the kebab code (L1)", async () => {
   }
 });
 
+test("a live session with an outcome still returns a terminal when the stop fails (R1, R2-L1)", async () => {
+  const { fake, log, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.setSession("laptop-a", handle.sessionId, {
+      metadata: {
+        [MOC_METADATA.outcome]: "finished",
+        [MOC_METADATA.outcomeDetail]: "turn completed",
+      },
+    });
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    fake.failNext("laptop-a", "session.stop", {
+      error: fakeErrors.hostUnreachable("peer.example-route"),
+      apply: false,
+    });
+    const result = await port.wait(ref, 1000, null);
+    expect(result).toEqual({
+      state: "finished",
+      sessionId: handle.sessionId,
+      cursor: "cursor-1",
+      usage: null,
+      detail: "turn completed",
+    });
+    expect(fake.calls("laptop-a").filter((call) => call.method === "session.stop")).toHaveLength(1);
+    const logged = log.find((entry) => entry.event === "adapter-stop-failed");
+    expect(logged?.code).toBe("host-unreachable");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("a terminal whose decision has stop false sends no session.stop", async () => {
   const { fake, port } = setup();
   try {

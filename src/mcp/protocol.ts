@@ -208,8 +208,11 @@ export function createLineSplitter(
       }
       // Without a newline the line is still incomplete: once its bytes
       // exceed the limit, report it once, drop it, and discard input
-      // up to and including the next newline (P1).
-      if (Buffer.byteLength(pending, "utf8") > maxBytes) {
+      // up to and including the next newline (P1). One trailing CR is
+      // left out of the check: a CRLF line split before the LF frames
+      // the same as the line in one chunk (H9, R2-8).
+      const incomplete = pending.endsWith("\r") ? pending.slice(0, -1) : pending;
+      if (Buffer.byteLength(incomplete, "utf8") > maxBytes) {
         onTooLarge();
         pending = "";
         discarding = true;

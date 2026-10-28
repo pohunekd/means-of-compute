@@ -53,17 +53,6 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
   );
   await Bun.write(`${env.dir}/bunfig.toml`, 'preload = ["./block.ts"]\n');
   const pidFile = `${env.dir}/server.pid`;
-  const watchPid = (async () => {
-    for (let i = 0; i < 100; i += 1) {
-      if (await Bun.file(pidFile).exists()) {
-        const found = Number((await Bun.file(pidFile).text()).trim());
-        if (Number.isInteger(found)) {
-          return;
-        }
-      }
-      await Bun.sleep(100);
-    }
-  })();
   const started = Date.now();
   let proc: ReturnType<typeof Bun.spawn> | null = null;
   try {
@@ -77,27 +66,26 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
       ],
       { cwd: env.dir, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     );
-    const [outcome, out, err] = await Promise.all([
-      Promise.race([
-        proc.exited.then(() => "exited" as const),
-        Bun.sleep(10000).then(() => "hang" as const),
-      ]),
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
+    const outcome = await Promise.race([
+      proc.exited.then(() => "exited" as const),
+      Bun.sleep(10000).then(() => "hang" as const),
     ]);
     expect(outcome).toBe("exited");
     const code = await proc.exited;
     const elapsed = Date.now() - started;
-    await watchPid;
+    expect(await Bun.file(pidFile).exists()).toBe(true);
+    const pid = Number((await Bun.file(pidFile).text()).trim());
+    expect(Number.isInteger(pid)).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout as ReadableStream).text(),
+      new Response(proc.stderr as ReadableStream).text(),
+    ]);
     expect(code).toBe(4);
     expect(out).toBe("");
     expect(err).toBe("mcp:call: no answer within 1500 ms\n");
     expect(elapsed).toBeGreaterThanOrEqual(2900);
     expect(elapsed).toBeLessThan(5000);
-    expect(await Bun.file(pidFile).exists()).toBe(true);
-    const pid = Number((await Bun.file(pidFile).text()).trim());
-    expect(Number.isInteger(pid)).toBe(true);
-    expect(() => process.kill(pid, 0)).toThrow();
   } finally {
     const client = proc;
     if (client !== null) {
@@ -112,19 +100,21 @@ test("O1 a server that never answers exits 4 within the bound (O1)", async () =>
         // The client already exited.
       }
     }
+    let leftover = Number.NaN;
     try {
-      if (await Bun.file(pidFile).exists()) {
-        const leftover = Number((await Bun.file(pidFile).text()).trim());
-        if (Number.isInteger(leftover)) {
-          try {
-            process.kill(leftover, "SIGKILL");
-          } catch {
-            // The client already reaped the blocked server.
-          }
-        }
+      leftover = Number((await Bun.file(pidFile).text()).trim());
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        expect.unreachable(`leftover server pid unreadable: ${(error as Error).message}`);
       }
-    } catch {
-      // The pid file is gone with the test env.
+      // The server never reached the preload, so it wrote no pid file.
+    }
+    if (Number.isInteger(leftover)) {
+      try {
+        process.kill(leftover, "SIGKILL");
+      } catch {
+        // The client already reaped the blocked server.
+      }
     }
   }
 }, 20000);

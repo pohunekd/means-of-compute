@@ -14,7 +14,13 @@ import {
 } from "../approvals/store.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
-import type { ToolContext, ToolDefinition, ToolOutcome, ToolPayload } from "./protocol.js";
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolError,
+  ToolOutcome,
+  ToolPayload,
+} from "./protocol.js";
 import type { ToolPaths } from "./tools.js";
 
 function refusedPayload(code: string, message: string): ToolPayload {
@@ -34,11 +40,11 @@ function errorPayload(
   message: string,
   retryable: boolean,
   detail: Record<string, unknown>,
-): ToolPayload {
+): ErrorPayload {
   return { ok: false, error: { code, message, retryable, ...detail } };
 }
 
-function unavailablePayload(source: string): ToolPayload {
+function unavailablePayload(source: string): ErrorPayload {
   return errorPayload("source-unreadable", `${source} unreadable`, false, { source });
 }
 
@@ -59,15 +65,30 @@ function outcomeSummary(outcome: RecordOutcome): Record<string, unknown> | null 
   return { requestId: outcome.request.requestId, outcome: outcome.kind };
 }
 
-function recordErrorPayload(error: unknown): ToolPayload {
+type ErrorPayload = { readonly ok: false; readonly error: ToolError };
+
+interface RecordError {
+  readonly payload: ErrorPayload;
+  readonly busy: boolean;
+}
+
+function recordError(error: unknown): RecordError {
   if (error instanceof ApprovalsBusyError) {
-    return errorPayload("store-busy", "requests store busy, retry", true, { store: "requests" });
+    return {
+      payload: errorPayload("store-busy", "requests store busy, retry", true, {
+        store: "requests",
+      }),
+      busy: true,
+    };
   }
   if (error instanceof ApprovalsDataError) {
-    return unavailablePayload("requests");
+    return { payload: unavailablePayload("requests"), busy: false };
   }
   if (error instanceof ApprovalsWriteError) {
-    return errorPayload("store-write-failed", "requests store write failed", false, {});
+    return {
+      payload: errorPayload("store-write-failed", "requests store write failed", false, {}),
+      busy: false,
+    };
   }
   throw error;
 }
@@ -165,6 +186,9 @@ async function checkReason(
   } catch (error: unknown) {
     return { payload: unavailablePayload("requests"), detail: errorDetail(error) };
   }
+  // Counting code points matches JSON Schema maxLength (AM4-1); a
+  // grapheme split would need Intl.Segmenter instead of the spread.
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread
   if ([...args.reason].length > approvals.maxReasonChars) {
     return {
       payload: errorPayload(
@@ -207,21 +231,20 @@ async function record(
       error instanceof ApprovalsDataError ||
       error instanceof ApprovalsWriteError
     ) {
-      const payload = recordErrorPayload(error);
-      const detail =
-        payload.ok === false && payload.error.code === "store-busy" ? null : errorDetail(error);
-      return { payload, summary: null, detail };
+      const mapped = recordError(error);
+      // store-busy retries with no message; every other failure carries one.
+      return {
+        payload: mapped.payload,
+        summary: null,
+        detail: mapped.busy ? null : errorDetail(error),
+      };
     }
     throw error;
   }
   return { payload: outcomePayload(outcome), summary: outcomeSummary(outcome), detail: null };
 }
 
-async function runApprove(
-  args: unknown,
-  ctx: ToolContext,
-  paths: ToolPaths,
-): Promise<ToolOutcome> {
+async function runApprove(args: unknown, ctx: ToolContext, paths: ToolPaths): Promise<ToolOutcome> {
   const typed = args as { readonly reason: string };
   const checked = await checkReason(paths, typed);
   if ("payload" in checked) {
@@ -261,10 +284,7 @@ async function runApprove(
   if (item.pullNumber !== submitted.pullNumber) {
     const pull = item.pullNumber === null ? "null" : String(item.pullNumber);
     return {
-      payload: refusedPayload(
-        "pull-mismatch",
-        `item ${submitted.workItemId} has pull ${pull}`,
-      ),
+      payload: refusedPayload("pull-mismatch", `item ${submitted.workItemId} has pull ${pull}`),
       summary: null,
       detail: null,
     };
@@ -283,13 +303,7 @@ async function runPauseFleet(
     return { payload: checked.payload, summary: null, detail: checked.detail };
   }
   const submitted = args as { readonly action: "pause" | "resume"; readonly reason: string };
-  return record(
-    "pause_fleet",
-    paths,
-    ctx,
-    { ...submitted },
-    checked.approvals.maxPendingRequests,
-  );
+  return record("pause_fleet", paths, ctx, { ...submitted }, checked.approvals.maxPendingRequests);
 }
 
 export function createApproveTool(paths: ToolPaths): ToolDefinition {

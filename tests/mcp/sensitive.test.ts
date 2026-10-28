@@ -3,11 +3,7 @@
 // call-end line. Expected values come from A3, A4, A5 and L2.
 import { expect, test } from "bun:test";
 import { decideRequest } from "../../src/approvals/decide.js";
-import {
-  createMcpTestEnv,
-  writeTestFile,
-  type McpTestEnv,
-} from "./env.js";
+import { createMcpTestEnv, writeTestFile, type McpTestEnv } from "./env.js";
 import { createTools } from "../../src/mcp/tools.ts";
 import { createProtocol } from "../../src/mcp/protocol.ts";
 import type { CallLog } from "../../src/mcp/call-log.ts";
@@ -109,17 +105,16 @@ async function callTool(
   return { structured: parsed.result.structuredContent, ends };
 }
 
-async function fleetPayload(
-  env: McpTestEnv,
-  lines: unknown[],
-): Promise<Record<string, unknown>> {
+async function fleetPayload(env: McpTestEnv, lines: unknown[]): Promise<Record<string, unknown>> {
   const { structured } = await callTool(env, lines, "fleet_status", {});
-  return structured as Record<string, unknown>;
+  return structured;
 }
 
 test("X1 approve on a review item records pending and lists the request (X1, A3, A4)", async () => {
   const { env, lines } = await setupEnv("mcp-x1-");
-  const before = await Bun.file(env.requestsPath).text().catch(() => "");
+  const before = await Bun.file(env.requestsPath)
+    .text()
+    .catch(() => "");
   const { structured, ends } = await callTool(env, lines, "approve", {
     workItemId: "demo-review",
     pullNumber: 7,

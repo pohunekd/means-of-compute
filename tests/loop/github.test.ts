@@ -335,6 +335,41 @@ describe("gh port", () => {
     );
   });
 
+  test("F5b: redaction happens before the cut and the cut respects chars", async () => {
+    await withPort(
+      [
+        {
+          match: ["pr", "merge"],
+          stdout: "",
+          stderr: `${"a".repeat(295)}secret-token`,
+          rc: 1,
+          hang: false,
+        },
+        {
+          match: ["pr", "merge"],
+          stdout: "",
+          stderr: `a${"é".repeat(400)}`,
+          rc: 1,
+          hang: false,
+        },
+      ],
+      5000,
+      "factory",
+      async (port) => {
+        const sha = "c".repeat(40);
+        const tokenCut = await port.mergePull("o/r", 7, sha).catch((error: unknown) => error);
+        expect(tokenCut).toBeInstanceOf(GitHubError);
+        expect((tokenCut as GitHubError).detail).toBe(`${"a".repeat(295)}[reda`);
+        const charCut = await port.mergePull("o/r", 7, sha).catch((error: unknown) => error);
+        expect(charCut).toBeInstanceOf(GitHubError);
+        const detail = (charCut as GitHubError).detail as string;
+        expect(detail).toBe(`a${"é".repeat(149)}`);
+        expect(Buffer.from(detail, "utf8").length).toBe(299);
+        expect(detail.includes("�")).toBe(false);
+      },
+    );
+  });
+
   test("L21: invalid checkRuns output is invalid-output and hang gives unavailable", async () => {
     const sha = "b".repeat(40);
     const dir = await mkdtemp(join(tmpdir(), "gh-port-"));

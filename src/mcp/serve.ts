@@ -215,12 +215,14 @@ async function serve(caller: string, configPath: string): Promise<number> {
       () => undefined,
     );
   }
-  // A transport failure writes no server-stop line, so reason stays within
-  // eof|signal|stdout-closed (L1); the exit code still reports the failure.
-  // On a rejected line the server prints one stderr line, aborts the
-  // protocol, stops reading stdin, and drains the started writes before
-  // exiting 1; it does not keep serving. No path reaches this with
+  // Both transport failure branches (a rejected protocol line here, a
+  // rejected too-large line below) resolve `done` with the internal reason
+  // "transport-failed" through the resolver shared with the stdin, signal
+  // and stdout listeners, so the shutdown below wakes even though stdin
+  // never ends after destroy(). Each branch prints one stderr line, aborts
+  // the protocol and stops reading stdin. No path reaches this with
   // fleet_status today (H7, R2-6).
+  let resolveDone: (reason: string) => void = () => undefined;
   async function handleTransportLine(line: string): Promise<void> {
     let response: string | null;
     try {
@@ -230,6 +232,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
       protocol.abort();
       process.stdin.destroy();
       transportFailed = true;
+      resolveDone("transport-failed");
       return;
     }
     if (response !== null) {
@@ -251,6 +254,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
           protocol.abort();
           process.stdin.destroy();
           transportFailed = true;
+          resolveDone("transport-failed");
           return;
         }
         // An aborted protocol answers no too-large line, as it answers
@@ -267,23 +271,24 @@ async function serve(caller: string, configPath: string): Promise<number> {
   // stop reason below still becomes "signal".
   let sawSignal: boolean = false;
   const done = new Promise<string>((resolve) => {
+    resolveDone = resolve;
     process.stdin.on("data", (chunk: string) => {
       splitter.push(chunk);
     });
     process.stdin.on("end", () => {
       // A final line without a trailing newline is still a message (T3.2).
       splitter.flush();
-      resolve("eof");
+      resolveDone("eof");
     });
     const onSignal = () => {
       sawSignal = true;
       protocol.abort();
-      resolve("signal");
+      resolveDone("signal");
     };
     process.on("SIGTERM", onSignal);
     process.on("SIGINT", onSignal);
     process.stdout.on("error", () => {
-      resolve("stdout-closed");
+      resolveDone("stdout-closed");
     });
   });
   const reason = await done;
@@ -292,7 +297,7 @@ async function serve(caller: string, configPath: string): Promise<number> {
   // first (T3.4). The reason is read after the drain below: a signal can
   // arrive after stdin already ended, while a large write is still
   // blocked, and it must still win over "eof".
-  if (reason === "signal" || reason === "stdout-closed") {
+  if (reason === "signal" || reason === "stdout-closed" || reason === "transport-failed") {
     protocol.abort();
   }
   await protocol.drain();
@@ -321,8 +326,14 @@ async function serve(caller: string, configPath: string): Promise<number> {
   if (!transportFailed) {
     await stop(stopReason === "stdout-closed" ? "stdout-closed" : stopReason);
   }
+  // A rejected line leaves no server-stop line, so the logged reason stays
+  // within eof|signal|stdout-closed (L1); the exit code still reports the
+  // failure. The started writes drained above; end stdout and wait for its
+  // finish before exiting 1. stdin was already destroyed in the failure
+  // branch, and nothing here waits for its end.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (transportFailed) {
+    await endStdoutAndWait();
     process.exitCode = 1;
     return 1;
   }

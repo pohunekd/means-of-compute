@@ -226,11 +226,6 @@ async function serve(caller: string, configPath: string): Promise<number> {
       stdoutOk = await writeStdout(response);
     }
   }
-  const tooLargeResponse = JSON.stringify({
-    jsonrpc: "2.0",
-    id: null,
-    error: { code: -32600, message: "message too large" },
-  });
   const splitter = createLineSplitter(
     maxMessageBytes,
     (line: string) => {
@@ -238,7 +233,16 @@ async function serve(caller: string, configPath: string): Promise<number> {
     },
     () => {
       enqueueTransport(async () => {
-        stdoutOk = await writeStdout(tooLargeResponse);
+        let response: string;
+        try {
+          response = await protocol.handleTooLarge();
+        } catch (error: unknown) {
+          process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
+          await stop("error");
+          transportFailed = true;
+          return;
+        }
+        stdoutOk = await writeStdout(response);
       });
     },
   );

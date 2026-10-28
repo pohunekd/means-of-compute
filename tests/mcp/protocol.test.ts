@@ -44,10 +44,10 @@ async function protocolWithTools(
   });
 }
 
-function initLine(protocolVersion = "2025-11-25"): string {
+function initLine(id = 1, protocolVersion = "2025-11-25"): string {
   return JSON.stringify({
     jsonrpc: "2.0",
-    id: 1,
+    id,
     method: "initialize",
     params: {
       protocolVersion,
@@ -57,8 +57,17 @@ function initLine(protocolVersion = "2025-11-25"): string {
   });
 }
 
+function callLineFor(id: number): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name: "fleet_status", arguments: {} },
+  });
+}
+
 async function init(protocol: Protocol, protocolVersion = "2025-11-25"): Promise<unknown> {
-  const raw = await protocol.handleLine(initLine(protocolVersion));
+  const raw = await protocol.handleLine(initLine(1, protocolVersion));
   return JSON.parse(raw as string) as unknown;
 }
 
@@ -234,6 +243,77 @@ test("P7 unknown tool is a JSON-RPC error plus a protocol-error line (P7)", asyn
   expect(parsed.error.message).toContain("Unknown tool: nope");
   const errors = entries.filter((entry) => entry.event === "protocol-error");
   expect(errors.length).toBe(1);
+});
+
+test("F3 a too-large line is answered in order and logged (F3, T4, L1)", async () => {
+  const entries: LogEntry[] = [];
+  const env = await createMcpTestEnv("mcp-f3-");
+  const slowGate = (() => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { gate, release: () => release?.() };
+  })();
+  const slowTool: ToolDefinition = {
+    name: "slow_tool",
+    title: "Slow tool",
+    toolClass: "read" as const,
+    description: "[read] test tool",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    validate: () => null,
+    run: async (): Promise<ToolOutcome> => {
+      await slowGate.gate;
+      return { payload: { ok: true }, summary: null, detail: null };
+    },
+  };
+  const tools: ToolDefinition[] = [
+    ...createTools({
+      workConfigPath: env.workConfigPath,
+      dispatcherConfigPath: env.dispatcherConfigPath,
+    }),
+    slowTool,
+  ];
+  const protocol = await protocolWithTools(entries, tools);
+  const maxBytes = Buffer.byteLength(initLine(), "utf8");
+  const { createLineSplitter } = await import("../../src/mcp/protocol.ts");
+  const pending: Promise<string | null>[] = [];
+  const splitter = createLineSplitter(
+    maxBytes,
+    (line: string) => {
+      pending.push(protocol.handleLine(line));
+    },
+    () => {
+      pending.push(protocol.handleTooLarge());
+    },
+  );
+  await init(protocol);
+  splitter.push(
+    `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "slow_tool", arguments: {} } })}\n${"x".repeat(maxBytes + 1)}\n`,
+  );
+  await Bun.sleep(10);
+  const completed: string[] = [];
+  for (const task of pending) {
+    void task.then((raw) => {
+      if (raw !== null) {
+        completed.push(raw);
+      }
+    });
+  }
+  slowGate.release();
+  await Promise.all(pending);
+  expect(completed.length).toBe(2);
+  expect((JSON.parse(completed[0] as string) as { id: number }).id).toBe(2);
+  const second = JSON.parse(completed[1] as string) as {
+    id: null;
+    error: { code: number; message: string };
+  };
+  expect(second.id).toBeNull();
+  expect(second.error.code).toBe(-32600);
+  expect(second.error.message).toContain("message too large");
+  const errors = entries.filter((entry) => entry.event === "protocol-error");
+  expect(errors.length).toBe(1);
+  expect(errors[0]?.["jsonrpcCode"]).toBe(-32600);
 });
 
 test("P8 oversized line is rejected and the next line is answered (P8)", async () => {

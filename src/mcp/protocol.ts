@@ -68,6 +68,7 @@ export interface ProtocolDeps {
 
 export interface Protocol {
   handleLine(line: string): Promise<string | null>;
+  handleTooLarge(): Promise<string>;
   abort(): void;
   drain(): Promise<void>;
 }
@@ -255,6 +256,11 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
 
   function sanitizedTool(value: unknown): string | null {
     return typeof value === "string" && TOOL_NAME_PATTERN.test(value) ? value : null;
+  }
+
+  async function handleTooLarge(): Promise<string> {
+    await logProtocolError(-32600, null, null);
+    return jsonError(null, -32600, "message too large");
   }
 
   async function appendLog(entry: Record<string, unknown>): Promise<boolean> {
@@ -560,6 +566,14 @@ export function createProtocol(deps: ProtocolDeps): Protocol {
   }
 
   return {
+    handleTooLarge(): Promise<string> {
+      const task = queue.then(() => (aborted ? jsonError(null, -32600, "message too large") : handleTooLarge()));
+      queue = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      return task;
+    },
     handleLine(line: string): Promise<string | null> {
       if (aborted) {
         return Promise.resolve(null);

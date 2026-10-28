@@ -1532,6 +1532,7 @@ test("an unreachable stop is unreachable", async () => {
       );
     expect(error).toBeInstanceOf(PortUnreachableError);
     expect(error).not.toBeInstanceOf(PortRejectedError);
+    expect((error as Error).message).toBe("laptop-a: session_stop_outcome_unknown");
     expect(dropped).toBe(1);
     expect(methodNames(fake, "laptop-a").filter((method) => method === "session.set_metadata")).toHaveLength(1);
   } finally {

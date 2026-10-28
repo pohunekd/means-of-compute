@@ -81,4 +81,4 @@ async function run(argv: readonly string[]): Promise<number> {
 }
 
 const code = await run(Bun.argv.slice(2));
-process.exit(code);
+process.exitCode = code;

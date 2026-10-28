@@ -59,8 +59,7 @@ only at the locations the model cites. Every git call goes through an
 allowlist; `--output`, `--ext-diff` and `--textconv` are refused before
 any process starts. The author models come from the configured ledger
 (`config/ledger.json`) with `--authors ledger`, or from `--author-model`
-with `--authors flags`. The auditor is the first configured auditor model
-that is not an author. An empty author set, or no eligible auditor,
+with `--authors flags`. Without `--phase-critical yes`, the auditor is the first entry of `auditors` whose model is not an author. With it (set by the coordinator, requires `--pull`), the auditor is `mergeAuditor` (Muse Wonder) unless Wonder is an author, which refuses with exit 3. Neither path falls back to the other, and `mergeAuditor` is never in the provider route. An empty author set, or no eligible auditor,
 refuses with exit 3. The budget gate runs before the model call; a refusal
 is exit 3. It makes exactly one model call through `callProviderOnce`,
 with no retry and no fallback. It appends one `kind: "audit"` pending
@@ -74,7 +73,7 @@ Counts are recomputed from the findings. The verdict is stored once at
 `<verdictDir>/<item id>/<sha>.json` by temp file plus `link(2)`. An
 existing verdict refuses with exit 3, unless `--post` is given: then the
 stored verdict is posted with no model call, no budget gate and no ledger
-entry, if it belongs to the same PR or has none. `--post` posts the
+entry, if it belongs to the same PR or has none. With `--phase-critical yes`, a stored verdict by another auditor refuses with exit 3. `--post` posts the
 marker comment with `gh pr comment`, then checks that some comment on
 that PR has the marker as its first line. A post failure is exit 4. Exit codes:
 0 done; 2 input, config, unknown revision or data error; 3 refusal

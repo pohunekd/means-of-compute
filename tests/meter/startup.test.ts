@@ -5,11 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import {
-  MeterConfigError,
-  loadMeterConfig,
-  resolveMeterEnv,
-} from "../../src/meter/config.js";
+import { MeterConfigError, loadMeterConfig, resolveMeterEnv } from "../../src/meter/config.js";
 import type { MeterConfig } from "../../src/meter/config.js";
 import { startMeter, type Meter, type MeterLogEvent } from "../../src/meter/meter.js";
 import { getProviders, resetProvidersCache } from "../../src/providers/config.js";
@@ -52,7 +48,7 @@ test("a throwing listening log releases the bound port", async () => {
     },
   });
   const port = probe.port;
-  probe.stop(true);
+  void probe.stop(true);
   const started: Meter[] = [];
   try {
     const base = await loadMeterConfig();

@@ -29,7 +29,7 @@ export function serveMeter(
   try {
     log({ level: "info", event: "listening", hostAlias: config.listenAlias });
   } catch (error: unknown) {
-    server.stop(true);
+    void server.stop(true);
     throw error;
   }
   return {

@@ -217,12 +217,18 @@ async function serve(caller: string, configPath: string): Promise<number> {
   }
   // A transport failure writes no server-stop line, so reason stays within
   // eof|signal|stdout-closed (L1); the exit code still reports the failure.
+  // On a rejected line the server prints one stderr line, aborts the
+  // protocol, stops reading stdin, and drains the started writes before
+  // exiting 1; it does not keep serving. No path reaches this with
+  // fleet_status today (H7, R2-6).
   async function handleTransportLine(line: string): Promise<void> {
     let response: string | null;
     try {
       response = await protocol.handleLine(line);
     } catch (error: unknown) {
       process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
+      protocol.abort();
+      process.stdin.destroy();
       transportFailed = true;
       return;
     }
@@ -242,6 +248,8 @@ async function serve(caller: string, configPath: string): Promise<number> {
           response = await protocol.handleTooLarge();
         } catch (error: unknown) {
           process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
+          protocol.abort();
+          process.stdin.destroy();
           transportFailed = true;
           return;
         }

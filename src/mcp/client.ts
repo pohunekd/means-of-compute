@@ -65,18 +65,18 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
       }
       const rest = deadline - Date.now();
       if (rest <= 0) {
-        throw new ClientError(4, "mcp:call: no answer within clientTimeoutMs");
+        throw new ClientError(4, `mcp:call: no answer within ${String(timeoutMs)} ms`);
       }
-      const next = await Promise.race([
-        reader.read(),
-        new Promise<"timeout">((resolve) => {
-          setTimeout(() => {
-            resolve("timeout");
-          }, rest);
-        }),
-      ]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => {
+          resolve("timeout");
+        }, rest);
+      });
+      const next = await Promise.race([reader.read(), timeoutPromise]);
+      clearTimeout(timer);
       if (next === "timeout") {
-        throw new ClientError(4, "mcp:call: no answer within clientTimeoutMs");
+        throw new ClientError(4, `mcp:call: no answer within ${String(timeoutMs)} ms`);
       }
       if (next.done) {
         done = true;
@@ -142,7 +142,30 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
     } catch {
       // The server may already have exited; closing stdin adds nothing.
     }
-    await proc.exited.catch(() => undefined);
+    let exited = false;
+    try {
+      await Promise.race([
+        proc.exited.then(() => {
+          exited = true;
+        }),
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            resolve();
+          }, options.clientTimeoutMs);
+        }),
+      ]);
+    } catch {
+      // Waiting for the child adds no new failure mode.
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!exited) {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // The child may have exited between the race and the kill.
+      }
+      await proc.exited.catch(() => undefined);
+    }
     try {
       reader.releaseLock();
     } catch {

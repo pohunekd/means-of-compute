@@ -78,6 +78,7 @@ test("a reply without usage refuses as spend unknown", async () => {
         waitTimeoutMs: 1000,
         lostAfterUnreachable: 3,
         unreachableBackoffMs: 0,
+        nonTerminalPauseMs: 0,
         registryPath: join(dir, "registry.json"),
       };
       const control = createMemoryPort();

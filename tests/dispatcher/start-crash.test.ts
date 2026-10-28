@@ -82,6 +82,7 @@ async function withHarness(body: (h: CrashHarness) => Promise<void>): Promise<vo
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };

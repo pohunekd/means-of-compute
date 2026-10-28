@@ -74,6 +74,7 @@ async function withHarness(body: (h: Harness) => Promise<void>): Promise<void> {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -159,6 +160,7 @@ test("unreachable: miss, miss, running, miss recovers as finished", async () => 
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -222,6 +224,7 @@ test("unreachable: two misses recover, the third is lost", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -338,6 +341,7 @@ test("watch replay after a failed appendPending writes exactly one pending entry
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -400,6 +404,7 @@ test("replay after a crash between append and write returns unchanged", async ()
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const control = createMemoryPort();
@@ -499,6 +504,7 @@ test("a start on an unappended terminal asks for watch first", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const control = createMemoryPort();
@@ -671,6 +677,7 @@ test("lost calls lostUsage before the registry write", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -729,6 +736,7 @@ test("a provisional lost calls lostUsage with its requestId", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 1,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();
@@ -775,6 +783,7 @@ test("invalid lost usage is stored as null", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 1,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath: join(dir, "registry.json"),
     };
     const control = createMemoryPort();

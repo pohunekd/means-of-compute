@@ -27,6 +27,7 @@ function dispatcherAt(registryPath: string, ledgerPath: string, ticks: { now: Da
     waitTimeoutMs: 1000,
     lostAfterUnreachable: 3,
     unreachableBackoffMs: 0,
+    nonTerminalPauseMs: 0,
     registryPath,
   };
   const dispatcher = createDispatcher({
@@ -101,6 +102,7 @@ async function withHarness(
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const control = createMemoryPort();
@@ -222,6 +224,7 @@ test("two concurrent watches on one completed session append exactly once", asyn
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
@@ -291,6 +294,7 @@ test("I1: two pending watches append once", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const ticks = { now: new Date("2026-10-27T10:00:00.000Z") };
@@ -691,6 +695,7 @@ test("I9b: two dispatcher instances on one registry make one session", async () 
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const clock = () => new Date("2026-10-27T10:00:00.000Z");
@@ -755,6 +760,7 @@ test("I10: a second placement conflicts", async () => {
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const dispatcher = createDispatcher({

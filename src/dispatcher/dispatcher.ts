@@ -931,13 +931,16 @@ export function createDispatcher(deps: DispatcherDeps): {
           revision: current.revision + 1,
         };
         await replaceRegistryEntry(deps.config.registryPath, persisted);
-        return { kind: "loop" as const };
+        return { kind: "pause" as const };
       });
       if (after.kind === "outcome") {
         return after.outcome;
       }
       if (after.kind === "sleep") {
         await deps.sleep(deps.config.unreachableBackoffMs);
+      }
+      if (after.kind === "pause") {
+        await deps.sleep(deps.config.nonTerminalPauseMs);
       }
     }
   }

@@ -10,7 +10,11 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import type { ModelSelection } from "../../src/dispatcher/port.js";
+import type {
+  ModelSelection,
+  SessionRef,
+  WaitResult,
+} from "../../src/dispatcher/port.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readLedger } from "../../src/ledger/read.js";
 
@@ -20,6 +24,7 @@ const CONFIG: DispatcherConfig = {
   waitTimeoutMs: 1000,
   lostAfterUnreachable: 3,
   unreachableBackoffMs: 0,
+  nonTerminalPauseMs: 0,
   registryPath: "",
 };
 
@@ -337,6 +342,66 @@ test("invalid port usage is stored as null and stays readable", async () => {
       "Do the work.",
     );
     expect(other.kind).toBe("started");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a non-terminal wait pauses nonTerminalPauseMs (6.4)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-pause-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const config: DispatcherConfig = {
+      ...CONFIG,
+      registryPath,
+      nonTerminalPauseMs: 7,
+      unreachableBackoffMs: 0,
+    };
+    const control = createMemoryPort();
+    let waits = 0;
+    const pausing = {
+      ...control.port,
+      wait(ref: SessionRef, timeoutMs: number, cursor: string | null): Promise<WaitResult> {
+        waits += 1;
+        // The third wait sees a finished session; the first two observe
+        // a running one, so the watch loop pauses twice before finishing.
+        if (waits === 3) {
+          control.complete(ref.sessionId, {
+            state: "finished",
+            usage: null,
+            detail: "exited 0",
+          });
+        }
+        return control.port.wait(ref, timeoutMs, cursor);
+      },
+    };
+    const sleeps: number[] = [];
+    const dispatcher = createDispatcher({
+      port: pausing,
+      budget: ADMIT_GATE,
+      ledgerPath,
+      config,
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: (ms: number) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+      log: () => undefined,
+      lostUsage: () => Promise.resolve(null),
+    });
+    const started = await dispatcher.start(
+      queuedItem() as never,
+      decision() as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (started.kind !== "started") {
+      throw new Error("expected a started session");
+    }
+    const outcome = await dispatcher.watch(started.request.requestId);
+    expect(outcome.result.state).toBe("finished");
+    expect(sleeps).toEqual([7, 7]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

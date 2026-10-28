@@ -82,6 +82,7 @@ async function withHarness(body: (h: SettleHarness) => Promise<void>): Promise<v
       waitTimeoutMs: 1000,
       lostAfterUnreachable: 3,
       unreachableBackoffMs: 0,
+      nonTerminalPauseMs: 0,
       registryPath,
     };
     const dispatcher = createDispatcher({

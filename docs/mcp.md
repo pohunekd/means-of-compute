@@ -42,8 +42,8 @@ as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the
 initialized flag are `-32600 "server not
-initialized"`. `tools/list` answers in PR order (read slice: only
-`fleet_status` so far). Unknown methods are `-32601`, unknown tools are
+initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results`.
+Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
 error response also appends a `protocol-error` line with `jsonrpcCode`.
@@ -70,7 +70,7 @@ return `call-log-unavailable` without running the handler; a `call-end`
 that fails still returns its payload, because the call already happened.
 If `server-start` cannot be logged, the server exits 2.
 
-## Read tool
+## Read tools
 
 `fleet_status` (`[read]`, no arguments): work items by status from the
 work store plus `openSessions` (registry entries with `terminal: null`).
@@ -79,3 +79,36 @@ configs, so an unknown provider model never fails it. Store or registry
 unreadable (missing file with a missing parent, non-file path) is
 `source-unreadable` naming the source; out-of-scope items fail dispatch,
 never this tool.
+
+`list_work` (`[read]`, `{"status":[...]}`): filtered work items. Input
+requires `status` (array, minItems 1, uniqueItems true, enum
+`queued|running|review|parked|blocked|done`). Output
+`{"ok":true,"revision":n,"items":[row...]}` where rows are store items
+whose status is in the filter, in store order. Each row is
+`{id,repo,title,issue,status,statusReason,assignedHostAlias,branch,pullNumber,
+dependencies,dod:{done,total},retryCount,stallRounds,modelRouting}`; `goal`
+and DoD texts are not returned. Errors: `source-unreadable` on store
+unreadable; invalid arguments are `invalid-arguments`.
+
+`audit_results` (`[read]`, `{"workItemId":id}`): stored verdicts. Steps:
+
+1. unknown `workItemId` in work store → `unknown-work-item`
+   `"unknown work item <id>"`; 2) `readVerdicts` throws →
+   `source-unreadable` `{source:"verdicts"}`; 3) any verdict where
+   `recount(findings)` differs from `counts` → `verdict-invalid`
+   `{headSha}` `"verdict <sha> counts disagree with its findings"`; 4)
+   otherwise `{"ok":true,"workItemId":id,"verdicts":[...]}` in
+   `readVerdicts` order (by `headSha`). Zero verdicts is `[]`.
+
+## Client `mcp:call`
+
+`mcp:call <tool> [--file <path>] [--config <path>]` spawns
+`process.execPath` with `fileURLToPath(new URL("./serve.ts", import.meta.url))`,
+`--caller mcp-call` and the passed `--config` (default `config/mcp.json`), using
+stdin/stdout pipes and inherited stderr. It sends `initialize`
+(protocolVersion `"2025-11-25"`, clientInfo `{name:"mcp-call",version:<server>}`),
+then `notifications/initialized`, then `tools/call` with arguments from `--file`
+or `{}`. It prints `structuredContent` as one compact JSON line. Exit codes:
+0 on `ok:true`, 3 on `ok:false`, 2 on usage or bad `--file`, 4 when the
+server exits early, a JSON-RPC error returns, a response is malformed, or
+no answer arrives within `clientTimeoutMs`.

@@ -18,6 +18,7 @@
     "meter:usage": "bun run src/meter/cli.ts usage",
     "place": "bun run src/placement/cli.ts",
     "mcp:serve": "bun run src/mcp/serve.ts",
+    "mcp:call": "bun run src/mcp/call.ts",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",
     "fmt": "prettier --write .",

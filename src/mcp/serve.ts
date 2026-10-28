@@ -92,6 +92,7 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
   const tools = createTools({
     workConfigPath: config.workConfigPath,
     dispatcherConfigPath: config.dispatcherConfigPath,
+    auditorConfigPath: config.auditorConfigPath,
   });
   const protocol = createProtocol({
     tools,
@@ -107,8 +108,8 @@ async function startup(caller: string, configPath: string): Promise<Startup> {
 // Every response travels through one serialized transport queue below:
 // the write callback (and drain under backpressure) is awaited before the
 // queue moves on, so awaiting the queue covers written bytes.
-// Serialization also means at most one drain listener is ever pending. A failed write resolves false; a closed
-// stream resolves false as well.
+// Serialization also means at most one drain listener is ever pending. A failed write resolves
+// false; a closed stream resolves false as well.
 async function writeStdout(text: string): Promise<boolean> {
   const line = `${text}\n`;
   let accepted: boolean | null = null;

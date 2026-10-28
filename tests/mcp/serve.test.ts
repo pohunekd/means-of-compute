@@ -410,14 +410,10 @@ test("too-deep arguments are refused and the server keeps serving (K1)", async (
     submissions: [],
   });
   await writeTestFile(env.registryPath, { sessions: [] });
-  // Arguments nested 100000 deep cannot be canonicalized: JSON.stringify
+  // Arguments nested 100000 deep cannot be canonicalized: canonicalJson
   // throws RangeError, so the protocol answers -32602 without a callId
   // while the plain calls before and after are still answered. The brace
   // group records the server's own exit status.
-  let nested: unknown = [];
-  for (let n = 0; n < 100000; n += 1) {
-    nested = [nested];
-  }
   // JSON.parse of the prebuilt string below keeps the depth; stringifying
   // in the test would throw the same RangeError first.
   const deepArgs = `[${"[".repeat(99999)}${"]".repeat(99999)}]`;
@@ -464,6 +460,11 @@ test("too-deep arguments are refused and the server keeps serving (K1)", async (
   expect(errors.length).toBe(1);
   expect(errors[0]).toContain('"jsonrpcCode":-32602');
   expect(errors[0]).toContain('"tool":"fleet_status"');
+  const starts = logText.split("\n").filter((line) => line.includes('"event":"call-start"'));
+  expect(starts.length).toBe(2);
+  expect(starts.map((line) => (JSON.parse(line) as { callId: number }).callId)).toEqual([1, 2]);
+  const ends = logText.split("\n").filter((line) => line.includes('"event":"call-end"'));
+  expect(ends.length).toBe(2);
 }, 20000);
 
 test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {

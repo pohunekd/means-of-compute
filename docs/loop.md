@@ -83,4 +83,4 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 ## Driver park (PR 5b)
 
-`src/loop/park.ts` parks stalled items, retries them at most twice, then blocks them with one labelled issue edit; it finalizes the ledger once and replays it unchanged. A lost park waits for the next tick, and an operator park holds until a human acts.
+`src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries at most twice, then turns blocked with a ledger finalize and one labelled issue edit; a lost park waits for the next tick, and an operator park holds for a human.

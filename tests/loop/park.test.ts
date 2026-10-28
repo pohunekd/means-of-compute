@@ -226,6 +226,58 @@ test("escalate posts once and the second call writes nothing (P1)", async () => 
   });
 });
 
+test("a busy store repairs itself on the next park tick (P11)", async () => {
+  await withTempDir(async (dir) => {
+    const fake = new FakeGitHub();
+    const { ctx } = makeCtx(dir, fake);
+    const entry = item();
+    await writeLoopState(
+      ctx.statePath,
+      loopItem({
+        phase: "ci",
+        session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
+        requestId: "req-1",
+      }),
+    );
+    await writeStore(ctx.storePath, entry);
+    const holder = Bun.spawn(["bun", join(import.meta.dir, "..", "work", "lock-holder.case.ts")], {
+      stdout: "pipe",
+      stderr: "ignore",
+      env: { ...process.env, WORK_STORE_TEST_PATH: ctx.storePath },
+    });
+    try {
+      const reader = (holder.stdout as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          throw new Error("holder exited before printing the ready line");
+        }
+        if ((decoder.decode(value, { stream: true }) + "\n").includes("holder ready")) {
+          reader.releaseLock();
+          break;
+        }
+      }
+      // parkOperator writes L while the store is busy; the W write waits.
+      expect(await parkOperator(ctx, entry, "pull-closed")).toBe("done");
+      expect((await readItem(ctx.statePath)).park?.kind).toBe("operator");
+      expect(
+        ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0]?.status,
+      ).toBe("queued");
+      // One tick after the lock is released repairs W to parked.
+      holder.kill(9);
+      await holder.exited;
+      expect(await advancePark(ctx, entry)).toBe("done");
+      const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+      expect(store.items[0]?.status).toBe("parked");
+      expect(store.items[0]?.statusReason).toBe("operator: pull-closed");
+    } finally {
+      holder.kill(9);
+      await holder.exited;
+    }
+  });
+});
+
 test("a factory marker is adopted and a foreign login posts (P2)", async () => {
   await withTempDir(async (dir) => {
     const fake = new FakeGitHub();
@@ -275,8 +327,7 @@ test("a null issue creates one labelled issue and adopts it (P3)", async () => {
     expect(created).toHaveLength(1);
     expect(created[0]?.args[1]).toBe("Escalation (gh-moc-5)");
     expect(created[0]?.args[3]).toEqual(["moc-escalation"]);
-    const posted = (await readItem(ctx.statePath)).escalations[0]?.posted;
-    expect(typeof posted).toBe("number");
+    expect((await readItem(ctx.statePath)).escalations[0]?.posted).toBe(100);
     await writeLoopState(ctx.statePath, loopItem());
     const before = fake.calls.length;
     expect(await escalate(ctx, entry, key, "")).toBe("done");
@@ -295,7 +346,7 @@ test("a failed post stays pending and retries (P4)", async () => {
     fake.failNext("postComment", new GitHubError("unavailable", "postComment", "down"));
     expect(await escalate(ctx, entry, "stall:gh-moc-5:0", "")).toBe("pending");
     expect((await readItem(ctx.statePath)).escalations[0]?.posted).toBe(null);
-    expect(events.some((line) => line.startsWith("github-error:unavailable"))).toBe(true);
+    expect(events.filter((line) => line.startsWith("github-error:unavailable"))).toHaveLength(1);
     expect(await escalate(ctx, entry, "stall:gh-moc-5:0", "")).toBe("done");
   });
 });
@@ -312,9 +363,21 @@ test("three stall parks retry twice then block with one ledger record (P5)", asy
     let li = await readItem(ctx.statePath);
     expect(li.retry).toBe(1);
     expect(li.park).toBe(null);
+    expect(
+      ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0],
+    ).toMatchObject({
+      status: "queued",
+      retryCount: 1,
+    });
     await redRounds(ctx, entry, 3);
     li = await readItem(ctx.statePath);
     expect(li.retry).toBe(2);
+    expect(
+      ((await Bun.file(ctx.storePath).json()) as { items: WorkItem[] }).items[0],
+    ).toMatchObject({
+      status: "queued",
+      retryCount: 2,
+    });
     await redRounds(ctx, entry, 3);
     li = await readItem(ctx.statePath);
     expect(li.park?.kind).toBe("blocked");
@@ -323,14 +386,19 @@ test("three stall parks retry twice then block with one ledger record (P5)", asy
     expect(store.items[0]?.status).toBe("blocked");
     expect(store.items[0]?.statusReason).toBe("blocked: 2 retries used");
     expect(store.items[0]?.retryCount).toBe(2);
-    const markers = new Set(
-      fake.callsOf("postComment").map((call) => (call.args[2] as string).split("\n")[0]),
-    );
-    expect([...markers].sort()).toEqual([
+    const markers = fake
+      .callsOf("postComment")
+      .map((call) => (call.args[2] as string).split("\n")[0]);
+    expect(markers).toEqual([
       escalationMarker("stall:gh-moc-5:0"),
       escalationMarker("stall:gh-moc-5:1"),
       escalationMarker("stall:gh-moc-5:2"),
     ]);
+    const { readLedger } = await import("../../src/ledger/read.js");
+    const ledger = await readLedger("Budget ledger", ctx.ledgerPath);
+    const mine = ledger.records.filter((record) => record.workItemId === "gh-moc-5");
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ result: "blocked", retries: 2 });
     expect(fake.callsOf("editIssueLabels")).toHaveLength(1);
     expect(fake.callsOf("editIssueLabels")[0]?.args.slice(1)).toEqual([
       12,
@@ -343,7 +411,7 @@ test("three stall parks retry twice then block with one ledger record (P5)", asy
 test("a broken ledger path stays pending, then finalizes when fixed (P6)", async () => {
   await withTempDir(async (dir) => {
     const fake = new FakeGitHub();
-    const { ctx } = makeCtx(dir, fake);
+    const { ctx, events } = makeCtx(dir, fake);
     const brokenParent = join(dir, "not-a-dir");
     await Bun.write(brokenParent, "blocking\n");
     const brokenCtx: ParkContext = { ...ctx, ledgerPath: join(brokenParent, "ledger.jsonl") };
@@ -362,6 +430,8 @@ test("a broken ledger path stays pending, then finalizes when fixed (P6)", async
       statusReason: "blocked: 2 retries used",
     });
     expect(await advancePark(brokenCtx, blockedEntry)).toBe("pending");
+    expect(events.filter((line) => line.startsWith("ledger-finalize-error:"))).toHaveLength(1);
+    expect(events.some((line) => line.startsWith("ledger-finalize-refused:"))).toBe(false);
     let li = await readItem(brokenCtx.statePath);
     expect(li.finalize).toEqual({ result: "blocked", done: false });
     expect((await Bun.file(brokenCtx.storePath).json()) as { items: WorkItem[] }).toMatchObject({
@@ -389,7 +459,7 @@ test("a broken ledger path stays pending, then finalizes when fixed (P6)", async
     );
     await writeStore(ctx.storePath, { ...entry, retryCount: 2 });
     expect(await advancePark(ctx, entry)).toBe("pending");
-    expect(events.some((line) => line.startsWith("ledger-finalize-refused:"))).toBe(true);
+    expect(events.filter((line) => line.startsWith("ledger-finalize-refused:"))).toHaveLength(1);
     expect((await readItem(ctx.statePath)).finalize?.done).toBe(false);
   });
 });

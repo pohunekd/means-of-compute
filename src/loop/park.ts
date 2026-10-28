@@ -38,11 +38,7 @@ async function readLoopItem(statePath: string, id: string): Promise<LoopItem> {
   return current;
 }
 
-async function writeLoopItem(
-  statePath: string,
-  id: string,
-  next: LoopItem,
-): Promise<LoopItem> {
+async function writeLoopItem(statePath: string, id: string, next: LoopItem): Promise<LoopItem> {
   return updateLoopState(statePath, (state) => {
     const current = state.items[id] as unknown as LoopItem | undefined;
     if (current === undefined) {

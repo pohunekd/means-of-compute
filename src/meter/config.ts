@@ -233,10 +233,13 @@ function resolveSecret(
 function checkHostAddressesContent(
   file: string,
   content: unknown,
+  hostAddressesFileEnv: string,
 ): ReadonlyMap<string, ReadonlySet<string>> {
   const label = `Meter host addresses ${file}`;
   if (typeof content !== "object" || content === null || Array.isArray(content)) {
-    throw new MeterConfigError(`${label}: must be a JSON object`);
+    throw new MeterConfigError(
+      `Meter host addresses ${hostAddressesFileEnv} ${file}: must be a JSON object`,
+    );
   }
   const record = content as Record<string, unknown>;
   const result = new Map<string, ReadonlySet<string>>();
@@ -296,6 +299,6 @@ export async function resolveMeterEnv(
   } catch {
     throw new MeterConfigError(`${label} ${file}: not valid JSON`);
   }
-  const hostAddresses = checkHostAddressesContent(file, content);
+  const hostAddresses = checkHostAddressesContent(file, content, config.hostAddressesFileEnv);
   return { listen, secret, hostAddresses, hostAddressesFile: file };
 }

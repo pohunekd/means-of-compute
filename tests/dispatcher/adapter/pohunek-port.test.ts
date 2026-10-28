@@ -37,6 +37,8 @@ const CONFIG: PohunekAdapterConfig = {
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 };
 
+const METER_TOKEN = (rid: string): string => "moc1." + rid + ".T";
+
 function request(overrides: Partial<StartRequest> = {}): StartRequest {
   return {
     requestId: "req-1",
@@ -68,6 +70,7 @@ function setup(): {
     log: (event) => {
       log.push(event);
     },
+    meterToken: METER_TOKEN,
   });
   return { fake, log, port };
 }
@@ -111,7 +114,7 @@ test("a resume start sends branch_source remote and reports the base commit", as
   const { fake, port } = setup();
   try {
     const req = request({ resume: true });
-    const params = sessionNewParams(req, CONFIG, requestDigestOf(req));
+    const params = sessionNewParams(req, CONFIG, requestDigestOf(req), "moc1." + req.requestId + ".T");
     expect(params.branch_source).toBe("remote");
     expect("base_branch" in params).toBe(false);
     const handle = await port.start(req);
@@ -198,6 +201,7 @@ test("preflight failing after a reconnect still lets cancel stop and wait observ
       log: (event) => {
         log.push(event);
       },
+      meterToken: METER_TOKEN,
     });
     try {
       const replayed = await fresh.start(request());
@@ -259,6 +263,7 @@ test("a thrown non-Error value rejects unchanged (L2)", async () => {
   const throwingPort = createPohunekPort(CONFIG, {
     connector: throwing,
     log: () => {},
+    meterToken: METER_TOKEN,
   });
   try {
     const caught: unknown = await throwingPort.start(request()).then(
@@ -392,6 +397,7 @@ test("a replayed start returns the accepted session although the preflight now f
     const second = createPohunekPort(CONFIG, {
       connector: fake.connector,
       log: () => {},
+      meterToken: METER_TOKEN,
     });
     try {
       fake.setCapabilities("laptop-a", {
@@ -426,6 +432,7 @@ test("a replayed start voids a pending match although the preflight now fails (R
     const second = createPohunekPort(CONFIG, {
       connector: fake.connector,
       log: () => {},
+      meterToken: METER_TOKEN,
     });
     try {
       fake.setCapabilities("laptop-a", {
@@ -891,6 +898,7 @@ test("a restart after stop keeps finished (WC3)", async () => {
       log: (event) => {
         secondLog.push(event);
       },
+      meterToken: METER_TOKEN,
     });
     try {
       fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId, "cursor-2"));
@@ -1193,6 +1201,7 @@ test("a hostUnreachable route gives alias plus code and drops the connection", a
     log: (event) => {
       droppingLog.push(event);
     },
+    meterToken: METER_TOKEN,
   });
   try {
     fake.failNext("laptop-a", "session.list", {
@@ -1248,6 +1257,67 @@ test("diff on a missing session gives session-not-found (3.8)", async () => {
     expect(diffError).toMatchObject({
       code: "session-not-found",
     });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("start sends the meter token in session.new metadata only", async () => {
+  const { fake, log, port } = setup();
+  try {
+    const req = request();
+    const handle = await port.start(req);
+    expect(handle.sessionId).toBe("fake-1");
+    const news = fake.calls("laptop-a").filter((call) => call.method === "session.new");
+    expect(news).toHaveLength(1);
+    const newParams = news[0]?.params as { metadata?: Record<string, unknown> };
+    expect(newParams.metadata?.[MOC_METADATA.meterToken]).toBe("moc1." + req.requestId + ".T");
+    for (const call of fake.calls("laptop-a")) {
+      if (call.method !== "session.new") {
+        expect(JSON.stringify(call.params)).not.toContain(".T");
+      }
+    }
+    expect(JSON.stringify(log)).not.toContain(".T");
+    expect(JSON.stringify(handle)).not.toContain(".T");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a port without a meter refuses to start", async () => {
+  const fake = createFakeDaemon(["laptop-a"], CONFIG.agentProfile);
+  const log: AdapterLogEvent[] = [];
+  const port = createPohunekPort(CONFIG, {
+    connector: fake.connector,
+    log: (event) => {
+      log.push(event);
+    },
+    meterToken: null,
+  });
+  try {
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PohunekAdapterError);
+    expect(error).toMatchObject({ code: "no-meter" });
+    expect(fake.calls("laptop-a")).toHaveLength(0);
+  } finally {
+    await port.close();
+    await fake.connector.close();
+  }
+});
+
+test("void clears the meter token", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({ applied_input: false }));
+    const error = await port.start(request()).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect(error).toMatchObject({ code: "prompt-not-acknowledged" });
+    const voids = fake.calls("laptop-a").filter((call) => call.method === "session.set_metadata");
+    expect(voids.length).toBeGreaterThan(0);
+    const unbind = voids[voids.length - 1]?.params as {
+      metadata?: Record<string, unknown>;
+    };
+    expect(unbind.metadata?.[MOC_METADATA.meterToken]).toBeNull();
   } finally {
     await teardown(fake, port);
   }

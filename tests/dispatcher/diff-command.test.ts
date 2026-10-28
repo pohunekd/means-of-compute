@@ -50,6 +50,7 @@ function harness(): CommandHarness {
       const port = createPohunekPort(CONFIG, {
         connector: fake.connector,
         log: () => undefined,
+        meterToken: null,
       });
       const wrapped: DispatcherPort = {
         ...port,
@@ -71,6 +72,7 @@ async function startSession(h: CommandHarness): Promise<SessionRef> {
   const setup = createPohunekPort(CONFIG, {
     connector: h.fake.connector,
     log: () => undefined,
+    meterToken: (rid: string) => "moc1." + rid + ".T",
   });
   const handle = await setup.start({
     requestId: "req-1",

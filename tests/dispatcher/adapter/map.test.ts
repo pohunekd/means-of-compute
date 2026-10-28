@@ -204,32 +204,45 @@ test("the preimage digest matches an independent sha256 computation", () => {
 });
 
 test("resume params send branch_source remote without base_branch", () => {
-  const params = sessionNewParams(request({ resume: true }), CONFIG, "digest-1");
+  const params = sessionNewParams(request({ resume: true }), CONFIG, "digest-1", "moc1.tok");
   expect(params.branch_source).toBe("remote");
   expect(params).not.toHaveProperty("base_branch");
   expect(params).not.toHaveProperty("on_diverged");
 });
 
 test("new params send the base branch without the origin prefix", () => {
-  const params = sessionNewParams(request(), CONFIG, "digest-1");
+  const params = sessionNewParams(request(), CONFIG, "digest-1", "moc1.tok");
   expect(params.base_branch).toBe("main");
   expect(params).not.toHaveProperty("branch_source");
 });
 
 test("input is the only params field holding the brief", () => {
-  const params = sessionNewParams(request({ brief: "uniquely worded brief text" }), CONFIG, "d");
+  const params = sessionNewParams(request({ brief: "uniquely worded brief text" }), CONFIG, "d", "moc1.tok");
   expect(params.input).toContain("uniquely worded brief text");
   const rest = JSON.stringify({ ...params, input: undefined });
   expect(rest).not.toContain("uniquely worded brief text");
 });
 
-test("new-session metadata holds exactly the three binding keys", () => {
-  const params = sessionNewParams(request(), CONFIG, "digest-9");
+test("new-session metadata holds exactly the four binding keys", () => {
+  const params = sessionNewParams(request(), CONFIG, "digest-9", "moc1.tok");
   expect(params.metadata).toEqual({
     [MOC_METADATA.requestId]: "item-7:0",
     [MOC_METADATA.requestDigest]: "digest-9",
     [MOC_METADATA.start]: "pending",
+    [MOC_METADATA.meterToken]: "moc1.tok",
   });
+});
+
+test("the meter token appears only in its metadata key", () => {
+  const token = "moc1.UNIQUEtoken.x";
+  const params = sessionNewParams(request(), CONFIG, "digest-9", token);
+  expect(params.name).toBe("item-7:0");
+  expect(params.input).not.toContain(token);
+  const withoutKey = JSON.stringify({
+    ...params,
+    metadata: { ...params.metadata, [MOC_METADATA.meterToken]: "" },
+  });
+  expect(withoutKey).not.toContain(token);
 });
 
 function capabilities(

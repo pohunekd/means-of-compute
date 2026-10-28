@@ -117,7 +117,7 @@ directory; nothing from the adapter log reaches stdout or stderr.
 provisional entry left behind by a transport failure, or any unresolved
 terminal entry. It runs under the item lock, so a concurrent `start`,
 `watch`, `cancel` or `resolve` waits for it. The outcome names which case
-ran, in the order of design 2.3:
+ran, in Q order:
 
 | First match                | Port                                                                                  | Registry                                                                                                                      | Ledger                                               | Returns                                                                            |
 | -------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |

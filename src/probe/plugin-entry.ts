@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { runProbe } from "./probe.js";
-import { loadHostFile } from "./config.js";
+import { loadHostFile, loadPluginConfig } from "./config.js";
 
-const configDir = join(dirname(process.execPath), "..", "config");
+const configDir = join(dirname(Bun.main), "..", "config");
 
 function parseArgs(args: readonly string[]): {
   factsPath?: string;
@@ -31,10 +30,9 @@ function parseArgs(args: readonly string[]): {
 
 async function main(): Promise<void> {
   const { factsPath, scenario } = parseArgs(Bun.argv.slice(2));
-  const hostFile = join(homedir(), ".config", "means-of-compute", "host.json");
   const output = await runProbe({
     configDir,
-    resolveHostAlias: () => loadHostFile(hostFile),
+    resolveHostAlias: () => loadHostFile(loadPluginConfig(join(configDir, "plugin.json")).hostFile),
     factsPath,
     scenario,
   });

@@ -9,7 +9,7 @@ const PACKAGE_CONFIG: HostStateConfig["package"] = {
   id: "moc.host-state",
   version: "0.1.0",
   sourceDigest: `sha256:${"a".repeat(64)}`,
-  targets: ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-arm64", "bun-darwin-x64"],
+  command: "host-state",
 };
 
 const PLACEMENT: PlacementConfig = {

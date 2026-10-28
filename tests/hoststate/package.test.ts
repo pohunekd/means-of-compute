@@ -30,24 +30,24 @@ function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-async function buildNative(out: string): Promise<string> {
-  const r = await run(["bun", "run", "plugin:build", "--target", "native", "--out", out]);
+async function buildPackage(out: string): Promise<string> {
+  const r = await run(["bun", "run", "plugin:build", "--out", out]);
   expect(r.exitCode).toBe(0);
   const entries = readdirSync(out);
-  expect(entries.length).toBe(1);
-  const bin = join(out, entries[0] as string, "bin", "moc-host-state");
-  return bin;
+  expect(entries).toEqual(["moc-host-state-0.2.0"]);
+  return join(out, entries[0] as string);
 }
 
 const buildTimeoutMs = 180_000;
 
 describe("plugin package", () => {
   test(
-    "compiled binary output deep-equals fixtures for every scenario",
+    "bundled entry output deep-equals fixtures for every scenario",
     async () => {
       const out = tempDir("hoststate-pkg-");
       try {
-        const bin = await buildNative(out);
+        const pkg = await buildPackage(out);
+        const bin = join(pkg, "bin", "moc-host-state");
         const scenarios = readdirSync(join(repoRoot, "config", "scenarios"))
           .filter((f) => f.endsWith(".json"))
           .sort();
@@ -71,7 +71,7 @@ describe("plugin package", () => {
     buildTimeoutMs,
   );
 
-  test("no file under src/probe/ derives paths from import.meta.url", () => {
+  test("no file under src/probe/ uses import.meta.url or process.execPath", () => {
     const probeDir = join(repoRoot, "src", "probe");
     const files = (readdirSync(probeDir, { recursive: true }) as string[])
       .filter((f) => f.endsWith(".ts"))
@@ -80,62 +80,142 @@ describe("plugin package", () => {
     for (const file of files) {
       const text = readFileSync(join(probeDir, file), "utf-8");
       expect(text).not.toContain("import.meta.url");
+      expect(text).not.toContain("process.execPath");
     }
   });
 
   test(
-    "host file resolves the alias, missing host file fails",
+    "host file outside HOME resolves the alias, missing host file fails",
     async () => {
       const out = tempDir("hoststate-pkg-");
       const home = tempDir("hoststate-home-");
+      const etcDir = tempDir("hoststate-etc-");
       try {
-        const bin = await buildNative(out);
+        const pkg = await buildPackage(out);
+        writeFileSync(
+          join(pkg, "config", "plugin.json"),
+          JSON.stringify({ hostFile: join(etcDir, "host.json") }),
+        );
+        // A valid host file inside HOME must not be used: the package
+        // points outside HOME.
+        const homeHostDir = join(home, ".config", "means-of-compute");
+        mkdirSync(homeHostDir, { recursive: true });
+        writeFileSync(join(homeHostDir, "host.json"), JSON.stringify({ hostAlias: "laptop-z" }));
         const scenario = JSON.parse(
           readFileSync(join(repoRoot, "config", "scenarios", "desktop-mains.json"), "utf-8"),
         ) as Record<string, unknown>;
         delete scenario["hostAlias"];
         const factsPath = join(home, "facts.json");
         writeFileSync(factsPath, JSON.stringify(scenario));
-        const missing = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        const hostPath = join(etcDir, "host.json");
+        const missing = await run([join(pkg, "bin", "moc-host-state"), "--facts", factsPath], {
+          env: { HOME: home },
+        });
         expect(missing.exitCode).toBe(1);
         expect(missing.stdout).toBe("");
-        const hostPath = join(home, ".config", "means-of-compute", "host.json");
         expect(missing.stderr).toBe(`host file ${hostPath}: ENOENT\n`);
-        const hostDir = join(home, ".config", "means-of-compute");
-        mkdirSync(hostDir, { recursive: true });
-        writeFileSync(join(hostDir, "host.json"), "{not json");
-        const unparsable = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        writeFileSync(join(etcDir, "host.json"), "{not json");
+        const unparsable = await run([join(pkg, "bin", "moc-host-state"), "--facts", factsPath], {
+          env: { HOME: home },
+        });
         expect(unparsable.exitCode).toBe(1);
         expect(unparsable.stdout).toBe("");
         expect(unparsable.stderr).toBe(`host file ${hostPath}: invalid hostAlias\n`);
         writeFileSync(
-          join(hostDir, "host.json"),
+          join(etcDir, "host.json"),
           JSON.stringify({ hostAlias: "laptop-a", extra: true }),
         );
-        const extra = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        const extra = await run([join(pkg, "bin", "moc-host-state"), "--facts", factsPath], {
+          env: { HOME: home },
+        });
         expect(extra.exitCode).toBe(1);
         expect(extra.stdout).toBe("");
         expect(extra.stderr).toBe(`host file ${hostPath}: invalid hostAlias\n`);
-        writeFileSync(join(hostDir, "host.json"), JSON.stringify({ hostAlias: "laptop-a" }));
-        const present = await run([bin, "--facts", factsPath], { env: { HOME: home } });
+        writeFileSync(join(etcDir, "host.json"), JSON.stringify({ hostAlias: "laptop-a" }));
+        const present = await run([join(pkg, "bin", "moc-host-state"), "--facts", factsPath], {
+          env: { HOME: home },
+        });
         expect(present.exitCode).toBe(0);
         const doc = JSON.parse(present.stdout) as { hostAlias: string };
         expect(doc.hostAlias).toBe("laptop-a");
       } finally {
         rmSync(out, { recursive: true, force: true });
         rmSync(home, { recursive: true, force: true });
+        rmSync(etcDir, { recursive: true, force: true });
       }
     },
     buildTimeoutMs,
   );
 
   test(
+    "package lists the six entries with mode, shebang, size, manifest and command",
+    async () => {
+      const out = tempDir("hoststate-pkg-");
+      try {
+        const pkg = await buildPackage(out);
+        expect(readdirSync(pkg).sort()).toEqual(["bin", "build.json", "config", "runtime.toml"]);
+        expect(readdirSync(join(pkg, "config")).sort()).toEqual([
+          "plugin.json",
+          "probe.json",
+          "scenarios",
+        ]);
+        const binPath = join(pkg, "bin", "moc-host-state");
+        const { mode, size } = await Bun.file(binPath)
+          .stat()
+          .then((s) => s);
+        expect(mode & 0o777).toBe(0o755);
+        const firstLine = readFileSync(binPath, "utf-8").split("\n")[0];
+        expect(firstLine).toBe("#!/usr/bin/env bun");
+        expect(size).toBeLessThan(16777216);
+        const config = JSON.parse(
+          readFileSync(join(repoRoot, "config", "host-state.json"), "utf-8"),
+        ) as { package: { id: string; version: string; command: string } };
+        const manifest = readFileSync(join(pkg, "runtime.toml"), "utf-8");
+        expect(manifest).toBe(
+          [
+            "schema = 1",
+            `id = "${config.package.id}"`,
+            `version = "${config.package.version}"`,
+            "runtime_api = 1",
+            `requires = ["package-commands-v1"]`,
+            "",
+            `[commands.${config.package.command}]`,
+            `program = "bin/moc-host-state"`,
+            `args = []`,
+            `expose = "peers"`,
+            "",
+          ].join("\n"),
+        );
+        const buildJson = JSON.parse(readFileSync(join(pkg, "build.json"), "utf-8")) as Record<
+          string,
+          unknown
+        >;
+        expect(buildJson["command"]).toBe(config.package.command);
+      } finally {
+        rmSync(out, { recursive: true, force: true });
+      }
+    },
+    buildTimeoutMs,
+  );
+
+  test("plugin:build rejects --target as an unknown argument", async () => {
+    const dir = tempDir("hoststate-target-");
+    try {
+      const r = await run(["bun", "run", "plugin:build", "--target", "native", "--out", dir]);
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain("plugin:build: unknown argument --target");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test(
     "unknown argument exits 2 with empty stdout",
     async () => {
       const out = tempDir("hoststate-pkg-");
       try {
-        const bin = await buildNative(out);
-        const r = await run([bin, "--bogus"]);
+        const pkg = await buildPackage(out);
+        const r = await run([join(pkg, "bin", "moc-host-state"), "--bogus"]);
         expect(r.exitCode).toBe(2);
         expect(r.stdout).toBe("");
       } finally {
@@ -176,7 +256,7 @@ describe("plugin package", () => {
     try {
       const filePath = join(dir, "out");
       writeFileSync(filePath, "taken");
-      const r = await run(["bun", "run", "plugin:build", "--target", "native", "--out", filePath]);
+      const r = await run(["bun", "run", "plugin:build", "--out", filePath]);
       expect(r.exitCode).toBe(2);
       expect(r.stderr).toContain(`output path ${filePath} is not a directory`);
     } finally {

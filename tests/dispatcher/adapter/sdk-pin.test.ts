@@ -5,13 +5,13 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const GITHUB_RELEASES = "https://github.com/zajca/pohunek/releases/download/v0.37.0";
-const SDK_URL = `${GITHUB_RELEASES}/pohunek-ts-sdk-0.37.0.tgz`;
-const PROTOCOL_URL = `${GITHUB_RELEASES}/pohunek-ts-protocol-0.37.0.tgz`;
+const GITHUB_RELEASES = "https://github.com/zajca/pohunek/releases/download/v0.38.1";
+const SDK_URL = `${GITHUB_RELEASES}/pohunek-ts-sdk-0.38.1.tgz`;
+const PROTOCOL_URL = `${GITHUB_RELEASES}/pohunek-ts-protocol-0.38.1.tgz`;
 const SDK_DIGEST =
-  "sha512-aVKD4DE+8AYBzdfmseqF6LwCdB24jf7OOoiK9wlWRO69087gEhf6rxypQo8EksuVSkYCn3ROfLgfyIVc9P1FUA==";
+  "sha512-WSXkYFaFrM/2ODGFIj7HFUvToctGX2AmQj2hJLsl0dD2ODWfGWjjTLialqvdjlcJmznOZmzN9xHDJdbs4AY8jw==";
 const PROTOCOL_DIGEST =
-  "sha512-VCQw2goZf8rcGZRZrZuiFo5mn+z7ZbHoewDuJKiUu79+G6RYaISYGWttJ2s9R/NFzLpqC7zxNmHQFxZ7XOG81w==";
+  "sha512-lzXI41patDY8hqQitx2RtGdz1P1TbKTlGyibF/mLV0tEalusKan7vKBiNhoh8cTIqZdroJ5PNwpVF8wDNghVQQ==";
 const AT = "@";
 
 async function repoFile(name: string): Promise<string> {

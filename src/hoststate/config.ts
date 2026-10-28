@@ -1,20 +1,11 @@
 import { dirname, join } from "node:path";
 import { loadConfig, readJson } from "../probe/config.js";
 
-export const hostStateTargets = [
-  "bun-linux-x64",
-  "bun-linux-arm64",
-  "bun-darwin-arm64",
-  "bun-darwin-x64",
-] as const;
-
-export type HostStateTarget = (typeof hostStateTargets)[number];
-
 export type HostStatePackage = {
   readonly id: string;
   readonly version: string;
   readonly sourceDigest: string;
-  readonly targets: readonly HostStateTarget[];
+  readonly command: string;
 };
 
 export type HostStateCollector = {
@@ -33,6 +24,7 @@ export type HostStateConfig = {
 const packageIdPattern = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
 const versionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const sourceDigestPattern = /^sha256:[0-9a-f]{64}$/;
+const commandPattern = /^[a-z][a-z0-9-]{0,31}$/;
 
 function fail(key: string): never {
   throw new Error(`config host-state.json: invalid ${key}`);
@@ -64,7 +56,7 @@ export function loadHostStateConfig(path: string): HostStateConfig {
     fail("package");
   }
   const fields = pkg as Record<string, unknown>;
-  const expectedPackageKeys = ["id", "version", "sourceDigest", "targets"];
+  const expectedPackageKeys = ["id", "version", "sourceDigest", "command"];
   for (const key of expectedPackageKeys) {
     if (!(key in fields)) {
       fail(`package.${key}`);
@@ -87,17 +79,9 @@ export function loadHostStateConfig(path: string): HostStateConfig {
   if (typeof sourceDigest !== "string" || !sourceDigestPattern.test(sourceDigest)) {
     fail("package.sourceDigest");
   }
-  const targets = fields["targets"];
-  if (
-    !Array.isArray(targets) ||
-    targets.length === 0 ||
-    new Set(targets).size !== targets.length ||
-    !targets.every(
-      (t): t is HostStateTarget =>
-        typeof t === "string" && (hostStateTargets as readonly string[]).includes(t),
-    )
-  ) {
-    fail("package.targets");
+  const command = fields["command"];
+  if (typeof command !== "string" || !commandPattern.test(command)) {
+    fail("package.command");
   }
   const collectorRaw = root["collector"];
   if (typeof collectorRaw !== "object" || collectorRaw === null || Array.isArray(collectorRaw)) {
@@ -144,7 +128,9 @@ export function loadHostStateConfig(path: string): HostStateConfig {
     fail("collector.transportMarginMs");
   }
   const maxOutputBytes = collectorFields["maxOutputBytes"];
-  if (!integerInRange(maxOutputBytes, 1024, 1048576)) {
+  // The daemon enforces its own output ceiling at 131072 bytes, so the
+  // collector cap cannot exceed it.
+  if (!integerInRange(maxOutputBytes, 1024, 131072)) {
     fail("collector.maxOutputBytes");
   }
   const maxClockSkewMs = collectorFields["maxClockSkewMs"];
@@ -156,7 +142,7 @@ export function loadHostStateConfig(path: string): HostStateConfig {
       id,
       version,
       sourceDigest,
-      targets: [...targets] as readonly HostStateTarget[],
+      command,
     },
     collector: {
       acceptedVersions: [...acceptedVersions] as readonly string[],

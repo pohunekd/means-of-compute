@@ -191,6 +191,26 @@ test("an update that changes a submission is refused by rule (h) (M2)", async ()
   }
 });
 
+test("an update with a missing parent is a data error (L3)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "work-store-"));
+  rmSync(dir, { recursive: true, force: true });
+  const path = join(dir, "work-items.json");
+  let error: unknown;
+  try {
+    await updateWorkStore(path, () => Promise.resolve({ next: null, value: undefined }));
+  } catch (thrown: unknown) {
+    error = thrown;
+  }
+  expect(error).toBeInstanceOf(WorkStoreDataError);
+  let absent = false;
+  try {
+    readFileSync(dir, "utf8");
+  } catch {
+    absent = true;
+  }
+  expect(absent).toBe(true);
+});
+
 test("duplicate item id names rule (c) (S5)", () => {
   const path = "unused-for-check";
   let message = "";

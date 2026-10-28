@@ -224,6 +224,9 @@ export async function updateWorkStore<T>(
       if (error.code === "busy") {
         throw new WorkStoreBusyError(error.message, { cause: error });
       }
+      if (error.code === "open-failed") {
+        throw new WorkStoreDataError(error.message, { cause: error });
+      }
       throw new WorkStoreWriteError(error.message, { cause: error });
     }
     throw error;

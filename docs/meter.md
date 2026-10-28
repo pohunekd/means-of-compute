@@ -281,11 +281,11 @@ A latched meter rethrows `MeterUnavailableError`.
 
 `diff` and `close` delegate to the inner port; `close` does not close the meter.
 
-The provisional lost path runs only when `port.start` is unreachable; there `lostUsage(requestId)` gives the measured join, a zero row when no call ran. A bound session that ends lost on the watch path gets its join through the same hook.
+The provisional lost path runs only when `port.start` is unreachable; there `settleUsage(requestId, "lost")` gives the measured join, a zero row when no call ran. A bound session that ends lost on the watch path gets its join through the same hook. A start rejected with a grant settles through the same hook with `"failed"`.
 
 ## Lost usage
 
-`createDispatcher` takes a required `lostUsage(requestId)` hook: the first step of `finishLost`, before the first registry write, reads back the durable usage through this hook. The factory sets `lostUsage` to `meter.settleRequest`, so the meter settles before the terminal exists. An invalid row stores `null` (`usage-invalid` event, `usage-invalid` token source) instead of the fabricated counts, and the budget guard refuses unknown spend — never a measured zero.
+`createDispatcher` takes a required `settleUsage(requestId, state)` hook: the first step of `finishLost`, before the first registry write, reads back the durable usage through this hook. `finishLost` settles with `"lost"` and a rejected start with `"failed"`. The factory sets `settleUsage` to `meter.settleRequest`, so the meter settles before the terminal exists. An invalid row stores `null` (`usage-invalid` event, `usage-invalid` token source) instead of the fabricated counts, and the budget guard refuses unknown spend — never a measured zero.
 
 ## Usage CLI
 

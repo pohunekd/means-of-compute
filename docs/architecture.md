@@ -164,10 +164,11 @@ request with null counts.
 `settle(sessionId, state)` finds the grant by session and delegates to `settleRequest(requestId)`, which owns one memoized `Promise<PortUsage | null>` per request id. After the close and the drain, the join is stable through replays and repeated calls. An unbound grant (opened, never bound) closes in `settleRequest`, so the
 stranded billing of a lost session survives.
 
-The dispatcher carries a required `lostUsage(requestId)` hook: the
+The dispatcher carries a required `settleUsage(requestId, state)` hook: the
 first step of `finishLost`, before the first registry write, settles
-the meter grant through this hook, which the factory wires to
-`meter.settleRequest`. An invalid row is stored as `null`, never as a
+the meter grant through this hook, which `dispatch:resolve` wires to
+`meter.settleRequest`. `finishLost` settles with `"lost"` and a rejected start
+with `"failed"`. An invalid row is stored as `null`, never as a
 fabricated zero, and the budget guard refuses unknown spend.
 
 `createMeteredPort(inner, meter, log)` adapts a dispatcher port so

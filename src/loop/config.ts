@@ -271,8 +271,11 @@ async function parseRouting(value: unknown, path: string): Promise<LoopRoutingCo
       if (status !== "file") {
         throw invalid(path, "routing.models");
       }
-    } catch {
-      throw invalid(path, "routing.models");
+    } catch (error: unknown) {
+      throw new LoopConfigError(
+        `Loop config ${path}: invalid required key "routing.models" (provider "${provider}")`,
+        { cause: error },
+      );
     }
     models[model] = provider;
   }
@@ -453,6 +456,9 @@ function parseRepos(value: unknown, path: string, specRepos: readonly string[]):
       throw invalid(path, `${name}.idPrefix`);
     }
     prefixes.add(idPrefix);
+    if (seen.has(repo)) {
+      throw invalid(path, `${name}.repo`);
+    }
     seen.add(repo);
     repos.push({ repo, checkoutDir: requiredString(record, path, name, "checkoutDir"), idPrefix });
   });
@@ -485,6 +491,24 @@ function parseTrialMerge(value: unknown, path: string): LoopTrialMergeConfig {
     scratchDir: requiredString(record, path, "trialMerge", "scratchDir"),
     steps,
     timeoutMs: requiredInteger(record, path, "trialMerge", "timeoutMs", 1000, 3600000),
+  };
+}
+
+function parseAudit(value: unknown, path: string): { readonly retries: number } {
+  const record = asRecord(value, path, "audit");
+  checkKeys(record, ["retries"], path, "audit");
+  return { retries: requiredInteger(record, path, "audit", "retries", 0, 10) };
+}
+
+function parseDigest(
+  value: unknown,
+  path: string,
+): { readonly dir: string; readonly onExit: boolean } {
+  const record = asRecord(value, path, "digest");
+  checkKeys(record, ["dir", "onExit"], path, "digest");
+  return {
+    dir: requiredString(record, path, "digest", "dir"),
+    onExit: requiredBoolean(record, path, "digest", "onExit"),
   };
 }
 
@@ -568,10 +592,22 @@ const TOP_LEVEL_KEYS = [
 
 export async function loadLoopConfig(path: string, mode: LoopMode): Promise<LoopConfig> {
   const label = "Loop config";
-  if ((await statInputPath(label, path)) === "absent") {
-    throw new LoopConfigError(`${label} ${path}: file is missing`);
+  try {
+    if ((await statInputPath(label, path)) === "absent") {
+      throw new LoopConfigError(`${label} ${path}: file is missing`);
+    }
+  } catch (error: unknown) {
+    if (error instanceof LoopConfigError) {
+      throw error;
+    }
+    throw new LoopConfigError(`${label} ${path}: cannot stat path`, { cause: error });
   }
-  const text = await readInputText(label, path);
+  let text: string;
+  try {
+    text = await readInputText(label, path);
+  } catch (error: unknown) {
+    throw new LoopConfigError(`${label} ${path}: cannot read file`, { cause: error });
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
@@ -610,10 +646,13 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
   const stub = parseStub(record["stub"], path, mode);
   const adapterConfigPath = optionalAdapterPath(record, path, "", "adapterConfigPath");
   const dashboardConfigPath = optionalAdapterPath(record, path, "", "dashboardConfigPath");
-  if (mode === "production" && (adapterConfigPath === null || dashboardConfigPath === null)) {
-    throw new LoopConfigError(
-      `Loop config ${path}: stub mode requires null adapter and dashboard paths`,
-    );
+  if (mode === "production") {
+    if (adapterConfigPath === null) {
+      throw invalid(path, "adapterConfigPath");
+    }
+    if (dashboardConfigPath === null) {
+      throw invalid(path, "dashboardConfigPath");
+    }
   }
   if (mode === "stub" && (adapterConfigPath !== null || dashboardConfigPath !== null)) {
     throw new LoopConfigError(
@@ -649,20 +688,8 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     github,
     repos,
     trialMerge: parseTrialMerge(record["trialMerge"], path),
-    audit: {
-      retries: requiredInteger(
-        asRecord(record["audit"], path, "audit"),
-        path,
-        "audit",
-        "retries",
-        0,
-        10,
-      ),
-    },
-    digest: {
-      dir: requiredString(asRecord(record["digest"], path, "digest"), path, "digest", "dir"),
-      onExit: requiredBoolean(asRecord(record["digest"], path, "digest"), path, "digest", "onExit"),
-    },
+    audit: parseAudit(record["audit"], path),
+    digest: parseDigest(record["digest"], path),
     stub,
   };
   if (mode === "stub" && stub !== null) {

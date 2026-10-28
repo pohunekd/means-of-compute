@@ -168,6 +168,91 @@ test("the checked-in production config has no stub section (L2 valid case)", asy
   });
 });
 
+test("an unknown key in audit or digest is rejected naming the key (F2)", async () => {
+  await withTempDir(async (dir) => {
+    const base = await productionBase();
+    for (const [section, key, name] of [
+      ["audit", "bogus", "audit.bogus"],
+      ["digest", "bogus", "digest.bogus"],
+    ] as const) {
+      const path = await writeConfig(dir, {
+        ...base,
+        [section]: { ...(base[section] as Record<string, unknown>), [key]: 1 },
+      });
+      let error: unknown;
+      try {
+        await loadLoopConfig(path, "production");
+      } catch (thrown: unknown) {
+        error = thrown;
+      }
+      expect(error).toBeInstanceOf(LoopConfigError);
+      expect((error as Error).message).toContain(`unexpected key "${name}"`);
+    }
+  });
+});
+
+test("an empty audit section reports the missing retries key (F2)", async () => {
+  await withTempDir(async (dir) => {
+    const base = await productionBase();
+    const path = await writeConfig(dir, { ...base, audit: {} });
+    let error: unknown;
+    try {
+      await loadLoopConfig(path, "production");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toContain('missing required key "audit.retries"');
+  });
+});
+
+test("duplicate repos entries are rejected naming the repo key (F3)", async () => {
+  await withTempDir(async (dir) => {
+    const base = await productionBase();
+    const first = { ...((base["repos"] as unknown[])[0] as Record<string, unknown>) };
+    const second = { ...first, idPrefix: "moc2", checkoutDir: "logs/checkouts/other" };
+    const path = await writeConfig(dir, { ...base, repos: [first, second] });
+    let error: unknown;
+    try {
+      await loadLoopConfig(path, "production");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toContain("repos[1].repo");
+  });
+});
+
+test("a null adapter path in production mode names the key (F6)", async () => {
+  await withTempDir(async (dir) => {
+    const base = await productionBase();
+    const path = await writeConfig(dir, { ...base, adapterConfigPath: null });
+    let error: unknown;
+    try {
+      await loadLoopConfig(path, "production");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+    expect((error as Error).message).toContain('invalid required key "adapterConfigPath"');
+  });
+});
+
+test("a missing config file throws LoopConfigError (F7)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "loop-config-missing-"));
+  try {
+    let error: unknown;
+    try {
+      await loadLoopConfig(join(dir, "nope", "loop.json"), "stub");
+    } catch (thrown: unknown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(LoopConfigError);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("stub present in production mode is an error (L2)", async () => {
   await withTempDir(async (dir) => {
     const base = await productionBase();

@@ -39,7 +39,10 @@ async function readArgsFile(path: string): Promise<unknown> {
 async function run(argv: readonly string[]): Promise<number> {
   try {
     if (argv.length === 0 || argv[0] === undefined || argv[0].startsWith("--")) {
-      throw new ClientError(2, "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]");
+      throw new ClientError(
+        2,
+        "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]",
+      );
     }
     const tool = argv[0];
     const rest = argv.slice(1);
@@ -51,7 +54,11 @@ async function run(argv: readonly string[]): Promise<number> {
       }
     }
     const config = await loadMcpConfig(configPath).catch((error: unknown) => {
-      throw new ClientError(4, `mcp:call: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      throw new ClientError(
+        4,
+        `mcp:call: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     });
     const args = file === null ? {} : await readArgsFile(file);
     const structured = (await runClientCall({

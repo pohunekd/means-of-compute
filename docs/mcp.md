@@ -91,13 +91,14 @@ and DoD texts are not returned. Errors: `source-unreadable` on store
 unreadable; invalid arguments are `invalid-arguments`.
 
 `audit_results` (`[read]`, `{"workItemId":id}`): stored verdicts. Steps:
-1) unknown `workItemId` in work store → `unknown-work-item`
-`"unknown work item <id>"`; 2) `readVerdicts` throws →
-`source-unreadable` `{source:"verdicts"}`; 3) any verdict where
-`recount(findings)` differs from `counts` → `verdict-invalid`
-`{headSha}` `"verdict <sha> counts disagree with its findings"`; 4)
-otherwise `{"ok":true,"workItemId":id,"verdicts":[...]}` in
-`readVerdicts` order (by `headSha`). Zero verdicts is `[]`.
+
+1. unknown `workItemId` in work store → `unknown-work-item`
+   `"unknown work item <id>"`; 2) `readVerdicts` throws →
+   `source-unreadable` `{source:"verdicts"}`; 3) any verdict where
+   `recount(findings)` differs from `counts` → `verdict-invalid`
+   `{headSha}` `"verdict <sha> counts disagree with its findings"`; 4)
+   otherwise `{"ok":true,"workItemId":id,"verdicts":[...]}` in
+   `readVerdicts` order (by `headSha`). Zero verdicts is `[]`.
 
 ## Client `mcp:call`
 

@@ -99,6 +99,7 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new ClientError(4, "mcp:call: malformed response");
     }
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     return raw as JsonRpcResponse;
   }
   try {

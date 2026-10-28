@@ -28,7 +28,10 @@ async function spawnCall(args: readonly string[]): Promise<SpawnResult> {
 
 test("C1 spawned mcp:call fleet_status exits 0 with ok true (C1)", async () => {
   const env = await createMcpTestEnv("mcp-c1-");
-  await Bun.write(env.storePath, JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }));
+  await Bun.write(
+    env.storePath,
+    JSON.stringify({ schemaVersion: "v1", revision: 0, items: [], submissions: [] }),
+  );
   await Bun.write(env.registryPath, JSON.stringify({ sessions: [] }));
   const result = await spawnCall(["fleet_status", "--config", env.mcpConfigPath]);
   expect(result.code).toBe(0);

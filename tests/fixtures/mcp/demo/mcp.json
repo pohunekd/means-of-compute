@@ -1,5 +1,5 @@
 {
-  "serverInfo": {"name": "means-of-compute-factory", "version": "0.1.0"},
+  "serverInfo": { "name": "means-of-compute-factory", "version": "0.1.0" },
   "callers": ["coordinator", "mcp-call"],
   "callLogPath": "logs/mcp-demo-calls.jsonl",
   "maxMessageBytes": 1048576,

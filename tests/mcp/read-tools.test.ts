@@ -25,7 +25,9 @@ async function loadFixture(path: string): Promise<unknown> {
   return JSON.parse(text) as unknown;
 }
 
-async function setupProtocol(env: ReturnType<typeof createMcpTestEnv> extends Promise<infer T> ? T : never): Promise<ReturnType<typeof createProtocol>> {
+async function setupProtocol(
+  env: ReturnType<typeof createMcpTestEnv> extends Promise<infer T> ? T : never,
+): Promise<ReturnType<typeof createProtocol>> {
   const tools = createTools({
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
@@ -43,26 +45,46 @@ async function setupProtocol(env: ReturnType<typeof createMcpTestEnv> extends Pr
     jsonrpc: "2.0",
     id: 1,
     method: "initialize",
-    params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "sh", version: "1" } },
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: { name: "sh", version: "1" },
+    },
   });
   await protocol.handleLine(init);
   return protocol;
 }
 
 function callLine(id: number, name: string, args: unknown): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
 }
 
 test("R1 list_work filters by status to one parked row (R1, R2)", async () => {
   const env = await createMcpTestEnv("mcp-r1-");
   const w1 = await loadFixture("contracts/v1/fixtures/work-item.json");
   const w2 = await loadFixture("contracts/v1/fixtures/work-item-parked.json");
-  await writeTestFile(env.storePath, { schemaVersion: "v1", revision: 3, items: [w1, w2], submissions: [] });
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 3,
+    items: [w1, w2],
+    submissions: [],
+  });
   await writeTestFile(env.registryPath, { sessions: [] });
   const protocol = await setupProtocol(env);
   const raw = await protocol.handleLine(callLine(2, "list_work", { status: ["parked"] }));
   const parsed = JSON.parse(raw as string) as {
-    result: { structuredContent: { ok: boolean; revision: number; items: readonly { id: string; dod: { done: number; total: number } }[] } };
+    result: {
+      structuredContent: {
+        ok: boolean;
+        revision: number;
+        items: readonly { id: string; dod: { done: number; total: number } }[];
+      };
+    };
   };
   expect(parsed.result.structuredContent.ok).toBe(true);
   expect(parsed.result.structuredContent.revision).toBe(3);
@@ -73,12 +95,19 @@ test("R1 list_work filters by status to one parked row (R1, R2)", async () => {
 
 test("R2 list_work with empty args is invalid-arguments required (R2)", async () => {
   const env = await createMcpTestEnv("mcp-r2-");
-  await writeTestFile(env.storePath, { schemaVersion: "v1", revision: 0, items: [], submissions: [] });
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
   await writeTestFile(env.registryPath, { sessions: [] });
   const protocol = await setupProtocol(env);
   const raw = await protocol.handleLine(callLine(2, "list_work", {}));
   const parsed = JSON.parse(raw as string) as {
-    result: { structuredContent: { ok: boolean; error: { code: string; keyword: string; path: string } } };
+    result: {
+      structuredContent: { ok: boolean; error: { code: string; keyword: string; path: string } };
+    };
   };
   expect(parsed.result.structuredContent.ok).toBe(false);
   expect(parsed.result.structuredContent.error.code).toBe("invalid-arguments");
@@ -107,23 +136,45 @@ test("R3 audit_results lists fixture verdict with counts 0,0,1 (R3)", async () =
     retryCount: 0,
     stallRounds: 0,
   };
-  await writeTestFile(env.storePath, { schemaVersion: "v1", revision: 1, items: [w1, demoA], submissions: [] });
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 1,
+    items: [w1, demoA],
+    submissions: [],
+  });
   await writeTestFile(env.registryPath, { sessions: [] });
   // Copy committed verdict to temp verdict dir
-  const fixtureText = await Bun.file("tests/fixtures/mcp/verdicts/demo-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json").text();
+  const fixtureText = await Bun.file(
+    "tests/fixtures/mcp/verdicts/demo-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+  ).text();
   const fixture = JSON.parse(fixtureText) as { headSha: string };
   await mkdir(join(env.verdictDir, "demo-a"), { recursive: true });
   await Bun.write(join(env.verdictDir, "demo-a", `${fixture.headSha}.json`), fixtureText);
   const protocol = await setupProtocol(env);
   const raw = await protocol.handleLine(callLine(2, "audit_results", { workItemId: "demo-a" }));
   const parsed = JSON.parse(raw as string) as {
-    result: { structuredContent: { ok: boolean; workItemId: string; verdicts: readonly { headSha: string; counts: { high: number; medium: number; low: number } }[] } };
+    result: {
+      structuredContent: {
+        ok: boolean;
+        workItemId: string;
+        verdicts: readonly {
+          headSha: string;
+          counts: { high: number; medium: number; low: number };
+        }[];
+      };
+    };
   };
   expect(parsed.result.structuredContent.ok).toBe(true);
   expect(parsed.result.structuredContent.workItemId).toBe("demo-a");
   expect(parsed.result.structuredContent.verdicts.length).toBe(1);
-  expect(parsed.result.structuredContent.verdicts[0]?.headSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-  expect(parsed.result.structuredContent.verdicts[0]?.counts).toEqual({ high: 0, medium: 0, low: 1 });
+  expect(parsed.result.structuredContent.verdicts[0]?.headSha).toBe(
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
+  expect(parsed.result.structuredContent.verdicts[0]?.counts).toEqual({
+    high: 0,
+    medium: 0,
+    low: 1,
+  });
 });
 
 test("R4 audit_results with bad counts is verdict-invalid (R4)", async () => {
@@ -146,7 +197,12 @@ test("R4 audit_results with bad counts is verdict-invalid (R4)", async () => {
     retryCount: 0,
     stallRounds: 0,
   };
-  await writeTestFile(env.storePath, { schemaVersion: "v1", revision: 1, items: [demoA], submissions: [] });
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 1,
+    items: [demoA],
+    submissions: [],
+  });
   await writeTestFile(env.registryPath, { sessions: [] });
   const badSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const badVerdict = {
@@ -158,27 +214,46 @@ test("R4 audit_results with bad counts is verdict-invalid (R4)", async () => {
     authorModels: ["meta/muse-glimmer-30b"],
     auditorModel: "muse-spark-1.3-contributor",
     counts: { high: 1, medium: 0, low: 0 },
-    findings: [{ severity: "low", location: "src/demo.ts:1", defect: "defect", scenario: "scenario", fixDirection: "fix" }],
+    findings: [
+      {
+        severity: "low",
+        location: "src/demo.ts:1",
+        defect: "defect",
+        scenario: "scenario",
+        fixDirection: "fix",
+      },
+    ],
   };
   await mkdir(join(env.verdictDir, "demo-a"), { recursive: true });
   await Bun.write(join(env.verdictDir, "demo-a", `${badSha}.json`), JSON.stringify(badVerdict));
   const protocol = await setupProtocol(env);
   const raw = await protocol.handleLine(callLine(2, "audit_results", { workItemId: "demo-a" }));
   const parsed = JSON.parse(raw as string) as {
-    result: { structuredContent: { ok: boolean; error: { code: string; headSha: string; message: string } } };
+    result: {
+      structuredContent: { ok: boolean; error: { code: string; headSha: string; message: string } };
+    };
   };
   expect(parsed.result.structuredContent.ok).toBe(false);
   expect(parsed.result.structuredContent.error.code).toBe("verdict-invalid");
   expect(parsed.result.structuredContent.error.headSha).toBe(badSha);
-  expect(parsed.result.structuredContent.error.message).toBe(`verdict ${badSha} counts disagree with its findings`);
+  expect(parsed.result.structuredContent.error.message).toBe(
+    `verdict ${badSha} counts disagree with its findings`,
+  );
 });
 
 test("R5 audit_results unknown id is unknown-work-item (R5)", async () => {
   const env = await createMcpTestEnv("mcp-r5-");
-  await writeTestFile(env.storePath, { schemaVersion: "v1", revision: 0, items: [], submissions: [] });
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
   await writeTestFile(env.registryPath, { sessions: [] });
   const protocol = await setupProtocol(env);
-  const raw = await protocol.handleLine(callLine(2, "audit_results", { workItemId: "no-such-item" }));
+  const raw = await protocol.handleLine(
+    callLine(2, "audit_results", { workItemId: "no-such-item" }),
+  );
   const parsed = JSON.parse(raw as string) as {
     result: { structuredContent: { ok: boolean; error: { code: string; message: string } } };
   };

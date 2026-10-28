@@ -59,7 +59,9 @@ function firstError(
   return { path, keyword: String(first?.keyword) };
 }
 
-function validateListWork(args: unknown): { readonly path: string; readonly keyword: string } | null {
+function validateListWork(
+  args: unknown,
+): { readonly path: string; readonly keyword: string } | null {
   if (listWorkValidate(args)) {
     return null;
   }

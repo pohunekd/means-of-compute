@@ -46,6 +46,26 @@ test("two events give two lines in order with the injected clock (C2)", async ()
   });
 });
 
+test("a burst of events lands in call order (C2)", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "loop.jsonl");
+    let tick = 0;
+    const log = await openLoopLog(path, () => {
+      tick += 1;
+      return new Date(Date.UTC(2026, 9, 28, 0, 0, 0, tick));
+    });
+    for (let round = 0; round < 200; round += 1) {
+      log.log({ event: "round-closed", workItemId: "gh-moc-5", round, code: "red-ci" });
+    }
+    await log.close();
+    const lines = (await Bun.file(path).text()).split("\n").filter((line) => line !== "");
+    expect(lines).toHaveLength(200);
+    lines.forEach((line, index) => {
+      expect((JSON.parse(line) as { round?: number }).round).toBe(index);
+    });
+  });
+});
+
 test("a failed write latches and later logs write nothing and do not throw (C3)", async () => {
   await withTempDir(async () => {
     // /dev/full fails every write with ENOSPC: the write latch trips

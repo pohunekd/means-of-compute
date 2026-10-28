@@ -25,7 +25,7 @@ function timeoutOverrideEnv(id: string): string {
   return `PROVIDER_${id.toUpperCase().replace(/-/g, "_")}_TIMEOUT_MS`;
 }
 
-async function loadDescriptor(id: string): Promise<ProviderDescriptor> {
+export async function loadProviderDescriptor(id: string): Promise<ProviderDescriptor> {
   const label = "Provider descriptor";
   const file = `${PROVIDERS_DIR}/${id}.json`;
   if (!PROVIDER_ID_PATTERN.test(id)) {
@@ -104,7 +104,7 @@ async function loadProviders(): Promise<Record<string, ProviderDescriptor>> {
   const ids = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
   const providers: Record<string, ProviderDescriptor> = {};
   for (const id of ids) {
-    providers[id] = await loadDescriptor(id);
+    providers[id] = await loadProviderDescriptor(id);
   }
   return providers;
 }

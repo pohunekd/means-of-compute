@@ -590,6 +590,34 @@ test("callProviderOnce rejects an unknown provider id", async () => {
   expect(message).toBe("Unknown provider ghost-api");
 });
 
+test("callWithFallback never reaches the merge auditor (mutation: add meta-wonder to route.json)", async () => {
+  resetProvidersCache();
+  process.env.NVIDIA_API_KEY = "test";
+  process.env.META_API_KEY = "test";
+  process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
+  const routeServer = await startLoopback("tests/providers/recordings/primary-429.json");
+  const wonderServer = await startLoopback("tests/auditor/recordings/wonder-clean.json");
+  try {
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(routeServer.port)}`;
+    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(routeServer.port)}`;
+    process.env.PROVIDER_META_WONDER_BASE_URL = `http://127.0.0.1:${String(wonderServer.port)}`;
+    const { callWithFallback } = await import("../../src/providers/router.js");
+    let caught: unknown;
+    try {
+      await callWithFallback({ messages: [{ role: "user", content: "hi" }] });
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ProvidersExhaustedError);
+    expect(wonderServer.requests()).toHaveLength(0);
+  } finally {
+    void routeServer.stop();
+    void wonderServer.stop();
+    delete process.env.PROVIDER_META_WONDER_BASE_URL;
+    cleanupEnv();
+  }
+});
+
 test("router rejects a duplicate route id on a warm cache (mutation: unvalidated route read)", async () => {
   const { makeTempConfig, removeTempConfig, runWarmCallCheck } = await import("./temp-config.js");
   const dir = await makeTempConfig();

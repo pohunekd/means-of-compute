@@ -1,4 +1,4 @@
-import { getProviders, providerDescriptorExists } from "./config.js";
+import { getProviders, loadProviderDescriptor, providerDescriptorExists } from "./config.js";
 import { loadProviderRoute } from "./route.js";
 import { PROVIDER_ROUTE_PATH } from "./paths.js";
 import type { ProviderDescriptor } from "./types.js";
@@ -225,11 +225,10 @@ export async function callProviderOnce(
   providerId: string,
   request: ModelRequest,
 ): Promise<SingleCallResult> {
-  const providers = await getProviders();
-  const provider = providers[providerId];
-  if (!provider) {
+  if (!(await providerDescriptorExists(providerId))) {
     throw new Error(`Unknown provider ${providerId}`);
   }
+  const provider = await loadProviderDescriptor(providerId);
   const result = await callProvider(provider, request);
   return {
     providerId: provider.id,

@@ -271,31 +271,34 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
       const adapterLog = log("adapter");
       const meterLog = log("meter");
       const port = await openPohunekPort(adapterConfig, adapterLog, process.env, null);
-      const meter = await startMeter({
-        config: meterConfig,
-        env: meterEnv,
-        providers,
-        now: () => new Date(),
-        log: meterLog,
-        timers: systemTimers,
-        logIo: systemUsageLogIo,
-      });
-      const dispatcher = createDispatcher({
-        port,
-        budget: {
-          admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
-        },
-        ledgerPath: ledgerConfig.ledgerPath,
-        config,
-        now: () => new Date(),
-        sleep: (ms) => Bun.sleep(ms),
-        log: dispatcherLog,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
-      });
       try {
-        return await use((requestId) => dispatcher.resolve(requestId));
+        const meter = await startMeter({
+          config: meterConfig,
+          env: meterEnv,
+          providers,
+          now: () => new Date(),
+          log: meterLog,
+          timers: systemTimers,
+          logIo: systemUsageLogIo,
+        });
+        try {
+          const dispatcher = createDispatcher({
+            port,
+            budget: {
+              admit: () => Promise.reject(new Error("dispatch: resolve never admits")),
+            },
+            ledgerPath: ledgerConfig.ledgerPath,
+            config,
+            now: () => new Date(),
+            sleep: (ms) => Bun.sleep(ms),
+            log: dispatcherLog,
+            lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+          });
+          return await use((requestId) => dispatcher.resolve(requestId));
+        } finally {
+          await meter.close();
+        }
       } finally {
-        await meter.close();
         await port.close();
       }
     });

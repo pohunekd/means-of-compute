@@ -7,16 +7,52 @@ import { ClientError, runClientCall } from "./client.js";
 import { loadMcpConfig } from "./config.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 
-function flagValue(args: readonly string[], flag: string): string | null {
-  const index = args.indexOf(flag);
-  if (index === -1) {
-    return null;
+function parseFlags(args: readonly string[]): { file: string | null; configPath: string } {
+  let file: string | null = null;
+  let configPath = "config/mcp.json";
+  let seenFile = false;
+  let seenConfig = false;
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index];
+    if (arg === "--file") {
+      if (seenFile) {
+        throw new ClientError(
+          2,
+          "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]",
+        );
+      }
+      const raw = args[index + 1];
+      if (raw === undefined || raw.startsWith("--")) {
+        throw new ClientError(2, "mcp:call: --file needs a value");
+      }
+      file = raw;
+      seenFile = true;
+      index += 2;
+      continue;
+    }
+    if (arg === "--config") {
+      if (seenConfig) {
+        throw new ClientError(
+          2,
+          "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]",
+        );
+      }
+      const raw = args[index + 1];
+      if (raw === undefined || raw.startsWith("--")) {
+        throw new ClientError(2, "mcp:call: --config needs a value");
+      }
+      configPath = raw;
+      seenConfig = true;
+      index += 2;
+      continue;
+    }
+    if (arg !== undefined && arg.startsWith("--")) {
+      throw new ClientError(2, `mcp:call: unknown flag "${arg}"`);
+    }
+    throw new ClientError(2, "mcp:call: usage: mcp:call <tool> [--file <path>] [--config <path>]");
   }
-  const raw = args[index + 1];
-  if (raw === undefined || raw.startsWith("--")) {
-    throw new ClientError(2, `mcp:call: ${flag} needs a value`);
-  }
-  return raw;
+  return { file, configPath };
 }
 
 async function readArgsFile(path: string): Promise<unknown> {
@@ -59,13 +95,7 @@ async function run(argv: readonly string[]): Promise<number> {
     }
     const tool = argv[0];
     const rest = argv.slice(1);
-    const file = flagValue(rest, "--file");
-    const configPath = flagValue(rest, "--config") ?? "config/mcp.json";
-    for (const arg of rest) {
-      if (arg.startsWith("--") && arg !== "--file" && arg !== "--config") {
-        throw new ClientError(2, `mcp:call: unknown flag "${arg}"`);
-      }
-    }
+    const { file, configPath } = parseFlags(rest);
     const config = await loadMcpConfig(configPath).catch((error: unknown) => {
       throw new ClientError(
         4,

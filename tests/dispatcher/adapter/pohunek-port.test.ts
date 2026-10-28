@@ -34,6 +34,7 @@ const CONFIG: PohunekAdapterConfig = {
   connectTimeoutMs: 5000,
   cancelWaitTimeoutMs: 30000,
   diffLogPath: "logs/dispatch-diff.jsonl",
+  resolveLogPath: "logs/dispatch-resolve.jsonl",
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
 };
 

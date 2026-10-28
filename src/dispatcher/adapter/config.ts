@@ -13,6 +13,7 @@ export interface PohunekAdapterConfig {
   readonly connectTimeoutMs: number;
   readonly cancelWaitTimeoutMs: number;
   readonly diffLogPath: string;
+  readonly resolveLogPath: string;
   readonly hostRoutesFileEnv: string;
 }
 
@@ -27,6 +28,7 @@ const ALLOWED_KEYS = new Set([
   "connectTimeoutMs",
   "cancelWaitTimeoutMs",
   "diffLogPath",
+  "resolveLogPath",
   "hostRoutesFileEnv",
 ]);
 
@@ -79,6 +81,9 @@ function checkPohunekAdapterConfig(value: unknown): string | null {
   if (!isNonEmptyString(record["diffLogPath"])) {
     return '"diffLogPath" must be a non-empty string';
   }
+  if (!isNonEmptyString(record["resolveLogPath"])) {
+    return '"resolveLogPath" must be a non-empty string';
+  }
   const envName = record["hostRoutesFileEnv"];
   if (!isNonEmptyString(envName) || !ENV_NAME_PATTERN.test(envName)) {
     return '"hostRoutesFileEnv" must match ^[A-Z][A-Z0-9_]*$';
@@ -114,6 +119,7 @@ export async function loadPohunekAdapterConfig(
     connectTimeoutMs: record["connectTimeoutMs"] as number,
     cancelWaitTimeoutMs: record["cancelWaitTimeoutMs"] as number,
     diffLogPath: record["diffLogPath"] as string,
+    resolveLogPath: record["resolveLogPath"] as string,
     hostRoutesFileEnv: record["hostRoutesFileEnv"] as string,
   };
 }

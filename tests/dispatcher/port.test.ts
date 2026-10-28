@@ -187,6 +187,14 @@ test("release with nothing bound returns []", async () => {
   expect(result).toEqual({ sessionIds: [] });
   expect(control.sessions()).toHaveLength(1);
   expect(control.sessions()[0]?.handle.sessionId).toBe(other.sessionId);
+  // A known id on another host is not this host's session.
+  const crossHost = await control.port.release({
+    requestId: "demo-item:0",
+    hostAlias: "laptop-a",
+    sessionId: other.sessionId,
+  });
+  expect(crossHost).toEqual({ sessionIds: [] });
+  expect(control.sessions()).toHaveLength(1);
   await control.port.close();
 });
 

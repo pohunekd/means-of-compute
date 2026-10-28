@@ -100,6 +100,7 @@ export interface Meter extends MeterLiveView {
   openGrant(spec: GrantSpec): Promise<void>;
   bindGrant(requestId: string, sessionId: string): Promise<void>;
   settle(sessionId: string, state: TerminalState): Promise<PortUsage | null>;
+  settleRequest(requestId: string, state: TerminalState): Promise<PortUsage | null>;
   close(): Promise<void>;
   liveCount(requestId: string): number;
 }
@@ -344,18 +345,24 @@ export async function startMeterWithInternals(deps: MeterDeps): Promise<{
       log({ level: "error", event: "unknown-session" });
       return null;
     }
-    const known = requestId;
+    return settleRequest(requestId, state);
+  }
+
+  async function settleRequest(
+    requestId: string,
+    state: TerminalState,
+  ): Promise<PortUsage | null> {
     // A resolved memo is returned before the latch check: a grant
     // that has settled keeps its value. A grant that has not settled
     // still sees the latch first, because its close could never have
     // gone durable.
-    const memo = settleMemos.get(known);
+    const memo = settleMemos.get(requestId);
     if (memo !== undefined) {
       return memo;
     }
     checkFailed(appender);
-    const fresh = settleGrant(known, state);
-    settleMemos.set(known, fresh);
+    const fresh = settleGrant(requestId, state);
+    settleMemos.set(requestId, fresh);
     return fresh;
   }
 
@@ -363,6 +370,7 @@ export async function startMeterWithInternals(deps: MeterDeps): Promise<{
     checkFailed(appender);
     const grant = index.grants.get(requestId);
     if (grant === undefined) {
+      log({ level: "error", event: "unknown-grant", requestId });
       return null;
     }
     let closeVerdict: "already-closed" | "meter-unavailable" | null;
@@ -459,6 +467,7 @@ export async function startMeterWithInternals(deps: MeterDeps): Promise<{
       openGrant,
       bindGrant,
       settle,
+      settleRequest,
       close,
       liveCount: readLiveCount,
     },

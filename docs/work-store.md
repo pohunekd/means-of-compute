@@ -32,9 +32,11 @@ A missing parent, a non-file path, or an I/O error is a `WorkStoreDataError`.
 
 Every write is `updateWorkStore(path, fn)`: take the lock file
 `<storePath>.lock` with `withFileLock("work store lock", ...)`, read the
-store, run `fn`, write nothing when `next` is null, otherwise check rule
-(h), persist revision + 1 after `checkWorkStore` passes and return
-`r.value`. Lock errors map as: a held lock is `WorkStoreBusyError` for the
+store, run `fn`, write nothing when `next` is null; otherwise build the
+next store at revision + 1, run `checkWorkStore` on it, then rule (h)
+against the store that was read, and only when both pass persist it and
+return `r.value`. A `next` that breaks a W2 rule therefore fails on that
+rule (for example rule (b) or (e)) before rule (h) is checked. Lock errors map as: a held lock is `WorkStoreBusyError` for the
 caller to retry; `open-failed` is `WorkStoreDataError` with the cause, the
 same class a missing parent gives on read; every other lock failure is
 `WorkStoreWriteError`, including a release failure after the write already

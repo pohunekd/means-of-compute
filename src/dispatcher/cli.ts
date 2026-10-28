@@ -235,6 +235,14 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
     const adapterConfig = await loadPohunekAdapterConfig();
     const ledgerConfig = await loadLedgerConfig();
     mkdirSync(dirname(config.registryPath), { recursive: true });
+    try {
+      mkdirSync(dirname(adapterConfig.resolveLogPath), { recursive: true });
+      appendFileSync(adapterConfig.resolveLogPath, "");
+    } catch (error: unknown) {
+      const raw = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+      const code = typeof raw === "string" && /^E[A-Z]+$/.test(raw) ? raw : "unwritable";
+      throw new Error(`resolve log: ${code}`, { cause: error });
+    }
     return await withFileLock("Dispatcher registry", config.registryPath, async () => {
       const log =
         (source: string) =>

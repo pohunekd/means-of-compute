@@ -365,6 +365,33 @@ test("a held registry lock exits 3", async () => {
   });
 });
 
+test("an unwritable resolve log exits 2 before the runtime", async () => {
+  await withConfigCopy(async (dir) => {
+    const addressesFile = join(dir, "host-addresses.json");
+    await writeFile(addressesFile, JSON.stringify({ "laptop-a": ["10.0.0.1"] }), "utf8");
+    const routesFile = join(dir, "host-routes.json");
+    await writeFile(routesFile, JSON.stringify({ "laptop-a": "route" }), "utf8");
+    // The resolve log path is a directory: the preparation fails with
+    // EISDIR before anything is locked, bound or opened.
+    await mkdir(join(dir, "logs", "dispatch-resolve.jsonl"), { recursive: true });
+    const env: Record<string, string | undefined> = {
+      ...envWithoutMoc(),
+      MOC_METER_LISTEN: "127.0.0.1:0",
+      MOC_METER_SECRET: randomBytes(32).toString("base64"),
+      MOC_METER_HOST_ADDRESSES_FILE: addressesFile,
+      MOC_HOST_ROUTES_FILE: routesFile,
+      NVIDIA_API_KEY: "test-nvidia-key",
+      META_API_KEY: "test-meta-key",
+    };
+    const started = Date.now();
+    const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(rc).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr.split("\n")).toEqual(["dispatch: resolve log: EISDIR", ""]);
+  });
+});
+
 test("an unknown request with no logs directory is a precondition error", async () => {
   await withConfigCopy(async (dir) => {
     const addressesFile = join(dir, "host-addresses.json");

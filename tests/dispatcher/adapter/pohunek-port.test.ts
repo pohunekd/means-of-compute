@@ -196,6 +196,8 @@ test("a thrown non-Error value rejects unchanged (L2)", async () => {
   const { fake, port } = setup();
   const throwing = {
     ...fake.connector,
+    // L2 needs a rejected non-Error value, which the lint rule forbids.
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
     client: (): Promise<never> => Promise.reject("connector boom"),
   };
   const throwingPort = createPohunekPort(CONFIG, {
@@ -545,21 +547,13 @@ test("each S5 failure leaves the session stopped and unbound, and a replay creat
       }),
       code: "fetch-failed",
     },
-    {
-      name: "start-unconfirmed replay",
-      reply: () => ({}),
-      code: "start-unconfirmed",
-    },
   ];
   for (const { name, reply, code } of overrides) {
     const { fake, log, port } = setup();
     try {
-      if (name === "start-unconfirmed replay") {
-        continue;
-      }
       fake.onNew("laptop-a", reply);
       const error = await port
-        .start(request({ resume: name === "fetch-failed" ? false : request().resume }))
+        .start(request())
         .catch((cause: unknown) => cause);
       expect(error, name).toBeInstanceOf(PortRejectedError);
       expect(error, name).toMatchObject({ code: code });

@@ -82,15 +82,33 @@ test("R1 list_work filters by status to one parked row (R1, R2)", async () => {
       structuredContent: {
         ok: boolean;
         revision: number;
-        items: readonly { id: string; dod: { done: number; total: number } }[];
+        items: readonly Record<string, unknown>[];
       };
     };
   };
   expect(parsed.result.structuredContent.ok).toBe(true);
   expect(parsed.result.structuredContent.revision).toBe(3);
   expect(parsed.result.structuredContent.items.length).toBe(1);
-  expect(parsed.result.structuredContent.items[0]?.id).toBe("w2-parked-example");
-  expect(parsed.result.structuredContent.items[0]?.dod).toEqual({ done: 0, total: 1 });
+  expect(parsed.result.structuredContent.items[0]).toEqual({
+    id: "w2-parked-example",
+    repo: "pohunekd/means-of-compute",
+    title: "Park a stalled task with its reason",
+    issue: 17,
+    status: "parked",
+    statusReason: "no newly met DoD item for 3 rounds",
+    assignedHostAlias: null,
+    branch: "17-loop-stall",
+    pullNumber: null,
+    dependencies: ["w1-contracts"],
+    dod: { done: 0, total: 1 },
+    retryCount: 1,
+    stallRounds: 3,
+    modelRouting: {
+      preferredModel: "meta/muse-glimmer-30b",
+      attempts: 2,
+      fallbackUsed: false,
+    },
+  });
 });
 
 test("R2 list_work with empty args is invalid-arguments required (R2)", async () => {
@@ -106,12 +124,19 @@ test("R2 list_work with empty args is invalid-arguments required (R2)", async ()
   const raw = await protocol.handleLine(callLine(2, "list_work", {}));
   const parsed = JSON.parse(raw as string) as {
     result: {
-      structuredContent: { ok: boolean; error: { code: string; keyword: string; path: string } };
+      structuredContent: unknown;
     };
   };
-  expect(parsed.result.structuredContent.ok).toBe(false);
-  expect(parsed.result.structuredContent.error.code).toBe("invalid-arguments");
-  expect(parsed.result.structuredContent.error.keyword).toBe("required");
+  expect(parsed.result.structuredContent).toEqual({
+    ok: false,
+    error: {
+      code: "invalid-arguments",
+      message: "invalid arguments at / (required)",
+      retryable: false,
+      path: "/",
+      keyword: "required",
+    },
+  });
 });
 
 test("R3 audit_results lists fixture verdict with counts 0,0,1 (R3)", async () => {

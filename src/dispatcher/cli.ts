@@ -298,7 +298,7 @@ async function runResolve(dargs: readonly string[]): Promise<number> {
                 now: () => new Date(),
                 sleep: (ms) => Bun.sleep(ms),
                 log: dispatcherLog,
-                lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+                settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
               });
               return await use((requestId) => dispatcher.resolve(requestId));
             },

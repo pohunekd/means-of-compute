@@ -46,7 +46,7 @@ function dispatcherAt(registryPath: string, ledgerPath: string, ticks: { now: Da
     sleep: () => Promise.resolve(),
     log: () => undefined,
 
-    lostUsage: () => Promise.resolve(null),
+    settleUsage: () => Promise.resolve(null),
   });
   return { control, waits, gate, config, dispatcher };
 }
@@ -116,7 +116,7 @@ async function withHarness(
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, registryPath, config, control, dispatcher, dir });
   } finally {
@@ -244,7 +244,7 @@ test("two concurrent watches on one completed session append exactly once", asyn
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       item("item-a") as never,
@@ -314,7 +314,7 @@ test("I1: two pending watches append once", async () => {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       item("item-a") as never,
@@ -709,7 +709,7 @@ test("I9b: two dispatcher instances on one registry make one session", async () 
         sleep: () => Promise.resolve(),
         log: () => undefined,
 
-        lostUsage: () => Promise.resolve(null),
+        settleUsage: () => Promise.resolve(null),
       });
     const a = makeDispatcher();
     const b = makeDispatcher();
@@ -772,7 +772,7 @@ test("I10: a second placement conflicts", async () => {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const first = dispatcher.start(
       item("item-a") as never,

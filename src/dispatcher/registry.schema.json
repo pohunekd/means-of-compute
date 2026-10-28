@@ -201,7 +201,7 @@
                 "type": "object",
                 "required": ["state"],
                 "properties": {
-                  "state": { "const": "lost" }
+                  "state": { "enum": ["lost", "failed"] }
                 }
               }
             ]

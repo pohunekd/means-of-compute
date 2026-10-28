@@ -88,7 +88,7 @@ async function withHarness(body: (h: Harness) => Promise<void>): Promise<void> {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     await body({ ledgerPath, config, control, dispatcher, clock, dir });
   } finally {
@@ -191,7 +191,7 @@ test("unreachable: miss, miss, running, miss recovers as finished", async () => 
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -252,7 +252,7 @@ test("unreachable: two misses recover, the third is lost", async () => {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -296,7 +296,7 @@ test("unreachable: two misses recover, the third is lost", async () => {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started2 = await dispatcher2.start(
       queuedItem() as never,
@@ -354,7 +354,7 @@ test("watch replay after a failed appendPending writes exactly one pending entry
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -418,7 +418,7 @@ test("replay after a crash between append and write returns unchanged", async ()
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -517,7 +517,7 @@ test("a start on an unappended terminal asks for watch first", async () => {
       sleep: () => Promise.resolve(),
       log: () => undefined,
 
-      lostUsage: () => Promise.resolve(null),
+      settleUsage: () => Promise.resolve(null),
     });
     const started = await dispatcher.start(
       queuedItem() as never,
@@ -664,7 +664,7 @@ test("no replay after finalize: watch returns unchanged and skips the ledger", a
   });
 });
 
-test("lost calls lostUsage before the registry write", async () => {
+test("lost calls settleUsage before the registry write", async () => {
   // The hook reads the registry inside itself through a fresh instance:
   // the terminal is still null while the hook runs, so the meter
   // settles before the first registry write.
@@ -693,7 +693,7 @@ test("lost calls lostUsage before the registry write", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: async (requestId: string) => {
+      settleUsage: async (requestId: string) => {
         hookRequestId = requestId;
         const entries = await readRegistry(join(dir, "registry.json"));
         const seen = entries.find((e) => e.requestId === requestId);
@@ -726,7 +726,7 @@ test("lost calls lostUsage before the registry write", async () => {
   }
 });
 
-test("a provisional lost calls lostUsage with its requestId", async () => {
+test("a provisional lost calls settleUsage with its requestId", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dispatch-lost-prov-"));
   try {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -750,7 +750,7 @@ test("a provisional lost calls lostUsage with its requestId", async () => {
       now: () => new Date("2026-10-27T10:00:00.000Z"),
       sleep: () => Promise.resolve(),
       log: () => undefined,
-      lostUsage: (requestId: string) => {
+      settleUsage: (requestId: string) => {
         seen.push(requestId);
         return Promise.resolve(null);
       },
@@ -799,7 +799,7 @@ test("invalid lost usage is stored as null", async () => {
       log: (event) => {
         events.push(event as unknown as Record<string, unknown>);
       },
-      lostUsage: () => Promise.resolve({ tokens: [] }),
+      settleUsage: () => Promise.resolve({ tokens: [] }),
     });
     const outcome = await dispatcher.start(
       queuedItem() as never,

@@ -118,6 +118,22 @@ test("resolvedAt is required", async () => {
   }
 });
 
+test("a provisional entry with terminal failed passes the schema", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "registry-schema-"));
+  try {
+    const path = join(dir, "registry.json");
+    const entry = provisionalEntry({
+      terminal: lostTerminal({ state: "failed", detail: "start-rejected: host-unsupported" }),
+    });
+    await insertRegistryEntry(path, entry as never);
+    const entries = await readRegistry(path);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.terminal?.state).toBe("failed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a provisional entry with a finished terminal is refused", async () => {
   const dir = mkdtempSync(join(tmpdir(), "registry-schema-"));
   try {

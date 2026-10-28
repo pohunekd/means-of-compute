@@ -43,7 +43,7 @@ export interface DispatcherDeps {
   readonly now: () => Date;
   readonly sleep: (ms: number) => Promise<void>;
   readonly log: (event: DispatchLogEvent) => void;
-  readonly lostUsage: (requestId: string) => Promise<PortUsage | null>;
+  readonly settleUsage: (requestId: string, state: "lost" | "failed") => Promise<PortUsage | null>;
 }
 
 export interface DispatchLogEvent {
@@ -672,7 +672,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     // The lost hook settles the meter grant before the first registry
     // write; a port-reported lost never reaches this function, it
     // carries the metered usage through the port instead.
-    const usage = await deps.lostUsage(entry.requestId);
+    const usage = await deps.settleUsage(entry.requestId, "lost");
     const usageValid = usage === null ? true : checkUsageValid(usage);
     if (!usageValid) {
       deps.log({
@@ -724,6 +724,66 @@ export function createDispatcher(deps: DispatcherDeps): {
       detail: "lost",
     });
     return { result, attempt: attemptOf("lost", appended.cancelReason), ledger };
+  }
+
+  async function finishRejected(
+    entry: RegistryEntry,
+    code: string,
+    usage: PortUsage,
+  ): Promise<void> {
+    // A rejection with a grant becomes a terminal failed attempt: the
+    // hook already closed the grant, so the usage below is the measured
+    // join. Seconds reuse the finishLost computation; a provisional
+    // entry never observed anything, so lastSeenAt still equals
+    // startedAt and the result is 0.
+    const observedAt = deps.now().toISOString();
+    const seconds = Math.floor((Date.parse(entry.lastSeenAt) - Date.parse(entry.startedAt)) / 1000);
+    if (seconds < 0) {
+      throw new DispatchClockError(`dispatcher clock: negative seconds for ${entry.requestId}`);
+    }
+    const usageValid = checkUsageValid(usage);
+    if (!usageValid) {
+      deps.log({
+        level: "error",
+        event: "usage-invalid",
+        requestId: entry.requestId,
+        workItemId: entry.workItemId,
+        detail: "rejected usage failed validation",
+      });
+    }
+    const rejected: RegistryEntry = {
+      ...entry,
+      revision: entry.revision + 1,
+      terminal: {
+        state: "failed",
+        observedAt,
+        seconds,
+        usage: usageValid ? usage : null,
+        usageValid,
+        detail: `start-rejected: ${code}`,
+        ledgerAppended: false,
+      },
+    };
+    await replaceRegistryEntry(deps.config.registryPath, rejected);
+    const stored = rejected.terminal;
+    if (stored === null) {
+      throw new Error(`dispatcher: entry ${entry.requestId} has no terminal state`);
+    }
+    const pending = pendingEntryOf(rejected, stored);
+    await appendPending(deps.ledgerPath, pending);
+    const appended: RegistryEntry = {
+      ...rejected,
+      revision: rejected.revision + 1,
+      terminal: { ...stored, ledgerAppended: true },
+    };
+    await replaceRegistryEntry(deps.config.registryPath, appended);
+    deps.log({
+      level: "info",
+      event: "start-rejected-ledgered",
+      requestId: entry.requestId,
+      workItemId: entry.workItemId,
+      detail: code,
+    });
   }
 
   async function start(
@@ -852,18 +912,23 @@ export function createDispatcher(deps: DispatcherDeps): {
               },
             );
           }
-          await removeProvisionalEntry(
-            deps.config.registryPath,
-            request.requestId,
-            provisional.revision,
-          );
-          deps.log({
-            level: "info",
-            event: "start-rejected",
-            requestId: request.requestId,
-            workItemId: request.workItemId,
-            detail: error.code,
-          });
+          const usage = await deps.settleUsage(request.requestId, "failed");
+          if (usage === null) {
+            await removeProvisionalEntry(
+              deps.config.registryPath,
+              request.requestId,
+              provisional.revision,
+            );
+            deps.log({
+              level: "info",
+              event: "start-rejected",
+              requestId: request.requestId,
+              workItemId: request.workItemId,
+              detail: error.code,
+            });
+            throw error;
+          }
+          await finishRejected(provisional, error.code, usage);
           throw error;
         }
         throw error;

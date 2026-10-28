@@ -91,7 +91,7 @@ test("a reply without usage refuses as spend unknown", async () => {
         now: () => new Date("2026-10-27T10:00:00.000Z"),
         sleep: () => Promise.resolve(),
         log: () => undefined,
-        lostUsage: (requestId) => meter.settleRequest(requestId, "lost"),
+        settleUsage: (requestId) => meter.settleRequest(requestId, "lost"),
       });
       const started = await dispatcher.start(
         item() as never,

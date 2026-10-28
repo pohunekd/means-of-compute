@@ -30,6 +30,7 @@ function provisionalEntry(overrides: Record<string, unknown> = {}): Record<strin
     lastSeenAt: "2026-10-27T10:00:00.000Z",
     cancelReason: null,
     terminal: null,
+    resolvedAt: null,
     revision: 0,
     ...overrides,
   };
@@ -77,6 +78,41 @@ test("a provisional lost may carry the measured usage", async () => {
         source: "meter-proxy",
       },
     ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolvedAt is required", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "registry-schema-"));
+  try {
+    const path = join(dir, "registry.json");
+    const { resolvedAt: _unused, ...withoutMarker } = provisionalEntry();
+    expect(_unused).toBeNull();
+    expect(withoutMarker).not.toHaveProperty("resolvedAt");
+    let missingMessage = "";
+    try {
+      await insertRegistryEntry(path, withoutMarker as never);
+    } catch (error: unknown) {
+      missingMessage = (error as Error).message;
+    }
+    expect(missingMessage).toContain("invalid registry");
+    let invalidMessage = "";
+    try {
+      await insertRegistryEntry(path, provisionalEntry({ resolvedAt: "x" }) as never);
+    } catch (error: unknown) {
+      invalidMessage = (error as Error).message;
+    }
+    expect(invalidMessage).toContain("invalid registry");
+    const nullPath = join(dir, "registry-null.json");
+    await insertRegistryEntry(nullPath, provisionalEntry({ resolvedAt: null }) as never);
+    expect(await readRegistry(nullPath)).toHaveLength(1);
+    const isoPath = join(dir, "registry-iso.json");
+    await insertRegistryEntry(
+      isoPath,
+      provisionalEntry({ resolvedAt: "2026-10-27T10:00:00.000Z" }) as never,
+    );
+    expect(await readRegistry(isoPath)).toHaveLength(1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

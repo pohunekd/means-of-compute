@@ -198,7 +198,7 @@ async function runDiff(dargs: readonly string[]): Promise<number> {
         `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
       );
     };
-    return await runDiffCommand(dargs, () => openPohunekPort(config, log, process.env), {
+    return await runDiffCommand(dargs, () => openPohunekPort(config, log, process.env, null), {
       stdout: (text: string): void => {
         process.stdout.write(text);
       },

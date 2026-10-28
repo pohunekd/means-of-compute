@@ -19,6 +19,7 @@ export const MOC_METADATA = {
   baseCommit: "moc.baseCommit",
   voidCode: "moc.voidCode",
   voidedRequestId: "moc.voidedRequestId",
+  meterToken: "moc.meterToken",
   outcome: "moc.outcome",
   outcomeDetail: "moc.outcomeDetail",
 } as const;
@@ -55,6 +56,7 @@ export function sessionNewParams(
   req: StartRequest,
   cfg: PohunekAdapterConfig,
   digest: string,
+  meterToken: string,
 ): SessionNewParams {
   const params: SessionNewParams = {
     agent: cfg.agentProfile,
@@ -69,6 +71,7 @@ export function sessionNewParams(
       [MOC_METADATA.requestId]: req.requestId,
       [MOC_METADATA.requestDigest]: digest,
       [MOC_METADATA.start]: "pending",
+      [MOC_METADATA.meterToken]: meterToken,
     },
   };
   if (req.resume) {

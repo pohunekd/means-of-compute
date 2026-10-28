@@ -48,11 +48,12 @@ export interface AdapterLogEvent {
 export interface PohunekPortDeps {
   readonly connector: HostConnector;
   readonly log: (event: AdapterLogEvent) => void;
+  readonly meterToken: ((requestId: string) => string) | null;
 }
 
 export class PohunekAdapterError extends Error {
-  readonly code: "closed" | "void-incomplete";
-  constructor(code: "closed" | "void-incomplete", message?: string) {
+  readonly code: "closed" | "void-incomplete" | "no-meter";
+  constructor(code: "closed" | "void-incomplete" | "no-meter", message?: string) {
     super(message ?? code);
     this.name = "PohunekAdapterError";
     this.code = code;
@@ -65,6 +66,7 @@ interface PortInternals {
   readonly config: PohunekAdapterConfig;
   readonly connector: HostConnector;
   readonly log: (event: AdapterLogEvent) => void;
+  readonly meterToken: ((requestId: string) => string) | null;
   closed: boolean;
   closeDone: boolean;
   readonly inspected: Map<string, Client>;
@@ -216,6 +218,7 @@ async function voidSession(
         [MOC_METADATA.start]: "void",
         [MOC_METADATA.voidCode]: code,
         [MOC_METADATA.voidedRequestId]: req.requestId,
+        [MOC_METADATA.meterToken]: null,
       },
     });
   } catch (error) {
@@ -330,6 +333,10 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   if (port.closed) {
     throw new PohunekAdapterError("closed");
   }
+  if (port.meterToken === null) {
+    throw new PohunekAdapterError("no-meter");
+  }
+  const token = port.meterToken(req.requestId);
   const alias = req.hostAlias;
   const client = await startClientFor(port, alias);
   const digest = requestDigestOf(req);
@@ -347,7 +354,7 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   await startPreflight(port, alias, client);
   let created: SessionNewResult;
   try {
-    created = await client.call("session.new", sessionNewParams(req, port.config, digest));
+    created = await client.call("session.new", sessionNewParams(req, port.config, digest, token));
   } catch (error) {
     const mapped = portErrorOf(error, alias);
     if (mapped instanceof PortUnreachableError) {
@@ -680,6 +687,7 @@ export function createPohunekPort(
     config,
     connector: deps.connector,
     log: deps.log,
+    meterToken: deps.meterToken,
     closed: false,
     closeDone: false,
     inspected: new Map(),
@@ -699,8 +707,9 @@ export async function openPohunekPort(
   config: PohunekAdapterConfig,
   log: (event: AdapterLogEvent) => void,
   env: Readonly<Record<string, string | undefined>>,
+  meterToken: ((requestId: string) => string) | null,
 ): Promise<import("../port.js").DispatcherPort> {
   const routes = await loadHostRoutes(config.hostRoutesFileEnv, env);
   const connector = createHostConnector(routes, { connectTimeoutMs: config.connectTimeoutMs }, env);
-  return createPohunekPort(config, { connector, log });
+  return createPohunekPort(config, { connector, log, meterToken });
 }

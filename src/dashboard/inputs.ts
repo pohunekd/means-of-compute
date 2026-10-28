@@ -1,10 +1,8 @@
 // Dashboard input gathering. Every per-request input arrives as a Sourced
 // value: ok, a no-data reason, or an error code. The page shows only the
 // code; the message goes to the log. A thrown value that is not an Error is
-// rethrown and becomes a 500. Registry fields stay for PR 2: the type keeps
-// the error codes future steps need, while gatherInputs fills no registry.
+// rethrown and becomes a 500.
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
-import type { RegistryEntry } from "../dispatcher/registry.js";
 import type { BudgetConfig } from "../budget/config.js";
 import { loadPricingForIds, type NanoPricing } from "../budget/pricing.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
@@ -13,7 +11,9 @@ import { readLedger, spendEntriesOf } from "../ledger/read.js";
 import type { LedgerContents } from "../ledger/types.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import { readVerdicts } from "../auditor/store.js";
+import { RegistryDataError, readRegistry, type RegistryEntry } from "../dispatcher/registry.js";
 import { lstat } from "node:fs/promises";
+import { requestIdProblem } from "./sessions.js";
 import { workRows } from "./model.js";
 import type { Baselines } from "./config.js";
 
@@ -132,6 +132,31 @@ async function readHostsInput(
   }
 }
 
+async function readRegistryInput(
+  registryPath: string,
+  log: (input: string, code: InputErrorCode, message: string) => void,
+): Promise<Sourced<readonly RegistryEntry[]>> {
+  let entries: readonly RegistryEntry[];
+  try {
+    entries = await readRegistry(registryPath);
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    const code: InputErrorCode =
+      error instanceof RegistryDataError ? "registry-invalid" : "registry-unreadable";
+    log("registry", code, error.message);
+    return { ok: false, failure: errorFailure(code) };
+  }
+  const problem = requestIdProblem(entries);
+  if (problem !== null) {
+    const message = `Dashboard registry ${registryPath}: ${problem}`;
+    log("registry", "registry-invalid", message);
+    return { ok: false, failure: errorFailure("registry-invalid") };
+  }
+  return { ok: true, value: entries };
+}
+
 async function readVerdictsForShown(
   verdictDir: string,
   shown: readonly string[],
@@ -188,9 +213,10 @@ export async function gatherInputs(
   const emit = (input: string, code: InputErrorCode, message: string): void => {
     log({ input, code, message });
   };
-  const [ledger, hosts] = await Promise.all([
+  const [ledger, hosts, registry] = await Promise.all([
     readLedgerInput(sources.ledgerPath, emit),
     readHostsInput(sources.hostState, emit),
+    readRegistryInput(sources.registryPath, emit),
   ]);
   const pricing = await readPricingInput(ledger, fixed.route, fixed.budget.nvidiaProviderId, emit);
   const partial: Omit<DashboardInputs, "verdicts"> = {
@@ -204,7 +230,7 @@ export async function gatherInputs(
     pricing,
     hosts,
     workItems: null,
-    registry: { ok: true, value: [] },
+    registry,
   };
   const { shown } = workRows(partial);
   const verdicts = await readVerdictsForShown(sources.verdictDir, shown, emit);

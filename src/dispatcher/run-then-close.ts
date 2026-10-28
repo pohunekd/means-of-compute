@@ -10,7 +10,8 @@ export async function runThenClose<T>(
   closers: readonly Closer[],
   warn: (line: string) => void,
 ): Promise<T> {
-  let outcome: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+  let outcome:
+    { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
   try {
     outcome = { ok: true, value: await run() };
   } catch (error: unknown) {

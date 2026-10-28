@@ -115,7 +115,8 @@ messages. Every dispatcher, adapter and meter event appends one JSON line
 to `resolveLogPath` (`logs/dispatch-resolve.jsonl`), creating the parent
 directory; nothing from those logs reaches stdout. A failed append prints
 one `dispatch: resolve log: <code>` line to stderr per run and drops later
-failures silently.
+failures silently. A close failure prints one `dispatch: close <meter|port>: <code>`
+line and does not change the run's output or exit code.
 
 The CLI holds the registry owner lock (`<registryPath>.lock`) for the whole
 run through `withFileLock` (`src/fs/lock.ts` `withFileLock`), so two runs

@@ -18,8 +18,9 @@ describe("runThenClose", () => {
         },
         {
           name: "port",
-          close: async () => {
+          close: () => {
             calls.push("port");
+            return Promise.resolve();
           },
         },
       ],
@@ -56,16 +57,23 @@ describe("runThenClose", () => {
 
   test("successful closers warn nothing", async () => {
     const lines: string[] = [];
+    const closed: string[] = [];
     const value = await runThenClose(
       () => Promise.resolve(7),
       [
         {
           name: "meter",
-          close: () => Promise.resolve(),
+          close: () => {
+            closed.push("meter");
+            return Promise.resolve();
+          },
         },
         {
           name: "port",
-          close: () => Promise.resolve(),
+          close: () => {
+            closed.push("port");
+            return Promise.resolve();
+          },
         },
       ],
       (line) => {
@@ -73,6 +81,7 @@ describe("runThenClose", () => {
       },
     );
     expect(value).toBe(7);
+    expect(closed).toEqual(["meter", "port"]);
     expect(lines).toEqual([]);
   });
 });

@@ -398,6 +398,7 @@ test("an unknown request with no logs directory is a precondition error", async 
     await writeFile(addressesFile, JSON.stringify({ "laptop-a": ["10.0.0.1"] }), "utf8");
     const routesFile = join(dir, "host-routes.json");
     await writeFile(routesFile, JSON.stringify({ "laptop-a": "route" }), "utf8");
+    // The socket path under a long TMPDIR would exceed Linux's 107-byte limit.
     const runtimeBase = await mkdtemp(join("/tmp", "moc-resolve-"));
     try {
       const runtimeDir = join(runtimeBase, "pohunek");

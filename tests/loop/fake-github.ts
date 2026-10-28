@@ -70,7 +70,7 @@ export class FakeGitHub implements GitHubPort {
 
   viewerLogin(): Promise<string> {
     this.calls.push({ method: "viewerLogin", args: [] });
-    return Promise.resolve(this.login);
+    return unused();
   }
 
   checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]> {

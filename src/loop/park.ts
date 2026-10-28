@@ -260,12 +260,7 @@ export async function parkOperator(
   });
   ctx.log.log({ event: "parked", workItemId: item.id, code });
   await reconcile(ctx.storePath, item.id, li, ctx);
-  if (li.park === null) {
-    throw new LoopStateDataError(
-      `loop state ${ctx.statePath}: operator park of item "${item.id}" is missing`,
-    );
-  }
-  return escalate(ctx, item, `op:${item.id}:${code}`, escalationBody(item, li, li.park.reason));
+  return escalate(ctx, item, `op:${item.id}:${code}`, escalationBody(item, li, `operator: ${code}`));
 }
 
 // T9: stall parking after closeRound returned a park decision.
@@ -284,12 +279,13 @@ export async function parkStall(
   return advancePark(ctx, item);
 }
 
-async function advanceStall(ctx: ParkContext, item: WorkItem, li: LoopItem): Promise<ParkProgress> {
+async function advanceStall(
+  ctx: ParkContext,
+  item: WorkItem,
+  li: LoopItem,
+  reason: string,
+): Promise<ParkProgress> {
   const key = `stall:${item.id}:${String(li.retry)}`;
-  if (li.park === null || li.park.kind !== "stall") {
-    return "done";
-  }
-  const reason = li.park.reason;
   const escalated = await escalate(ctx, item, key, escalationBody(item, li, reason));
   if (escalated === "pending") {
     return "pending";
@@ -342,9 +338,8 @@ async function advanceBlocked(ctx: ParkContext, item: WorkItem): Promise<ParkPro
       escalations: [...current.escalations, entry],
     });
   }
-  const journal = key;
   try {
-    await ctx.github.editIssueLabels(item.repo, item.issue, [ctx.blockedLabel], [ctx.readyLabel]);
+    await ctx.github.editIssueLabels(item.repo, issue, [ctx.blockedLabel], [ctx.readyLabel]);
   } catch (error: unknown) {
     if (error instanceof GitHubError) {
       ctx.log.log({
@@ -359,21 +354,19 @@ async function advanceBlocked(ctx: ParkContext, item: WorkItem): Promise<ParkPro
   }
   const labelled = await readLoopItem(ctx.statePath, item.id);
   const escalations = labelled.escalations.map((entry) =>
-    entry.key === journal && item.issue !== null ? { ...entry, posted: item.issue } : entry,
+    entry.key === key ? { ...entry, posted: issue } : entry,
   );
   await writeLoopItem(ctx.statePath, item.id, { ...labelled, escalations });
   return "done";
 }
 
-// M1: every tick first reconciles the fresh loop item as it stands,
-// whatever its phase or park, so a busy store or a crash between an L
-// write and its reconcile repairs itself here and never throws.
-// Then it runs the first unfinished step until done or pending.
+// Every tick first reconciles the fresh item as it stands (rule P2),
+// so a busy store or a crash between a write and its reconcile heals here.
 export async function advancePark(ctx: ParkContext, item: WorkItem): Promise<ParkProgress> {
   const li = await readLoopItem(ctx.statePath, item.id);
   await reconcile(ctx.storePath, item.id, li, ctx);
   if (li.park !== null && li.park.kind === "stall") {
-    return advanceStall(ctx, item, li);
+    return advanceStall(ctx, item, li, li.park.reason);
   }
   if (li.park !== null && li.park.kind === "blocked") {
     return advanceBlocked(ctx, item);

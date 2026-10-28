@@ -676,6 +676,7 @@ test("lost calls lostUsage before the registry write", async () => {
     const control = createMemoryPort();
     const { readRegistry } = await import("../../src/dispatcher/registry.js");
     let terminalAtHook: unknown = "not-called";
+    let revisionAtHook = -1;
     let hookRequestId = "";
     const dispatcher = createDispatcher({
       port: control.port,
@@ -688,7 +689,9 @@ test("lost calls lostUsage before the registry write", async () => {
       lostUsage: async (requestId: string) => {
         hookRequestId = requestId;
         const entries = await readRegistry(join(dir, "registry.json"));
-        terminalAtHook = entries.find((e) => e.requestId === requestId)?.terminal ?? null;
+        const seen = entries.find((e) => e.requestId === requestId);
+        terminalAtHook = seen?.terminal ?? null;
+        revisionAtHook = seen?.revision ?? -1;
         return null;
       },
     });
@@ -706,7 +709,11 @@ test("lost calls lostUsage before the registry write", async () => {
     const outcome = await dispatcher.watch(started.request.requestId);
     expect(outcome.result.state).toBe("lost");
     expect(hookRequestId).toBe(started.request.requestId);
+    // The first registry write of the terminal bumps the revision by
+    // one from the last persisted value, so a hook that runs before it
+    // still sees the old revision with no terminal.
     expect(terminalAtHook).toBeNull();
+    expect(revisionAtHook).toBe(3);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

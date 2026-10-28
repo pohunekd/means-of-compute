@@ -696,9 +696,10 @@ async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<Re
       ids.push(match.id);
     }
   }
+  const stopped: string[] = [];
   try {
     for (const id of ids) {
-      await stopAndUnbind(
+      const outcome = await stopAndUnbind(
         port,
         client,
         alias,
@@ -707,6 +708,10 @@ async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<Re
         "operator-release",
         bound.some((session) => session.id === id),
       );
+      if (outcome === "absent") {
+        continue;
+      }
+      stopped.push(id);
       port.log({
         level: "info",
         event: "adapter-release",
@@ -722,7 +727,7 @@ async function releaseSessions(port: PortInternals, ref: ReleaseRef): Promise<Re
     }
     throw error;
   }
-  return { sessionIds: ids };
+  return { sessionIds: stopped };
 }
 
 // 3.9: close the connector once; a second close returns at once. Later

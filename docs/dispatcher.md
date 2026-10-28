@@ -47,9 +47,9 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
 
 `release` (`src/dispatcher/port.ts` `ReleaseRef`) stops every session on the host
 that is either the known `sessionId` or bound to the `requestId` and removes
-the binding of each bound one. It returns the stopped `sessionIds`, the known
+the binding of each bound one. It returns the sessions found and stopped, the known
 id first then the bound ones in daemon order with no duplicates, or `[]` when
-nothing was there. It never creates a session and never sends input. A refused
+none was there. It never creates a session and never sends input. A refused
 daemon gives `PortRejectedError("void-incomplete")`; nothing confirmed gives
 `PortUnreachableError`. This trusts that the binding metadata survives a daemon
 restart: an empty `session.list` reading means nothing is bound.

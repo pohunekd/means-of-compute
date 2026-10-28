@@ -1518,7 +1518,8 @@ test("a missing session counts as released", async () => {
       hostAlias: "laptop-a",
       sessionId: "fake-9",
     });
-    expect(result).toEqual({ sessionIds: ["fake-9"] });
+    expect(result).toEqual({ sessionIds: [] });
+    expect(methodNames(fake, "laptop-a")).toEqual(["session.list", "session.stop"]);
   } finally {
     await teardown(fake, port);
   }

@@ -178,9 +178,7 @@ test("O3 --file rejects a directory and a path under a missing dir (O3)", async 
   ]);
   expect(missingCase.code).toBe(2);
   expect(missingCase.stdout).toBe("");
-  expect(missingCase.stderr).toBe(
-    `mcp:call file ${missing}: cannot stat parent (ENOENT)\n`,
-  );
+  expect(missingCase.stderr).toBe(`mcp:call file ${missing}: cannot stat parent (ENOENT)\n`);
 });
 
 test("O5 extra positional and duplicate --config exit 2 (O5)", async () => {

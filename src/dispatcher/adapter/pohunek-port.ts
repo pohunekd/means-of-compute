@@ -403,11 +403,12 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
 }
 
 // Lost terminal shared by W1, W3, W5 and X1: no mark, no stop, cached (3.7).
+// The cursor is the caller's cursor (W1) or null (X1); never "".
 function lostTerminal(
   port: PortInternals,
   alias: string,
   id: string,
-  cursor: string,
+  cursor: string | null,
 ): TerminalResult {
   return storeTerminal(port, alias, id, {
     state: "lost",
@@ -530,7 +531,7 @@ async function waitSession(
     });
   } catch (error) {
     if (isSessionNotFound(error)) {
-      return lostTerminal(port, alias, id, cursor ?? "");
+      return lostTerminal(port, alias, id, cursor);
     }
     throw await mappedError(port, alias, error);
   }
@@ -604,7 +605,7 @@ async function cancelSession(
     await client.call("session.stop", ref.sessionId);
   } catch (error) {
     if (isSessionNotFound(error)) {
-      return lostTerminal(port, ref.hostAlias, ref.sessionId, "");
+      return lostTerminal(port, ref.hostAlias, ref.sessionId, null);
     }
     throw await mappedError(port, ref.hostAlias, error);
   }

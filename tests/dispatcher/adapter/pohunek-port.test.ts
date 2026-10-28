@@ -675,7 +675,26 @@ test("LOST-2 on wait_turn gives lost session missing", async () => {
     expect(result).toEqual({
       state: "lost",
       sessionId: handle.sessionId,
-      cursor: "",
+      cursor: null,
+      usage: null,
+      detail: "session missing",
+    });
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("LOST-2 on wait_turn with a cursor returns the caller's cursor", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    const ref = { sessionId: handle.sessionId, hostAlias: "laptop-a" };
+    fake.failNext("laptop-a", "session.wait_turn", { errCode: "session_not_found", apply: false });
+    const result = await port.wait(ref, 1000, "cursor-9");
+    expect(result).toEqual({
+      state: "lost",
+      sessionId: handle.sessionId,
+      cursor: "cursor-9",
       usage: null,
       detail: "session missing",
     });
@@ -828,6 +847,7 @@ test("cancel on a missing session gives lost session missing (X1)", async () => 
     fake.failNext("laptop-a", "session.stop", { errCode: "session_not_found", apply: false });
     const result = await port.cancel(ref, "stall");
     expect(result).toMatchObject({ state: "lost", detail: "session missing" });
+    expect(result).toMatchObject({ cursor: null });
   } finally {
     await teardown(fake, port);
   }

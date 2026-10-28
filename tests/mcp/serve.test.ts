@@ -401,6 +401,71 @@ test("SV3 startup failures exit 2 with empty stdout (SV3)", async () => {
   expect(missingOut).toBe("");
 });
 
+test("too-deep arguments are refused and the server keeps serving (K1)", async () => {
+  const env = await createMcpTestEnv("mcp-k1-");
+  await writeTestFile(env.storePath, {
+    schemaVersion: "v1",
+    revision: 0,
+    items: [],
+    submissions: [],
+  });
+  await writeTestFile(env.registryPath, { sessions: [] });
+  // Arguments nested 100000 deep cannot be canonicalized: JSON.stringify
+  // throws RangeError, so the protocol answers -32602 without a callId
+  // while the plain calls before and after are still answered. The brace
+  // group records the server's own exit status.
+  let nested: unknown = [];
+  for (let n = 0; n < 100000; n += 1) {
+    nested = [nested];
+  }
+  // JSON.parse of the prebuilt string below keeps the depth; stringifying
+  // in the test would throw the same RangeError first.
+  const deepArgs = `[${"[".repeat(99999)}${"]".repeat(99999)}]`;
+  const rcfile = join(env.dir, "server.rc");
+  const serveCmd = `{ ${process.execPath} src/mcp/serve.ts --caller coordinator --config "${env.mcpConfigPath}"; echo $? > "${rcfile}"; }`;
+  const proc = Bun.spawn(["sh", "-c", serveCmd], {
+    cwd: process.cwd(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const sink = proc.stdin as unknown as {
+    write(chunk: string): void;
+    end(): void;
+  };
+  const deepCall = `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fleet_status","arguments":{"x":${deepArgs}}}}`;
+  sink.write(`${initLine(1)}\n${callLine(2)}\n${deepCall}\n${callLine(4)}\n`);
+  sink.end();
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(code).toBe(0);
+  const k1ServerRc = (await Bun.file(rcfile).text()).trim();
+  expect(k1ServerRc).toBe("0");
+  expect(stderr).not.toContain("{");
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
+  expect(lines.length).toBe(4);
+  const parsed = lines.map((line) => JSON.parse(line) as { id: number });
+  expect(parsed.map((entry) => entry.id)).toEqual([1, 2, 3, 4]);
+  const refused = JSON.parse(lines[2] as string) as {
+    error: { code: number; message: string };
+  };
+  expect(refused.error.code).toBe(-32602);
+  const answered = JSON.parse(lines[3] as string) as {
+    id: number;
+    result: { structuredContent: { ok: boolean } };
+  };
+  expect(answered.id).toBe(4);
+  expect(answered.result.structuredContent.ok).toBe(true);
+  const logText = await Bun.file(env.callLogPath).text();
+  const errors = logText.split("\n").filter((line) => line.includes('"event":"protocol-error"'));
+  expect(errors.length).toBe(1);
+  expect(errors[0]).toContain('"jsonrpcCode":-32602');
+  expect(errors[0]).toContain('"tool":"fleet_status"');
+}, 20000);
+
 test("closing stdout stops queued calls (H5, R2-4, R2-9)", async () => {
   const env = await createMcpTestEnv("mcp-h5-");
   await writeTestFile(env.storePath, {

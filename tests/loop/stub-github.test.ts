@@ -352,4 +352,37 @@ describe("stub github", () => {
       await sandbox.cleanup();
     }
   }, 15_000);
+
+  test("T1: a leftover of the pull scratch path is cleared before the add", async () => {
+    const sandbox = await makeSandbox();
+    try {
+      const options = stubOptions(sandbox.origin, sandbox.scratchDir);
+      const stub = createStubGitHub(options);
+      const porch = async (): Promise<string> =>
+        git(options.originDir, ["worktree", "list", "--porcelain"]);
+      // Case (a): a registered worktree at the pull's scratch path.
+      await pushEmpty(sandbox.seed, "moc/demo-t1a");
+      const headA = await revParse(options.originDir, options.git, "refs/heads/moc/demo-t1a");
+      const pullA = await stub.createPull("factory/demo", "moc/demo-t1a", "main", "t", "b");
+      const wtA = join(sandbox.scratchDir, `stub-merge-${String(pullA)}`);
+      await git(options.originDir, ["worktree", "add", "--detach", wtA, "main"]);
+      expect(await porch()).toContain(wtA);
+      await stub.mergePull("factory/demo", pullA, headA);
+      expect((await stub.viewPull("factory/demo", pullA)).state).toBe("MERGED");
+      expect(await porch()).not.toContain(wtA);
+      // Case (b): the leftover directory is gone but stays registered.
+      await pushEmpty(sandbox.seed, "moc/demo-t1b");
+      const headB = await revParse(options.originDir, options.git, "refs/heads/moc/demo-t1b");
+      const pullB = await stub.createPull("factory/demo", "moc/demo-t1b", "main", "t", "b");
+      const wtB = join(sandbox.scratchDir, `stub-merge-${String(pullB)}`);
+      await git(options.originDir, ["worktree", "add", "--detach", wtB, "main"]);
+      await rm(wtB, { recursive: true, force: true });
+      expect(await porch()).toContain(wtB);
+      await stub.mergePull("factory/demo", pullB, headB);
+      expect((await stub.viewPull("factory/demo", pullB)).state).toBe("MERGED");
+      expect(await porch()).not.toContain(wtB);
+    } finally {
+      await sandbox.cleanup();
+    }
+  }, 15_000);
 });

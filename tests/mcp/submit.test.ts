@@ -344,7 +344,7 @@ test("U6 a new item depending on a stored item is accepted (U6)", async () => {
 test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
   const fixture = await loadFixture("tests/fixtures/mcp/good-dag.json");
   const items = [fixture.items[0], fixture.items[1], { ...fixture.items[0] }];
-  const { structured } = await setup({ items });
+  const { structured, lines } = await setup({ items });
   expect(structured["ok"]).toBe(false);
   expect(errorOf(structured)).toEqual({
     code: "duplicate-id",
@@ -353,6 +353,11 @@ test("U7 repeated ids at indices 0 and 2 are duplicate-id (U7)", async () => {
     id: "demo-a",
     indices: [0, 2],
   });
+  const ends = lines.filter(
+    (entry) => (entry as { event?: string }).event === "call-end",
+  ) as Record<string, unknown>[];
+  expect(ends.length).toBe(1);
+  expect(ends[0]?.["summary"]).toEqual({ id: "demo-a", indices: [0, 2] });
 });
 
 function fieldCase(field: string, value: unknown): Record<string, unknown>[] {
@@ -462,7 +467,7 @@ test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
   >;
   committed["maxStoreItems"] = 1;
   await writeTestFile(env.workConfigPath, committed);
-  const { log } = memoryLog();
+  const { log, lines } = memoryLog();
   const tools = createTools({
     workConfigPath: env.workConfigPath,
     dispatcherConfigPath: env.dispatcherConfigPath,
@@ -507,6 +512,11 @@ test("U9 store at maxStoreItems refuses with store-full (U9)", async () => {
     retryable: false,
     limit: 1,
   });
+  const ends = lines.filter(
+    (entry) => (entry as { event?: string }).event === "call-end",
+  ) as Record<string, unknown>[];
+  expect(ends.length).toBe(1);
+  expect(ends[0]?.["summary"]).toEqual({ limit: 1 });
 });
 
 test("U10 held lock is store-busy with retryable true (U10)", async () => {

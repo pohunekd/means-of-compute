@@ -84,6 +84,12 @@ function summaryFor(
   if (code === "dag-cycle" || code === "unknown-dependency") {
     return { edge: details["edge"] };
   }
+  if (code === "duplicate-id") {
+    return { id: details["id"], indices: details["indices"] };
+  }
+  if (code === "store-full") {
+    return { limit: details["limit"] };
+  }
   if ("index" in details) {
     return { index: details["index"] };
   }

@@ -138,9 +138,11 @@ returns `{submissionId, itemIds, replayed}`. Store errors map as
 committed write is a write failure, so a retry replays.
 
 Summary on ok is `{submissionId, itemIds, replayed}`; on `dag-cycle` and
-`unknown-dependency` it is `{edge}`; on other refusals `{index}` or
-`{ids}`. Item ids are synthetic slugs, never brief text. The call log
-carries only the summary, never the arguments.
+`unknown-dependency` it is `{edge}`; on `duplicate-id` it is `{id,
+indices}`; on `store-full` it is `{limit}`; on the `index` codes it is
+`{index}`; on `id-exists` it is `{ids}`; the step-0 `invalid-arguments`
+(`maxItems`) keeps `null`. Item ids are synthetic slugs, never brief
+text. The call log carries only the summary, never the arguments.
 
 ## Client `mcp:call`
 

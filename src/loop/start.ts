@@ -21,7 +21,13 @@ import type { ModelChoice } from "./policy.js";
 import { parkLost, parkOperator, parkStall, type ParkContext } from "./park.js";
 import { reconcile } from "./project.js";
 import { closeRound } from "./rounds.js";
-import { LoopStateDataError, readLoopState, updateLoopState } from "./state.js";
+import {
+  LoopStateDataError,
+  readLoopItem,
+  readLoopState,
+  updateLoopState,
+  writeLoopItem,
+} from "./state.js";
 import type { LoopItem, RoundAttempt, RoundOutcome } from "./types.js";
 
 export type StartDispatcher = Pick<
@@ -46,33 +52,6 @@ export interface ClaimInput {
 }
 
 export type StartStep = "running" | "publishing" | "idle" | "parked";
-
-// Single read of the fresh loop item; an unknown id is a data error
-// like in rounds.ts. The write twin below commits one L change.
-async function readLoopItem(statePath: string, id: string): Promise<LoopItem> {
-  const current = await updateLoopState(statePath, (state) => {
-    const found = state.items[id] as unknown as LoopItem | undefined;
-    if (found === undefined) {
-      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
-    }
-    return Promise.resolve({ next: null, value: found });
-  });
-  return current;
-}
-
-async function writeLoopItem(statePath: string, id: string, next: LoopItem): Promise<LoopItem> {
-  return updateLoopState(statePath, (state) => {
-    const current = state.items[id] as unknown as LoopItem | undefined;
-    if (current === undefined) {
-      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
-    }
-    const stored: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
-    return Promise.resolve({
-      next: { ...state, items: { ...state.items, [id]: stored } },
-      value: next,
-    });
-  });
-}
 
 // The step the caller reports for a stored item: parked wins, then the
 // two live session phases, otherwise the item is idle to the scheduler.

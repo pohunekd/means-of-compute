@@ -6,7 +6,7 @@ import type { AuditVerdict, FactorySpec, WorkItem } from "../../contracts/v1/typ
 import { m1, type M1Result } from "./merge-rule.js";
 import { readVerdicts } from "../auditor/store.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
-import { fetchRefs, isAncestor, trialMerge, GitError } from "./git.js";
+import { fetchRefs, isAncestor, trialMerge } from "./git.js";
 import { GitHubError } from "./github.js";
 import {
   baseCheck,
@@ -17,15 +17,20 @@ import {
   verdictCheck,
 } from "./merge-rule.js";
 import { escalate, finalizeItem, parkOperator } from "./park.js";
-import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
+import {
+  readLoopItem,
+  readLoopState,
+  updateLoopState,
+  writeLoopItem,
+  LoopStateDataError,
+} from "./state.js";
 import type { LoopItem } from "./types.js";
 import {
   checkoutDirOf,
   closeReviewRound,
+  githubStep,
   logGithubError,
-  readReviewItem,
   registryBranchOf,
-  writeReviewItem,
   type ReviewContext,
 } from "./review.js";
 import { reconcile } from "./project.js";
@@ -72,6 +77,16 @@ type DecideInput =
       verdict: ReturnType<typeof verdictCheck>;
     };
 
+// The new head of a head-moved M1 or merge step, or null for any other kind.
+function movedHeadOf(input: DecideInput): string | null {
+  switch (input.kind) {
+    case "early":
+      return input.detail.kind === "head-moved" ? input.detail.headSha : null;
+    case "full":
+      return input.step.kind === "head-moved" ? input.step.headSha : null;
+  }
+}
+
 async function decideMerge(
   ctx: MergeContext,
   item: WorkItem,
@@ -85,15 +100,15 @@ async function decideMerge(
     return "pending";
   }
   if (tag === "head-moved") {
-    let moved = h;
-    if (input.kind === "early" && input.detail.kind === "head-moved") {
-      moved = input.detail.headSha;
-    } else if (input.kind === "full" && input.step.kind === "head-moved") {
-      moved = input.step.headSha;
+    const moved = movedHeadOf(input);
+    if (moved === null) {
+      throw new LoopStateDataError(
+        `loop state ${ctx.statePath}: item "${item.id}" has a head-moved step without a head`,
+      );
     }
-    const fresh = await readReviewItem(ctx, item.id);
-    await writeReviewItem(ctx, item.id, {
-      ...(await readReviewItem(ctx, item.id)),
+    const fresh = await readLoopItem(ctx.statePath, item.id);
+    await writeLoopItem(ctx.statePath, item.id, {
+      ...(await readLoopItem(ctx.statePath, item.id)),
       pull: { number: pullNumber, headSha: moved },
       ciSince: ctx.now().toISOString(),
       phase: "ci",
@@ -133,20 +148,20 @@ async function decideMerge(
   }
   const step = input.step;
   if (step.kind === "ci") {
-    const fresh = await readReviewItem(ctx, item.id);
+    const fresh = await readLoopItem(ctx.statePath, item.id);
     if (fresh.phase === "ci") {
       return "ci";
     }
-    await writeReviewItem(ctx, item.id, {
-      ...(await readReviewItem(ctx, item.id)),
+    await writeLoopItem(ctx.statePath, item.id, {
+      ...(await readLoopItem(ctx.statePath, item.id)),
       phase: "ci",
       ciSince: ctx.now().toISOString(),
     });
     return "ci";
   }
   if (step.kind === "audit-missing") {
-    const fresh = await readReviewItem(ctx, item.id);
-    await writeReviewItem(ctx, item.id, { ...fresh, phase: "auditing" });
+    const fresh = await readLoopItem(ctx.statePath, item.id);
+    await writeLoopItem(ctx.statePath, item.id, { ...fresh, phase: "auditing" });
     return "auditing";
   }
   if (step.kind === "verdict-invalid") {
@@ -165,10 +180,10 @@ async function decideMerge(
     return "idle";
   }
   if (step.kind === "marker-missing") {
-    const fresh = await readReviewItem(ctx, item.id);
+    const fresh = await readLoopItem(ctx.statePath, item.id);
     if (fresh.phase !== "auditing") {
-      await writeReviewItem(ctx, item.id, {
-        ...(await readReviewItem(ctx, item.id)),
+      await writeLoopItem(ctx.statePath, item.id, {
+        ...(await readLoopItem(ctx.statePath, item.id)),
         phase: "auditing",
       });
       return "auditing";
@@ -177,10 +192,10 @@ async function decideMerge(
     return "parked";
   }
   if (step.kind === "awaiting-approval") {
-    const fresh = await readReviewItem(ctx, item.id);
+    const fresh = await readLoopItem(ctx.statePath, item.id);
     if (fresh.phase !== "awaiting-approval") {
-      await writeReviewItem(ctx, item.id, {
-        ...(await readReviewItem(ctx, item.id)),
+      await writeLoopItem(ctx.statePath, item.id, {
+        ...(await readLoopItem(ctx.statePath, item.id)),
         phase: "awaiting-approval",
       });
     }
@@ -216,33 +231,24 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       pull.number,
     );
   }
-  let base: string;
-  try {
-    base = await ctx.github.baseSha(item.repo, baseBranch);
+  const baseStep = await githubStep(ctx, item, async () => {
+    const base = await ctx.github.baseSha(item.repo, baseBranch);
     await fetchRefs(checkoutDir, ctx.git, [
       `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
       `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
     ]);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+    return base;
+  });
+  if (!baseStep.ok) {
+    return "pending";
   }
-  let ancestor: boolean;
-  try {
-    ancestor = await isAncestor(checkoutDir, ctx.git, base, h);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const base = baseStep.value;
+  const ancestorStep = await githubStep(ctx, item, () => isAncestor(checkoutDir, ctx.git, base, h));
+  if (!ancestorStep.ok) {
+    return "pending";
   }
-  const fresh = await readReviewItem(ctx, item.id);
+  const ancestor = ancestorStep.value;
+  const fresh = await readLoopItem(ctx.statePath, item.id);
   const trial = fresh.trial;
   const trialFresh =
     trial !== null && trial.baseSha === base && trial.headSha === h && trial.passed;
@@ -257,9 +263,8 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       });
       return "idle";
     }
-    let passed: boolean;
-    try {
-      const result = await trialMerge({
+    const trialStep = await githubStep(ctx, item, () =>
+      trialMerge({
         dir: checkoutDir,
         scratchDir: resolve(ctx.trialMerge.scratchDir),
         id: item.id,
@@ -269,19 +274,15 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
         timeoutMs: ctx.trialMerge.timeoutMs,
         PATH: ctx.git.PATH,
         HOME: ctx.home,
-      });
-      passed = result.passed;
-    } catch (error: unknown) {
-      const failure = githubErrorOf(error);
-      if (failure !== null) {
-        logGithubError(ctx, item, failure);
-        return "pending";
-      }
-      throw error;
+      }),
+    );
+    if (!trialStep.ok) {
+      return "pending";
     }
-    const beforeTrial = await readReviewItem(ctx, item.id);
+    const passed = trialStep.value.passed;
+    const beforeTrial = await readLoopItem(ctx.statePath, item.id);
     const failedMerging = !passed && beforeTrial.phase === "merging";
-    await writeReviewItem(ctx, item.id, {
+    await writeLoopItem(ctx.statePath, item.id, {
       ...beforeTrial,
       phase: failedMerging ? "auditing" : beforeTrial.phase,
       trial: { baseSha: base, headSha: h, passed },
@@ -297,43 +298,33 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       return "idle";
     }
   }
-  await writeReviewItem(ctx, item.id, {
-    ...(await readReviewItem(ctx, item.id)),
+  await writeLoopItem(ctx.statePath, item.id, {
+    ...(await readLoopItem(ctx.statePath, item.id)),
     phase: "merging",
     trial: { baseSha: base, headSha: h, passed: true },
   });
-  let moved: string;
-  try {
-    moved = await ctx.github.baseSha(item.repo, baseBranch);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const movedStep = await githubStep(ctx, item, () => ctx.github.baseSha(item.repo, baseBranch));
+  if (!movedStep.ok) {
+    return "pending";
   }
+  const moved = movedStep.value;
   if (moved !== base) {
     return "pending";
   }
-  const prior = (await readReviewItem(ctx, item.id)).mergeAttempts;
+  const prior = (await readLoopItem(ctx.statePath, item.id)).mergeAttempts;
   if (prior?.headSha === h && prior.count >= 1 + ctx.mergeRetries) {
     await parkOperator(ctx, item, "merge-failed");
     return "parked";
   }
-  await writeReviewItem(ctx, item.id, {
-    ...(await readReviewItem(ctx, item.id)),
+  await writeLoopItem(ctx.statePath, item.id, {
+    ...(await readLoopItem(ctx.statePath, item.id)),
     mergeAttempts: { headSha: h, count: prior?.headSha === h ? prior.count + 1 : 1 },
   });
-  try {
-    await ctx.github.mergePull(item.repo, pull.number, h);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const mergeStepResult = await githubStep(ctx, item, () =>
+    ctx.github.mergePull(item.repo, pull.number, h),
+  );
+  if (!mergeStepResult.ok) {
+    return "pending";
   }
   const after = await ctx.github.viewPull(item.repo, pull.number);
   if (m1(after, h, baseBranch).kind === "merged") {
@@ -346,7 +337,7 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
 }
 
 export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"done" | "pending"> {
-  const li = await readReviewItem(ctx, item.id);
+  const li = await readLoopItem(ctx.statePath, item.id);
   if (li.phase === "final") {
     return "done";
   }
@@ -359,8 +350,8 @@ export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"d
   if (progress === "pending") {
     return "pending";
   }
-  const fresh = await readReviewItem(ctx, item.id);
-  const written = await writeReviewItem(ctx, item.id, { ...fresh, phase: "final" });
+  const fresh = await readLoopItem(ctx.statePath, item.id);
+  const written = await writeLoopItem(ctx.statePath, item.id, { ...fresh, phase: "final" });
   await reconcile(ctx.storePath, item.id, written, ctx);
   return "done";
 }
@@ -369,23 +360,10 @@ export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<Mer
   const heads = await mergeHeads(ctx, item);
   const { li, baseBranch, pull, spec: readySpec } = heads;
   const h = pull.headSha;
-  try {
-    return await decideOnView(ctx, item, li, h, baseBranch, pull.number, readySpec);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
-  }
-}
-
-function githubErrorOf(error: unknown): GitHubError | GitError | null {
-  if (error instanceof GitHubError || error instanceof GitError) {
-    return error;
-  }
-  return null;
+  const step = await githubStep(ctx, item, () =>
+    decideOnView(ctx, item, li, h, baseBranch, pull.number, readySpec),
+  );
+  return step.ok ? step.value : "pending";
 }
 
 async function mergeHeads(
@@ -399,7 +377,7 @@ async function mergeHeads(
   readonly pull: { readonly number: number; readonly headSha: string };
   readonly spec: FactorySpec;
 }> {
-  const li = await readReviewItem(ctx, item.id);
+  const li = await readLoopItem(ctx.statePath, item.id);
   if (li.phase !== "auditing" && li.phase !== "awaiting-approval" && li.phase !== "merging") {
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" is "${li.phase}", not a merge phase`,
@@ -484,7 +462,7 @@ async function closeMerged(
   humanMerge: boolean,
   pullNumber: number,
 ): Promise<MergeOutcome> {
-  const li = await readReviewItem(ctx, item.id);
+  const li = await readLoopItem(ctx.statePath, item.id);
   const round = li.round;
   const requestId: string | null = li.requestId;
   await closeReviewRound(ctx, item, {
@@ -523,7 +501,7 @@ async function mergedPathInternal(
     );
     return "pending";
   }
-  const li = await readReviewItem(ctx, item.id);
+  const li = await readLoopItem(ctx.statePath, item.id);
   if (li.phase !== "merging") {
     return closeMerged(ctx, item, h, mergeCommit, false, true, pullNumber);
   }

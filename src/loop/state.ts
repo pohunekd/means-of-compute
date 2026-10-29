@@ -8,6 +8,7 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
 import { writeFileAtomic } from "../fs/write.js";
 import stateSchema from "./state.schema.json" with { type: "json" };
+import type { LoopItem } from "./types.js";
 
 export class LoopStateDataError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -208,4 +209,35 @@ export async function updateLoopState<T>(
     throw error;
   }
   return result.value;
+}
+
+// One read of the fresh loop item under the state lock; an unknown id is a
+// data error.
+export async function readLoopItem(statePath: string, id: string): Promise<LoopItem> {
+  return updateLoopState(statePath, (state) => {
+    const found = state.items[id] as unknown as LoopItem | undefined;
+    if (found === undefined) {
+      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
+    }
+    return Promise.resolve({ next: null, value: found });
+  });
+}
+
+// One loop-state write that replaces the item; an unknown id is a data error.
+export async function writeLoopItem(
+  statePath: string,
+  id: string,
+  next: LoopItem,
+): Promise<LoopItem> {
+  return updateLoopState(statePath, (state) => {
+    const current = state.items[id] as unknown as LoopItem | undefined;
+    if (current === undefined) {
+      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
+    }
+    const stored: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
+    return Promise.resolve({
+      next: { ...state, items: { ...state.items, [id]: stored } },
+      value: next,
+    });
+  });
 }

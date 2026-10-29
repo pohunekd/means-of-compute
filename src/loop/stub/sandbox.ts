@@ -1,16 +1,6 @@
 // Demo sandbox: reset and seed for the loop demo. Only a directory marked
 // with the sandbox marker is ever removed; anything else is refused.
-import {
-  copyFile,
-  cp,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export const SANDBOX_MARKER = ".loop-demo";

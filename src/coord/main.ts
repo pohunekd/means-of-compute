@@ -1,8 +1,7 @@
 // Coordinator plan runner: arg parsing, startup checks, dry run, session.
 import { randomBytes, randomUUID } from "node:crypto";
 import { readdir, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve, basename, relative } from "node:path";
-import { realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { openCallLog } from "../mcp/call-log.js";
 import { ClientError, runClientCall } from "../mcp/client.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
@@ -11,7 +10,6 @@ import { readInputText } from "../fs/input.js";
 import { createCliBudgetGate, loadBudgetGateConfig, BudgetGateError } from "../budget/gate.js";
 import { loadWorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
-import { sha256Hex } from "../work/canonical.js";
 import { COORD_CONFIG_PATH, loadCoordConfig, type LoadedCoordConfig } from "./config.js";
 import { museArgv, type MuseSession } from "./argv.js";
 import { loadGoal, type Goal } from "./goal.js";
@@ -54,8 +52,6 @@ function parseArgs(argv: readonly string[]): PlanArgs {
   let phaseCount = 0;
   let configCount = 0;
   let dryRunCount = 0;
-  const seenDryRun = false;
-  void seenDryRun;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i] as string;
     if (arg === "--goal") {
@@ -121,7 +117,7 @@ function parseArgs(argv: readonly string[]): PlanArgs {
   }
   return {
     goalPath,
-    phase: phase as Phase,
+    phase,
     configPath: configPath ?? COORD_CONFIG_PATH,
     dryRun,
   };
@@ -311,7 +307,7 @@ async function runPlan(args: PlanArgs): Promise<number> {
     throw new Error(`coord: ${process.cwd()} is not a means-of-compute checkout`);
   }
   const loaded: LoadedCoordConfig = await loadCoordConfig(args.configPath);
-  const { config, configSha256, apiKeyEnv, mcp, skill } = loaded;
+  const { config, apiKeyEnv, mcp, skill } = loaded;
   if (config.seed !== null) {
     throw new Error("coord: seed is not implemented");
   }
@@ -421,7 +417,7 @@ async function runPlan(args: PlanArgs): Promise<number> {
     return await withFileLock("coordinator runs", join(config.runsDir, "coordinator"), runFn);
   } catch (error: unknown) {
     if (error instanceof FileLockError && error.code === "busy") {
-      throw new Error("coord: another coordinator run is active");
+      throw new Error("coord: another coordinator run is active", { cause: error });
     }
     throw error;
   }
@@ -495,7 +491,6 @@ async function runSession(
     }
     let result: MuseSessionResult | null = null;
     if (stop === null && !controller.signal.aborted) {
-      const started = new Date();
       const onSpawn = (pid: number): void => {
         writeFile(recordPath, `${JSON.stringify({ runId, k: 1, pid })}\n`, {
           flag: "wx",
@@ -517,10 +512,6 @@ async function runSession(
       } finally {
         await rm(recordPath, { force: true });
       }
-      const outcomeKind =
-        result.outcome.kind === "exited"
-          ? `exited ${String(result.outcome.rc)}`
-          : result.outcome.kind;
       sessions.push({
         k: 1,
         kind: "plan",
@@ -530,8 +521,6 @@ async function runSession(
         exportOk: result.exportOk,
         attentionKeys: [],
       });
-      void started;
-      void outcomeKind;
     } else if (stop === null) {
       stop = "signal";
     }
@@ -572,7 +561,7 @@ async function runSession(
       idPrefix: goal.idPrefix,
       repo: goal.repo,
       phase: args.phase,
-      stop: stop as string,
+      stop,
       startedAt: t0.toISOString(),
       endedAt: new Date().toISOString(),
       configPath: args.configPath,

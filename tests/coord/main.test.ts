@@ -1,6 +1,7 @@
 // Coordinator plan-run tests (M1-M15): arg parsing, startup checks,
 // dry run, session, report and exit codes.
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { constants } from "node:os";
 import { readdirSync, realpathSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -120,6 +121,23 @@ async function spawnMain(
       const rc = proc.exitCode;
       if (rc !== null) {
         return rc;
+      }
+      // Bun withholds exitCode while an orphaned grandchild holds a stdio pipe
+      // open, so a signal death that orphans the session would hang the poll.
+      // The signal code is still reported: when the process is verifiably gone,
+      // derive the exit code the same way the shell does.
+      if (typeof proc.signalCode === "string") {
+        let alive = true;
+        try {
+          process.kill(proc.pid, 0);
+        } catch {
+          alive = false;
+        }
+        if (!alive) {
+          const table: Record<string, number | undefined> = { ...constants.signals };
+          const offset = table[proc.signalCode];
+          return typeof offset === "number" ? 128 + offset : 1;
+        }
       }
       if (Date.now() > deadline) {
         proc.kill("SIGKILL");
@@ -313,13 +331,18 @@ test("a held run lock refuses the run (M8)", async () => {
   const holderPath = join(env.runsDir, "coordinator");
   let releaseHolder: () => void = () => {};
   const held = new Promise<void>((resolve) => {
-    void withFileLock("coordinator runs", holderPath, async () => {
-      releaseHolder = resolve as unknown as () => void;
-      console.log("holder ready");
-      await new Promise<void>((done) => {
-        releaseHolder = done;
-      });
-    });
+    void withFileLock(
+      "coordinator runs",
+      holderPath,
+      () =>
+        new Promise<void>((done) => {
+          releaseHolder = (): void => {
+            resolve(undefined);
+          };
+          console.log("holder ready");
+          releaseHolder = done;
+        }),
+    );
   });
   void held;
   const holder = Bun.spawn(
@@ -331,10 +354,24 @@ test("a held run lock refuses the run (M8)", async () => {
       stderr: "pipe",
     },
   );
-  const holderOut = new Response(holder.stdout).text();
-  const holderText = await Promise.race([holderOut, Bun.sleep(5000).then(() => "")]);
-  void holderText;
-  await Bun.sleep(500);
+  const holderReader = holder.stdout.getReader();
+  const holderDecoder = new TextDecoder();
+  let holderSeen = "";
+  const holderDeadline = Date.now() + 5000;
+  for (;;) {
+    const chunk = await holderReader.read();
+    if (chunk.done) {
+      break;
+    }
+    holderSeen += holderDecoder.decode(chunk.value, { stream: true });
+    if (holderSeen.includes("holder ready")) {
+      break;
+    }
+    if (Date.now() > holderDeadline) {
+      throw new Error("lock holder did not become ready in time");
+    }
+  }
+  holderReader.releaseLock();
   const { run } = await spawnMain(env, "tests/fixtures/coord/goals/notes.json", "plan", []);
   const [rc, , stderr] = await Promise.all([run.waitExit(), run.stdoutText(), run.stderrText()]);
   expect(rc).toBe(2);
@@ -513,43 +550,45 @@ test("SIGTERM during the session reports signal (M13)", async () => {
   const stdoutPromise = spawned.run.stdoutText();
   const stderrPromise = spawned.run.stderrText();
   const exitPromise = spawned.run.waitExit();
-  const dirs = async (): Promise<string[]> => listRunDirs(env.runsDir);
-  let runDir = "";
   const recordPath = join(env.runsDir, "coordinator-session.json");
-  const deadline = Date.now() + 10000;
-  let sessionPid = 0;
-  for (;;) {
-    const found = await dirs();
-    if (found.length === 1) {
-      runDir = join(env.runsDir, found[0] as string);
-      const coordPath = join(runDir, "coord.jsonl");
-      if (await Bun.file(coordPath).exists()) {
-        const text = await Bun.file(coordPath).text();
-        if (text.includes("session-start") && (await Bun.file(recordPath).exists())) {
-          if (!(await Bun.file(env.recordPath).exists())) {
-            await Bun.sleep(20);
-            continue;
+  const waitForStart = async (): Promise<{
+    readonly runDir: string;
+    readonly sessionPid: number;
+  }> => {
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const found = await listRunDirs(env.runsDir);
+      if (found.length === 1) {
+        const candidate = join(env.runsDir, found[0] as string);
+        const coordPath = join(candidate, "coord.jsonl");
+        if (await Bun.file(coordPath).exists()) {
+          const text = await Bun.file(coordPath).text();
+          if (text.includes("session-start") && (await Bun.file(recordPath).exists())) {
+            if (!(await Bun.file(env.recordPath).exists())) {
+              await Bun.sleep(20);
+              continue;
+            }
+            const parsed = JSON.parse(await Bun.file(recordPath).text()) as { pid: number };
+            expect((): void => {
+              process.kill(-parsed.pid, 0);
+            }).not.toThrow();
+            return { runDir: candidate, sessionPid: parsed.pid };
           }
-          const parsed = JSON.parse(await Bun.file(recordPath).text()) as { pid: number };
-          sessionPid = parsed.pid;
-          expect((): void => {
-            process.kill(-parsed.pid, 0);
-          }).not.toThrow();
-          break;
         }
       }
+      if (Date.now() > deadline) {
+        spawned.run.proc.kill("SIGKILL");
+        throw new Error("session did not start in time");
+      }
+      await Bun.sleep(20);
     }
-    if (Date.now() > deadline) {
-      spawned.run.proc.kill("SIGKILL");
-      throw new Error("session did not start in time");
-    }
-    await Bun.sleep(20);
-  }
+  };
+  const { runDir, sessionPid } = await waitForStart();
   try {
     spawned.run.proc.kill("SIGTERM");
     const [rc, stdout] = await Promise.all([exitPromise, stdoutPromise]);
-    await stderrPromise;
     expect(rc).toBe(0);
+    await stderrPromise;
     expect(stdout.trim().split("\n").at(-1)).toMatch(/stop=signal/);
     const report = (await Bun.file(join(runDir, "report.json")).json()) as {
       readonly sessions: readonly { readonly outcome: unknown }[];

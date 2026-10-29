@@ -263,7 +263,6 @@ export async function runMuseSession(
   checkSessionEnv(config.envPassthrough, apiKeyEnv, env);
   const t0 = now();
   const k = session.k;
-  const home = join(session.runDir, "home");
   const childEnv = museEnv(config.envPassthrough, session.runDir, env);
   const argvSha256 = sha256Hex(JSON.stringify(museArgv(config, session)));
   await log.append({

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, sha256Hex } from "../../src/work/canonical.js";
+import { redactText } from "../../src/coord/evidence.js";
 import { createCoordTestEnv } from "./env.js";
 import { createMcpTestEnv } from "../mcp/env.js";
 
@@ -49,6 +50,9 @@ async function runEvidence(
 }
 
 test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
+  expect(redactText("/h/u/code/moc/a /h/u/b", { cwd: "/h/u/code/moc", home: "/h/u" })).toBe(
+    "<checkout>/a ~/b",
+  );
   const env = await createCoordTestEnv();
   const home = homedir();
   const configJson = {

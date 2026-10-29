@@ -90,7 +90,7 @@ export interface LoopConfig {
   readonly approvalsConfigPath: string;
   readonly meterConfigPath: string;
   readonly adapterConfigPath: string | null;
-  readonly dashboardConfigPath: string | null;
+  readonly hostStateConfigPath: string | null;
   readonly tickMs: number;
   readonly maxActiveItems: number;
   readonly shutdownGraceMs: number;
@@ -571,7 +571,7 @@ const TOP_LEVEL_KEYS = [
   "approvalsConfigPath",
   "meterConfigPath",
   "adapterConfigPath",
-  "dashboardConfigPath",
+  "hostStateConfigPath",
   "tickMs",
   "maxActiveItems",
   "shutdownGraceMs",
@@ -645,18 +645,18 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
   }
   const stub = parseStub(record["stub"], path, mode);
   const adapterConfigPath = optionalAdapterPath(record, path, "", "adapterConfigPath");
-  const dashboardConfigPath = optionalAdapterPath(record, path, "", "dashboardConfigPath");
+  const hostStateConfigPath = optionalAdapterPath(record, path, "", "hostStateConfigPath");
   if (mode === "production") {
     if (adapterConfigPath === null) {
       throw invalid(path, "adapterConfigPath");
     }
-    if (dashboardConfigPath === null) {
-      throw invalid(path, "dashboardConfigPath");
+    if (hostStateConfigPath === null) {
+      throw invalid(path, "hostStateConfigPath");
     }
   }
-  if (mode === "stub" && (adapterConfigPath !== null || dashboardConfigPath !== null)) {
+  if (mode === "stub" && (adapterConfigPath !== null || hostStateConfigPath !== null)) {
     throw new LoopConfigError(
-      `Loop config ${path}: stub mode requires null adapter and dashboard paths`,
+      `Loop config ${path}: stub mode requires null adapter and host-state paths`,
     );
   }
   const github = parseGithub(record["github"], path, workModels);
@@ -674,7 +674,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     approvalsConfigPath: requiredString(record, path, "", "approvalsConfigPath"),
     meterConfigPath: requiredString(record, path, "", "meterConfigPath"),
     adapterConfigPath,
-    dashboardConfigPath,
+    hostStateConfigPath,
     tickMs: requiredInteger(record, path, "", "tickMs", 50, 600000),
     maxActiveItems: requiredInteger(record, path, "", "maxActiveItems", 1, 64),
     shutdownGraceMs: requiredInteger(record, path, "", "shutdownGraceMs", 0, 600000),

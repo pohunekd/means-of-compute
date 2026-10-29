@@ -76,7 +76,7 @@ counts non-dry run dirs for today and exits 3 past `maxRunsPerDay`; the G1
 `mcp-calls.jsonl`, `report.json`, `report.md` and session files. A dry run prints one JSON
 line with `runDir`, `cwd`, `argv`, `phase` and `covers`, creating only
 `home`, `mcp.json`, `prompt-1.md` and `workspace`. E0 step 1 runs the dry run. Stops are `plan-done`,
-`no-submission`, `budget-refused`, `muse-unavailable` and `signal`, with
+`no-submission`, `budget-refused`, `muse-unavailable`, `tool-surface` and `signal`, with
 exit 0 for `plan-done` and `signal` and exit 3 for the failing stops; a
 failed final snapshot turns 0 into 3. Stdout ends with
 `coord: run <runId> stop=<stop> submitted=<n> items=<n|unknown>`
@@ -84,3 +84,24 @@ failed final snapshot turns 0 into 3. Stdout ends with
 the run and group while the session runs; the next run refuses while the
 group answers instead of killing it, since no portable proof of the old
 group identity exists. The export group is not recorded.
+
+## Tool surface
+
+Every session runs with `--preset empty`, so it has exactly the six
+factory tools and no built-in. Before each session the keyless echo probe
+runs `probeArgv` without `--api-key-stdin`, `--no-parallel-tool-calls`,
+`--model`, `--reasoning-effort` and with `--provider echo`; it makes zero
+Meta calls and writes `probe-<k>.jsonl`, `probe-<k>.stderr` and
+`probe-<k>-export.json`. After the session the runner checks the
+session's own export the same way. Both checks require `mode named`, the
+exact tool set, every context source to be one of the six (`capability_policy`,
+`meta_context_note`, `security_mode`, `session_identity`, `skills`,
+`workspace_identity`), an
+inactive delegation posture and an empty reminder roster. Each check
+appends a `surface` event with `k`, `stage`, `ok`, `reason`, `extra` and
+`missing`. A probe spawn failure stops the run with `muse-unavailable`
+(reason `probe-spawn`), an abort stops `signal`, and any other failed
+probe or session check stops the run with
+`tool-surface` and exit 3. `runsDir` stays in the checkout because the
+untrusted workspace skips `AGENTS.md`, and a `rules_file` source fails
+the check.

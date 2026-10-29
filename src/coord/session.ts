@@ -97,7 +97,7 @@ async function closeQuiet(handle: FileHandle): Promise<void> {
   }
 }
 
-function spawnCode(error: unknown): string {
+export function spawnCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = (error as { readonly code: unknown }).code;
     if (typeof code === "string" && code.length > 0) {
@@ -107,7 +107,7 @@ function spawnCode(error: unknown): string {
   return "unknown";
 }
 
-function killGroup(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
+export function killGroup(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
   try {
     process.kill(-pid, signal);
   } catch (error: unknown) {
@@ -122,7 +122,7 @@ function killGroup(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
   }
 }
 
-function exitRc(exitCode: number | null, signalCode: unknown): number {
+export function exitRc(exitCode: number | null, signalCode: unknown): number {
   if (typeof exitCode === "number") {
     return exitCode;
   }

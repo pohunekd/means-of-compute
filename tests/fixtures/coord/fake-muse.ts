@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 interface FakeCall {
   readonly tool: string;
@@ -14,11 +14,20 @@ interface FakeCall {
   readonly argumentsFile?: string;
 }
 
+interface FakeSurface {
+  readonly provider: "echo" | "meta";
+  readonly activeTools: readonly string[];
+  readonly contextSources: readonly string[];
+  readonly echoExit?: number;
+  readonly sessionExportFails?: boolean;
+}
+
 interface FakeScript {
   readonly calls: readonly FakeCall[];
   readonly exit: number;
   readonly hang: boolean;
   readonly exportFails: boolean;
+  readonly surface?: FakeSurface;
 }
 
 function fail(message: string): never {
@@ -58,6 +67,7 @@ function parseScript(text: string): FakeScript {
     readonly exit?: unknown;
     readonly hang?: unknown;
     readonly exportFails?: unknown;
+    readonly surface?: unknown;
   };
   if (!Array.isArray(raw.calls)) {
     fail("script is not a fake muse script");
@@ -86,15 +96,90 @@ function parseScript(text: string): FakeScript {
   if (typeof exit !== "number" || typeof hang !== "boolean" || typeof exportFails !== "boolean") {
     fail("script is not a fake muse script");
   }
-  return { calls, exit, hang, exportFails };
+  const surfaceRaw: unknown = raw.surface;
+  if (surfaceRaw === undefined) {
+    return { calls, exit, hang, exportFails };
+  }
+  if (typeof surfaceRaw !== "object" || surfaceRaw === null) {
+    fail("script is not a fake muse script");
+  }
+  const surface = surfaceRaw as {
+    readonly provider?: unknown;
+    readonly activeTools?: unknown;
+    readonly contextSources?: unknown;
+    readonly echoExit?: unknown;
+    readonly sessionExportFails?: unknown;
+  };
+  if (surface.provider !== "echo" && surface.provider !== "meta") {
+    fail("script is not a fake muse script");
+  }
+  if (
+    !Array.isArray(surface.activeTools) ||
+    !surface.activeTools.every((e: unknown) => typeof e === "string")
+  ) {
+    fail("script is not a fake muse script");
+  }
+  if (
+    !Array.isArray(surface.contextSources) ||
+    !surface.contextSources.every((e: unknown) => typeof e === "string")
+  ) {
+    fail("script is not a fake muse script");
+  }
+  const echoExit: unknown = surface.echoExit;
+  if (echoExit !== undefined && typeof echoExit !== "number") {
+    fail("script is not a fake muse script");
+  }
+  const sessionExportFails: unknown = surface.sessionExportFails;
+  if (sessionExportFails !== undefined && typeof sessionExportFails !== "boolean") {
+    fail("script is not a fake muse script");
+  }
+  return {
+    calls,
+    exit,
+    hang,
+    exportFails,
+    surface: {
+      provider: surface.provider === "echo" ? "echo" : "meta",
+      activeTools: surface.activeTools.filter(
+        (entry): entry is string => typeof entry === "string",
+      ),
+      contextSources: surface.contextSources.filter(
+        (entry): entry is string => typeof entry === "string",
+      ),
+      echoExit: typeof echoExit === "number" ? echoExit : undefined,
+      sessionExportFails: sessionExportFails === true,
+    },
+  };
 }
 
 async function runExec(): Promise<void> {
   const scriptPath = readScriptEnv("FAKE_MUSE_SCRIPT");
-  const recordPath = readScriptEnv("FAKE_MUSE_RECORD");
+  const script = parseScript(await Bun.file(scriptPath).text());
+  const providerFlag = process.argv.indexOf("--provider");
+  const sessionFlag = process.argv.indexOf("--session-id");
+  const providerRaw = providerFlag === -1 ? undefined : process.argv[providerFlag + 1];
+  const sessionRaw = sessionFlag === -1 ? undefined : process.argv[sessionFlag + 1];
+  if (providerRaw === undefined || sessionRaw === undefined || sessionRaw === "") {
+    fail("missing provider or session id");
+  }
+  const sessionValue: string = sessionRaw;
+  const home = process.env["HOME"] ?? "";
+  if (home !== "") {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(`${home}/fake-muse-sessions`, { recursive: true });
+    await Bun.write(`${home}/fake-muse-sessions/${sessionValue}`, `${providerRaw}\n`);
+  }
+  if (providerRaw === "echo") {
+    await readStdinBytes();
+    const echoSurface = script.surface;
+    const echoExitCode =
+      echoSurface !== undefined && echoSurface.provider === "echo"
+        ? (echoSurface.echoExit ?? 0)
+        : 0;
+    process.exit(echoExitCode);
+  }
   const stdinBytes = await readStdinBytes();
-  const scriptText = await Bun.file(scriptPath).text();
-  const script = parseScript(scriptText);
+  const recordPath = readScriptEnv("FAKE_MUSE_RECORD");
   const record = {
     argv: process.argv.slice(2),
     envKeys: Object.keys(process.env).sort(),
@@ -249,11 +334,72 @@ async function runExport(): Promise<void> {
     fail("missing --out flag");
   }
   const outPath: string = out;
+  const sessionIndex = process.argv.indexOf("--session");
+  const sessionId = sessionIndex === -1 ? undefined : process.argv[sessionIndex + 1];
   const script = parseScript(await Bun.file(scriptPath).text());
   if (script.exportFails) {
     process.exit(5);
   }
-  await Bun.write(outPath, '{"export_schema_version":1}\n');
+  const sessionOnly = script.surface?.sessionExportFails ?? false;
+  if (sessionOnly && basename(outPath).startsWith("session-")) {
+    process.exit(5);
+  }
+  let provider = "meta";
+  if (sessionId !== undefined && sessionId !== "") {
+    const home = process.env["HOME"] ?? "";
+    if (home !== "") {
+      try {
+        provider = (await Bun.file(`${home}/fake-muse-sessions/${sessionId}`).text()).trim();
+      } catch {
+        provider = "meta";
+      }
+    }
+    if (provider !== "echo" && provider !== "meta") {
+      provider = "meta";
+    }
+  }
+  const surface = script.surface;
+  const matches = surface !== undefined && surface.provider === provider;
+  const tools: readonly string[] = matches
+    ? surface.activeTools
+    : [
+        "mcp__factory__fleet_status",
+        "mcp__factory__list_work",
+        "mcp__factory__audit_results",
+        "mcp__factory__submit_work",
+        "mcp__factory__approve",
+        "mcp__factory__pause_fleet",
+      ];
+  const sources: readonly string[] = matches
+    ? surface.contextSources
+    : [
+        "capability_policy",
+        "meta_context_note",
+        "security_mode",
+        "session_identity",
+        "skills",
+        "workspace_identity",
+      ];
+  const doc = {
+    export_schema_version: 1,
+    events: [
+      {
+        envelope: {
+          payload_type: "runtime.session",
+          payload: {
+            event: {
+              kind: "model_request_configured",
+              toolset: { active_tools: tools, mode: "named", source: "settings" },
+              run_context_messages: sources.map((s) => ({ source: s })),
+              delegation_posture: { state: "inactive" },
+              reminder_roster: { agents: [], source: "runtime" },
+            },
+          },
+        },
+      },
+    ],
+  };
+  await Bun.write(outPath, `${JSON.stringify(doc)}\n`);
   await chmod(outPath, 0o600);
   process.exit(0);
 }

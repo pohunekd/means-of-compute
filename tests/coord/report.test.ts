@@ -1,4 +1,4 @@
-// Coordinator report tests (R1-R7): fixed render, strand propagation,
+// Coordinator report tests (R1-R10): fixed render, strand propagation,
 // snapshot failure, followup and out-of-scope ids, snapshot parsing.
 import { expect, test } from "bun:test";
 import { join } from "node:path";
@@ -331,7 +331,7 @@ test("an ok approve summary lands in requests, a refused line without a code thr
     throw new Error("expected a call line");
   }
   expect((codeThrown as Error).message).toBe(
-    `Report: call ${missingCall.run}/${String(missingCall.callId)} has an invalid submit_work summary`,
+    `Report: call ${missingCall.run}/${String(missingCall.callId)} has a refused submit_work line without a code`,
   );
 });
 
@@ -351,7 +351,13 @@ test("a pipe in a refusal code stays inside its cell (R8)", () => {
   expect(rendered.includes("| submit_work | a\\|b | 1 |")).toBe(true);
   for (const line of rendered.split("\n")) {
     if (line.includes("submit_work") && line.startsWith("|")) {
-      expect(line.split("|").length).toBe(6);
+      expect(line.split(/(?<!\\)\|/).length).toBe(5);
     }
   }
+});
+
+test("null items with an ok snapshot throws instead of rendering a revision (R10)", () => {
+  expect(() => renderReportMd({ ...buildReport(fixedInput()), items: null })).toThrow(
+    ReportDataError,
+  );
 });

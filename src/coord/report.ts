@@ -194,19 +194,13 @@ function parseListRow(row: unknown): ListRow | null {
   if (!isInteger(retryCount) || retryCount < 0) {
     return null;
   }
-  const ids: string[] = [];
-  for (const entry of dependencies as readonly unknown[]) {
-    ids.push(entry as string);
-  }
   const typedStatus = status as WorkItemStatus;
-  const typedReason = statusReason;
-  const typedPull = pullNumber;
   return {
     id,
     status: typedStatus,
-    statusReason: typedReason,
-    pullNumber: typedPull,
-    dependencies: ids,
+    statusReason,
+    pullNumber,
+    dependencies: dependencies as readonly string[],
     dod: { done, total },
     retryCount,
   };
@@ -326,12 +320,7 @@ function parseSubmitSummary(call: CoordCallEnd): {
       `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
     );
   }
-  const ids: string[] = [];
-  for (const entry of itemIds as readonly unknown[]) {
-    if (typeof entry === "string") {
-      ids.push(entry);
-    }
-  }
+  const ids: readonly string[] = itemIds as readonly string[];
   return {
     submissionId,
     itemIds: ids,
@@ -403,7 +392,7 @@ export function buildReport(input: ReportInput): Report {
     if (call.outcome === "refused" || call.outcome === "error") {
       if (call.code === null) {
         throw new ReportDataError(
-          `Report: call ${call.run}/${String(call.callId)} has an invalid ${call.tool} summary`,
+          `Report: call ${call.run}/${String(call.callId)} has a ${call.outcome} ${call.tool} line without a code`,
         );
       }
       refusals.push({ tool: call.tool, code: call.code });
@@ -489,10 +478,6 @@ function cell(value: string | null): string {
     return "-";
   }
   return cellText(value);
-}
-
-function dash(value: string | null): string {
-  return value === null ? "-" : cellText(value);
 }
 
 function outcomeText(outcome: SessionOutcome): string {
@@ -601,9 +586,10 @@ function refusalLines(report: Report): string[] {
 
 function itemsLines(report: Report): string[] {
   if (report.items === null) {
-    const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? snapshot.revision : snapshot.code;
-    return [`Items: unavailable (${String(code)})`];
+    if (report.finalSnapshot.ok) {
+      throw new ReportDataError("Report: items are null with an ok snapshot");
+    }
+    return [`Items: unavailable (${report.finalSnapshot.code})`];
   }
   return table(
     "| Item | Status | Reason | DoD | Pull | Retries | Stranded |",
@@ -612,7 +598,7 @@ function itemsLines(report: Report): string[] {
       cellText(item.status),
       cell(item.statusReason),
       cellText(`${String(item.dod.done)}/${String(item.dod.total)}`),
-      dash(item.pullNumber === null ? null : String(item.pullNumber)),
+      cell(item.pullNumber === null ? null : String(item.pullNumber)),
       cellText(String(item.retryCount)),
       cellText(item.stranded ? "yes" : "no"),
     ]),
@@ -621,9 +607,10 @@ function itemsLines(report: Report): string[] {
 
 function unresolvedLines(report: Report): string[] {
   if (report.unresolved === null) {
-    const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? snapshot.revision : snapshot.code;
-    return [`Unresolved: unavailable (${String(code)})`];
+    if (report.finalSnapshot.ok) {
+      throw new ReportDataError("Report: unresolved is null with an ok snapshot");
+    }
+    return [`Unresolved: unavailable (${report.finalSnapshot.code})`];
   }
   if (report.unresolved.length === 0) {
     return ["None."];

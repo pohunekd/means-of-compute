@@ -53,7 +53,11 @@ async function runGitStep(
 
 // One streamed chat call through the real meter; a non-200 status fails
 // the session. The body is drained so the meter records the usage.
-async function meteredCall(deps: StubWorkerDeps, requestId: string, round: number): Promise<number> {
+async function meteredCall(
+  deps: StubWorkerDeps,
+  requestId: string,
+  round: number,
+): Promise<number> {
   const response = await fetch(`http://127.0.0.1:${String(deps.meter.port)}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -91,11 +95,7 @@ async function applyPatch(
   const base = listed.trim().length > 0 ? `origin/${branch}` : "origin/main";
   await runGitStep(deps, cloneDir, ["checkout", "-B", branch, base]);
   await runGitStep(deps, cloneDir, ["apply", "--index", patchPath]);
-  await runGitStep(deps, cloneDir, [
-    "commit",
-    "-m",
-    `Round ${String(round)} for ${workItemId}`,
-  ]);
+  await runGitStep(deps, cloneDir, ["commit", "-m", `Round ${String(round)} for ${workItemId}`]);
   await runGitStep(deps, cloneDir, ["push", "origin", `HEAD:refs/heads/${branch}`]);
 }
 

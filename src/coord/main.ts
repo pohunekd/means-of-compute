@@ -1,9 +1,9 @@
-// Coordinator plan runner: arg parsing, startup checks, dry run, session.
+// Coordinator runner: arg parsing, startup checks, seed, plan and watch runs.
 import { randomBytes, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { readdir, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { openCallLog } from "../mcp/call-log.js";
+import { openCallLog, type FileCallLog } from "../mcp/call-log.js";
 import { ClientError, definedEnv, runClientCall } from "../mcp/client.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
 import { writeFileAtomic } from "../fs/write.js";
@@ -15,19 +15,23 @@ import {
   type Admission,
   type BudgetGate,
 } from "../budget/gate.js";
-import { loadWorkConfig } from "../work/config.js";
+import { loadWorkConfig, type WorkConfig } from "../work/config.js";
+import { checkWorkStore } from "../work/store.js";
+import { loadApprovalsConfig } from "../approvals/config.js";
+import { loadDispatcherConfig } from "../dispatcher/config.js";
 import type { MergeMode } from "../../contracts/v1/types.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { COORD_CONFIG_PATH, loadCoordConfig, type LoadedCoordConfig } from "./config.js";
 import { museArgv, type MuseSession } from "./argv.js";
 import { loadGoal, type Goal } from "./goal.js";
-import { renderPlanPrompt } from "./prompt.js";
+import { renderPlanPrompt, renderReactPrompt, type SkillText } from "./prompt.js";
 import { readCoordCalls, type CoordCallEnd } from "./calls.js";
 import {
   buildReport,
   parseListSnapshot,
   renderReportMd,
   type FinalSnapshot,
+  type Report,
   type ReportGate,
   type ReportSession,
 } from "./report.js";
@@ -37,6 +41,17 @@ import {
   runMuseSession,
   type MuseSessionResult,
 } from "./session.js";
+import {
+  attentionOf,
+  auditTargets,
+  isGoalTerminal,
+  parseFleet,
+  parseVerdicts,
+  parseWatchRows,
+  scopeRows,
+  type WatchContext,
+  type WatchRow,
+} from "./watch.js";
 import { readSurface, runSurfaceProbe, type SurfaceVerdict } from "./surface.js";
 
 type Phase = "plan" | "watch" | "full";
@@ -117,12 +132,6 @@ function parseArgs(argv: readonly string[]): PlanArgs {
   }
   if (dryRun && phase !== "plan" && phase !== "full") {
     throw new Error("coord: --dry-run needs --phase plan or full");
-  }
-  if (phase === "watch") {
-    throw new Error("coord: --phase watch is not implemented");
-  }
-  if (phase === "full" && !dryRun) {
-    throw new Error("coord: --phase full is not implemented");
   }
   return {
     goalPath,
@@ -238,6 +247,7 @@ async function loadGoalPrecondition(
   goalId: string,
   idPrefix: string,
   env: Record<string, string>,
+  phase: Phase,
 ): Promise<FinalSnapshot> {
   let payload: unknown;
   try {
@@ -256,13 +266,19 @@ async function loadGoalPrecondition(
     throw error;
   }
   const snapshot = parseListSnapshot(payload);
-  if (snapshot.ok) {
-    for (const row of snapshot.snapshot.items) {
-      if (row.id.startsWith(`${idPrefix}-`)) {
-        throw new Error(
-          `coord: goal ${goalId} already planned (ids with prefix ${idPrefix}- exist)`,
-        );
-      }
+  if (!snapshot.ok) {
+    return snapshot;
+  }
+  if (phase === "watch") {
+    const found = snapshot.snapshot.items.some((row) => row.id.startsWith(`${idPrefix}-`));
+    if (!found) {
+      throw new Error(`coord: no items with prefix ${idPrefix}-`);
+    }
+    return snapshot;
+  }
+  for (const row of snapshot.snapshot.items) {
+    if (row.id.startsWith(`${idPrefix}-`)) {
+      throw new Error(`coord: goal ${goalId} already planned (ids with prefix ${idPrefix}- exist)`);
     }
   }
   return snapshot;
@@ -289,9 +305,81 @@ interface Startup {
   readonly loaded: LoadedCoordConfig;
   readonly goal: Goal;
   readonly mergeMode: MergeMode;
+  readonly workConfig: WorkConfig;
   readonly gate: BudgetGate | null;
   readonly key: string | null;
   readonly childEnv: Record<string, string>;
+}
+
+async function seedStateDir(
+  config: LoadedCoordConfig["config"],
+  mcp: LoadedCoordConfig["mcp"],
+  workConfig: WorkConfig,
+): Promise<void> {
+  const seed = config.seed;
+  if (seed === null) {
+    return;
+  }
+  const approvals = await loadApprovalsConfig(mcp.approvalsConfigPath);
+  const dispatcher = await loadDispatcherConfig(mcp.dispatcherConfigPath);
+  const pairs: ReadonlyArray<readonly [string, string]> = [
+    ["storePath", workConfig.storePath],
+    ["requestsPath", approvals.requestsPath],
+    ["registryPath", dispatcher.registryPath],
+    ["callLogPath", mcp.callLogPath],
+  ];
+  const stateDir = resolve(seed.stateDir);
+  for (const [key, path] of pairs) {
+    if (!(resolve(path) + "/").startsWith(`${stateDir}/`)) {
+      throw new Error(`coord: seed ${key} ${path} is outside ${seed.stateDir}`);
+    }
+  }
+  const resolvedRunsDir = resolve(config.runsDir);
+  if (resolvedRunsDir === stateDir || resolvedRunsDir.startsWith(`${stateDir}/`)) {
+    throw new Error("coord: runsDir is inside seed stateDir");
+  }
+  let seedText: string | null = null;
+  if (seed.storeSeedPath !== null) {
+    const text = await readInputText("Seed store", seed.storeSeedPath);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      throw new Error(`coord: seed storeSeedPath ${seed.storeSeedPath} is not valid JSON`);
+    }
+    checkWorkStore(parsed, seed.storeSeedPath);
+    seedText = text;
+  }
+  let markerMissing = false;
+  try {
+    await stat(join(stateDir, ".coord-demo"));
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      let exists = false;
+      try {
+        await stat(stateDir);
+        exists = true;
+      } catch (inner: unknown) {
+        if ((inner as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw inner;
+        }
+      }
+      if (exists) {
+        markerMissing = true;
+      }
+    } else {
+      throw error;
+    }
+  }
+  if (markerMissing) {
+    throw new Error(`coord: ${seed.stateDir} is not a coordinator demo dir`);
+  }
+  await rm(stateDir, { recursive: true, force: true });
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await writeFileAtomic("Seed marker", join(stateDir, ".coord-demo"), "coordinator demo dir\n");
+  if (seedText !== null) {
+    await writeFileAtomic("Seed store", workConfig.storePath, seedText);
+  }
 }
 
 async function runStartup(args: PlanArgs): Promise<number> {
@@ -312,9 +400,6 @@ async function runStartup(args: PlanArgs): Promise<number> {
   }
   const loaded: LoadedCoordConfig = await loadCoordConfig(args.configPath);
   const { config, apiKeyEnv, mcp } = loaded;
-  if (config.seed !== null) {
-    throw new Error("coord: seed is not implemented");
-  }
   let key: string | null = null;
   let childEnv: Record<string, string> = {};
   if (!args.dryRun) {
@@ -345,7 +430,16 @@ async function runStartup(args: PlanArgs): Promise<number> {
   if (!args.dryRun) {
     Reflect.deleteProperty(process.env, apiKeyEnv);
   }
-  const startup: Startup = { config, loaded, goal, mergeMode: spec.mergeMode, gate, key, childEnv };
+  const startup: Startup = {
+    config,
+    loaded,
+    goal,
+    mergeMode: spec.mergeMode,
+    workConfig,
+    gate,
+    key,
+    childEnv,
+  };
   try {
     return await withFileLock("coordinator runs", join(config.runsDir, "coordinator"), () =>
       runFromStep13(startup, args),
@@ -375,6 +469,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       process.stderr.write(`coord: run-cap ${String(count)} runs today\n`);
       return 3;
     }
+    await seedStateDir(config, mcp, startup.workConfig);
     const pre = await loadGoalPrecondition(
       config.mcpConfigPath,
       mcp.serverInfo.version,
@@ -382,6 +477,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       goal.goalId,
       goal.idPrefix,
       startup.childEnv,
+      args.phase === "watch" ? "watch" : "plan",
     );
     if (!pre.ok) {
       throw new Error(`coord: goal ${goal.goalId} precondition failed (${pre.code})`);
@@ -408,17 +504,19 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       checkoutDir: process.cwd(),
       bunPath: process.execPath,
     };
-    await writeFileAtomic(
-      "Plan prompt",
-      join(runDir, "prompt-1.md"),
-      renderPlanPrompt({
-        skill,
-        goal,
-        runId,
-        mergeMode: startup.mergeMode,
-        limits: { maxSubmitAttempts: config.plan.maxSubmitAttempts },
-      }),
-    );
+    if (args.phase !== "watch") {
+      await writeFileAtomic(
+        "Plan prompt",
+        join(runDir, "prompt-1.md"),
+        renderPlanPrompt({
+          skill,
+          goal,
+          runId,
+          mergeMode: startup.mergeMode,
+          limits: { maxSubmitAttempts: config.plan.maxSubmitAttempts },
+        }),
+      );
+    }
     if (args.dryRun) {
       const line = JSON.stringify({
         runDir,
@@ -437,6 +535,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       config,
       startup.loaded,
       goal,
+      startup.mergeMode,
       args,
       runId,
       runDir,
@@ -453,10 +552,423 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
   }
 }
 
+interface RunCtx {
+  readonly config: LoadedCoordConfig["config"];
+  readonly loaded: LoadedCoordConfig;
+  readonly goal: Goal;
+  readonly skill: SkillText;
+  readonly runId: string;
+  readonly runDir: string;
+  readonly recordPath: string;
+  readonly gate: BudgetGate;
+  readonly key: string;
+  readonly childEnv: Record<string, string>;
+  readonly log: FileCallLog;
+  readonly controller: AbortController;
+  readonly gates: ReportGate[];
+  readonly sessions: ReportSession[];
+  readonly results: Map<number, MuseSessionResult>;
+  readonly consumed: Set<string>;
+}
+
+async function sessionStep(
+  ctx: RunCtx,
+  kind: "plan" | "react",
+  k: number,
+  attentionKeys: readonly string[],
+): Promise<string | null> {
+  const { config, loaded, runId, runDir, recordPath, gate } = ctx;
+  const { apiKeyEnv } = loaded;
+  const log = ctx.log;
+  const wasAborted = (): boolean => ctx.controller.signal.aborted;
+  if (wasAborted()) {
+    return "signal";
+  }
+  {
+    let admit = false;
+    let reason: string | null = null;
+    try {
+      const admission: Admission = await gate.admit();
+      if (admission.admit) {
+        admit = true;
+      } else {
+        reason = admission.reason;
+      }
+    } catch (error: unknown) {
+      if (error instanceof BudgetGateError) {
+        reason = "budget-gate-error";
+      } else {
+        throw error;
+      }
+    }
+    ctx.gates.push({ k, admit, reason: admit ? null : reason });
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "gate",
+      k,
+      admit,
+      reason: admit ? null : reason,
+    });
+    if (!admit) {
+      return "budget-refused";
+    }
+  }
+  if (wasAborted()) {
+    return "signal";
+  }
+  const probeBase: MuseSession = {
+    kind,
+    k,
+    sessionId: randomUUID(),
+    runDir,
+    checkoutDir: process.cwd(),
+    bunPath: process.execPath,
+  };
+  const probe = await runSurfaceProbe(
+    { config, session: probeBase, signal: ctx.controller.signal },
+    { env: ctx.childEnv },
+  );
+  if (probe.kind === "checked") {
+    const verdict = probe.verdict;
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "surface",
+      k,
+      stage: "probe",
+      ok: verdict.ok,
+      reason: verdict.ok ? null : verdict.reason,
+      extra: verdict.ok ? [] : verdict.extra,
+      missing: verdict.ok ? [] : verdict.missing,
+    });
+    if (!verdict.ok) {
+      return "tool-surface";
+    }
+  } else if (probe.kind === "probe-failed") {
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "surface",
+      k,
+      stage: "probe",
+      ok: false,
+      reason: probe.reason,
+      extra: [],
+      missing: [],
+    });
+    return "tool-surface";
+  } else if (probe.kind === "spawn-failed") {
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "surface",
+      k,
+      stage: "probe",
+      ok: false,
+      reason: "probe-spawn",
+      extra: [],
+      missing: [],
+    });
+    return "muse-unavailable";
+  } else {
+    return "signal";
+  }
+  const sessionAborted = (): boolean => ctx.controller.signal.aborted;
+  if (sessionAborted()) {
+    return "signal";
+  }
+  const session: MuseSession = {
+    kind,
+    k,
+    sessionId: randomUUID(),
+    runDir,
+    checkoutDir: process.cwd(),
+    bunPath: process.execPath,
+  };
+  const onSpawn = (pid: number): void => {
+    writeFileSync(recordPath, `${JSON.stringify({ runId, k, pid })}\n`, {
+      flag: "wx",
+      mode: 0o600,
+    });
+  };
+  const timeoutMs = kind === "plan" ? config.plan.timeoutMs : config.react.timeoutMs;
+  const result = await runMuseSession(
+    {
+      config,
+      session,
+      apiKeyEnv,
+      timeoutMs,
+      killGraceMs: config.killGraceMs,
+      signal: ctx.controller.signal,
+    },
+    { env: { ...process.env, [apiKeyEnv]: ctx.key }, log, now: () => new Date(), onSpawn },
+  );
+  await rm(recordPath, { force: true });
+  ctx.sessions.push({
+    k,
+    kind,
+    sessionId: session.sessionId,
+    outcome: result.outcome,
+    durationMs: result.durationMs,
+    exportOk: result.exportOk,
+    attentionKeys: [...attentionKeys],
+  });
+  ctx.results.set(k, result);
+  let surfaceOk = true;
+  if (result.outcome.kind !== "spawn-failed") {
+    const verdict: SurfaceVerdict = result.exportOk
+      ? await readSurface(join(runDir, `session-${String(k)}-export.json`))
+      : { ok: false, reason: "unreadable", extra: [], missing: [] };
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "surface",
+      k,
+      stage: "session",
+      ok: verdict.ok,
+      reason: verdict.ok ? null : verdict.reason,
+      extra: verdict.ok ? [] : verdict.extra,
+      missing: verdict.ok ? [] : verdict.missing,
+    });
+    surfaceOk = verdict.ok;
+  }
+  if (result.outcome.kind === "spawn-failed") {
+    return "muse-unavailable";
+  }
+  if (result.outcome.kind === "aborted") {
+    return "signal";
+  }
+  if (!surfaceOk) {
+    return "tool-surface";
+  }
+  return null;
+}
+
+async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Promise<string> {
+  const { config, loaded, goal } = ctx;
+  const { mcp } = loaded;
+  const watch = config.watch;
+  const t0 = Date.now();
+  const consumed = ctx.consumed;
+  let reactSessions = 0;
+  let failedInRow = 0;
+  let pollErrors = 0;
+  let k = firstK;
+  const workConfig = await loadWorkConfig(mcp.workConfigPath);
+  const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
+  const mergeModes = new Map(specs.map((entry) => [entry.repo, entry.mergeMode] as const));
+  const goalId = goal.goalId;
+  const idPrefix = goal.idPrefix;
+  const callerEnv = ctx.childEnv;
+  const runMcpPath = join(ctx.runDir, "mcp.json");
+  const readFiledFollowups = async (): Promise<number> => {
+    const calls = (await readCoordCalls(join(ctx.runDir, "mcp-calls.jsonl"))) ?? [];
+    const seen = new Set<string>();
+    for (const call of calls) {
+      if (call.caller !== "coordinator" || call.tool !== "submit_work" || call.outcome !== "ok") {
+        continue;
+      }
+      const summary = call.summary;
+      if (summary === null) {
+        continue;
+      }
+      const itemIds: unknown = (summary as Record<string, unknown>)["itemIds"];
+      if (!Array.isArray(itemIds)) {
+        continue;
+      }
+      for (const id of itemIds) {
+        if (typeof id === "string" && id.endsWith("-fu")) {
+          seen.add(id);
+        }
+      }
+    }
+    return seen.size;
+  };
+  for (;;) {
+    if (ctx.controller.signal.aborted) {
+      return "signal";
+    }
+    if (Date.now() - t0 >= watch.deadlineMs) {
+      return "deadline";
+    }
+    let rows: readonly WatchRow[];
+    let revision = 0;
+    let fleet: { readonly paused: boolean; readonly pendingTools: readonly string[] };
+    const verdicts = new Map<
+      string,
+      readonly {
+        readonly headSha: string;
+        readonly pullNumber: number | null;
+        readonly auditorModel: string;
+        readonly counts: { readonly high: number; readonly medium: number; readonly low: number };
+      }[]
+    >();
+    try {
+      const rowsPayload = await runClientCall({
+        tool: "list_work",
+        args: { status: ["queued", "running", "review", "parked", "blocked", "done"] },
+        configPath: runMcpPath,
+        serverVersion: mcp.serverInfo.version,
+        clientTimeoutMs: mcp.clientTimeoutMs,
+        env: callerEnv,
+      });
+      const rowsParsed = parseWatchRows(rowsPayload);
+      if (!rowsParsed.ok) {
+        throw new Error(rowsParsed.code);
+      }
+      rows = rowsParsed.value.rows;
+      revision = rowsParsed.value.revision;
+      const fleetPayload = await runClientCall({
+        tool: "fleet_status",
+        args: {},
+        configPath: runMcpPath,
+        serverVersion: mcp.serverInfo.version,
+        clientTimeoutMs: mcp.clientTimeoutMs,
+        env: callerEnv,
+      });
+      const fleetParsed = parseFleet(fleetPayload);
+      if (!fleetParsed.ok) {
+        throw new Error(fleetParsed.code);
+      }
+      fleet = fleetParsed.value;
+      const followupsFiled = await readFiledFollowups();
+      const watchCtx: WatchContext = {
+        goalId,
+        idPrefix,
+        mergeModes,
+        maxFollowupsPerRun: watch.maxFollowupsPerRun,
+        pauseRequestBlockedItems: watch.pauseRequestBlockedItems,
+        followupsFiled,
+        consumed,
+      };
+      for (const id of auditTargets(rows, watchCtx)) {
+        const verdictPayload = await runClientCall({
+          tool: "audit_results",
+          args: { workItemId: id },
+          configPath: runMcpPath,
+          serverVersion: mcp.serverInfo.version,
+          clientTimeoutMs: mcp.clientTimeoutMs,
+          env: callerEnv,
+        });
+        const verdictsParsed = parseVerdicts(verdictPayload);
+        if (!verdictsParsed.ok) {
+          throw new Error(verdictsParsed.code);
+        }
+        verdicts.set(id, verdictsParsed.value);
+      }
+      pollErrors = 0;
+    } catch (error: unknown) {
+      const code = error instanceof ClientError ? "client-error" : "client-error";
+      const tool = "list_work";
+      pollErrors += 1;
+      await ctx.log.append({
+        ts: new Date().toISOString(),
+        event: "poll-error",
+        revision,
+        tool,
+        code,
+      });
+      if (pollErrors >= watch.maxPollErrors) {
+        return "factory-unreadable";
+      }
+      await new Promise<void>((done) => {
+        const t = setTimeout(done, watch.pollMs);
+        ctx.controller.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(t);
+            done();
+          },
+          { once: true },
+        );
+      });
+      continue;
+    }
+    const followupsFiled = await readFiledFollowups();
+    const watchCtx: WatchContext = {
+      goalId,
+      idPrefix,
+      mergeModes,
+      maxFollowupsPerRun: watch.maxFollowupsPerRun,
+      pauseRequestBlockedItems: watch.pauseRequestBlockedItems,
+      followupsFiled,
+      consumed,
+    };
+    const attention = attentionOf({ rows, verdicts, fleet }, watchCtx);
+    await ctx.log.append({
+      ts: new Date().toISOString(),
+      event: "poll",
+      revision,
+      scope: scopeRows(rows, idPrefix).length,
+      attention: attention.length,
+    });
+    if (isGoalTerminal(rows, idPrefix) && attention.length === 0) {
+      return "goal-terminal";
+    }
+    if (attention.length > 0) {
+      if (reactSessions >= watch.maxReactSessions) {
+        return "max-sessions";
+      }
+      const entries = attention.slice(0, config.react.maxEntries);
+      const keys = entries.map((entry) => entry.key);
+      await ctx.log.append({
+        ts: new Date().toISOString(),
+        event: "attention",
+        k,
+        keys,
+      });
+      await writeFileAtomic(
+        `React prompt ${String(k)}`,
+        join(ctx.runDir, `prompt-${String(k)}.md`),
+        renderReactPrompt({
+          skill: ctx.skill,
+          goal,
+          runId: ctx.runId,
+          mergeMode,
+          attention: entries,
+          limits: { maxSubmitPerEntry: config.react.maxSubmitPerEntry },
+        }),
+      );
+      const outcome = await sessionStep(ctx, "react", k, keys);
+      for (const entryKey of keys) {
+        consumed.add(entryKey);
+      }
+      reactSessions += 1;
+      if (outcome !== null) {
+        return outcome;
+      }
+      const sessionResult = ctx.results.get(k);
+      if (sessionResult !== undefined) {
+        const sessionOutcome = sessionResult.outcome;
+        if (
+          sessionOutcome.kind === "timeout" ||
+          (sessionOutcome.kind === "exited" && sessionOutcome.rc !== 0)
+        ) {
+          failedInRow += 1;
+        } else {
+          failedInRow = 0;
+        }
+        if (failedInRow >= watch.maxFailedSessions) {
+          return "session-failed";
+        }
+      }
+      k += 1;
+    }
+    await new Promise<void>((done) => {
+      const t = setTimeout(done, watch.pollMs);
+      ctx.controller.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(t);
+          done();
+        },
+        { once: true },
+      );
+    });
+  }
+}
+
 async function runSession(
   config: LoadedCoordConfig["config"],
   loaded: LoadedCoordConfig,
   goal: Goal,
+  mergeMode: MergeMode,
   args: PlanArgs,
   runId: string,
   runDir: string,
@@ -467,7 +979,6 @@ async function runSession(
   key: string,
   childEnv: Record<string, string>,
 ): Promise<number> {
-  const { apiKeyEnv, mcp } = loaded;
   const log = await openCallLog(join(runDir, "coord.jsonl"));
   try {
     await log.append({
@@ -487,170 +998,109 @@ async function runSession(
     };
     process.on("SIGINT", onSignal);
     process.on("SIGTERM", onSignal);
-    let stop: string | null = null;
     const gates: ReportGate[] = [];
     const sessions: ReportSession[] = [];
-    if (!controller.signal.aborted) {
-      try {
-        const admission: Admission = await gate.admit();
-        if (admission.admit) {
-          gates.push({ k: 1, admit: true, reason: null });
-        } else {
-          gates.push({ k: 1, admit: false, reason: admission.reason });
-          stop = "budget-refused";
+    const results = new Map<number, MuseSessionResult>();
+    const consumed = new Set<string>();
+    const ctx: RunCtx = {
+      config,
+      loaded,
+      goal,
+      skill: loaded.skill,
+      runId,
+      runDir,
+      recordPath,
+      gate,
+      key,
+      childEnv,
+      log,
+      controller,
+      gates,
+      sessions,
+      results,
+      consumed,
+    };
+    let stop: string | null = null;
+    if (args.phase === "plan" || args.phase === "full") {
+      stop = await sessionStep(ctx, "plan", 1, []);
+      if (stop === null) {
+        const calls = (await readCoordCalls(join(runDir, "mcp-calls.jsonl"))) ?? [];
+        const okSubmit = calls.some((call) => call.tool === "submit_work" && call.outcome === "ok");
+        stop = okSubmit ? "plan-done" : "no-submission";
+        if (args.phase === "plan") {
+          const code = await finishRun(ctx, args, runId, runDir, t0, stop);
+          process.removeListener("SIGINT", onSignal);
+          process.removeListener("SIGTERM", onSignal);
+          await log.close();
+          return code;
         }
-      } catch (error: unknown) {
-        if (error instanceof BudgetGateError) {
-          gates.push({ k: 1, admit: false, reason: "budget-gate-error" });
-          stop = "budget-refused";
-        } else {
-          throw error;
-        }
-      }
-      const first = gates[0] as ReportGate;
-      await log.append({
-        ts: new Date().toISOString(),
-        event: "gate",
-        k: 1,
-        admit: first.admit,
-        reason: first.admit ? null : first.reason,
-      });
-    } else {
-      stop = "signal";
-    }
-    let result: MuseSessionResult | null = null;
-    let sessionSurfaceOk = true;
-    if (stop === null && !controller.signal.aborted) {
-      const probeSession: MuseSession = { ...session, sessionId: randomUUID() };
-      const probe = await runSurfaceProbe(
-        { config, session: probeSession, signal: controller.signal },
-        { env: childEnv },
-      );
-      if (probe.kind === "checked") {
-        const verdict = probe.verdict;
-        await log.append({
-          ts: new Date().toISOString(),
-          event: "surface",
-          k: 1,
-          stage: "probe",
-          ok: verdict.ok,
-          reason: verdict.ok ? null : verdict.reason,
-          extra: verdict.ok ? [] : verdict.extra,
-          missing: verdict.ok ? [] : verdict.missing,
-        });
-        if (!verdict.ok) {
-          stop = "tool-surface";
-        }
-      } else if (probe.kind === "probe-failed") {
-        await log.append({
-          ts: new Date().toISOString(),
-          event: "surface",
-          k: 1,
-          stage: "probe",
-          ok: false,
-          reason: probe.reason,
-          extra: [],
-          missing: [],
-        });
-        stop = "tool-surface";
-      } else if (probe.kind === "spawn-failed") {
-        await log.append({
-          ts: new Date().toISOString(),
-          event: "surface",
-          k: 1,
-          stage: "probe",
-          ok: false,
-          reason: "probe-spawn",
-          extra: [],
-          missing: [],
-        });
-        stop = "muse-unavailable";
-      } else {
-        stop = "signal";
+      } else if (args.phase === "plan") {
+        const code = await finishRun(ctx, args, runId, runDir, t0, stop);
+        process.removeListener("SIGINT", onSignal);
+        process.removeListener("SIGTERM", onSignal);
+        await log.close();
+        return code;
       }
     }
-    if (stop === null && !controller.signal.aborted) {
-      const onSpawn = (pid: number): void => {
-        writeFileSync(recordPath, `${JSON.stringify({ runId, k: 1, pid })}\n`, {
-          flag: "wx",
-          mode: 0o600,
-        });
-      };
-      result = await runMuseSession(
-        {
-          config,
-          session,
-          apiKeyEnv,
-          timeoutMs: config.plan.timeoutMs,
-          killGraceMs: config.killGraceMs,
-          signal: controller.signal,
-        },
-        { env: { ...process.env, [apiKeyEnv]: key }, log, now: () => new Date(), onSpawn },
-      );
-      await rm(recordPath, { force: true });
-      sessions.push({
-        k: 1,
-        kind: "plan",
-        sessionId: session.sessionId,
-        outcome: result.outcome,
-        durationMs: result.durationMs,
-        exportOk: result.exportOk,
-        attentionKeys: [],
-      });
-      if (result.outcome.kind !== "spawn-failed") {
-        const verdict: SurfaceVerdict = result.exportOk
-          ? await readSurface(join(runDir, "session-1-export.json"))
-          : { ok: false, reason: "unreadable", extra: [], missing: [] };
-        await log.append({
-          ts: new Date().toISOString(),
-          event: "surface",
-          k: 1,
-          stage: "session",
-          ok: verdict.ok,
-          reason: verdict.ok ? null : verdict.reason,
-          extra: verdict.ok ? [] : verdict.extra,
-          missing: verdict.ok ? [] : verdict.missing,
-        });
-        sessionSurfaceOk = verdict.ok;
-      }
-    } else if (stop === null) {
-      stop = "signal";
+    let doneStop: string | null = stop;
+    if (doneStop === "plan-done" && args.phase === "full") {
+      doneStop = await watchLoop(ctx, 2, mergeMode);
+    } else if (args.phase === "watch" && doneStop === null) {
+      doneStop = await watchLoop(ctx, 1, mergeMode);
     }
-    let finalSnapshot: FinalSnapshot;
+    const finalStop = doneStop === null ? "signal" : doneStop;
+    const code = await finishRun(ctx, args, runId, runDir, t0, finalStop);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    await log.close();
+    return code;
+  } catch (error: unknown) {
     try {
-      const payload = await runClientCall({
-        tool: "list_work",
-        args: { status: ["queued", "running", "review", "parked", "blocked", "done"] },
-        configPath: join(runDir, "mcp.json"),
-        serverVersion: mcp.serverInfo.version,
-        clientTimeoutMs: mcp.clientTimeoutMs,
-        env: childEnv,
-      });
-      finalSnapshot = parseListSnapshot(payload);
-    } catch (error: unknown) {
-      if (error instanceof ClientError) {
-        finalSnapshot = { ok: false, code: "client-error" };
-      } else {
-        throw error;
-      }
+      await log.close();
+    } catch {
+      // The run already failed; closing the log must not hide the cause.
     }
-    const calls: readonly CoordCallEnd[] =
-      (await readCoordCalls(join(runDir, "mcp-calls.jsonl"))) ?? [];
-    if (stop === null) {
-      if (result !== null && result.outcome.kind === "spawn-failed") {
-        stop = "muse-unavailable";
-      } else if (result !== null && result.outcome.kind === "aborted") {
-        stop = "signal";
-      } else if (!sessionSurfaceOk) {
-        stop = "tool-surface";
-      } else if (calls.some((call) => call.tool === "submit_work" && call.outcome === "ok")) {
-        stop = "plan-done";
-      } else {
-        stop = "no-submission";
-      }
+    const message = (error as Error).message;
+    process.stderr.write(`${failPrefix(message)}\n`);
+    return 1;
+  }
+}
+
+async function finishRun(
+  ctx: RunCtx,
+  args: PlanArgs,
+  runId: string,
+  runDir: string,
+  t0: Date,
+  stop: string,
+): Promise<number> {
+  const { loaded, goal } = ctx;
+  const { mcp } = loaded;
+  let finalSnapshot: FinalSnapshot;
+  try {
+    const payload = await runClientCall({
+      tool: "list_work",
+      args: { status: ["queued", "running", "review", "parked", "blocked", "done"] },
+      configPath: join(runDir, "mcp.json"),
+      serverVersion: mcp.serverInfo.version,
+      clientTimeoutMs: mcp.clientTimeoutMs,
+      env: ctx.childEnv,
+    });
+    finalSnapshot = parseListSnapshot(payload);
+  } catch (error: unknown) {
+    if (error instanceof ClientError) {
+      finalSnapshot = { ok: false, code: "client-error" };
+    } else {
+      throw error;
     }
-    const failedSnapshot = !finalSnapshot.ok;
-    const report = buildReport({
+  }
+  const calls: readonly CoordCallEnd[] =
+    (await readCoordCalls(join(runDir, "mcp-calls.jsonl"))) ?? [];
+  const consumed = [...ctx.consumed];
+  const failedSnapshot = !finalSnapshot.ok;
+  let report: Report;
+  try {
+    report = buildReport({
       runId,
       goalId: goal.goalId,
       idPrefix: goal.idPrefix,
@@ -661,10 +1111,10 @@ async function runSession(
       endedAt: new Date().toISOString(),
       configPath: args.configPath,
       configSha256: loaded.configSha256,
-      gates,
-      sessions,
+      gates: ctx.gates,
+      sessions: ctx.sessions,
       calls,
-      consumed: [],
+      consumed,
       finalSnapshot,
     });
     await writeFileAtomic(
@@ -673,15 +1123,12 @@ async function runSession(
       `${JSON.stringify(report, null, 2)}\n`,
     );
     await writeFileAtomic("Run report markdown", join(runDir, "report.md"), renderReportMd(report));
-    await log.append({
+    await ctx.log.append({
       ts: new Date().toISOString(),
       event: "report",
       path: join(runDir, "report.md"),
     });
-    await log.append({ ts: new Date().toISOString(), event: "run-end", stop });
-    process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
-    await log.close();
+    await ctx.log.append({ ts: new Date().toISOString(), event: "run-end", stop });
     const okSubmits = calls.filter(
       (call) => call.tool === "submit_work" && call.outcome === "ok",
     ).length;
@@ -689,16 +1136,16 @@ async function runSession(
     process.stdout.write(
       `coord: run ${runId} stop=${stop} submitted=${String(okSubmits)} items=${itemsText} followups=${String(report.followups.length)} report=${join(runDir, "report.md")}\n`,
     );
-    if (stop === "plan-done" || stop === "signal") {
+    if (
+      stop === "plan-done" ||
+      stop === "signal" ||
+      stop === "goal-terminal" ||
+      stop === "deadline"
+    ) {
       return failedSnapshot ? 3 : 0;
     }
     return 3;
   } catch (error: unknown) {
-    try {
-      await log.close();
-    } catch {
-      // The run already failed; closing the log must not hide the cause.
-    }
     const message = (error as Error).message;
     process.stderr.write(`${failPrefix(message)}\n`);
     return 1;

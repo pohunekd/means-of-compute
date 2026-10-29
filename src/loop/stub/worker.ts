@@ -24,6 +24,33 @@ function workItemIdOf(requestId: string): string {
   return requestId.slice(0, requestId.lastIndexOf(":"));
 }
 
+class StubGitError extends Error {
+  readonly subcommand: string;
+  constructor(subcommand: string, options: { cause: unknown }) {
+    super(`stub step failed: git ${subcommand}`, options);
+    this.name = "StubGitError";
+    this.subcommand = subcommand;
+  }
+}
+
+// Runs one git step; a sandbox failure carries the subcommand structurally,
+// so the failure detail names no path and no message text.
+async function runGitStep(
+  deps: StubWorkerDeps,
+  cwd: string,
+  args: readonly string[],
+): Promise<string> {
+  const subcommand = args[0] ?? "<none>";
+  try {
+    return await sandboxGit(deps.git, cwd, args);
+  } catch (error: unknown) {
+    if (error instanceof SandboxError) {
+      throw new StubGitError(subcommand, { cause: error });
+    }
+    throw error;
+  }
+}
+
 // One streamed chat call through the real meter; a non-200 status fails
 // the session. The body is drained so the meter records the usage.
 async function meteredCall(deps: StubWorkerDeps, requestId: string, round: number): Promise<number> {
@@ -57,19 +84,19 @@ async function applyPatch(
 ): Promise<void> {
   const cloneDir = join(deps.hostsDir, hostAlias);
   if (!existsSync(join(cloneDir, ".git"))) {
-    await sandboxGit(deps.git, deps.hostsDir, ["clone", deps.originDir, cloneDir]);
+    await runGitStep(deps, deps.hostsDir, ["clone", deps.originDir, cloneDir]);
   }
-  await sandboxGit(deps.git, cloneDir, ["fetch", "origin"]);
-  const listed = await sandboxGit(deps.git, cloneDir, ["ls-remote", deps.originDir, branch]);
+  await runGitStep(deps, cloneDir, ["fetch", "origin"]);
+  const listed = await runGitStep(deps, cloneDir, ["ls-remote", deps.originDir, branch]);
   const base = listed.trim().length > 0 ? `origin/${branch}` : "origin/main";
-  await sandboxGit(deps.git, cloneDir, ["checkout", "-B", branch, base]);
-  await sandboxGit(deps.git, cloneDir, ["apply", "--index", patchPath]);
-  await sandboxGit(deps.git, cloneDir, [
+  await runGitStep(deps, cloneDir, ["checkout", "-B", branch, base]);
+  await runGitStep(deps, cloneDir, ["apply", "--index", patchPath]);
+  await runGitStep(deps, cloneDir, [
     "commit",
     "-m",
     `Round ${String(round)} for ${workItemId}`,
   ]);
-  await sandboxGit(deps.git, cloneDir, ["push", "origin", `HEAD:refs/heads/${branch}`]);
+  await runGitStep(deps, cloneDir, ["push", "origin", `HEAD:refs/heads/${branch}`]);
 }
 
 export function createStubWorker(deps: StubWorkerDeps): StubWorker {
@@ -86,6 +113,14 @@ export function createStubWorker(deps: StubWorkerDeps): StubWorker {
       }
       const requestId = session.handle.requestId;
       const workItemId = workItemIdOf(requestId);
+      const failSession = (detail: string): void => {
+        deps.control.complete(session.handle.sessionId, {
+          state: "failed",
+          usage: null,
+          detail,
+        });
+        done.push(session.handle.sessionId);
+      };
       const handledRounds = [...handled.entries()].filter(([id]) => {
         const other = sessions.find((candidate) => candidate.handle.sessionId === id);
         return other !== undefined && workItemIdOf(other.handle.requestId) === workItemId;
@@ -101,7 +136,13 @@ export function createStubWorker(deps: StubWorkerDeps): StubWorker {
         done.push(session.handle.sessionId);
         continue;
       }
-      const status = await meteredCall(deps, requestId, handledRounds);
+      let status: number;
+      try {
+        status = await meteredCall(deps, requestId, handledRounds);
+      } catch {
+        failSession("stub step failed: meter");
+        continue;
+      }
       if (status !== 200) {
         deps.control.complete(session.handle.sessionId, {
           state: "failed",
@@ -121,8 +162,9 @@ export function createStubWorker(deps: StubWorkerDeps): StubWorker {
           patchPath,
         );
       } catch (error: unknown) {
-        if (error instanceof SandboxError) {
-          throw error;
+        if (error instanceof StubGitError) {
+          failSession(`stub step failed: git ${error.subcommand}`);
+          continue;
         }
         throw error;
       }

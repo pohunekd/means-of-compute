@@ -64,9 +64,9 @@ render, so `.prettierignore` excludes it from formatting.
 
 ## Plan runs
 
-`bun run coord --goal <goal> --phase plan [--config <path>] [--dry-run]`
-starts a plan run. Unknown arguments, repeated flags and missing values
-exit 2, as do a bad checkout, a bad session record, a seed, a failed
+`bun run coord --goal <goal> --phase plan|watch|full [--config <path>] [--dry-run]`
+starts a run. Unknown arguments, repeated flags and missing values
+exit 2, as do a bad checkout, a bad session record, a failed
 precondition and lock contention. Startup checks run
 before the body: args, checkout, config, key, goal with spec lookup, gate,
 runs dir, then the coordinator lock and the record check. The daily cap
@@ -76,8 +76,9 @@ counts non-dry run dirs for today and exits 3 past `maxRunsPerDay`; the G1
 `mcp-calls.jsonl`, `report.json`, `report.md` and session files. A dry run prints one JSON
 line with `runDir`, `cwd`, `argv`, `phase` and `covers`, creating only
 `home`, `mcp.json`, `prompt-1.md` and `workspace`. E0 step 1 runs the dry run. Stops are `plan-done`,
-`no-submission`, `budget-refused`, `muse-unavailable`, `tool-surface` and `signal`, with
-exit 0 for `plan-done` and `signal` and exit 3 for the failing stops; a
+`no-submission`, `goal-terminal`, `deadline`, `max-sessions`, `session-failed`,
+`factory-unreadable`, `budget-refused`, `muse-unavailable`, `tool-surface` and `signal`, with
+exit 0 for `plan-done`, `signal`, `goal-terminal` and `deadline` and exit 3 for the failing stops; a
 failed final snapshot turns 0 into 3. Stdout ends with
 `coord: run <runId> stop=<stop> submitted=<n> items=<n|unknown>`
 `followups=<n> report=<path>`. The `coordinator-session.json` record names
@@ -122,3 +123,12 @@ are blocked rows that are not `-fu` rows and have no `-fu` sibling plus
 blocked, operator-parked, or stranded. Bad `list_work`, `audit_results` and
 `fleet_status` payloads report `invalid-list-work`, `invalid-audit-results` and
 `invalid-fleet-status`.
+
+## Watch runs
+
+The seed wipes and reseeds `stateDir`, refusing paths outside it, a `runsDir`
+inside it, a non-demo dir, and a bad store seed; the watch precondition
+needs a row with the id prefix. Each poll reads work, fleet and verdicts,
+then reacts to attention until the goal is terminal, the deadline or a
+session cap stops it. The log carries `poll`, `poll-error` and `attention`
+events; `consumed` keys never repeat. `full` runs plan then watch.

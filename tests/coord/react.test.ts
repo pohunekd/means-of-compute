@@ -42,6 +42,13 @@ async function listRunDirs(runsDir: string): Promise<string[]> {
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 }
 
+interface Spawned {
+  readonly proc: ReturnType<typeof Bun.spawn>;
+  readonly stdoutText: () => Promise<string>;
+  readonly stderrText: () => Promise<string>;
+  readonly waitExit: () => Promise<number>;
+}
+
 async function waitExit(proc: ReturnType<typeof Bun.spawn>): Promise<number> {
   const deadline = Date.now() + 25000;
   for (;;) {

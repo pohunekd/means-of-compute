@@ -709,6 +709,10 @@ test("SIGTERM during the session reports signal (M13)", async () => {
   }> => {
     const deadline = Date.now() + 10000;
     for (;;) {
+      if (Date.now() > deadline) {
+        spawned.run.proc.kill("SIGKILL");
+        throw new Error("session did not start in time");
+      }
       const found = await listRunDirs(env.runsDir);
       if (found.length === 1) {
         const candidate = join(env.runsDir, found[0] as string);
@@ -740,10 +744,6 @@ test("SIGTERM during the session reports signal (M13)", async () => {
             return { runDir: candidate, sessionPid: parsed.pid };
           }
         }
-      }
-      if (Date.now() > deadline) {
-        spawned.run.proc.kill("SIGKILL");
-        throw new Error("session did not start in time");
       }
       await Bun.sleep(20);
     }

@@ -354,6 +354,10 @@ async function runStartup(args: PlanArgs): Promise<number> {
     if (error instanceof FileLockError && error.code === "busy") {
       throw new Error("coord: another coordinator run is active", { cause: error });
     }
+    if (error instanceof FileLockError && error.code === "release-failed") {
+      process.stderr.write(`coord: ${error.message}\n`);
+      return 1;
+    }
     throw error;
   }
 }

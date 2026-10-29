@@ -1,4 +1,4 @@
-// MCP boundary test (matrix X4): the import closure of every file under src/mcp/ never reaches the approvals decide module or the CLI, and no file under src/mcp/ names the atomic writer. Specs come from Bun's import scanner, every closure file is TypeScript or JSON, specs resolve through Bun's resolver on real paths, only node: and bun: modules and bun itself are builtins, root dependencies never point into the file system, dependency and install inputs stay outside this test, and the loader checks run on the comment-free code of every TypeScript file in the closure. The checks match loader names spelled in source; a name or code built at runtime is outside this test (docs/mcp.md, A9).
+// MCP boundary test (matrix X4): the import closure of every file under src/mcp/ never reaches the approvals decide module or the CLI, and no file under src/mcp/ names the atomic writer. Specs come from Bun's import scanner, every closure file is TypeScript or JSON, specs resolve through Bun's resolver on real paths, only node: and bun: modules and bun itself are builtins, root dependency specs that start with file:, link:, workspace:, . or / fail as an early warning, dependency and install inputs stay outside this test, and the loader checks run on the comment-free code of every TypeScript file in the closure. The checks match loader names spelled in source; a name or code built at runtime is outside this test (docs/mcp.md, A9).
 import { afterAll, expect, test } from "bun:test";
 import {
   existsSync,
@@ -271,7 +271,7 @@ test("checkTarget gates closure edges by location and file type (X4 Y6)", () => 
   }
 });
 
-test("root package dependencies never point into the file system (X4 Y8)", () => {
+test("a root dependency spec with a file-system prefix fails (X4 Y8)", () => {
   const pkg: unknown = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
   expect(localDependencies(pkg)).toEqual([]);
   expect(localDependencies({ dependencies: { zzpkg: "file:./src/zzpkg" } })).toEqual([

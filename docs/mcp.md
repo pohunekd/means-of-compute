@@ -188,9 +188,11 @@ error it is `null`, because the call-end line already carries `code`.
    with `import "<spec>" in <file> resolves to a non-file module`.
    A result under the repository's top-level `node_modules/` is not
    followed; anywhere else `node_modules` is an ordinary directory.
-   A root `package.json` dependency that points into the file system
-   fails with `dependency "<name>" points into the file system`
-   followed by the spec. Dependency and install inputs
+   Y8 is an early warning only: a root dependency in `dependencies`,
+   `devDependencies`, `optionalDependencies` or `peerDependencies`
+   whose spec starts with `file:`, `link:`, `workspace:`, `.` or `/`
+   fails with `dependency "<name>" points into the file system: <spec>`.
+   Dependency and install inputs
    (`package.json`, `bun.lock`, patches, files under `node_modules/`)
    are outside X4 and covered by review and by the runtime boundary
    in #94. A spec Bun cannot resolve fails with

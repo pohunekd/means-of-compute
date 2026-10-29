@@ -127,8 +127,9 @@ async function mergedVerdict(
     return null;
   }
   const verdicts = await readVerdicts(ctx.verdictDir, item.id);
+  const pull = li.pull;
   const found = verdicts.find(
-    (verdict) => verdict.headSha === li.pull?.headSha && verdict.pullNumber === li.pull?.number,
+    (verdict) => verdict.headSha === pull.headSha && verdict.pullNumber === pull.number,
   );
   return found ?? null;
 }

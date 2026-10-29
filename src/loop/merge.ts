@@ -147,6 +147,10 @@ async function decideMerge(
   if (step.kind === "audit-missing") {
     const fresh = await readReviewItem(ctx, item.id);
     if (fresh.phase !== "auditing") {
+      await writeReviewItem(ctx, item.id, {
+        ...(await readReviewItem(ctx, item.id)),
+        phase: "auditing",
+      });
       return "auditing";
     }
     await parkOperator(ctx, item, "audit-missing");
@@ -353,6 +357,9 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
 
 export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"done" | "pending"> {
   const li = await readReviewItem(ctx, item.id);
+  if (li.phase === "final") {
+    return "done";
+  }
   if (li.phase !== "finalizing") {
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" is "${li.phase}", not "finalizing"`,
@@ -538,13 +545,16 @@ async function mergedPathInternal(
   ) {
     ctx.log.log({ event: "merge-base-race", workItemId: item.id, sha: mergeCommit });
   }
-  await escalate(
+  const escalated = await escalate(
     ctx,
     item,
     `race:${mergeCommit}`,
     `Merge ${mergeCommit} of pull request #${String(pullNumber)} has parents ${parents.join(", ")}, not [${base}, ${h}]: the merged tree was not trial-merged.`,
   );
-  return "pending";
+  if (escalated === "pending") {
+    return "pending";
+  }
+  return closeMerged(ctx, item, h, mergeCommit, true, false);
 }
 
 async function decideOnView(

@@ -11,6 +11,7 @@ import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import type { GitDeps } from "../../src/loop/git.js";
+import { GitHubError } from "../../src/loop/github.js";
 import {
   createStubGitHub,
   type StubCi,
@@ -23,8 +24,16 @@ import { renderComment } from "../../src/auditor/verdict.js";
 import { appendPending } from "../../src/ledger/store.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
 import { createApprovalsView } from "../../src/loop/approvals-view.js";
+import { decideRequest } from "../../src/approvals/decide.js";
+import { recordRequest } from "../../src/approvals/store.js";
 import { applyTestEnv } from "../auditor/test-env.js";
-import { createMergeMutex, mergeCheck, type MergeContext } from "../../src/loop/merge.js";
+import {
+  createMergeMutex,
+  finishMerge,
+  mergeCheck,
+  type MergeContext,
+} from "../../src/loop/merge.js";
+import { writeReviewItem } from "../../src/loop/review.js";
 
 const PREFERRED = "muse-spark-1.3-contributor";
 const PROVIDER = "meta-api";
@@ -499,6 +508,7 @@ test("MT2 a moved base runs one trial per call then merges", async () => {
 interface ReadySeed {
   readonly harness: MergeHarness;
   readonly ctx: MergeContext;
+  readonly events: string[];
   readonly head: string;
   readonly base: string;
 }
@@ -506,7 +516,11 @@ interface ReadySeed {
 async function seedReadyItem(
   dir: string,
   overrides: Partial<LoopItem> = {},
-  opts: { readonly branch?: string; readonly ci?: (sha: string) => StubCi } = {},
+  opts: {
+    readonly branch?: string;
+    readonly ci?: (sha: string) => StubCi;
+    readonly skipMarker?: boolean;
+  } = {},
 ): Promise<ReadySeed> {
   const extra = opts.ci === undefined ? {} : { ci: opts.ci };
   const harness = await makeHarness(dir, extra);
@@ -522,22 +536,28 @@ async function seedReadyItem(
     join(dir, "verdicts", "gh-demo-1", `${head}.json`),
     `${JSON.stringify(verdict)}\n`,
   );
-  const marker = renderComment(verdict);
-  if (marker !== null) {
-    await harness.ctx.github.postComment(REPO, 1, marker);
+  if (opts.skipMarker !== true) {
+    const marker = renderComment(verdict);
+    if (marker !== null) {
+      await harness.ctx.github.postComment(REPO, 1, marker);
+    }
   }
   await appendPending(harness.ctx.ledgerPath, pendingLedger());
   await seedFinishedSession(harness.registryPath);
   await writeStore(harness.ctx.storePath, item());
   await writeLoopState(harness.ctx.statePath, readyItem(head, overrides));
-  return { harness, ctx: harness.ctx, head, base };
+  return { harness, ctx: harness.ctx, events: harness.events, head, base };
 }
 
 async function withReadySeed(
   dir: string,
   body: (seed: ReadySeed) => Promise<void>,
   overrides: Partial<LoopItem> = {},
-  opts: { readonly branch?: string; readonly ci?: (sha: string) => StubCi } = {},
+  opts: {
+    readonly branch?: string;
+    readonly ci?: (sha: string) => StubCi;
+    readonly skipMarker?: boolean;
+  } = {},
 ): Promise<void> {
   const restoreEnv = applyTestEnv();
   const seed = await seedReadyItem(dir, overrides, opts);
@@ -551,7 +571,7 @@ async function withReadySeed(
 
 // Trial spy helpers live inline in MT2.
 
-// MT3: a raced merge sets the hold, escalates once and keeps later calls out.
+// MT3: a raced merge holds, escalates and closes with baseRace.
 test("MT3 a raced merge sets the hold and escalates once", async () => {
   await withTempDir(async (dir) => {
     await withReadySeed(dir, async (seed) => {
@@ -577,7 +597,7 @@ test("MT3 a raced merge sets the hold and escalates once", async () => {
         },
       };
       const outcome = await mergeCheck(ctx, item());
-      expect(outcome).toBe("pending");
+      expect(outcome).toBe("done");
       expect(mergeCalls).toBe(1);
       const view = await seed.ctx.github.viewPull(REPO, 1);
       const mergeSha = view.mergeCommit;
@@ -605,8 +625,29 @@ test("MT3 a raced merge sets the hold and escalates once", async () => {
       expect(racedBase).not.toBe(base);
       expect(hold.since).toBe(NOW);
       const li = await readItem(ctx.statePath);
-      expect(li.phase).toBe("merging");
-      expect(li.rounds).toHaveLength(0);
+      expect(li.phase).toBe("final");
+      expect(li.finalize).toEqual({ result: "success", done: true });
+      expect(li.rounds).toHaveLength(1);
+      expect(li.rounds[0]).toMatchObject({
+        outcome: "merged",
+        headSha: head,
+        baseRace: true,
+        verdict: { auditorModel: AUDITOR, high: 0, medium: 0, low: 0 },
+      });
+      const resultsFile = Bun.file(ctx.resultsPath);
+      const lines = (await resultsFile.text()).split("\n").filter((line) => line !== "");
+      expect(lines).toHaveLength(1);
+      expect((JSON.parse(lines[0] as string) as { routingResult: string }).routingResult).toBe(
+        "success",
+      );
+      const store = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+      expect(store.items[0]?.status).toBe("done");
+      const records = (await Bun.file(ctx.ledgerPath).text())
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as unknown);
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({ workItemId: "gh-demo-1", result: "success" });
       const stateCheck = await readLoopState(ctx.statePath);
       expect(stateCheck.mergeHold).toEqual(hold);
       const raceEvents = seed.harness.events.filter((line) => line.startsWith("merge-base-race:"));
@@ -623,21 +664,40 @@ test("MT3 a raced merge sets the hold and escalates once", async () => {
         `Merge ${mergeSha} of pull request #1 has parents ${racedBase}, ${head}, not [${base}, ${head}]: the merged tree was not trial-merged.`,
       );
       expect(view.state).toBe("MERGED");
-      // A set hold stops the second call at MR3 step 1: the raced item
-      // stays merging with byte-equal state and no further merge call.
-      const before = await Bun.file(ctx.statePath).text();
-      const next = await mergeCheck(ctx, item());
-      expect(next).toBe("pending");
-      expect(await Bun.file(ctx.statePath).text()).toBe(before);
-      expect(mergeCalls).toBe(1);
-      const done = await readItem(ctx.statePath);
-      expect(done.phase).toBe("merging");
-      expect(done.rounds).toHaveLength(0);
-      const resultsFile = Bun.file(ctx.resultsPath);
-      if (await resultsFile.exists()) {
-        const lines = (await resultsFile.text()).split("\n").filter((line) => line !== "");
-        expect(lines).toHaveLength(0);
+      const mergedEvents = seed.harness.events.filter((line) => line.startsWith("merged:"));
+      expect(mergedEvents).toHaveLength(1);
+      expect(mergedEvents[0]).toContain(`:${mergeSha}:`);
+      // A set hold stops another ready item at MR3 step 1: seed the same
+      // work item in merging with a new head h2 and an open second pull,
+      // then the check waits with byte-equal state and no further merge.
+      const head2 = await pushEmpty(seed.harness.sandbox.seed, "moc/gh-demo-1-b");
+      const checkoutDir = seed.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkoutDir, ["fetch", "origin"]);
+      await seed.ctx.github.createPull(REPO, "moc/gh-demo-1-b", "main", "t2", "b2");
+      const verdict2 = cleanVerdict(head2, 2);
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${head2}.json`),
+        `${JSON.stringify(verdict2)}\n`,
+      );
+      const marker2 = renderComment(verdict2);
+      if (marker2 !== null) {
+        await seed.ctx.github.postComment(REPO, 2, marker2);
       }
+      await writeReviewItem(
+        ctx,
+        item().id,
+        readyItem(head2, {
+          phase: "merging",
+          pull: { number: 2, headSha: head2 },
+          trial: { baseSha: base, headSha: head2, passed: true },
+        }),
+      );
+      const beforeHold = await Bun.file(ctx.statePath).text();
+      const heldCtx: MergeContext = { ...ctx, mergeMutex: createMergeMutex() };
+      const next = await mergeCheck(heldCtx, item());
+      expect(next).toBe("pending");
+      expect(await Bun.file(ctx.statePath).text()).toBe(beforeHold);
+      expect(mergeCalls).toBe(1);
     });
   });
 });
@@ -867,7 +927,561 @@ test("MT7 a wrong base parks the item without closing a round", async () => {
   });
 });
 
-// MT1: ready with an ancestral base merges, finalizes and logs one event.
+// MT8: findings close the round without merging.
+test("MT8 findings close the round without merging", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      const findingsVerdict = {
+        ...cleanVerdict(head),
+        counts: { high: 1 as const, medium: 0 as const, low: 0 as const },
+        findings: [
+          {
+            severity: "high" as const,
+            location: "src/example.ts:1",
+            defect: "A finding blocks the merge.",
+            scenario: "Review flags the head.",
+            fixDirection: "Fix the flagged code.",
+          },
+        ],
+      };
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${head}.json`),
+        `${JSON.stringify(findingsVerdict)}\n`,
+      );
+      const marker = renderComment(findingsVerdict);
+      if (marker !== null) {
+        await seed.ctx.github.postComment(REPO, 1, marker);
+      }
+      let mergeCalls = 0;
+      const ctx: MergeContext = {
+        ...seed.ctx,
+        github: {
+          ...seed.ctx.github,
+          mergePull: async (repo: string, pull: number, sha: string): Promise<void> => {
+            mergeCalls += 1;
+            return seed.ctx.github.mergePull(repo, pull, sha);
+          },
+        },
+      };
+      const outcome = await mergeCheck(ctx, item());
+      expect(outcome).toBe("idle");
+      expect(mergeCalls).toBe(0);
+      const li = await readItem(ctx.statePath);
+      expect(li.rounds[0]).toMatchObject({
+        outcome: "findings",
+        headSha: head,
+        verdict: { auditorModel: AUDITOR, high: 1, medium: 0, low: 0 },
+      });
+      const stored = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
+      expect(stored.items[0]?.status).toBe("queued");
+    });
+  });
+});
+
+// MT9: a missing marker parks in auditing and returns to auditing otherwise.
+test("MT9 a missing marker parks in auditing and returns otherwise", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        let commentCalls = 0;
+        const tracked: MergeContext = {
+          ...seed.ctx,
+          github: {
+            ...seed.ctx.github,
+            postComment: async (repo: string, number: number, body: string): Promise<void> => {
+              commentCalls += 1;
+              return seed.ctx.github.postComment(repo, number, body);
+            },
+          },
+        };
+        const outcome = await mergeCheck(tracked, item());
+        expect(outcome).toBe("parked");
+        expect(commentCalls).toBe(0);
+        const li = await readItem(seed.ctx.statePath);
+        expect(li.park).toMatchObject({ code: "marker-missing" });
+        expect(li.rounds).toHaveLength(0);
+      },
+      {},
+      { skipMarker: true },
+    );
+  });
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    const harness = await makeHarness(dir);
+    const ctx = harness.ctx;
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await appendPending(ctx.ledgerPath, pendingLedger());
+      await seedFinishedSession(harness.registryPath);
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, readyItem(head, { phase: "awaiting-approval" }));
+      const verdict = cleanVerdict(head);
+      await mkdir(join(dir, "verdicts", "gh-demo-1"), { recursive: true });
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${head}.json`),
+        `${JSON.stringify(verdict)}\n`,
+      );
+      const outcome = await mergeCheck(ctx, item());
+      expect(outcome).toBe("auditing");
+      const li = await readItem(ctx.statePath);
+      expect(li.phase).toBe("auditing");
+      expect(li.park).toBeNull();
+      expect(li.rounds).toHaveLength(0);
+    } finally {
+      restoreEnv();
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+// MT10: human-approval waits for an approval of the exact triple.
+test("MT10 human-approval waits for an approval of the exact triple", async () => {
+  await withTempDir(async (dir) => {
+    const approveHead = async (ctx: MergeContext, head: string, pull: number): Promise<void> => {
+      const recorded = await recordRequest(join(dir, "approval-requests.json"), {
+        tool: "approve",
+        args: { workItemId: "gh-demo-1", pullNumber: pull, headSha: head, reason: "Ship it." },
+        caller: "owner",
+        now: () => new Date(NOW),
+        maxPending: 20,
+      });
+      if (recorded.kind !== "recorded") {
+        throw new Error(`expected recorded, got ${recorded.kind}`);
+      }
+      const decided = await decideRequest(join(dir, "approval-requests.json"), {
+        requestId: recorded.request.requestId,
+        decision: "approved",
+        author: "owner",
+        now: () => new Date(NOW),
+      });
+      if (decided.kind !== "decided") {
+        throw new Error(`expected decided, got ${decided.kind}`);
+      }
+      expect(ctx.specs).toHaveLength(1);
+    };
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        const { head } = seed;
+        const human: MergeContext = {
+          ...seed.ctx,
+          specs: [{ schemaVersion: "v1", repo: REPO, mergeMode: "human-approval" }],
+        };
+        const waiting = await mergeCheck(human, item());
+        expect(waiting).toBe("awaiting-approval");
+        const stored = await readItem(human.statePath);
+        expect(stored.phase).toBe("awaiting-approval");
+        const saved = (await Bun.file(human.storePath).json()) as { items: WorkItem[] };
+        expect(saved.items[0]?.status).toBe("queued");
+        let mergeCalls = 0;
+        const tracked: MergeContext = {
+          ...human,
+          github: {
+            ...human.github,
+            mergePull: async (repo: string, pull: number, sha: string): Promise<void> => {
+              mergeCalls += 1;
+              return human.github.mergePull(repo, pull, sha);
+            },
+          },
+        };
+        expect(mergeCalls).toBe(0);
+        await approveHead(human, `${"0".repeat(39)}1`, 1);
+        const stillWaiting = await mergeCheck(tracked, item());
+        expect(stillWaiting).toBe("awaiting-approval");
+        expect(mergeCalls).toBe(0);
+        await approveHead(human, head, 1);
+        const done = await mergeCheck(tracked, item());
+        expect(done).toBe("done");
+        expect(mergeCalls).toBe(1);
+      },
+      {},
+      {},
+    );
+  });
+});
+
+// MT11/MT12: CI pending returns to ci with a fresh ciSince.
+test("MT11 pending CI returns to ci with a fresh ciSince", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        const outcome = await mergeCheck(seed.ctx, item());
+        expect(outcome).toBe("ci");
+        const li = await readItem(seed.ctx.statePath);
+        expect(li.phase).toBe("ci");
+        expect(li.ciSince).toBe(NOW);
+      },
+      { ciSince: "2026-10-28T09:00:00.000Z" },
+      { ci: () => "pending" },
+    );
+  });
+});
+
+test("MT12 a new head after the audit returns to ci with a fresh ciSince", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        const { head } = seed;
+        const checkout = seed.ctx.repos[0]?.checkoutDir ?? dir;
+        await git(seed.harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+        await Bun.write(join(seed.harness.sandbox.seed, "f.txt"), "main line\nsecond head\n");
+        await git(seed.harness.sandbox.seed, ["add", "f.txt"]);
+        await git(seed.harness.sandbox.seed, ["commit", "--amend", "--no-edit"]);
+        await git(seed.harness.sandbox.seed, ["push", "--force", "origin", "moc/gh-demo-1"]);
+        await git(checkout, ["fetch", "origin"]);
+        const moved = (await seed.ctx.github.viewPull(REPO, 1)).headRefOid;
+        expect(moved).not.toBe(head);
+        let mergeCalls = 0;
+        const ctx: MergeContext = {
+          ...seed.ctx,
+          github: {
+            ...seed.ctx.github,
+            mergePull: async (repo: string, pull: number, sha: string): Promise<void> => {
+              mergeCalls += 1;
+              return seed.ctx.github.mergePull(repo, pull, sha);
+            },
+          },
+        };
+        const outcome = await mergeCheck(ctx, item());
+        expect(outcome).toBe("ci");
+        expect(mergeCalls).toBe(0);
+        const li = await readItem(ctx.statePath);
+        expect(li.pull?.headSha).toBe(moved);
+        expect(li.ciSince).toBe(NOW);
+      },
+      { ciSince: "2026-10-28T09:00:00.000Z" },
+    );
+  });
+});
+
+// MT13: a verdict authored by the session author parks as verdict-invalid.
+test("MT13 a verdict authored by the session author parks as verdict-invalid", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      const authored = {
+        ...cleanVerdict(head),
+        auditorModel: PREFERRED,
+        authorModels: [PREFERRED],
+      };
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${head}.json`),
+        `${JSON.stringify(authored)}\n`,
+      );
+      const marker = renderComment(authored);
+      if (marker !== null) {
+        await seed.ctx.github.postComment(REPO, 1, marker);
+      }
+      const outcome = await mergeCheck(seed.ctx, item());
+      expect(outcome).toBe("parked");
+      const li = await readItem(seed.ctx.statePath);
+      expect(li.park).toMatchObject({ code: "verdict-invalid" });
+      expect(li.rounds).toHaveLength(0);
+    });
+  });
+});
+
+// MT14: rejected merges count attempts and then park as merge-failed.
+test("MT14 rejected merges count attempts and then park as merge-failed", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      let mergeCalls = 0;
+      const rejecting = (base: MergeContext): MergeContext => ({
+        ...base,
+        mergeRetries: 1,
+        mergeMutex: createMergeMutex(),
+        github: {
+          ...base.github,
+          mergePull: (): Promise<void> => {
+            mergeCalls += 1;
+            return Promise.reject(new GitHubError("unavailable", "mergePull", "rejected"));
+          },
+        },
+      });
+      const first = await mergeCheck(rejecting(seed.ctx), item());
+      expect(first).toBe("pending");
+      expect((await readItem(seed.ctx.statePath)).mergeAttempts).toEqual({
+        headSha: head,
+        count: 1,
+      });
+      const second = await mergeCheck(rejecting(seed.ctx), item());
+      expect(second).toBe("pending");
+      expect((await readItem(seed.ctx.statePath)).mergeAttempts).toEqual({
+        headSha: head,
+        count: 2,
+      });
+      const third = await mergeCheck(rejecting(seed.ctx), item());
+      expect(third).toBe("parked");
+      expect(mergeCalls).toBe(2);
+      const li = await readItem(seed.ctx.statePath);
+      expect(li.park).toMatchObject({ code: "merge-failed" });
+    });
+  });
+});
+
+// MT15: a seeded merge hold stops the driver before any GitHub read.
+test("MT15 a seeded merge hold stops the driver before any GitHub read", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      const { updateLoopState } = await import("../../src/loop/state.js");
+      await updateLoopState<undefined>(seed.ctx.statePath, (state) =>
+        Promise.resolve({
+          next: {
+            ...state,
+            mergeHold: {
+              mergeSha: "d".repeat(40),
+              workItemId: "gh-demo-1",
+              expectedBase: "b".repeat(40),
+              parents: ["b".repeat(40), head],
+              since: NOW,
+            },
+          },
+          value: undefined,
+        }),
+      );
+      const before = await Bun.file(seed.ctx.statePath).text();
+      let baseCalls = 0;
+      let mergeCalls = 0;
+      const baseImpl = seed.ctx.github.baseSha.bind(seed.ctx.github);
+      const mergeImpl = seed.ctx.github.mergePull.bind(seed.ctx.github);
+      const ctx: MergeContext = {
+        ...seed.ctx,
+        github: {
+          ...seed.ctx.github,
+          baseSha: (...args: Parameters<typeof seed.ctx.github.baseSha>) => {
+            baseCalls += 1;
+            return baseImpl(...args);
+          },
+          mergePull: (...args: Parameters<typeof seed.ctx.github.mergePull>) => {
+            mergeCalls += 1;
+            return mergeImpl(...args);
+          },
+        },
+      };
+      const outcome = await mergeCheck(ctx, item());
+      expect(outcome).toBe("pending");
+      expect(baseCalls).toBe(0);
+      expect(mergeCalls).toBe(0);
+      const after = await Bun.file(seed.ctx.statePath).text();
+      expect(after).toBe(before);
+    });
+  });
+});
+
+// MT16: awaiting-approval without a verdict file returns to auditing.
+test("MT16 awaiting-approval without a verdict file returns to auditing", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        await Bun.$`rm ${join(dir, "verdicts", "gh-demo-1", `${seed.head}.json`)}`.quiet();
+        const outcome = await mergeCheck(seed.ctx, item());
+        expect(outcome).toBe("auditing");
+        const li = await readItem(seed.ctx.statePath);
+        expect(li.phase).toBe("auditing");
+        expect(li.park).toBeNull();
+      },
+      { phase: "awaiting-approval" },
+    );
+  });
+});
+
+// MT17: GitHub errors log once and keep the phase.
+test("MT17 GitHub errors log once and keep the phase", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      let calls = 0;
+      const failing: MergeContext = {
+        ...seed.ctx,
+        github: {
+          ...seed.ctx.github,
+          viewPull: async (repo: string, pull: number) => {
+            calls += 1;
+            if (calls === 1) {
+              throw new GitHubError("unavailable", "viewPull", "unavailable");
+            }
+            return seed.ctx.github.viewPull(repo, pull);
+          },
+        },
+      };
+      const before = await Bun.file(seed.ctx.statePath).text();
+      const outcome = await mergeCheck(failing, item());
+      expect(outcome).toBe("pending");
+      expect(await Bun.file(seed.ctx.statePath).text()).toBe(before);
+      const errors = seed.events.filter((line) => line.startsWith("github-error:"));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("unavailable:viewPull");
+    });
+  });
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      let mergeCalls = 0;
+      const flaky = (base: MergeContext): MergeContext => ({
+        ...base,
+        mergeRetries: 1,
+        mergeMutex: createMergeMutex(),
+        github: {
+          ...base.github,
+          mergePull: async (repo: string, pull: number, sha: string): Promise<void> => {
+            mergeCalls += 1;
+            if (mergeCalls === 1) {
+              throw new GitHubError("unavailable", "mergePull", "rejected");
+            }
+            return seed.ctx.github.mergePull(repo, pull, sha);
+          },
+        },
+      });
+      const first = await mergeCheck(flaky(seed.ctx), item());
+      expect(first).toBe("pending");
+      const second = await mergeCheck(flaky(seed.ctx), item());
+      expect(second).toBe("done");
+      expect(mergeCalls).toBe(2);
+      expect((await readItem(seed.ctx.statePath)).mergeAttempts).toEqual({
+        headSha: head,
+        count: 2,
+      });
+    });
+  });
+});
+
+// MT18: finishMerge finalizes the ledger once, then writes final.
+test("MT18 finishMerge finalizes the ledger once then writes final", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    const harness = await makeHarness(dir);
+    const ctx = harness.ctx;
+    try {
+      const base = await harness.ctx.github.baseSha(REPO, "main");
+      expect(base).not.toBe("");
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await ctx.github.mergePull(REPO, 1, head);
+      const mergedHead = (await ctx.github.viewPull(REPO, 1)).headRefOid;
+      const verdict = cleanVerdict(mergedHead);
+      await mkdir(join(dir, "verdicts", "gh-demo-1"), { recursive: true });
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${mergedHead}.json`),
+        `${JSON.stringify(verdict)}\n`,
+      );
+      const marker = renderComment(verdict);
+      if (marker !== null) {
+        await ctx.github.postComment(REPO, 1, marker);
+      }
+      await appendPending(ctx.ledgerPath, pendingLedger());
+      await seedFinishedSession(harness.registryPath);
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, {
+        ...readyItem(mergedHead),
+        phase: "finalizing",
+        finalize: { result: "success", done: false },
+      });
+      const mid = await readItem(ctx.statePath);
+      expect(mid.phase).toBe("finalizing");
+      expect(mid.finalize).toEqual({ result: "success", done: false });
+      const fresh: MergeContext = { ...ctx, mergeMutex: createMergeMutex() };
+      const first = await finishMerge(fresh, item());
+      expect(first).toBe("done");
+      const li = await readItem(ctx.statePath);
+      expect(li.phase).toBe("final");
+      expect(li.finalize).toEqual({ result: "success", done: true });
+      const records = await Bun.file(fresh.ledgerPath).text();
+      const lines = records.split("\n").filter((line) => line !== "");
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0] ?? "{}") as { result?: string };
+      expect(parsed.result).toBe("success");
+      const mergedEvents = harness.events.filter((line) => line.startsWith("merged:"));
+      expect(mergedEvents).toHaveLength(0);
+      const second = await finishMerge(fresh, item());
+      expect(second).toBe("done");
+      const again = await Bun.file(fresh.ledgerPath).text();
+      expect(again.split("\n").filter((line) => line !== "")).toHaveLength(1);
+    } finally {
+      restoreEnv();
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+// MT19: a failed escalation keeps the race pending without a second event.
+test("MT19 a failed escalation keeps the race pending without a second event", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      const stateBefore = await readLoopState(seed.ctx.statePath);
+      expect(stateBefore.mergeHold).toBeNull();
+      const realMerge = seed.ctx.github.mergePull.bind(seed.ctx.github);
+      const realIssue = seed.ctx.github.createIssue.bind(seed.ctx.github);
+      let issueCalls = 0;
+      const flaky: MergeContext = {
+        ...seed.ctx,
+        github: {
+          ...seed.ctx.github,
+          mergePull: async (repo: string, pull: number, sha: string): Promise<void> => {
+            await git(seed.harness.sandbox.seed, ["checkout", "main"]);
+            await Bun.write(join(seed.harness.sandbox.seed, "f.txt"), "main line\nrace one\n");
+            await git(seed.harness.sandbox.seed, ["add", "f.txt"]);
+            await git(seed.harness.sandbox.seed, ["commit", "-m", "race one"]);
+            await git(seed.harness.sandbox.seed, ["push", "origin", "main"]);
+            await realMerge(repo, pull, sha);
+          },
+          createIssue: async (
+            repo: string,
+            title: string,
+            body: string,
+            labels: readonly string[],
+          ) => {
+            issueCalls += 1;
+            if (issueCalls === 1) {
+              throw new GitHubError("unavailable", "createIssue", "unavailable");
+            }
+            return realIssue(repo, title, body, labels);
+          },
+        },
+      };
+      const first = await mergeCheck(flaky, item());
+      expect(first).toBe("pending");
+      const held = await readLoopState(seed.ctx.statePath);
+      expect(held.mergeHold).not.toBeNull();
+      expect(issueCalls).toBe(1);
+      const races = seed.events.filter((line) => line.startsWith("merge-base-race:"));
+      expect(races).toHaveLength(1);
+      const mid = await readItem(seed.ctx.statePath);
+      expect(mid.phase).toBe("merging");
+      expect(head).not.toBe("");
+      const steady: MergeContext = {
+        ...seed.ctx,
+        github: {
+          ...seed.ctx.github,
+          mergePull: () => Promise.resolve(),
+          createIssue: realIssue,
+        },
+      };
+      const second = await mergeCheck(steady, item());
+      expect(second).toBe("done");
+      const issues = seed.ctx.github as unknown as {
+        snapshot(): StubGitHubSnapshot;
+      };
+      const escalationIssues = issues
+        .snapshot()
+        .issues.filter((entry) => entry.labels.includes("moc-escalation"));
+      expect(escalationIssues).toHaveLength(1);
+      const later = seed.events.filter((line) => line.startsWith("merge-base-race:"));
+      expect(later).toHaveLength(1);
+    });
+  });
+});
 test("MT1 ready with an ancestral base merges and finalizes", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();

@@ -533,7 +533,7 @@ async function tickOnce(
   const launched: string[] = [];
   const fresh = await readWorkStore(ctx.storePath);
   for (const item of fresh.items) {
-    if (steps.has(item.id)) {
+    if (steps.has(item.id) || timeouts.has(item.id)) {
       continue;
     }
     const reread = await readLoopState(ctx.statePath);

@@ -42,7 +42,7 @@ interface SurfaceRecord {
   readonly toolset: { readonly mode: string; readonly activeTools: readonly string[] };
   readonly sources: readonly string[];
   readonly delegationState: string;
-  readonly agentCount: number | null;
+  readonly agentCount: number;
 }
 
 function unreadable(): SurfaceVerdict {
@@ -100,12 +100,8 @@ function toRecord(event: unknown): SurfaceRecord | null {
     return null;
   }
   const agentCount = roster.agents.length;
-  const tools: string[] = [];
-  for (const entry of activeTools) {
-    tools.push(entry);
-  }
   return {
-    toolset: { mode: toolset.mode, activeTools: tools },
+    toolset: { mode: toolset.mode, activeTools: activeTools as readonly string[] },
     sources,
     delegationState: state,
     agentCount,
@@ -138,7 +134,7 @@ function checkRecord(record: SurfaceRecord): SurfaceVerdict | null {
   if (record.delegationState !== "inactive") {
     return { ok: false, reason: "delegation", extra: [], missing: [] };
   }
-  if ((record.agentCount as number) > 0) {
+  if (record.agentCount > 0) {
     return { ok: false, reason: "reminders", extra: [], missing: [] };
   }
   return null;
@@ -216,10 +212,6 @@ export interface SurfaceProbeOpts {
   readonly signal: AbortSignal;
 }
 
-function signalAborted(signal: AbortSignal): boolean {
-  return (signal as { readonly aborted: boolean }).aborted;
-}
-
 export interface SurfaceProbeDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
@@ -231,8 +223,8 @@ export async function runSurfaceProbe(
   const { config, session, signal } = opts;
   const runDir = session.runDir;
   const stem = `probe-${String(session.k)}`;
-  const abortedBeforeOpen = signalAborted(signal);
-  if (abortedBeforeOpen) {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (signal.aborted) {
     return { kind: "aborted" };
   }
   const stdoutHandle = await open(join(runDir, `${stem}.jsonl`), "wx", 0o600);
@@ -291,7 +283,8 @@ export async function runSurfaceProbe(
   if (probeKillError.value !== null) {
     throw probeKillError.value as Error;
   }
-  if (probeAborted.value || signalAborted(signal)) {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (probeAborted.value || signal.aborted) {
     return { kind: "aborted" };
   }
   if (probeTimedOut.value) {
@@ -313,19 +306,38 @@ export async function runSurfaceProbe(
   } catch {
     return { kind: "checked", verdict: await readSurface(join(runDir, `${stem}-export.json`)) };
   }
-  const exportState = { timedOut: false };
+  const exportAborted = { value: false };
+  const exportKillError: { value: unknown } = { value: null };
   const exportTimer = setTimeout(() => {
-    exportState.timedOut = true;
     try {
       killGroup(exportProc.pid, "SIGKILL");
-    } catch {
-      // The export already exited; the missing file reads as unreadable.
+    } catch (error: unknown) {
+      exportKillError.value = error;
     }
   }, config.exportTimeoutMs);
+  const onExportAbort = (): void => {
+    exportAborted.value = true;
+    try {
+      killGroup(exportProc.pid, "SIGKILL");
+    } catch (error: unknown) {
+      if (exportKillError.value === null) {
+        exportKillError.value = error;
+      }
+    }
+  };
+  signal.addEventListener("abort", onExportAbort, { once: true });
   try {
     await exportProc.exited;
   } finally {
     clearTimeout(exportTimer);
+    signal.removeEventListener("abort", onExportAbort);
+  }
+  if (exportKillError.value !== null) {
+    throw exportKillError.value as Error;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (exportAborted.value || signal.aborted) {
+    return { kind: "aborted" };
   }
   return { kind: "checked", verdict: await readSurface(join(runDir, `${stem}-export.json`)) };
 }

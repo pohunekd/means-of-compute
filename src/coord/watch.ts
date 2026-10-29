@@ -97,8 +97,11 @@ export function parseVerdicts(payload: unknown): Parsed<readonly Verdict[]> {
   if (!isRecord(payload)) {
     return { ok: false, code: "invalid-audit-results" };
   }
-  if (payload["ok"] !== true) {
+  if (payload["ok"] === false) {
     return errorCode(payload, "invalid-audit-results");
+  }
+  if (payload["ok"] !== true) {
+    return { ok: false, code: "invalid-audit-results" };
   }
   const verdicts: unknown = payload["verdicts"];
   if (!Array.isArray(verdicts)) {
@@ -119,8 +122,11 @@ export function parseFleet(payload: unknown): Parsed<FleetState> {
   if (!isRecord(payload)) {
     return { ok: false, code: "invalid-fleet-status" };
   }
-  if (payload["ok"] !== true) {
+  if (payload["ok"] === false) {
     return errorCode(payload, "invalid-fleet-status");
+  }
+  if (payload["ok"] !== true) {
+    return { ok: false, code: "invalid-fleet-status" };
   }
   const fleet: unknown = payload["fleet"];
   if (!isRecord(fleet)) {

@@ -67,15 +67,15 @@ render, so `.prettierignore` excludes it from formatting.
 `bun run coord --goal <goal> --phase plan [--config <path>] [--dry-run]`
 starts a plan run. Unknown arguments, repeated flags and missing values
 exit 2, as do a bad checkout, a bad session record, a seed, a failed
-precondition, lock contention and an over-cap runs dir. Startup checks run
+precondition and lock contention. Startup checks run
 before the body: args, checkout, config, key, goal with spec lookup, gate,
 runs dir, then the coordinator lock and the record check. The daily cap
 counts non-dry run dirs for today and exits 3 past `maxRunsPerDay`; the G1
 `list_work` snapshot refuses ids with the goal prefix. The run dir holds
 `home`, `workspace`, `mcp.json`, `prompt-1.md`, `coord.jsonl`,
-`report.json`, `report.md` and session files. A dry run prints one JSON
+`mcp-calls.jsonl`, `report.json`, `report.md` and session files. A dry run prints one JSON
 line with `runDir`, `cwd`, `argv`, `phase` and `covers`, creating only
-`home`, `mcp.json`, `prompt-1.md` and `workspace`. Stops are `plan-done`,
+`home`, `mcp.json`, `prompt-1.md` and `workspace`. E0 step 1 runs the dry run. Stops are `plan-done`,
 `no-submission`, `budget-refused`, `muse-unavailable` and `signal`, with
 exit 0 for `plan-done` and `signal` and exit 3 for the failing stops; a
 failed final snapshot turns 0 into 3. Stdout ends with

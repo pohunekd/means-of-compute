@@ -524,18 +524,17 @@ async function runSession(
       );
       if (probe.kind === "checked") {
         const verdict = probe.verdict;
-        const ok = verdict.ok;
         await log.append({
           ts: new Date().toISOString(),
           event: "surface",
           k: 1,
           stage: "probe",
-          ok,
-          reason: ok ? null : (verdict as { readonly reason: string }).reason,
-          extra: ok ? [] : (verdict as { readonly extra: readonly string[] }).extra,
-          missing: ok ? [] : (verdict as { readonly missing: readonly string[] }).missing,
+          ok: verdict.ok,
+          reason: verdict.ok ? null : verdict.reason,
+          extra: verdict.ok ? [] : verdict.extra,
+          missing: verdict.ok ? [] : verdict.missing,
         });
-        if (!ok) {
+        if (!verdict.ok) {
           stop = "tool-surface";
         }
       } else if (probe.kind === "probe-failed") {
@@ -598,18 +597,17 @@ async function runSession(
         const verdict: SurfaceVerdict = result.exportOk
           ? await readSurface(join(runDir, "session-1-export.json"))
           : { ok: false, reason: "unreadable", extra: [], missing: [] };
-        const ok = verdict.ok;
         await log.append({
           ts: new Date().toISOString(),
           event: "surface",
           k: 1,
           stage: "session",
-          ok,
-          reason: ok ? null : (verdict as { readonly reason: string }).reason,
-          extra: ok ? [] : (verdict as { readonly extra: readonly string[] }).extra,
-          missing: ok ? [] : (verdict as { readonly missing: readonly string[] }).missing,
+          ok: verdict.ok,
+          reason: verdict.ok ? null : verdict.reason,
+          extra: verdict.ok ? [] : verdict.extra,
+          missing: verdict.ok ? [] : verdict.missing,
         });
-        sessionSurfaceOk = ok;
+        sessionSurfaceOk = verdict.ok;
       }
     } else if (stop === null) {
       stop = "signal";

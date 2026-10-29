@@ -26,7 +26,7 @@ function workItemIdOf(requestId: string): string {
 
 // One streamed chat call through the real meter; a non-200 status fails
 // the session. The body is drained so the meter records the usage.
-async function meteredCall(deps: StubWorkerDeps, requestId: string): Promise<number> {
+async function meteredCall(deps: StubWorkerDeps, requestId: string, round: number): Promise<number> {
   const response = await fetch(`http://127.0.0.1:${String(deps.meter.port)}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -35,7 +35,9 @@ async function meteredCall(deps: StubWorkerDeps, requestId: string): Promise<num
     },
     body: JSON.stringify({
       model: deps.sessionModelId,
-      messages: [{ role: "user", content: `Work item ${workItemIdOf(requestId)}, round 0.` }],
+      messages: [
+        { role: "user", content: `Work item ${workItemIdOf(requestId)}, round ${String(round)}.` },
+      ],
       stream: true,
     }),
   });
@@ -99,7 +101,7 @@ export function createStubWorker(deps: StubWorkerDeps): StubWorker {
         done.push(session.handle.sessionId);
         continue;
       }
-      const status = await meteredCall(deps, requestId);
+      const status = await meteredCall(deps, requestId, handledRounds);
       if (status !== 200) {
         deps.control.complete(session.handle.sessionId, {
           state: "failed",

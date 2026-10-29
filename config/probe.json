@@ -12,8 +12,8 @@
     "systemProfiler": "/usr/sbin/system_profiler"
   },
   "policy": {
-    "allowedWindowStart": "08:00",
-    "allowedWindowEnd": "22:00",
+    "allowedWindowStart": "00:00",
+    "allowedWindowEnd": "00:00",
     "maxConcurrentAgents": 2
   }
 }

@@ -17,6 +17,7 @@ import { createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
 import { readLoopState, updateLoopState } from "../../src/loop/state.js";
 import type { LoopItem } from "../../src/loop/types.js";
 import { initialLoopItem } from "../../src/loop/start.js";
+import { updateWorkStore } from "../../src/work/store.js";
 import { appendPending } from "../../src/ledger/store.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
 import { createCollector } from "../../src/hoststate/collector.js";
@@ -441,11 +442,6 @@ async function settleSoon(
   await settled;
 }
 
-// Yields one macrotask so pending promise continuations run first.
-async function setTimeoutZero(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 // Waits, through the loop state lock, until the item satisfies the check.
 // Holding the lock means the writer that made the change has released it.
 async function untilItem(
@@ -706,17 +702,17 @@ test("ST7 green checks off the merge keep the hold", async () => {
   });
 });
 
-async function seedFinishedRegistry(registryPath: string): Promise<void> {
+async function seedFinishedRegistry(registryPath: string, workItemId = "gh-demo-1"): Promise<void> {
   await Bun.write(
     registryPath,
     `${JSON.stringify({
       sessions: [
         {
-          requestId: "gh-demo-1:0",
-          workItemId: "gh-demo-1",
+          requestId: `${workItemId}:0`,
+          workItemId,
           repo: REPO,
           hostAlias: "host-a",
-          branch: "moc/gh-demo-1",
+          branch: `moc/${workItemId}`,
           baseRef: "origin/main",
           resume: false,
           model: { providerId: PROVIDER, model: PREFERRED },
@@ -1179,19 +1175,25 @@ test("ST16 a step failure latches the scheduler", async () => {
   });
 });
 
-// R2-8 (a): a second tick while the item's step call is still in flight
-// launches nothing more for it. The blocked step settles after the
-// second tick, and the item is not relaunched from its old phase.
-// R3-2 (a): with two running items, a second tick launches no stale
-// step for the gated item while its watch is still in flight; the watch
-// completion is awaited through the loop state, never settled().
+// R2-8 (a), the F2 regression: a tick launches nothing for gh-demo-2 while
+// its watch is in flight. Then gh-demo-2's watch finishes while the next
+// tick is held inside gh-demo-1's reconcile, so gh-demo-2's loop item must
+// be read after that reconcile. The tick reads storePath four times before
+// that reconcile (tick start, orphan pass, pre-loop store read, the
+// reconcile call); the fourth read takes the work store lock first, so the
+// reconcile waits behind it until the test opens the gate.
 test("R2-8a step in flight blocks a second launch", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();
     try {
-      const harness = await makeHarness(dir);
+      const harness = await makeHarness(dir, { maxActiveItems: 0 });
       await writeStore(harness.ctx.storePath, [item("gh-demo-1"), item("gh-demo-2")]);
       await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "final",
+          finalize: { result: "success", done: true },
+        },
         "gh-demo-2": {
           ...initialLoopItem(),
           phase: "running",
@@ -1199,14 +1201,11 @@ test("R2-8a step in flight blocks a second launch", async () => {
           requestId: "gh-demo-2:0",
         },
       });
-      await seedFinishedRegistry(harness.registryPath);
+      await seedFinishedRegistry(harness.registryPath, "gh-demo-2");
       let releaseWatch!: () => void;
       const watchGate = new Promise<void>((resolve) => {
-        releaseWatch = () => {
-          resolve();
-        };
+        releaseWatch = resolve;
       });
-      let gatedWatchCalls = 0;
       const realWatch = harness.ctx.dispatcher.watch.bind(harness.ctx.dispatcher);
       const ctx: SchedulerContext = {
         ...harness.ctx,
@@ -1214,36 +1213,65 @@ test("R2-8a step in flight blocks a second launch", async () => {
           ...harness.ctx.dispatcher,
           watch: async (requestId: string) => {
             if (requestId === "gh-demo-2:0") {
-              gatedWatchCalls += 1;
               await watchGate;
             }
             return realWatch(requestId);
           },
         },
       };
+      const storePath = harness.ctx.storePath;
+      let storeReads = 0;
+      let armed = false;
+      let openStore!: () => void;
+      const storeGate = new Promise<void>((resolve) => {
+        openStore = resolve;
+      });
+      let markHeld!: () => void;
+      const held = new Promise<void>((resolve) => {
+        markHeld = resolve;
+      });
+      let holder!: Promise<void>;
+      Object.defineProperty(ctx, "storePath", {
+        get: () => {
+          if (armed) {
+            storeReads += 1;
+            if (storeReads === 4) {
+              holder = updateWorkStore(storePath, async () => {
+                markHeld();
+                await storeGate;
+                return { next: null, value: undefined };
+              });
+            }
+          }
+          return storePath;
+        },
+      });
       const scheduler = createScheduler(ctx);
       const first = await scheduler.tick();
-      expect(first.launched).toContain("gh-demo-2");
-      for (let round = 0; round < 1000 && gatedWatchCalls === 0; round += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      expect(gatedWatchCalls).toBe(1);
-      const second = await scheduler.tick();
-      expect(second.launched).not.toContain("gh-demo-2");
-      releaseWatch();
-      const settledWatch = await untilItem(
-        harness.ctx.statePath,
-        "gh-demo-2",
-        (li) => li !== undefined && li.phase !== "running",
-      );
-      expect(settledWatch).toBeDefined();
-      await setTimeoutZero();
+      expect(first.launched).toEqual(["gh-demo-2"]);
       await scheduler.settled();
-      const third = await scheduler.tick();
-      expect(third.launched).not.toContain("gh-demo-2");
-      const finished = await readLoopState(harness.ctx.statePath);
-      expect(finished.items["gh-demo-2"]?.phase).not.toBe("running");
-      await settleSoon(scheduler, harness.control);
+      const blocked = await scheduler.tick();
+      expect(blocked.launched).toEqual([]);
+      await scheduler.settled();
+      armed = true;
+      const secondTick = scheduler.tick();
+      await held;
+      releaseWatch();
+      await untilItem(ctx.statePath, "gh-demo-2", (li) => li?.phase !== "running");
+      openStore();
+      await holder;
+      const second = await secondTick;
+      expect(second.launched).toEqual(["gh-demo-2"]);
+      const outcome = await scheduler.settled().then(
+        () => "resolved",
+        (error: unknown) => error,
+      );
+      expect(outcome).toBe("resolved");
+      const finished = (await readLoopState(ctx.statePath)).items[
+        "gh-demo-2"
+      ] as unknown as LoopItem;
+      expect(finished.phase).not.toBe("running");
+      expect(finished.rounds.at(-1)?.outcome).toBe("no-push");
     } finally {
       restoreEnv();
     }

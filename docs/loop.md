@@ -123,6 +123,10 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 `src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. An open issue that carries the opt-in and ready labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. An issue already imported under its own id is skipped silently; every other skipped issue logs `intake-skip` with its code, and an issue already tracked under another id logs once per process run.
 
+## Follow-ups and digest (PR 7)
+
+`src/loop/followups.ts` files one issue per low finding of the merged verdict before the item turns final, and one blocked issue (rounds, pull request, last findings) when an item is blocked. Each issue starts with a `moc:followup` key marker, finding text sits in code fences longer than any backtick run inside it, the key is recorded before the create, and an existing factory issue with the marker is adopted, so a replay files nothing twice. `src/loop/digest.ts` writes `<digest.dir>/<day>.md` once for the previous UTC day after each new day starts (merged, running, parked and blocked, spend), with no goal, finding or issue text.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.

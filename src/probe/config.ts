@@ -50,6 +50,9 @@ function validateMacosTools(value: unknown): MacosTools {
   }
   const tools = value as Record<string, unknown>;
   for (const key of Object.keys(tools)) {
+    if (!MACOS_TOOL_KEYS.includes(key as (typeof MACOS_TOOL_KEYS)[number])) {
+      throw new Error(`config probe.json: invalid macosTools.${key}`);
+    }
     const v = tools[key];
     if (typeof v !== "string" || !v.startsWith("/")) {
       throw new Error(`config probe.json: invalid macosTools.${key}`);
@@ -113,14 +116,13 @@ export function loadConfig(path: string): ProbeConfig {
   if (process.platform === "linux") {
     assertSysfsRoot(sysfsRoot, "config probe.json: invalid sysfsRoot");
   }
-  const macosTools = validateMacosTools(raw["macosTools"]);
   return {
     idleMinutes: num("idleMinutes", 1),
     batteryThreshold: num("batteryThreshold", 0, 100),
     localModelsBaseUrl: str("localModelsBaseUrl"),
     localModelsTimeoutMs: num("localModelsTimeoutMs", 0),
     sysfsRoot,
-    macosTools,
+    macosTools: validateMacosTools(raw["macosTools"]),
     policy: {
       allowedWindowStart: policy["allowedWindowStart"] as string,
       allowedWindowEnd: policy["allowedWindowEnd"] as string,

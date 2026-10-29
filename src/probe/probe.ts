@@ -172,7 +172,10 @@ export async function runProbe(options: {
 
   if (facts.acPower === undefined || facts.batteryPercent === undefined) {
     try {
-      const p = platformOrThrow() === "linux" ? linuxPower(sysfsRoot) : await macosPower(cfg.macosTools.pmset);
+      const p =
+        platformOrThrow() === "linux"
+          ? linuxPower(sysfsRoot)
+          : await macosPower(cfg.macosTools.pmset);
       if (facts.acPower === undefined) acPower = p.acPower;
       if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
     } catch (e) {
@@ -199,7 +202,10 @@ export async function runProbe(options: {
     facts.gpuName === undefined ||
     facts.gpuFreeMb === undefined
   ) {
-    const gpu = platformOrThrow() === "linux" ? await linuxGpu(sysfsRoot) : await macosGpu(cfg.macosTools.systemProfiler);
+    const gpu =
+      platformOrThrow() === "linux"
+        ? await linuxGpu(sysfsRoot)
+        : await macosGpu(cfg.macosTools.systemProfiler);
     if (facts.gpuPresent === undefined) gpuPresent = gpu.present;
     if (facts.gpuName === undefined) gpuName = gpu.name;
     if (facts.gpuFreeMb === undefined) gpuFreeMb = gpu.freeMb;

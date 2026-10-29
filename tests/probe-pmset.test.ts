@@ -23,18 +23,15 @@ async function runDarwinProbe(fixture: string, factsPath: string): Promise<RunRe
     };
     raw.macosTools["pmset"] = join(pmsetBin, "pmset");
     writeFileSync(join(configDir, "probe.json"), JSON.stringify(raw));
-    const proc = Bun.spawn(
-      ["bun", "--preload", preload, darwinProbe, configDir, factsPath],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: {
-          ...process.env,
-          TZ: "UTC",
-          MOC_PMSET_FIXTURE: join(repoRoot, "tests/fixtures/pmset", fixture, "output.txt"),
-        },
+    const proc = Bun.spawn(["bun", "--preload", preload, darwinProbe, configDir, factsPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        TZ: "UTC",
+        MOC_PMSET_FIXTURE: join(repoRoot, "tests/fixtures/pmset", fixture, "output.txt"),
       },
-    );
+    });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),

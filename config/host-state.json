@@ -2,7 +2,7 @@
   "package": {
     "id": "moc.host-state",
     "version": "0.3.0",
-    "sourceDigest": "sha256:68641d7d56e7761113c84371ca6d7125910fd2dc10399169ba982f9aef4540fd",
+    "sourceDigest": "sha256:96d15479f1e93b2675a8d99aacde35c56a693ecde370be4a255507c7788b343c",
     "command": "host-state"
   },
   "collector": {

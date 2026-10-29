@@ -69,7 +69,3 @@ test("router fails over on 429", async () => {
     throw new Error("Expected failover reason rate_limit");
   if (result.content !== "fallback response") throw new Error("Unexpected content");
 });
-
-// A raw TCP stub for R4-1: it answers HTTP 200 with a Content-Length the
-// body never fills, then resets or closes the socket. fetch resolves the
-// 200, and the body read fails with a TypeError, so the failover must be

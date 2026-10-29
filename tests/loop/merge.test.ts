@@ -1,5 +1,5 @@
-// Driver merge tests (slice 5e rows MT1-MT23): the ready path, the
-// trial gate, the base race hold, human merges and the error latches.
+// Driver merge tests (kept row MT1): the ready path through the stub
+// GitHub, with one named mutation per row killed by its own assertion.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -387,10 +387,6 @@ function cleanVerdict(
     findings: [],
   };
 }
-
-// MT2 helper state lives inline in the test body below.
-
-// MT2: a moved base trials once per call, then the second call merges.
 
 test("MT1 ready with an ancestral base merges and finalizes", async () => {
   await withTempDir(async (dir) => {

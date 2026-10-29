@@ -1,12 +1,10 @@
-// CLI tests (D1, D2, M4, M5): the CLI runs as a child process whose cwd
-// is a temp directory with its own config/ tree, so the committed config
-// is never touched and no real network or model is involved. Config:
-// ledger.json points into the temp dir, auditor.json holds a temp
-// verdictDir, budget-gate.json holds a stub that prints what the real
-// check prints for admit. Mutations: run the same recording for both
-// branches; drop the SHA binding between marker and verdict file;
-// append only on success (M5: no new ledger line on re-post);
-// plain Error for post failures (M4: rc 2 instead of 4).
+// CLI tests (kept rows D1, D2): the CLI runs as a child process whose
+// cwd is a temp directory with its own config/ tree, so the committed
+// config is never touched and no real network or model is involved.
+// Config: ledger.json points into the temp dir, auditor.json holds a
+// temp verdictDir, budget-gate.json holds a stub that prints what the
+// real check prints for admit. Mutations: run the same recording for
+// both branches; drop the SHA binding between marker and verdict file.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -148,8 +146,7 @@ async function runCliWithLoopback(
   }
 }
 
-// A fake gh on PATH: `pr comment` stores the body, counts the call and
-// fails or succeeds per $GH_STATE/mode; `api` prints the first line of
+// Kept row D1: the CLI posts a clean verdict bound to the head SHA.
 
 test("D1: clean branch gets a clean verdict bound to the head SHA (mutation: bind the marker to the ref name)", async () => {
   const repo = await makeTempRepo();

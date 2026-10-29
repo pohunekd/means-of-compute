@@ -71,6 +71,16 @@ type DecideInput =
       verdict: ReturnType<typeof verdictCheck>;
     };
 
+// The new head of a head-moved M1 or merge step, or null for any other kind.
+function movedHeadOf(input: DecideInput): string | null {
+  switch (input.kind) {
+    case "early":
+      return input.detail.kind === "head-moved" ? input.detail.headSha : null;
+    case "full":
+      return input.step.kind === "head-moved" ? input.step.headSha : null;
+  }
+}
+
 async function decideMerge(
   ctx: MergeContext,
   item: WorkItem,
@@ -84,11 +94,11 @@ async function decideMerge(
     return "pending";
   }
   if (tag === "head-moved") {
-    let moved = h;
-    if (input.kind === "early" && input.detail.kind === "head-moved") {
-      moved = input.detail.headSha;
-    } else if (input.kind === "full" && input.step.kind === "head-moved") {
-      moved = input.step.headSha;
+    const moved = movedHeadOf(input);
+    if (moved === null) {
+      throw new LoopStateDataError(
+        `loop state ${ctx.statePath}: item "${item.id}" has a head-moved step without a head`,
+      );
     }
     const fresh = await readLoopItem(ctx.statePath, item.id);
     await writeLoopItem(ctx.statePath, item.id, {

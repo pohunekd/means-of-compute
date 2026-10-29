@@ -115,7 +115,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `src/loop/scheduler.ts` runs one tick at a time over every loop item:
 
 - A tick appends missing result lines, reports orphan sessions once and escalates them, clears the merge hold when the base contains the merge and its checks are green, reconciles each item fresh with no call in flight, and launches one step call per item by phase: start, watch, publish, CI (at most every `ciPollMs`), audit and merge in one call, merge, finalize, or the park step. No new call or claim starts after `stop()` or a latched failure, even mid-tick.
-- A running item also gets the session timeout check. A failed call stops the scheduler: the next tick rejects with that error, and `settled()` rejects with it once every non-watch call has settled.
+- A running item also gets the session timeout check. No step call starts for an item while its timeout check is in flight. A failed call stops the scheduler: the next tick rejects with that error, and `settled()` rejects with it once every non-watch call has settled.
 - Unless the fleet is paused, it claims ready items in store order up to `maxActiveItems`, outside their backoff window, with the model rule, placement over the collected hosts minus the item's excluded hosts and counting `starting` items from earlier ticks and the same tick, and the brief; a brief over `maxBriefBytes` parks the item as operator `brief-too-large`.
 - At startup, a `running` or `review` store item without a loop item, or with an idle one, stops the factory with `loop state missing for <ids>`.
 

@@ -38,7 +38,7 @@ import { startLoopback } from "../../providers/loopback.js";
 import { checkItems, applySubmission } from "../../work/submit.js";
 import { readWorkStore, updateWorkStore, readyItems } from "../../work/store.js";
 import { readLoopState } from "../state.js";
-import { requireWritableTarget } from "../../fs/write.js";
+import { requireWritableTarget, writeFileAtomic } from "../../fs/write.js";
 import { createScheduler, recoverAtStartup } from "../scheduler.js";
 import type { LoopItem } from "../types.js";
 
@@ -225,7 +225,13 @@ async function runInside(
   const loop = configs.loop;
   const stub = loop.stub;
   if (stub === null) {
-    throw new Error("stub mode requires the stub config");
+    throw new LoopStartupError("stub mode requires the stub config");
+  }
+  if (configs.specs.length !== 1) {
+    throw new LoopStartupError("stub needs exactly one factory spec repo");
+  }
+  if (loop.github.factoryLogin === null) {
+    throw new LoopStartupError("stub needs github.factoryLogin");
   }
   const registryPath = resolve(configs.dispatcher.registryPath);
   const ledgerPath = resolve(configs.ledgerPath);
@@ -404,15 +410,9 @@ async function runInside(
     log: dispatcherLog,
     settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
   });
-  const spec = configs.specs[0];
-  if (spec === undefined) {
-    throw new LoopStartupError("stub needs exactly one factory spec repo");
-  }
-  const login = loop.github.factoryLogin;
-  if (login === null) {
-    throw new LoopStartupError("stub needs github.factoryLogin");
-  }
-  const github: GitHubPort = createStubGitHub({
+  const spec = configs.specs[0] as (typeof configs.specs)[number];
+  const login = loop.github.factoryLogin as string;
+  const github: GitHubPort & { snapshot(): unknown } = createStubGitHub({
     repo: spec.repo,
     originDir: join(sandboxDir, "origin.git"),
     baseBranch: configs.dispatcher.baseBranch,
@@ -528,6 +528,11 @@ async function runInside(
     );
     await writeDigestFile(digestDir, today, text);
   }
+  await writeFileAtomic(
+    "stub github snapshot",
+    join(sandboxDir, "github.json"),
+    `${JSON.stringify(github.snapshot())}\n`,
+  );
   const finalState = await readLoopState(statePath);
   let merged = 0;
   let blocked = 0;

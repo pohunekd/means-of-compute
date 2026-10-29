@@ -60,7 +60,7 @@ the redacted `export`, except for an abort seen at the entry check, which runs n
 with an ISO timestamp. `buildReport` folds call-ends, gates, sessions
 and the final `list_work` snapshot into `report.json`, and
 `renderReportMd` renders the same data as `report.md`; neither file
-holds the key or any env value. Exports are set to mode 600 once written. `report-expected.md` pins the exact
+holds the key or any env value. Exports are set to mode 600 once written. If the mode cannot be set, the export counts as failed with reason `mode`. `report-expected.md` pins the exact
 render, so `.prettierignore` excludes it from formatting.
 
 ## Plan runs
@@ -142,9 +142,8 @@ runs one session when attention is non-empty, then sleeps `watch.pollMs`. The lo
 
 `bun run coord:evidence --run <runDir> --out <dir>` copies `report.md`,
 `report.json`, `mcp-calls.jsonl` plus `prompt-<n>.md` and
-`session-<n>-export.json` files. Paths redact cwd to `<checkout>` then home
-to `~`. Each line is scanned against the config deny patterns plus the key
-value; a hit exits 3 and keeps the out dir. Bad args exit 2, a clean bundle
+`session-<n>-export.json` files. Paths redact the run's `<run>/home` to `<run-home>`, then cwd to `<checkout>`, then home to `~`. Each line is scanned against the config deny patterns plus the key
+value; a hit exits 3 and keeps the out dir. The key pattern is anchored (`\bsk-`), so words such as `task-` do not hit. Bad args exit 2, a clean bundle
 exits 0 and prints each out file. Encrypted reasoning in an export blob may
 hit a pattern, and the scan is never weakened. The judge path runs
 `bun install`, `bun run gates`, then

@@ -14,7 +14,7 @@ import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import type { GitDeps } from "../../src/loop/git.js";
 import type { CheckRun } from "../../src/loop/github.js";
 import { createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
-import { readLoopState } from "../../src/loop/state.js";
+import { readLoopState, updateLoopState } from "../../src/loop/state.js";
 import type { LoopItem } from "../../src/loop/types.js";
 import { initialLoopItem } from "../../src/loop/start.js";
 import { appendPending } from "../../src/ledger/store.js";
@@ -439,6 +439,30 @@ async function settleSoon(
     }
   }
   await settled;
+}
+
+// Yields one macrotask so pending promise continuations run first.
+async function setTimeoutZero(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+// Waits, through the loop state lock, until the item satisfies the check.
+// Holding the lock means the writer that made the change has released it.
+async function untilItem(
+  statePath: string,
+  id: string,
+  check: (li: LoopItem | undefined) => boolean,
+): Promise<LoopItem | undefined> {
+  for (let round = 0; round < 1000; round += 1) {
+    const li = await updateLoopState(statePath, (state) =>
+      Promise.resolve({ next: null, value: state.items[id] as unknown as LoopItem }),
+    );
+    if (check(li)) {
+      return li;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`item ${id} never reached the expected state`);
 }
 
 function countPrefix(events: readonly string[], prefix: string): number {
@@ -973,6 +997,7 @@ test("ST11 a stale running session is stall-cancelled", async () => {
       const second = createScheduler(ctx);
       await second.tick();
       await settleSoon(second, harness.control);
+      await untilItem(harness.ctx.statePath, "gh-demo-1", (li) => li?.phase !== "running");
       expect(cancels).toBe(1);
       const third = createScheduler(ctx);
       await third.tick();
@@ -1008,6 +1033,7 @@ test("ST12 a lost host parks the item on one tick", async () => {
       const report = await second.tick();
       expect(report.claimed).toEqual([]);
       await settleSoon(second, harness.control);
+      await untilItem(harness.ctx.statePath, "gh-demo-1", (li) => li?.park !== null);
       const lost = (await readLoopState(harness.ctx.statePath)).items[
         "gh-demo-1"
       ] as unknown as LoopItem;
@@ -1156,54 +1182,67 @@ test("ST16 a step failure latches the scheduler", async () => {
 // R2-8 (a): a second tick while the item's step call is still in flight
 // launches nothing more for it. The blocked step settles after the
 // second tick, and the item is not relaunched from its old phase.
+// R3-2 (a): with two running items, a second tick launches no stale
+// step for the gated item while its watch is still in flight; the watch
+// completion is awaited through the loop state, never settled().
 test("R2-8a step in flight blocks a second launch", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();
     try {
       const harness = await makeHarness(dir);
-      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1"), item("gh-demo-2")]);
       await writeLoopState(harness.ctx.statePath, {
-        "gh-demo-1": {
+        "gh-demo-2": {
           ...initialLoopItem(),
           phase: "running",
-          session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
-          requestId: "gh-demo-1:0",
+          session: { hostAlias: "host-b", providerId: PROVIDER, model: PREFERRED },
+          requestId: "gh-demo-2:0",
         },
       });
       await seedFinishedRegistry(harness.registryPath);
-      let releases = 0;
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = () => {
-          releases += 1;
+      let releaseWatch!: () => void;
+      const watchGate = new Promise<void>((resolve) => {
+        releaseWatch = () => {
           resolve();
         };
       });
-      let calls = 0;
+      let gatedWatchCalls = 0;
       const realWatch = harness.ctx.dispatcher.watch.bind(harness.ctx.dispatcher);
       const ctx: SchedulerContext = {
         ...harness.ctx,
         dispatcher: {
           ...harness.ctx.dispatcher,
           watch: async (requestId: string) => {
-            calls += 1;
-            await gate;
+            if (requestId === "gh-demo-2:0") {
+              gatedWatchCalls += 1;
+              await watchGate;
+            }
             return realWatch(requestId);
           },
         },
       };
       const scheduler = createScheduler(ctx);
       const first = await scheduler.tick();
-      expect(first.launched).toEqual(["gh-demo-1"]);
+      expect(first.launched).toContain("gh-demo-2");
+      for (let round = 0; round < 1000 && gatedWatchCalls === 0; round += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(gatedWatchCalls).toBe(1);
       const second = await scheduler.tick();
-      expect(second.launched).toEqual([]);
-      expect(calls).toBe(1);
-      release();
+      expect(second.launched).not.toContain("gh-demo-2");
+      releaseWatch();
+      const settledWatch = await untilItem(
+        harness.ctx.statePath,
+        "gh-demo-2",
+        (li) => li !== undefined && li.phase !== "running",
+      );
+      expect(settledWatch).toBeDefined();
+      await setTimeoutZero();
       await scheduler.settled();
-      expect(releases).toBe(1);
       const third = await scheduler.tick();
-      expect(third.launched).toEqual(["gh-demo-1"]);
-      expect(calls).toBe(2);
+      expect(third.launched).not.toContain("gh-demo-2");
+      const finished = await readLoopState(harness.ctx.statePath);
+      expect(finished.items["gh-demo-2"]?.phase).not.toBe("running");
       await settleSoon(scheduler, harness.control);
     } finally {
       restoreEnv();
@@ -1211,8 +1250,9 @@ test("R2-8a step in flight blocks a second launch", async () => {
   });
 });
 
-// R2-8 (b): a starting item from an earlier tick holds its host's only
-// agent slot, so the next tick places no second item on that host.
+// R3-3 (b): gh-demo-1 stays in starting across the second tick because
+// the gated port holds driveStart open; the held slot keeps gh-demo-2
+// unclaimed even though the tick would otherwise place it.
 test("R2-8b starting item from an earlier tick holds its host slot", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();
@@ -1222,14 +1262,39 @@ test("R2-8b starting item from an earlier tick holds its host slot", async () =>
       await writeLoopState(harness.ctx.statePath, {});
       await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0", "gh-demo-1"));
       await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-2:gh-demo-2:0", "gh-demo-2"));
-      const first = createScheduler(harness.ctx);
-      const firstReport = await first.tick();
+      let releaseStart!: () => void;
+      const startGate = new Promise<void>((resolve) => {
+        releaseStart = () => {
+          resolve();
+        };
+      });
+      const realStart = harness.ctx.dispatcher.start.bind(harness.ctx.dispatcher);
+      const gatedStart: typeof realStart = (...args) => {
+        if (args[0].id === "gh-demo-1") {
+          return startGate.then(() => realStart(...args));
+        }
+        return realStart(...args);
+      };
+      const ctx: SchedulerContext = {
+        ...harness.ctx,
+        dispatcher: {
+          ...harness.ctx.dispatcher,
+          start: gatedStart,
+        },
+      };
+      const first = createScheduler(ctx);
+      const firstTick = first.tick();
+      await untilItem(harness.ctx.statePath, "gh-demo-1", (li) => li?.phase === "starting");
+      const firstReport = await firstTick;
       expect(firstReport.claimed).toEqual(["gh-demo-1"]);
-      const second = createScheduler(harness.ctx);
+      const second = createScheduler(ctx);
       const secondReport = await second.tick();
       expect(secondReport.claimed).toEqual([]);
-      const state = await readLoopState(harness.ctx.statePath);
-      expect(state.items["gh-demo-2"]).toBeUndefined();
+      const held = await readLoopState(harness.ctx.statePath);
+      expect(held.items["gh-demo-1"]?.phase).toBe("starting");
+      expect(held.items["gh-demo-2"]).toBeUndefined();
+      releaseStart();
+      await untilItem(harness.ctx.statePath, "gh-demo-1", (li) => li?.phase !== "starting");
       await settleSoon(first, harness.control);
       await settleSoon(second, harness.control);
     } finally {

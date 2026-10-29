@@ -419,7 +419,9 @@ function completeAll(control: ReturnType<typeof createMemoryPort>): void {
 
 // Complete running memory sessions while waiting: the dispatcher watch
 // loops on non-terminal sleeps, so completing first would miss a watch
-// launched by the tick under test.
+// launched by the tick under test. Session polling uses the synchronous
+// memory-port session list; the race still yields on a zero-delay timer
+// so the dispatcher sleep (Promise.resolve) can resolve first.
 async function settleSoon(
   scheduler: ReturnType<typeof createScheduler>,
   control: ReturnType<typeof createMemoryPort>,
@@ -429,7 +431,7 @@ async function settleSoon(
     completeAll(control);
     const raced = await Promise.race([
       settled.then(() => "done" as const),
-      new Promise((resolve) => setTimeout(resolve, 5)).then(() => "wait" as const),
+      new Promise((resolve) => setTimeout(resolve, 0)).then(() => "wait" as const),
     ]);
     if (raced === "done") {
       await settled;
@@ -993,8 +995,8 @@ test("ST12 a lost host parks the item on one tick", async () => {
       const scheduler = createScheduler(harness.ctx);
       const first = await scheduler.tick();
       expect(first.claimed).toEqual(["gh-demo-1"]);
-      for (let round = 0; round < 100 && harness.control.sessions().length === 0; round += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+      for (let round = 0; round < 1000 && harness.control.sessions().length === 0; round += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
       harness.control.loseHost("host-a");
       await settleSoon(scheduler, harness.control);
@@ -1145,6 +1147,91 @@ test("ST16 a step failure latches the scheduler", async () => {
         tickError = caught;
       }
       expect(tickError).toBe(boom);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// R2-8 (a): a second tick while the item's step call is still in flight
+// launches nothing more for it. The blocked step settles after the
+// second tick, and the item is not relaunched from its old phase.
+test("R2-8a step in flight blocks a second launch", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "running",
+          session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
+          requestId: "gh-demo-1:0",
+        },
+      });
+      await seedFinishedRegistry(harness.registryPath);
+      let releases = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = () => {
+          releases += 1;
+          resolve();
+        };
+      });
+      let calls = 0;
+      const realWatch = harness.ctx.dispatcher.watch.bind(harness.ctx.dispatcher);
+      const ctx: SchedulerContext = {
+        ...harness.ctx,
+        dispatcher: {
+          ...harness.ctx.dispatcher,
+          watch: (async (requestId: string) => {
+            calls += 1;
+            await gate;
+            return realWatch(requestId);
+          }) as typeof harness.ctx.dispatcher.watch,
+        },
+      };
+      const scheduler = createScheduler(ctx);
+      const first = await scheduler.tick();
+      expect(first.launched).toEqual(["gh-demo-1"]);
+      const second = await scheduler.tick();
+      expect(second.launched).toEqual([]);
+      expect(calls).toBe(1);
+      release();
+      await scheduler.settled();
+      expect(releases).toBe(1);
+      const third = await scheduler.tick();
+      expect(third.launched).toEqual(["gh-demo-1"]);
+      expect(calls).toBe(2);
+      await settleSoon(scheduler, harness.control);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// R2-8 (b): a starting item from an earlier tick holds its host's only
+// agent slot, so the next tick places no second item on that host.
+test("R2-8b starting item from an earlier tick holds its host slot", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir, { hosts: ["host-a"], maxActiveItems: 2 });
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1"), item("gh-demo-2")]);
+      await writeLoopState(harness.ctx.statePath, {});
+      await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0", "gh-demo-1"));
+      await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-2:gh-demo-2:0", "gh-demo-2"));
+      const first = createScheduler(harness.ctx);
+      const firstReport = await first.tick();
+      expect(firstReport.claimed).toEqual(["gh-demo-1"]);
+      const second = createScheduler(harness.ctx);
+      const secondReport = await second.tick();
+      expect(secondReport.claimed).toEqual([]);
+      const state = await readLoopState(harness.ctx.statePath);
+      expect(state.items["gh-demo-2"]).toBeUndefined();
+      await settleSoon(first, harness.control);
+      await settleSoon(second, harness.control);
     } finally {
       restoreEnv();
     }

@@ -28,6 +28,17 @@ export interface MuseSessionDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly log: CallLog;
   readonly now: () => Date;
+  readonly onSpawn: (pid: number) => void;
+}
+
+export async function prepareSessionDirs(runDir: string): Promise<void> {
+  const home = join(runDir, "home");
+  await mkdir(join(runDir, "workspace"), { recursive: true, mode: 0o700 });
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".config"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".local", "share"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".local", "state"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".cache"), { recursive: true, mode: 0o700 });
 }
 
 export interface MuseSessionResult {
@@ -181,16 +192,23 @@ async function runSessionExport(
     });
     return false;
   }
-  const exportState = { timedOut: false };
+  const exportState = { killError: null as unknown, timedOut: false };
   const timer = setTimeout(() => {
     exportState.timedOut = true;
-    killGroup(proc.pid, "SIGKILL");
+    try {
+      killGroup(proc.pid, "SIGKILL");
+    } catch (error: unknown) {
+      exportState.killError = error;
+    }
   }, config.exportTimeoutMs);
   let rc: number;
   try {
     rc = await proc.exited;
   } finally {
     clearTimeout(timer);
+  }
+  if (exportState.killError !== null) {
+    throw exportState.killError as Error;
   }
   const at = now();
   if (exportState.timedOut) {
@@ -270,12 +288,7 @@ export async function runMuseSession(
   }
   const workspace = join(session.runDir, "workspace");
   try {
-    await mkdir(workspace, { recursive: true, mode: 0o700 });
-    await mkdir(home, { recursive: true, mode: 0o700 });
-    await mkdir(join(home, ".config"), { recursive: true, mode: 0o700 });
-    await mkdir(join(home, ".local", "share"), { recursive: true, mode: 0o700 });
-    await mkdir(join(home, ".local", "state"), { recursive: true, mode: 0o700 });
-    await mkdir(join(home, ".cache"), { recursive: true, mode: 0o700 });
+    await prepareSessionDirs(session.runDir);
   } catch (error: unknown) {
     return appendSpawnFailed(log, now, t0, k, "files", spawnCode(error));
   }
@@ -360,6 +373,12 @@ export async function runMuseSession(
   // can read as aborted here even though it was live at the entry check.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (opts.signal.aborted) {
+    onAbort();
+  }
+  try {
+    deps.onSpawn(pid);
+  } catch (error: unknown) {
+    recordKillError(error);
     onAbort();
   }
   try {

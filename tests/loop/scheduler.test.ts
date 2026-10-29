@@ -1185,11 +1185,11 @@ test("R2-8a step in flight blocks a second launch", async () => {
         ...harness.ctx,
         dispatcher: {
           ...harness.ctx.dispatcher,
-          watch: (async (requestId: string) => {
+          watch: async (requestId: string) => {
             calls += 1;
             await gate;
             return realWatch(requestId);
-          }) as typeof harness.ctx.dispatcher.watch,
+          },
         },
       };
       const scheduler = createScheduler(ctx);

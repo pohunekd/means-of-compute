@@ -15,6 +15,7 @@ import {
   type Closer,
 } from "../compose.js";
 import type { LoopConfigs } from "../compose.js";
+import type { FactorySpec } from "../../../contracts/v1/types.js";
 import { digestFor, writeDigestFile } from "../digest.js";
 import { openLoopLog } from "../log.js";
 import { openCallLog } from "../../mcp/call-log.js";
@@ -142,6 +143,19 @@ async function loopbackDescriptors(
     descriptors[id] = { ...descriptor, baseUrl: url, apiKeyEnv: undefined };
   }
   return descriptors;
+}
+
+function singleSpec(specs: readonly FactorySpec[]): FactorySpec {
+  let found: FactorySpec | undefined;
+  let count = 0;
+  for (const spec of specs) {
+    count += 1;
+    found = spec;
+  }
+  if (count !== 1 || found === undefined) {
+    throw new LoopStartupError("stub needs exactly one factory spec repo");
+  }
+  return found;
 }
 
 async function observedAliases(path: string): Promise<readonly string[]> {
@@ -308,16 +322,14 @@ async function runInside(
     throw new LoopStartupError(detail, { cause: error });
   }
   closers.push({ name: "ports-log", close: () => portsLog.close() });
-  let portsLogFailed = false;
+  const portsState: { failed: boolean } = { failed: false };
   const portsAppend = (
     source: "meter" | "port" | "dispatcher",
     event: Record<string, unknown>,
   ): void => {
-    portsLog
-      .append({ ts: new Date().toISOString(), source, ...event })
-      .catch(() => {
-        portsLogFailed = true;
-      });
+    portsLog.append({ ts: new Date().toISOString(), source, ...event }).catch(() => {
+      portsState.failed = true;
+    });
   };
   const meterLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
     portsAppend("meter", { ...(event as unknown as Record<string, unknown>) });
@@ -410,13 +422,17 @@ async function runInside(
     log: dispatcherLog,
     settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
   });
-  const spec = configs.specs[0] as (typeof configs.specs)[number];
-  const login = loop.github.factoryLogin as string;
+  const stubSpec = singleSpec(configs.specs);
+  const rawLogin: unknown = loop.github.factoryLogin;
+  if (typeof rawLogin !== "string") {
+    throw new LoopStartupError("stub needs github.factoryLogin");
+  }
+  const stubLogin = rawLogin;
   const github: GitHubPort & { snapshot(): unknown } = createStubGitHub({
-    repo: spec.repo,
+    repo: stubSpec.repo,
     originDir: join(sandboxDir, "origin.git"),
     baseBranch: configs.dispatcher.baseBranch,
-    factoryLogin: login,
+    factoryLogin: stubLogin,
     git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
     scratchDir,
     ci: () => "success",
@@ -474,7 +490,7 @@ async function runInside(
     }
     await scheduler.tick();
     await worker.step();
-    if (portsLogFailed) {
+    if (portsState.failed) {
       deps.out("loop: ports log failed");
       return 1;
     }

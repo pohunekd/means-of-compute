@@ -78,18 +78,23 @@ async function decideMerge(
   input: DecideInput,
   h: string,
   mergeCommit: string | null,
+  pullNumber: number,
 ): Promise<MergeOutcome> {
   const tag = input.kind === "early" ? input.early : input.step.kind;
   if (tag === "draft") {
     return "pending";
   }
   if (tag === "head-moved") {
-    const moved =
-      input.kind === "early" && input.detail.kind === "head-moved" ? input.detail.headSha : h;
+    let moved = h;
+    if (input.kind === "early" && input.detail.kind === "head-moved") {
+      moved = input.detail.headSha;
+    } else if (input.kind === "full" && input.step.kind === "head-moved") {
+      moved = input.step.headSha;
+    }
     const fresh = await readReviewItem(ctx, item.id);
     await writeReviewItem(ctx, item.id, {
       ...(await readReviewItem(ctx, item.id)),
-      pull: { number: fresh.pull?.number ?? 0, headSha: moved },
+      pull: { number: pullNumber, headSha: moved },
       ciSince: ctx.now().toISOString(),
       phase: "ci",
     });
@@ -103,7 +108,7 @@ async function decideMerge(
     return "ci";
   }
   if (tag === "merged") {
-    const done = await mergedPathInternal(ctx, item, h, mergeCommit);
+    const done = await mergedPathInternal(ctx, item, h, mergeCommit, pullNumber);
     if (done !== null) {
       return done;
     }
@@ -193,25 +198,14 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     return "pending";
   }
   const heads = await mergeHeads(ctx, item);
-  const { checkoutDir, branch, baseBranch, pull } = heads;
+  const { checkoutDir, branch, baseBranch, pull, spec } = heads;
   if (pull.headSha !== h) {
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" moved under a ready merge`,
     );
   }
-  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
-  if (spec === undefined) {
-    throw new Error(`merge: no factory spec for ${item.repo}`);
-  }
   const view = await ctx.github.viewPull(item.repo, pull.number);
   const first = m1(view, h, baseBranch);
-  if (first.kind === "merged") {
-    const done = await mergedPathInternal(ctx, item, h, view.mergeCommit);
-    if (done !== null) {
-      return done;
-    }
-    throw new LoopStateDataError(`loop state ${ctx.statePath}: MERGED view without a handler`);
-  }
   if (first.kind !== "pass") {
     return decideMerge(
       ctx,
@@ -219,6 +213,7 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       { kind: "early", early: first.kind, detail: first, mergeCommit: view.mergeCommit },
       h,
       view.mergeCommit,
+      pull.number,
     );
   }
   let base: string;
@@ -284,19 +279,14 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       }
       throw error;
     }
+    const beforeTrial = await readReviewItem(ctx, item.id);
+    const failedMerging = !passed && beforeTrial.phase === "merging";
     await writeReviewItem(ctx, item.id, {
-      ...(await readReviewItem(ctx, item.id)),
+      ...beforeTrial,
+      phase: failedMerging ? "auditing" : beforeTrial.phase,
       trial: { baseSha: base, headSha: h, passed },
     });
     if (!passed) {
-      const beforeClose = await readReviewItem(ctx, item.id);
-      if (beforeClose.phase === "merging") {
-        await writeReviewItem(ctx, item.id, {
-          ...beforeClose,
-          phase: "auditing",
-          trial: { baseSha: base, headSha: h, passed: false },
-        });
-      }
       await closeReviewRound(ctx, item, {
         outcome: "trial-failed",
         headSha: h,
@@ -347,7 +337,7 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
   }
   const after = await ctx.github.viewPull(item.repo, pull.number);
   if (m1(after, h, baseBranch).kind === "merged") {
-    const done = await mergedPathInternal(ctx, item, h, after.mergeCommit);
+    const done = await mergedPathInternal(ctx, item, h, after.mergeCommit, pull.number);
     if (done !== null) {
       return done;
     }
@@ -377,10 +367,10 @@ export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"d
 
 export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<MergeOutcome> {
   const heads = await mergeHeads(ctx, item);
-  const { li, baseBranch, pull } = heads;
+  const { li, baseBranch, pull, spec: readySpec } = heads;
   const h = pull.headSha;
   try {
-    return await decideOnView(ctx, item, li, h, baseBranch, pull.number);
+    return await decideOnView(ctx, item, li, h, baseBranch, pull.number, readySpec);
   } catch (error: unknown) {
     const failure = githubErrorOf(error);
     if (failure !== null) {
@@ -407,6 +397,7 @@ async function mergeHeads(
   readonly branch: string;
   readonly baseBranch: string;
   readonly pull: { readonly number: number; readonly headSha: string };
+  readonly spec: FactorySpec;
 }> {
   const li = await readReviewItem(ctx, item.id);
   if (li.phase !== "auditing" && li.phase !== "awaiting-approval" && li.phase !== "merging") {
@@ -434,7 +425,7 @@ async function mergeHeads(
   }
   const checkoutDir = checkoutDirOf(ctx, item);
   const branch = await registryBranchOf(ctx, item, li);
-  return { li, checkoutDir, branch, baseBranch: ctx.dispatcherConfig.baseBranch, pull };
+  return { li, checkoutDir, branch, baseBranch: ctx.dispatcherConfig.baseBranch, pull, spec };
 }
 
 type VerdictCounts = {
@@ -491,6 +482,7 @@ async function closeMerged(
   mergeCommit: string,
   race: boolean,
   humanMerge: boolean,
+  pullNumber: number,
 ): Promise<MergeOutcome> {
   const li = await readReviewItem(ctx, item.id);
   const round = li.round;
@@ -499,7 +491,7 @@ async function closeMerged(
     outcome: "merged",
     headSha: h,
     failingChecks: [],
-    verdict: countsOf(await storedVerdictAt(ctx, item, li.pull?.number ?? 0, h)),
+    verdict: countsOf(await storedVerdictAt(ctx, item, pullNumber, h)),
     baseRace: race,
     finalize: { humanMerge },
   });
@@ -516,6 +508,7 @@ async function mergedPathInternal(
   item: WorkItem,
   h: string,
   mergeCommit: string | null,
+  pullNumber: number,
 ): Promise<MergeOutcome | null> {
   if (mergeCommit === null) {
     logGithubError(
@@ -531,9 +524,8 @@ async function mergedPathInternal(
     return "pending";
   }
   const li = await readReviewItem(ctx, item.id);
-  const pullNumber = li.pull?.number ?? 0;
   if (li.phase !== "merging") {
-    return closeMerged(ctx, item, h, mergeCommit, false, true);
+    return closeMerged(ctx, item, h, mergeCommit, false, true, pullNumber);
   }
   const base = li.trial?.baseSha ?? null;
   const trialFresh = base !== null && li.trial?.headSha === h && li.trial.passed;
@@ -544,7 +536,7 @@ async function mergedPathInternal(
   }
   const parents = await ctx.github.commitParents(item.repo, mergeCommit);
   if (baseCheck(parents, base, h) !== "race") {
-    return closeMerged(ctx, item, h, mergeCommit, false, false);
+    return closeMerged(ctx, item, h, mergeCommit, false, false, pullNumber);
   }
   if (
     await setMergeHold(ctx, {
@@ -566,7 +558,7 @@ async function mergedPathInternal(
   if (escalated === "pending") {
     return "pending";
   }
-  return closeMerged(ctx, item, h, mergeCommit, true, false);
+  return closeMerged(ctx, item, h, mergeCommit, true, false, pullNumber);
 }
 
 async function decideOnView(
@@ -576,6 +568,7 @@ async function decideOnView(
   h: string,
   baseBranch: string,
   pullNumber: number,
+  spec: FactorySpec,
 ): Promise<MergeOutcome> {
   const view = await ctx.github.viewPull(item.repo, pullNumber);
   const first = m1(view, h, baseBranch);
@@ -586,6 +579,7 @@ async function decideOnView(
       { kind: "early", early: first.kind, detail: first, mergeCommit: view.mergeCommit },
       h,
       view.mergeCommit,
+      pullNumber,
     );
   }
   const runs = await ctx.github.checkRuns(item.repo, h);
@@ -604,10 +598,6 @@ async function decideOnView(
       h,
       verdict.verdict,
     );
-  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
-  if (spec === undefined) {
-    throw new Error(`merge: no factory spec for ${item.repo}`);
-  }
   const approved =
     spec.mergeMode === "human-approval" &&
     (await ctx.approvals.approvedMerge(item.id, pullNumber, h));
@@ -630,5 +620,6 @@ async function decideOnView(
     },
     h,
     view.mergeCommit,
+    pullNumber,
   );
 }

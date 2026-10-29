@@ -6,7 +6,7 @@ import { InputPathError } from "../fs/input.js";
 import { finalizeUsage } from "../ledger/store.js";
 import { GitHubError, type GitHubPort } from "./github.js";
 import type { StallDecision } from "./policy.js";
-import { LoopStateDataError, updateLoopState } from "./state.js";
+import { LoopStateDataError, readLoopItem, updateLoopState, writeLoopItem } from "./state.js";
 import type { Escalation, LoopItem } from "./types.js";
 import type { CoreContext } from "./rounds.js";
 import { reconcile } from "./project.js";
@@ -24,33 +24,6 @@ export interface ParkContext extends CoreContext {
 export type ParkProgress = "done" | "pending";
 
 const OPERATOR_CODE_PATTERN = /^[a-z][a-z0-9-]{0,40}$/;
-
-// Single read of the fresh loop item; an unknown id is a data error
-// like in rounds.ts. The write twin below commits one L change.
-async function readLoopItem(statePath: string, id: string): Promise<LoopItem> {
-  const current = await updateLoopState(statePath, (state) => {
-    const found = state.items[id] as unknown as LoopItem | undefined;
-    if (found === undefined) {
-      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
-    }
-    return Promise.resolve({ next: null, value: found });
-  });
-  return current;
-}
-
-async function writeLoopItem(statePath: string, id: string, next: LoopItem): Promise<LoopItem> {
-  return updateLoopState(statePath, (state) => {
-    const current = state.items[id] as unknown as LoopItem | undefined;
-    if (current === undefined) {
-      throw new LoopStateDataError(`loop state ${statePath}: unknown item "${id}"`);
-    }
-    const stored: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
-    return Promise.resolve({
-      next: { ...state, items: { ...state.items, [id]: stored } },
-      value: next,
-    });
-  });
-}
 
 // The marker line every escalation body starts with.
 export function escalationMarker(key: string): string {

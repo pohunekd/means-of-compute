@@ -67,6 +67,44 @@ function realRoot(): string {
   return `${realpathSync(process.cwd())}/`;
 }
 
+export function isBuiltin(resolved: string): boolean {
+  return resolved.startsWith("node:") || resolved.startsWith("bun:") || resolved === "bun";
+}
+
+export function localDependencies(pkg: unknown): string[] {
+  if (typeof pkg !== "object" || pkg === null) {
+    return [];
+  }
+  const record = pkg as Record<string, unknown>;
+  const names: string[] = [];
+  for (const section of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    const deps = record[section];
+    if (typeof deps !== "object" || deps === null) {
+      continue;
+    }
+    for (const [name, spec] of Object.entries(deps as Record<string, unknown>)) {
+      if (typeof spec !== "string") {
+        continue;
+      }
+      if (
+        spec.startsWith("file:") ||
+        spec.startsWith("link:") ||
+        spec.startsWith("workspace:") ||
+        spec.startsWith(".") ||
+        spec.startsWith("/")
+      ) {
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+
 export function checkTarget(
   spec: string,
   file: string,
@@ -99,15 +137,22 @@ function importClosure(entries: string[], root: string): Set<string> {
     }
     for (const spec of specsOf(readFileSync(file, "utf8"))) {
       let resolved: string;
+      let target: string;
       try {
         resolved = Bun.resolveSync(spec, dirname(file));
-      } catch {
-        throw new Error(`unresolved import "${spec}" in ${file}`);
+        if (!isBuiltin(resolved) && !resolved.startsWith("/")) {
+          throw new Error(`import "${spec}" in ${file} resolves to a non-file module`);
+        }
+        if (isBuiltin(resolved)) {
+          continue;
+        }
+        target = realpathSync(resolved);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("resolves to a non-file module")) {
+          throw error;
+        }
+        throw new Error(`unresolved import "${spec}" in ${file}`, { cause: error });
       }
-      if (!resolved.startsWith("/")) {
-        continue;
-      }
-      const target = realpathSync(resolved);
       if (checkTarget(spec, file, target, root) === "skip") {
         continue;
       }
@@ -209,7 +254,13 @@ test("checkTarget gates closure edges by location and file type (X4 Y6)", () => 
   expect(checkTarget("./a", file, "/repo/src/util/a.ts", root)).toBe("follow");
   expect(checkTarget("./a", file, "/repo/src/util/a.json", root)).toBe("follow");
   expect(checkTarget("x", file, "/repo/node_modules/x/a.ts", root)).toBe("skip");
+  expect(checkTarget("x", file, "/repo/node_modules/x/a.mjs", root)).toBe("skip");
   expect(checkTarget("./a", file, "/repo/src/util/node_modules/a.ts", root)).toBe("follow");
+  expect(isBuiltin("node:fs")).toBe(true);
+  expect(isBuiltin("bun:test")).toBe(true);
+  expect(isBuiltin("bun")).toBe(true);
+  expect(isBuiltin("data:text/javascript,export {}")).toBe(false);
+  expect(isBuiltin("https://example.invalid/a.js")).toBe(false);
   expect(() => checkTarget("../a", file, "/other/a.ts", root)).toThrow(
     `import "../a" in ${file} leaves the repository`,
   );
@@ -218,6 +269,16 @@ test("checkTarget gates closure edges by location and file type (X4 Y6)", () => 
       `import "../a${ext}" in ${file} resolves to an unsupported file type`,
     );
   }
+});
+
+test("root package dependencies never point into the file system (X4 Y8)", () => {
+  const pkg: unknown = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+  expect(localDependencies(pkg)).toEqual([]);
+  expect(localDependencies({ dependencies: { zzpkg: "file:./src/zzpkg" } })).toEqual(["zzpkg"]);
+  expect(localDependencies({ devDependencies: { a: "link:../a", b: "workspace:*" } })).toEqual([
+    "a",
+    "b",
+  ]);
 });
 
 test("the src/mcp/ import closure never reaches decide or the CLI (X4 Y4, A9)", () => {
@@ -277,6 +338,10 @@ test("the closure follows symlinks and aliases to the real decide (X4 Y7)", () =
     ["package-alias", 'export { decideRequest } from "#zz/decide.ts";\n'],
     ["tsconfig-alias", 'export { decideRequest } from "@zz/decide.ts";\n'],
     ["nested-modules", 'export { decideRequest } from "../util/node_modules/zz-relay.ts";\n'],
+    [
+      "data-module",
+      "export { decideRequest } from \"data:text/javascript,import { decideRequest } from './src/approvals/decide.ts';export { decideRequest };\";\n",
+    ],
   ] as const;
   symlinkSync(relayTarget, join(approvalsDir, "zz-decide.ts"));
   symlinkSync(approvalsDir, join(realRootDir, "src", "zzdir"));
@@ -288,6 +353,10 @@ test("the closure follows symlinks and aliases to the real decide (X4 Y7)", () =
   const realDecide = realpathSync(decide);
   entries.forEach((entry, index) => {
     const label = entrySpecs[index]?.[0] ?? "unknown";
+    if (label === "data-module") {
+      expect(() => importClosure([entry], root)).toThrow("resolves to a non-file module");
+      return;
+    }
     const closure = importClosure([entry], root);
     const found = closure.has(realDecide) ? "true" : "false";
     expect(`${label}: ${found}`).toBe(`${label}: true`);

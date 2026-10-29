@@ -74,6 +74,7 @@ test("refusal blocks new starts but a running item still finishes", async () => 
       ],
       timeoutMs: 30000,
       cwd: process.cwd(),
+      env: { ...process.env } as Record<string, string>,
     });
     const dispatcher = createDispatcher({
       port: control.port,
@@ -110,6 +111,7 @@ test("refusal blocks new starts but a running item still finishes", async () => 
       ],
       timeoutMs: 30000,
       cwd: process.cwd(),
+      env: { ...process.env } as Record<string, string>,
     });
     const dispatcherRefusing = createDispatcher({
       port: control.port,
@@ -179,6 +181,7 @@ test("a gate error throws BudgetGateError with no port session", async () => {
       command: ["bun", "-e", "process.exit(1)"],
       timeoutMs: 30000,
       cwd: process.cwd(),
+      env: { ...process.env } as Record<string, string>,
     });
     const dispatcher = createDispatcher({
       port: control.port,

@@ -15,6 +15,7 @@ export interface BudgetGateOptions {
   readonly command: readonly string[];
   readonly timeoutMs: number;
   readonly cwd: string;
+  readonly env: Record<string, string>;
 }
 
 const GATE_CONFIG_PATH = "config/budget-gate.json";
@@ -115,6 +116,7 @@ export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
           stdout: "pipe",
           stderr: "pipe",
           stdin: "ignore",
+          env: options.env,
         });
       } catch (error: unknown) {
         throw new BudgetGateError(

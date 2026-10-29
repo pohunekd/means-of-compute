@@ -48,6 +48,7 @@ export function admittingGate(cwd: string): BudgetGate {
     ],
     timeoutMs: 30000,
     cwd,
+    env: { ...process.env } as Record<string, string>,
   });
 }
 
@@ -62,5 +63,6 @@ export function refusingGate(cwd: string): BudgetGate {
     ],
     timeoutMs: 30000,
     cwd,
+    env: { ...process.env } as Record<string, string>,
   });
 }

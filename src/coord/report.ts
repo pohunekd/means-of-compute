@@ -177,10 +177,11 @@ function parseListRow(row: unknown): ListRow | null {
   if (pullNumber !== null && !isInteger(pullNumber)) {
     return null;
   }
-  if (
-    !Array.isArray(dependencies) ||
-    !dependencies.every((entry: unknown) => typeof entry === "string")
-  ) {
+  if (!Array.isArray(dependencies)) {
+    return null;
+  }
+  const deps = dependencies as readonly string[];
+  if (!deps.every((entry: unknown) => typeof entry === "string")) {
     return null;
   }
   if (!isRecord(dod)) {
@@ -194,19 +195,12 @@ function parseListRow(row: unknown): ListRow | null {
   if (!isInteger(retryCount) || retryCount < 0) {
     return null;
   }
-  const ids: string[] = [];
-  for (const entry of dependencies as readonly unknown[]) {
-    ids.push(entry as string);
-  }
-  const typedStatus = status as WorkItemStatus;
-  const typedReason = statusReason;
-  const typedPull = pullNumber;
   return {
     id,
-    status: typedStatus,
-    statusReason: typedReason,
-    pullNumber: typedPull,
-    dependencies: ids,
+    status: status as WorkItemStatus,
+    statusReason,
+    pullNumber,
+    dependencies: deps,
     dod: { done, total },
     retryCount,
   };
@@ -316,21 +310,16 @@ function parseSubmitSummary(call: CoordCallEnd): {
   const submissionId: unknown = summary["submissionId"];
   const itemIds: unknown = summary["itemIds"];
   const replayed: unknown = summary["replayed"];
-  if (
-    typeof submissionId !== "string" ||
-    !Array.isArray(itemIds) ||
-    !itemIds.every((entry: unknown) => typeof entry === "string") ||
-    typeof replayed !== "boolean"
-  ) {
+  if (typeof submissionId !== "string" || !Array.isArray(itemIds)) {
     throw new ReportDataError(
       `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
     );
   }
-  const ids: string[] = [];
-  for (const entry of itemIds as readonly unknown[]) {
-    if (typeof entry === "string") {
-      ids.push(entry);
-    }
+  const ids = itemIds as readonly string[];
+  if (!ids.every((entry: unknown) => typeof entry === "string") || typeof replayed !== "boolean") {
+    throw new ReportDataError(
+      `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
+    );
   }
   return {
     submissionId,
@@ -403,7 +392,7 @@ export function buildReport(input: ReportInput): Report {
     if (call.outcome === "refused" || call.outcome === "error") {
       if (call.code === null) {
         throw new ReportDataError(
-          `Report: call ${call.run}/${String(call.callId)} has an invalid ${call.tool} summary`,
+          `Report: call ${call.run}/${String(call.callId)} has a ${call.outcome} ${call.tool} line without a code`,
         );
       }
       refusals.push({ tool: call.tool, code: call.code });
@@ -489,10 +478,6 @@ function cell(value: string | null): string {
     return "-";
   }
   return cellText(value);
-}
-
-function dash(value: string | null): string {
-  return value === null ? "-" : cellText(value);
 }
 
 function outcomeText(outcome: SessionOutcome): string {
@@ -601,9 +586,10 @@ function refusalLines(report: Report): string[] {
 
 function itemsLines(report: Report): string[] {
   if (report.items === null) {
-    const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? snapshot.revision : snapshot.code;
-    return [`Items: unavailable (${String(code)})`];
+    if (report.finalSnapshot.ok) {
+      throw new ReportDataError("Report: items are null with an ok snapshot");
+    }
+    return [`Items: unavailable (${report.finalSnapshot.code})`];
   }
   return table(
     "| Item | Status | Reason | DoD | Pull | Retries | Stranded |",
@@ -612,7 +598,7 @@ function itemsLines(report: Report): string[] {
       cellText(item.status),
       cell(item.statusReason),
       cellText(`${String(item.dod.done)}/${String(item.dod.total)}`),
-      dash(item.pullNumber === null ? null : String(item.pullNumber)),
+      cell(item.pullNumber === null ? null : String(item.pullNumber)),
       cellText(String(item.retryCount)),
       cellText(item.stranded ? "yes" : "no"),
     ]),
@@ -621,9 +607,10 @@ function itemsLines(report: Report): string[] {
 
 function unresolvedLines(report: Report): string[] {
   if (report.unresolved === null) {
-    const snapshot = report.finalSnapshot;
-    const code = snapshot.ok ? snapshot.revision : snapshot.code;
-    return [`Unresolved: unavailable (${String(code)})`];
+    if (report.finalSnapshot.ok) {
+      throw new ReportDataError("Report: unresolved is null with an ok snapshot");
+    }
+    return [`Unresolved: unavailable (${report.finalSnapshot.code})`];
   }
   if (report.unresolved.length === 0) {
     return ["None."];

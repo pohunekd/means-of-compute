@@ -161,6 +161,7 @@ test("a reply without usage refuses as spend unknown", async () => {
         command: ["bun", resolve("src/budget/check.ts")],
         timeoutMs: 30000,
         cwd: sandbox,
+        env: { ...process.env } as Record<string, string>,
       });
       const admission = await gate.admit();
       expect(admission.admit).toBe(false);

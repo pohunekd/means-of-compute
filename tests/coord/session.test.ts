@@ -1,4 +1,4 @@
-// Muse session tests (S1-S10): env isolation, tools/call round trip,
+// Muse session tests (S1-S11): env isolation, tools/call round trip,
 // process-group kill, export gating, env failures and log shapes.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
@@ -64,6 +64,7 @@ async function setupEnv(script: string): Promise<Setup> {
     },
     log,
     now: () => new Date(),
+    onSpawn: () => {},
   };
   const controller = new AbortController();
   const opts: MuseSessionOpts = {
@@ -148,6 +149,7 @@ async function setupEnvFresh(
       },
     },
     now: () => new Date(),
+    onSpawn: () => {},
   };
   const controller = new AbortController();
   return {
@@ -397,3 +399,30 @@ test("museEnv isolates HOME and the XDG dirs (S9)", () => {
     XDG_CACHE_HOME: "/r/home/.cache",
   });
 });
+
+test("an onSpawn throw rejects without session-end (S11)", async () => {
+  const setup = await setupEnv("hang.json");
+  const pids: number[] = [];
+  const deps: MuseSessionDeps = {
+    ...setup.deps,
+    onSpawn: (pid: number): void => {
+      pids.push(pid);
+      throw new Error("record failed");
+    },
+  };
+  const opts: MuseSessionOpts = { ...setup.opts, timeoutMs: 5000 };
+  await runMuseSession(opts, deps).then(
+    () => {
+      throw new Error("expected record failed");
+    },
+    (error: unknown) => {
+      expect((error as Error).message).toBe("record failed");
+    },
+  );
+  expect(pids.length).toBe(1);
+  expect(Number.isInteger(pids[0] as number)).toBe(true);
+  // The onSpawn throw kills the group before the fake starts, so the fake
+  // never writes its record: there is no grandchild to wait for, and no
+  // session-end is logged.
+  expect(setup.entries.map((entry) => entry["event"])).toEqual(["session-start"]);
+}, 30000);

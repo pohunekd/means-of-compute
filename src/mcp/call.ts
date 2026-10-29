@@ -3,7 +3,7 @@
 // true, 3 when ok is false, 2 for usage or a bad --file, 4 when the server
 // exits before answering, a JSON-RPC error comes back, a response is
 // malformed, or there is no answer within clientTimeoutMs.
-import { ClientError, runClientCall } from "./client.js";
+import { ClientError, definedEnv, runClientCall } from "./client.js";
 import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 
@@ -113,6 +113,7 @@ async function run(argv: readonly string[]): Promise<number> {
       configPath,
       serverVersion: config.serverInfo.version,
       clientTimeoutMs: config.clientTimeoutMs,
+      env: definedEnv(process.env),
     })) as { ok?: unknown };
     process.stdout.write(`${JSON.stringify(structured)}\n`);
     return structured.ok === true ? 0 : 3;

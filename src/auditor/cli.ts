@@ -22,6 +22,7 @@ import { AuditPostError, auditExitCode, runAudit } from "./audit.js";
 import type { AuditInput } from "./audit-types.js";
 import { loadAuditorConfig } from "./config.js";
 import { createReadOnlyGit, GitReadError } from "./git.js";
+import { definedEnv } from "../mcp/client.js";
 import { readVerdicts } from "./store.js";
 import { renderComment } from "./verdict.js";
 
@@ -367,6 +368,7 @@ async function run(): Promise<number> {
         command: budgetConfig.command,
         timeoutMs: budgetConfig.timeoutMs,
         cwd: process.cwd(),
+        env: definedEnv(process.env),
       }),
       call: callProviderOnce,
       ledgerPath,

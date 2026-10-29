@@ -1,6 +1,9 @@
 {
   "calls": [
-    { "tool": "list_work", "arguments": { "status": ["queued", "running", "review", "parked", "blocked", "done"] } },
+    {
+      "tool": "list_work",
+      "arguments": { "status": ["queued", "running", "review", "parked", "blocked", "done"] }
+    },
     { "tool": "audit_results", "arguments": { "workItemId": "d3-writer" } },
     { "tool": "submit_work", "argumentsFile": "d3-followup.json" }
   ],

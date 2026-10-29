@@ -1,4 +1,4 @@
-// Coordinator plan-run tests (M1-M15): arg parsing, startup checks,
+// Coordinator plan-run tests (M1-M3, M6-M16, M18, M19): arg parsing, startup checks,
 // dry run, session, report and exit codes.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { constants } from "node:os";
@@ -562,6 +562,19 @@ test("SIGTERM during the session reports signal (M13)", async () => {
               continue;
             }
             const parsed = JSON.parse(await Bun.file(recordPath).text()) as { pid: number };
+            let grandchildPid: unknown;
+            try {
+              grandchildPid = (
+                JSON.parse(await Bun.file(env.recordPath).text()) as { grandchildPid: unknown }
+              ).grandchildPid;
+            } catch {
+              await Bun.sleep(20);
+              continue;
+            }
+            if (!Number.isInteger(grandchildPid)) {
+              await Bun.sleep(20);
+              continue;
+            }
             expect((): void => {
               process.kill(-parsed.pid, 0);
             }).not.toThrow();

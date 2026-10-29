@@ -410,10 +410,7 @@ function parseSeed(value: unknown, path: string): CoordSeedConfig | null {
   return { stateDir, storeSeedPath };
 }
 
-function parseEvidenceDenyPatterns(
-  record: Record<string, unknown>,
-  path: string,
-): string[] {
+function parseEvidenceDenyPatterns(record: Record<string, unknown>, path: string): string[] {
   const patterns = requiredStringList(record, path, "", "evidenceDenyPatterns", 1);
   try {
     for (const p of patterns) {

@@ -1,14 +1,10 @@
 {
-  "museCommand": [
-    "muse"
-  ],
+  "museCommand": ["muse"],
   "providerId": "meta-api",
   "model": "muse-spark-1.3-contributor",
   "contributorMode": "on",
   "approvalMode": "never",
-  "envPassthrough": [
-    "PATH"
-  ],
+  "envPassthrough": ["PATH"],
   "mcpConfigPath": "tests/fixtures/coord/d3/mcp.json",
   "budgetGateConfigPath": "config/budget-gate.json",
   "skillDir": ".agents/skills/factory-coord",

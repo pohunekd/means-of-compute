@@ -89,7 +89,10 @@ async function loadRunReport(runDir: string): Promise<LoadedReport> {
     fail(`${path} is not a run report`);
   }
   const record = doc as Record<string, string>;
-  return { configPath: record["configPath"] as string, configSha256: record["configSha256"] as string };
+  return {
+    configPath: record["configPath"] as string,
+    configSha256: record["configSha256"] as string,
+  };
 }
 
 export async function run(argv: readonly string[]): Promise<number> {
@@ -100,7 +103,9 @@ export async function run(argv: readonly string[]): Promise<number> {
     fail(`config ${report.configPath} changed since the run`);
   }
   const { config, apiKeyEnv } = await loadCoordConfig(report.configPath);
-  console.error(`coord:evidence: config ${report.configPath}, ${String(config.evidenceDenyPatterns.length)} deny patterns`);
+  console.error(
+    `coord:evidence: config ${report.configPath}, ${String(config.evidenceDenyPatterns.length)} deny patterns`,
+  );
   if ((await stat(outDir).catch(() => null)) !== null) {
     fail(`${outDir} already exists`);
   }
@@ -129,7 +134,8 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   const patterns = config.evidenceDenyPatterns.map((p) => new RegExp(p));
   const env = definedEnv(process.env as Record<string, string | undefined>);
-  const literal = env[apiKeyEnv] === undefined || env[apiKeyEnv] === "" ? null : (env[apiKeyEnv] as string);
+  const literal =
+    env[apiKeyEnv] === undefined || env[apiKeyEnv] === "" ? null : (env[apiKeyEnv] as string);
   let hits = 0;
   for (const { name, text } of written) {
     const lines = text.split("\n");

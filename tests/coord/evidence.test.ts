@@ -25,7 +25,11 @@ afterAll(() => {
   expect(checkoutLogNames()).toEqual(checkoutBefore);
 });
 
-async function runEvidence(args: readonly string[], cwd: string, home: string): Promise<{
+async function runEvidence(
+  args: readonly string[],
+  cwd: string,
+  home: string,
+): Promise<{
   readonly rc: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -66,11 +70,7 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
   await Bun.write(join(runDir, "mcp-calls.jsonl"), `{"event":"server-start"}\n`);
   await Bun.write(join(runDir, "prompt-1.md"), "prompt\n");
   const out1 = join(env.dir, "out1");
-  const first = await runEvidence(
-    ["--run", runDir, "--out", out1],
-    checkoutReal,
-    home,
-  );
+  const first = await runEvidence(["--run", runDir, "--out", out1], checkoutReal, home);
   expect(first.rc).toBe(0);
   expect(first.stdout.trim().split("\n").length).toBe(4);
   expect(await Bun.file(join(out1, "report.md")).text()).toBe("see <checkout>/a and ~/b\n");
@@ -82,7 +82,9 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
   const out2 = join(env.dir, "out2");
   const second = await runEvidence(["--run", runDir, "--out", out2], checkoutReal, home);
   expect(second.rc).toBe(3);
-  expect(second.stderr.includes("coord:evidence: session-1-export.json:1 matches deny pattern 2")).toBe(true);
+  expect(
+    second.stderr.includes("coord:evidence: session-1-export.json:1 matches deny pattern 2"),
+  ).toBe(true);
   expect(second.stderr.includes("192.168")).toBe(false);
   expect(statSync(out2).isDirectory()).toBe(true);
   const third = await runEvidence(["--run", runDir, "--out", out1], checkoutReal, home);
@@ -94,9 +96,21 @@ test("judge replay returns the pinned submission id (J1)", async () => {
   const mcp = await createMcpTestEnv("coord-judge-");
   const fixturePath = join(process.cwd(), "tests/fixtures/coord/replay/d1-submit.json");
   const fixture = (await Bun.file(fixturePath).json()) as { readonly items: readonly unknown[] };
-  async function submitOnce(): Promise<{ readonly rc: number; readonly last: Record<string, unknown> }> {
+  async function submitOnce(): Promise<{
+    readonly rc: number;
+    readonly last: Record<string, unknown>;
+  }> {
     const proc = Bun.spawn(
-      ["bun", "run", "mcp:call", "submit_work", "--file", fixturePath, "--config", mcp.mcpConfigPath],
+      [
+        "bun",
+        "run",
+        "mcp:call",
+        "submit_work",
+        "--file",
+        fixturePath,
+        "--config",
+        mcp.mcpConfigPath,
+      ],
       { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" },
     );
     const [rc, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
@@ -110,5 +124,7 @@ test("judge replay returns the pinned submission id (J1)", async () => {
   expect(first.last["replayed"]).toBe(false);
   const second = await submitOnce();
   expect(second.last["replayed"]).toBe(true);
-  expect(`sub-${sha256Hex(canonicalJson(fixture.items)).slice(0, 16)}`).toBe("sub-6b9641d69cb833e3");
+  expect(`sub-${sha256Hex(canonicalJson(fixture.items)).slice(0, 16)}`).toBe(
+    "sub-6b9641d69cb833e3",
+  );
 }, 30000);

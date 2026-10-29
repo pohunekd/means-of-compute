@@ -134,3 +134,16 @@ scratch cleanup is best effort and never changes the result.
 `stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step is
 `step-failed` with `rc: null`; merge rc 1 without the conflict line is
 `GitError` `failed`.
+
+## Scheduler (PR 6a)
+
+`src/loop/scheduler.ts` runs one tick over every loop item with `createScheduler(ctx)`:
+`tick()` launches at most one step call per item plus at most one timeout call per running item, `settled()` waits for the in-flight calls, and `stop()` drains them. A step failure latches and every later `tick()` throws it.
+
+- `recoverAtStartup` exits 2 with `loop state missing for <id>` when a `running` or `review` store item has no loop item; otherwise it writes missing loop items for `running` store rows and calls `appendMissingResults`.
+- Each tick first appends missing result lines, then files each registry session that names no live loop item as `orphan-session` and escalates `orphan:<requestId>` once without cancelling it.
+- A set merge hold fetches the base and clears the hold in one write only when the head is green and contains the merge, escalating `race-cleared` and logging `merge-hold-cleared`; red checks, a moved-away head, and a GitHub or git error keep the hold.
+- Reconcile runs first for every item, then one step per phase: a `lost` park unparks, any other park advances, `starting` drives, `running` watches, `publishing` publishes, `ci` polls at most every `ciPollMs`, `auditing` audits and merges in the same call on `audited`, `awaiting-approval` and `merging` merge, and `finalizing` finishes.
+- `running` items also launch `checkSessionTimeout`, which reads the durable registry `startedAt` and stall-cancels an overdue session once per tick.
+- Claims run last when the fleet is not paused: ready items in store order, skipping in-flight, backed-off, parked and finalizing items, sharing one result and verdict read per tick. Each claim picks the model, places the session on the running set including same-tick claims, logs `no-host` when no host fits, and parks `brief-too-large` on an oversized brief.
+- A failed tick writes one log line per step start, result, timeout and GitHub error through the shared log chain.

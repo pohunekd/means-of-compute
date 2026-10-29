@@ -1,0 +1,3 @@
+#!/bin/sh
+[ "$*" = "-f %Su /dev/console" ] || exit 2
+echo alice

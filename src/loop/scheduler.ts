@@ -35,7 +35,6 @@ import {
 } from "./start.js";
 import { readWorkStore, readyItems } from "../work/store.js";
 import { fetchRefs, isAncestor, type GitDeps } from "./git.js";
-import { type CheckRun } from "./github.js";
 import { ciStatus } from "./merge-rule.js";
 
 function asMergeHold(value: unknown): MergeHold {

@@ -24,7 +24,7 @@ import type { BriefPrevious } from "./brief.js";
 import { parkOperator, parkStall } from "./park.js";
 import { reconcile } from "./project.js";
 import { closeRound, type RoundClose } from "./rounds.js";
-import { LoopStateDataError, readLoopItem, updateLoopState, writeLoopItem } from "./state.js";
+import { LoopStateDataError, readLoopItem, writeLoopItem } from "./state.js";
 import type { LoopItem, RoundAttempt, RoundOutcome, RoundRecord } from "./types.js";
 import type { StartContext } from "./start.js";
 
@@ -376,9 +376,7 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
     });
     return "ci";
   }
-  const runsStep = await githubStep(ctx, item, () =>
-    ctx.github.checkRuns(item.repo, pull.headSha),
-  );
+  const runsStep = await githubStep(ctx, item, () => ctx.github.checkRuns(item.repo, pull.headSha));
   if (!runsStep.ok) {
     return "pending";
   }

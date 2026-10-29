@@ -17,7 +17,13 @@ import {
   verdictCheck,
 } from "./merge-rule.js";
 import { escalate, finalizeItem, parkOperator } from "./park.js";
-import { readLoopItem, readLoopState, updateLoopState, writeLoopItem, LoopStateDataError } from "./state.js";
+import {
+  readLoopItem,
+  readLoopState,
+  updateLoopState,
+  writeLoopItem,
+  LoopStateDataError,
+} from "./state.js";
 import type { LoopItem } from "./types.js";
 import {
   checkoutDirOf,
@@ -237,9 +243,7 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     return "pending";
   }
   const base = baseStep.value;
-  const ancestorStep = await githubStep(ctx, item, () =>
-    isAncestor(checkoutDir, ctx.git, base, h),
-  );
+  const ancestorStep = await githubStep(ctx, item, () => isAncestor(checkoutDir, ctx.git, base, h));
   if (!ancestorStep.ok) {
     return "pending";
   }

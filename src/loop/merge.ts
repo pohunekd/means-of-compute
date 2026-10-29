@@ -6,7 +6,7 @@ import type { AuditVerdict, FactorySpec, WorkItem } from "../../contracts/v1/typ
 import { m1, type M1Result } from "./merge-rule.js";
 import { readVerdicts } from "../auditor/store.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
-import { fetchRefs, isAncestor, trialMerge, GitError } from "./git.js";
+import { fetchRefs, isAncestor, trialMerge } from "./git.js";
 import { GitHubError } from "./github.js";
 import {
   baseCheck,
@@ -22,6 +22,7 @@ import type { LoopItem } from "./types.js";
 import {
   checkoutDirOf,
   closeReviewRound,
+  githubStep,
   logGithubError,
   registryBranchOf,
   type ReviewContext,
@@ -214,32 +215,25 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       pull.number,
     );
   }
-  let base: string;
-  try {
-    base = await ctx.github.baseSha(item.repo, baseBranch);
+  const baseStep = await githubStep(ctx, item, async () => {
+    const base = await ctx.github.baseSha(item.repo, baseBranch);
     await fetchRefs(checkoutDir, ctx.git, [
       `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
       `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
     ]);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+    return base;
+  });
+  if (!baseStep.ok) {
+    return "pending";
   }
-  let ancestor: boolean;
-  try {
-    ancestor = await isAncestor(checkoutDir, ctx.git, base, h);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const base = baseStep.value;
+  const ancestorStep = await githubStep(ctx, item, () =>
+    isAncestor(checkoutDir, ctx.git, base, h),
+  );
+  if (!ancestorStep.ok) {
+    return "pending";
   }
+  const ancestor = ancestorStep.value;
   const fresh = await readLoopItem(ctx.statePath, item.id);
   const trial = fresh.trial;
   const trialFresh =
@@ -255,9 +249,8 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       });
       return "idle";
     }
-    let passed: boolean;
-    try {
-      const result = await trialMerge({
+    const trialStep = await githubStep(ctx, item, () =>
+      trialMerge({
         dir: checkoutDir,
         scratchDir: resolve(ctx.trialMerge.scratchDir),
         id: item.id,
@@ -267,16 +260,12 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
         timeoutMs: ctx.trialMerge.timeoutMs,
         PATH: ctx.git.PATH,
         HOME: ctx.home,
-      });
-      passed = result.passed;
-    } catch (error: unknown) {
-      const failure = githubErrorOf(error);
-      if (failure !== null) {
-        logGithubError(ctx, item, failure);
-        return "pending";
-      }
-      throw error;
+      }),
+    );
+    if (!trialStep.ok) {
+      return "pending";
     }
+    const passed = trialStep.value.passed;
     const beforeTrial = await readLoopItem(ctx.statePath, item.id);
     const failedMerging = !passed && beforeTrial.phase === "merging";
     await writeLoopItem(ctx.statePath, item.id, {
@@ -300,17 +289,11 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     phase: "merging",
     trial: { baseSha: base, headSha: h, passed: true },
   });
-  let moved: string;
-  try {
-    moved = await ctx.github.baseSha(item.repo, baseBranch);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const movedStep = await githubStep(ctx, item, () => ctx.github.baseSha(item.repo, baseBranch));
+  if (!movedStep.ok) {
+    return "pending";
   }
+  const moved = movedStep.value;
   if (moved !== base) {
     return "pending";
   }
@@ -323,15 +306,11 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     ...(await readLoopItem(ctx.statePath, item.id)),
     mergeAttempts: { headSha: h, count: prior?.headSha === h ? prior.count + 1 : 1 },
   });
-  try {
-    await ctx.github.mergePull(item.repo, pull.number, h);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
+  const mergeStepResult = await githubStep(ctx, item, () =>
+    ctx.github.mergePull(item.repo, pull.number, h),
+  );
+  if (!mergeStepResult.ok) {
+    return "pending";
   }
   const after = await ctx.github.viewPull(item.repo, pull.number);
   if (m1(after, h, baseBranch).kind === "merged") {
@@ -367,23 +346,10 @@ export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<Mer
   const heads = await mergeHeads(ctx, item);
   const { li, baseBranch, pull, spec: readySpec } = heads;
   const h = pull.headSha;
-  try {
-    return await decideOnView(ctx, item, li, h, baseBranch, pull.number, readySpec);
-  } catch (error: unknown) {
-    const failure = githubErrorOf(error);
-    if (failure !== null) {
-      logGithubError(ctx, item, failure);
-      return "pending";
-    }
-    throw error;
-  }
-}
-
-function githubErrorOf(error: unknown): GitHubError | GitError | null {
-  if (error instanceof GitHubError || error instanceof GitError) {
-    return error;
-  }
-  return null;
+  const step = await githubStep(ctx, item, () =>
+    decideOnView(ctx, item, li, h, baseBranch, pull.number, readySpec),
+  );
+  return step.ok ? step.value : "pending";
 }
 
 async function mergeHeads(

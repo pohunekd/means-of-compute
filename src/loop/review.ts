@@ -180,6 +180,24 @@ export function logGithubError(
   });
 }
 
+// G7: a GitHub or git error is logged and reported as not ok, so the
+// caller keeps the phase; every other error propagates.
+export async function githubStep<T>(
+  ctx: ReviewContext,
+  item: WorkItem,
+  run: () => Promise<T>,
+): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false }> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (error: unknown) {
+    if (error instanceof GitHubError || error instanceof GitError) {
+      logGithubError(ctx, item, error);
+      return { ok: false };
+    }
+    throw error;
+  }
+}
+
 async function reviewAttemptOf(
   ctx: ReviewContext,
   requestId: string | null,
@@ -266,26 +284,28 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
   const branch = await registryBranchOf(ctx, item, li);
   const baseBranch = ctx.dispatcherConfig.baseBranch;
   const attempt = await reviewAttemptOf(ctx, li.requestId);
-  let decision: ReturnType<typeof pullDecision>;
-  let head: string | null;
-  try {
-    decision = pullDecision(await ctx.github.pullsForBranch(item.repo, branch), ctx.factoryLogin);
+  const step = await githubStep(ctx, item, async () => {
+    const decision = pullDecision(
+      await ctx.github.pullsForBranch(item.repo, branch),
+      ctx.factoryLogin,
+    );
     if (decision.kind === "duplicate") {
       await parkOperator(ctx, item, "duplicate-pulls");
-      return "parked";
+      return { parked: true as const, decision, head: null as string | null };
     }
-    if (decision.kind === "adopt") {
-      head = decision.pull.headRefOid;
-    } else {
-      head = await remoteBranchSha(checkoutDir, ctx.git, branch);
-    }
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+    const head =
+      decision.kind === "adopt"
+        ? decision.pull.headRefOid
+        : await remoteBranchSha(checkoutDir, ctx.git, branch);
+    return { parked: false as const, decision, head };
+  });
+  if (!step.ok) {
+    return "pending";
   }
+  if (step.value.parked) {
+    return "parked";
+  }
+  const { decision, head } = step.value;
   if (head === null) {
     const outcome = attempt === "success" ? "no-push" : "session-failed";
     return closeReviewRound(ctx, item, {
@@ -312,21 +332,13 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
     number = decision.pull.number;
     code = "adopted";
   } else {
-    try {
-      number = await ctx.github.createPull(
-        item.repo,
-        branch,
-        baseBranch,
-        item.title,
-        pullBodyOf(item),
-      );
-    } catch (error: unknown) {
-      if (error instanceof GitHubError || error instanceof GitError) {
-        logGithubError(ctx, item, error);
-        return "pending";
-      }
-      throw error;
+    const step = await githubStep(ctx, item, () =>
+      ctx.github.createPull(item.repo, branch, baseBranch, item.title, pullBodyOf(item)),
+    );
+    if (!step.ok) {
+      return "pending";
     }
+    number = step.value;
     code = "created";
   }
   const now = ctx.now().toISOString();
@@ -345,41 +357,34 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
 export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<ReviewStep> {
   const heads = await requireHeads(ctx, item, "ci");
   const { li, pull } = heads;
-  try {
-    const view = await ctx.github.viewPull(item.repo, pull.number);
-    if (view.state === "OPEN" && view.headRefOid !== pull.headSha) {
-      const now = ctx.now().toISOString();
-      await writeLoopItem(ctx.statePath, item.id, {
-        ...(await readLoopItem(ctx.statePath, item.id)),
-        pull: { number: pull.number, headSha: view.headRefOid },
-        ciSince: now,
-      });
-      ctx.log.log({
-        event: "pull",
-        workItemId: item.id,
-        round: li.round,
-        sha: view.headRefOid,
-        code: "moved",
-      });
-      return "ci";
-    }
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+  const viewStep = await githubStep(ctx, item, () => ctx.github.viewPull(item.repo, pull.number));
+  if (!viewStep.ok) {
+    return "pending";
   }
-  let runs: readonly CheckRun[];
-  try {
-    runs = await ctx.github.checkRuns(item.repo, pull.headSha);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+  const view = viewStep.value;
+  if (view.state === "OPEN" && view.headRefOid !== pull.headSha) {
+    const now = ctx.now().toISOString();
+    await writeLoopItem(ctx.statePath, item.id, {
+      ...(await readLoopItem(ctx.statePath, item.id)),
+      pull: { number: pull.number, headSha: view.headRefOid },
+      ciSince: now,
+    });
+    ctx.log.log({
+      event: "pull",
+      workItemId: item.id,
+      round: li.round,
+      sha: view.headRefOid,
+      code: "moved",
+    });
+    return "ci";
   }
+  const runsStep = await githubStep(ctx, item, () =>
+    ctx.github.checkRuns(item.repo, pull.headSha),
+  );
+  if (!runsStep.ok) {
+    return "pending";
+  }
+  const runs = runsStep.value;
   const status = ciStatus(runs, ctx.requiredChecks);
   if (status === "green") {
     await writeLoopItem(ctx.statePath, item.id, {
@@ -444,33 +449,24 @@ async function postVerdict(
   if (check.kind === "invalid") {
     return "audited";
   }
-  let markers: ReturnType<typeof factoryMarkers>;
-  try {
-    markers = factoryMarkers(
-      await ctx.github.commentFirstLines(item.repo, heads.pull.number),
-      ctx.factoryLogin,
-    );
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+  const markersStep = await githubStep(ctx, item, () =>
+    ctx.github.commentFirstLines(item.repo, heads.pull.number),
+  );
+  if (!markersStep.ok) {
+    return "pending";
   }
+  const markers = factoryMarkers(markersStep.value, ctx.factoryLogin);
   if (markerMatches(markers, item.repo, heads.pull.number, h, v)) {
     return "audited";
   }
-  try {
+  const commentStep = await githubStep(ctx, item, async () => {
     const body = renderComment(v);
     if (body !== null) {
       await ctx.github.postComment(item.repo, heads.pull.number, body);
     }
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+  });
+  if (!commentStep.ok) {
+    return "pending";
   }
   ctx.log.log({ event: "verdict", workItemId: item.id, round, sha: h, code: check.kind });
   return "audited";
@@ -603,20 +599,17 @@ export async function auditStep(ctx: ReviewContext, item: WorkItem): Promise<Rev
   if (li.backoffUntil !== null && ctx.now().getTime() < Date.parse(li.backoffUntil)) {
     return "pending";
   }
-  let h: string;
-  try {
+  const fetchStep = await githubStep(ctx, item, async () => {
     await fetchRefs(checkoutDir, ctx.git, [
       `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
       `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
     ]);
-    h = await revParse(checkoutDir, ctx.git, `refs/remotes/origin/${branch}`);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return "pending";
-    }
-    throw error;
+    return revParse(checkoutDir, ctx.git, `refs/remotes/origin/${branch}`);
+  });
+  if (!fetchStep.ok) {
+    return "pending";
   }
+  const h = fetchStep.value;
   if (h !== pull.headSha) {
     const now = ctx.now().toISOString();
     await writeLoopItem(ctx.statePath, item.id, {

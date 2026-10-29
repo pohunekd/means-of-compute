@@ -12,7 +12,7 @@ import {
   auditStep,
   ciStep,
   checkoutDirOf,
-  logGithubError,
+  githubStep,
   previousRoundOf,
   publishStep,
 } from "./review.js";
@@ -34,8 +34,8 @@ import {
   watchSession,
 } from "./start.js";
 import { readWorkStore, readyItems } from "../work/store.js";
-import { fetchRefs, isAncestor, GitError, type GitDeps } from "./git.js";
-import { GitHubError, type CheckRun } from "./github.js";
+import { fetchRefs, isAncestor, type GitDeps } from "./git.js";
+import { type CheckRun } from "./github.js";
 import { ciStatus } from "./merge-rule.js";
 
 function asMergeHold(value: unknown): MergeHold {
@@ -263,49 +263,35 @@ async function clearMergeHold(ctx: SchedulerContext, steps: ReadonlySet<string>)
   if (steps.has(item.id)) {
     return;
   }
-  let base: string;
-  try {
-    base = await ctx.github.baseSha(item.repo, ctx.dispatcherConfig.baseBranch);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return;
-    }
-    throw error;
+  const baseStep = await githubStep(ctx, item, () =>
+    ctx.github.baseSha(item.repo, ctx.dispatcherConfig.baseBranch),
+  );
+  if (!baseStep.ok) {
+    return;
   }
+  const base = baseStep.value;
   const checkoutDir = checkoutDirOf(ctx, item);
   const git: GitDeps = ctx.git;
-  try {
-    await fetchRefs(checkoutDir, git, [
+  const fetchStep = await githubStep(ctx, item, () =>
+    fetchRefs(checkoutDir, git, [
       `+refs/heads/${ctx.dispatcherConfig.baseBranch}:refs/remotes/origin/${ctx.dispatcherConfig.baseBranch}`,
-    ]);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return;
-    }
-    throw error;
+    ]),
+  );
+  if (!fetchStep.ok) {
+    return;
   }
-  let contained: boolean;
-  try {
-    contained = await isAncestor(checkoutDir, git, raw.mergeSha, base);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return;
-    }
-    throw error;
+  const containedStep = await githubStep(ctx, item, () =>
+    isAncestor(checkoutDir, git, raw.mergeSha, base),
+  );
+  if (!containedStep.ok) {
+    return;
   }
-  let runs: readonly CheckRun[];
-  try {
-    runs = await ctx.github.checkRuns(item.repo, base);
-  } catch (error: unknown) {
-    if (error instanceof GitHubError || error instanceof GitError) {
-      logGithubError(ctx, item, error);
-      return;
-    }
-    throw error;
+  const contained = containedStep.value;
+  const runsStep = await githubStep(ctx, item, () => ctx.github.checkRuns(item.repo, base));
+  if (!runsStep.ok) {
+    return;
   }
+  const runs = runsStep.value;
   if (!contained || ciStatus(runs, ctx.requiredChecks) !== "green") {
     return;
   }

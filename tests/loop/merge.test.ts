@@ -1570,8 +1570,32 @@ test("MT21 a failed trial in merging audits again then closes trial-failed", asy
             trial: { baseSha: seed.base, headSha: conflictedHead, passed: true },
           }),
         );
-        const outcome = await mergeCheck(seed.ctx, item());
-        expect(outcome).toBe("idle");
+        const midCtx: MergeContext = {
+          ...seed.ctx,
+          dispatcher: {
+            start: seed.ctx.dispatcher.start.bind(seed.ctx.dispatcher),
+            cancel: seed.ctx.dispatcher.cancel.bind(seed.ctx.dispatcher),
+            watch: () => Promise.reject(new Error("fault: close")) as never,
+          },
+        };
+        let thrown: unknown = null;
+        try {
+          await mergeCheck(midCtx, item());
+        } catch (error: unknown) {
+          thrown = error;
+        }
+        expect((thrown as Error).message).toBe("fault: close");
+        const mid = await readItem(seed.ctx.statePath);
+        expect(mid.phase).toBe("auditing");
+        expect(mid.trial).toEqual({
+          baseSha: movedBase,
+          headSha: conflictedHead,
+          passed: false,
+        });
+        expect(mid.rounds).toHaveLength(0);
+        await seedFinishedSession(seed.harness.registryPath);
+        const second = await mergeCheck(seed.ctx, item());
+        expect(second).toBe("idle");
         const li = await readItem(seed.ctx.statePath);
         expect(li.phase).toBe("idle");
         expect(seed.head).not.toBe("");
@@ -1655,6 +1679,8 @@ test("MT22 a finalizing close skips the stall decision", async () => {
 test("MT23 a repo without a factory spec throws before any write", async () => {
   await withTempDir(async (dir) => {
     await withReadySeed(dir, async (seed) => {
+      const { head } = seed;
+      await seed.ctx.github.mergePull(REPO, 1, head);
       const missing: MergeContext = { ...seed.ctx, specs: [] };
       const before = await Bun.file(missing.statePath).text();
       let thrown: unknown = null;

@@ -126,7 +126,11 @@ export async function readReviewItem(ctx: ReviewContext, id: string): Promise<Lo
   });
 }
 
-export async function writeReviewItem(ctx: ReviewContext, id: string, next: LoopItem): Promise<LoopItem> {
+export async function writeReviewItem(
+  ctx: ReviewContext,
+  id: string,
+  next: LoopItem,
+): Promise<LoopItem> {
   return updateLoopState(ctx.statePath, (state) => {
     const current = state.items[id] as unknown as LoopItem | undefined;
     if (current === undefined) {
@@ -148,7 +152,11 @@ export function checkoutDirOf(ctx: ReviewContext, item: WorkItem): string {
   return resolve(entry.checkoutDir);
 }
 
-export async function registryBranchOf(ctx: ReviewContext, item: WorkItem, li: LoopItem): Promise<string> {
+export async function registryBranchOf(
+  ctx: ReviewContext,
+  item: WorkItem,
+  li: LoopItem,
+): Promise<string> {
   const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
   const entry = entries.find((candidate) => candidate.requestId === li.requestId);
   if (entry === undefined) {
@@ -187,7 +195,11 @@ async function requireHeads(
   return { li, checkoutDir, branch, baseBranch, pull };
 }
 
-export function logGithubError(ctx: ReviewContext, item: WorkItem, error: GitHubError | GitError): void {
+export function logGithubError(
+  ctx: ReviewContext,
+  item: WorkItem,
+  error: GitHubError | GitError,
+): void {
   ctx.log.log({
     event: "github-error",
     workItemId: item.id,
@@ -309,7 +321,13 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
   }
   if (li.pull !== null && head === li.pull.headSha) {
     const outcome = attempt === "success" ? "no-new-commit" : "session-failed";
-    return closeReviewRound(ctx, item, { outcome, headSha: head, failingChecks: [], verdict: null, baseRace: false });
+    return closeReviewRound(ctx, item, {
+      outcome,
+      headSha: head,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   let number: number;
   let code: string;

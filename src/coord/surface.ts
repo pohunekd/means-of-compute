@@ -63,14 +63,15 @@ function toRecord(event: unknown): SurfaceRecord | null {
     return null;
   }
   const toolset = record.toolset as { readonly mode?: unknown; readonly active_tools: unknown };
-  const activeTools: unknown = toolset.active_tools;
+  const rawTools: unknown = toolset.active_tools;
   if (
     typeof toolset.mode !== "string" ||
-    !Array.isArray(activeTools) ||
-    !activeTools.every((entry: unknown) => typeof entry === "string")
+    !Array.isArray(rawTools) ||
+    !rawTools.every((entry: unknown) => typeof entry === "string")
   ) {
     return null;
   }
+  const activeTools: readonly string[] = rawTools;
   if (!Array.isArray(record.run_context_messages)) {
     return null;
   }
@@ -101,7 +102,7 @@ function toRecord(event: unknown): SurfaceRecord | null {
   }
   const agentCount = roster.agents.length;
   return {
-    toolset: { mode: toolset.mode, activeTools: activeTools as readonly string[] },
+    toolset: { mode: toolset.mode, activeTools },
     sources,
     delegationState: state,
     agentCount,
@@ -223,7 +224,6 @@ export async function runSurfaceProbe(
   const { config, session, signal } = opts;
   const runDir = session.runDir;
   const stem = `probe-${String(session.k)}`;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (signal.aborted) {
     return { kind: "aborted" };
   }

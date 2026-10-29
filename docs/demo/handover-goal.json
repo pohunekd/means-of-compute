@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "v1",
+  "goalId": "handover",
+  "idPrefix": "handover",
+  "repo": "pohunekd/means-of-compute",
+  "title": "Handover: docs link check and a work store summary",
+  "outcome": "Three small additions, one per issue. (1) Issue 125: scripts/docs-links.ts checks that every relative Markdown link in README.md, AGENTS.md and docs/*.md points to an existing file (links inside fenced code blocks and links with a URL scheme or a bare #anchor are skipped); it prints one line per broken link as <file>:<line>: <target> and exits 1 when any link is broken, otherwise 0; package.json gains \"docs:links\": \"bun run scripts/docs-links.ts\"; tests/docs-links.test.ts runs it on a temp dir with one good and one broken link. (2) Issue 126: src/work/summary.ts exports summarizeStore(store) that returns {revision, total, byStatus} where byStatus has the six statuses queued, running, review, parked, blocked and done in that order, each a count; tests/work/summary.test.ts checks it on tests/fixtures/coord/d3/store.json. (3) Issue 127, which needs the summary of issue 126: scripts/work-summary.ts reads the work store at --store <path>, or at the storePath of config/work.json when the flag is absent, and prints JSON.stringify(summarizeStore(store)) as one line; a store error prints work:summary: <message> to stderr and exits 2; package.json gains \"work:summary\": \"bun run scripts/work-summary.ts\"; docs/work-store.md gains a short section on the command; tests/work/summary-cli.test.ts spawns it on tests/fixtures/coord/d3/store.json.",
+  "constraints": [
+    "Change no file under src/mcp, src/loop, src/approvals, src/coord, .agents or config.",
+    "No new dependencies.",
+    "Each item delivers exactly one issue and sets that issue number.",
+    "The item for issue 127 depends on the item for issue 126; the other two items have no dependencies.",
+    "Each item adds one test file with at most two tests, and bun run gates passes."
+  ],
+  "issues": [
+    { "number": 125, "title": "Check relative Markdown links in the docs" },
+    { "number": 126, "title": "Summarize the work store by status" },
+    { "number": 127, "title": "work:summary command for the work store" }
+  ],
+  "maxItems": 3,
+  "preferredModel": "meta/muse-glimmer-30b"
+}

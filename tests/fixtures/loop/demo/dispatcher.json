@@ -1,0 +1,9 @@
+{
+  "baseBranch": "main",
+  "branchPrefix": "moc/",
+  "waitTimeoutMs": 1000,
+  "lostAfterUnreachable": 3,
+  "nonTerminalPauseMs": 50,
+  "unreachableBackoffMs": 100,
+  "registryPath": "logs/loop-demo-registry.json"
+}

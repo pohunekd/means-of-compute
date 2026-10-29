@@ -1,0 +1,6 @@
+{
+  "requestsPath": "logs/loop-demo/approval-requests.json",
+  "operators": ["owner"],
+  "maxPendingRequests": 20,
+  "maxReasonChars": 2000
+}

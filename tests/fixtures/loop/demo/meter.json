@@ -1,0 +1,17 @@
+{
+  "listenEnv": "MOC_METER_LISTEN",
+  "listenAlias": "factory",
+  "secretEnv": "MOC_METER_SECRET",
+  "hostAddressesFileEnv": "MOC_METER_HOST_ADDRESSES_FILE",
+  "usageLogPath": "logs/loop-demo/meter-usage.jsonl",
+  "sessionModelId": "moc-session",
+  "maxRequestBytes": 16777216,
+  "maxUsageScanBytes": 4194304,
+  "clientIdleTimeoutSec": 30,
+  "firstByteTimeoutMs": 300000,
+  "idleTimeoutMs": 120000,
+  "totalTimeoutMs": 1800000,
+  "drainTimeoutMs": 30000,
+  "unboundGrantTtlMs": 120000,
+  "maxInFlightPerSession": 4
+}

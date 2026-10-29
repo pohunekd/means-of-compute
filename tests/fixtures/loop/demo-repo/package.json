@@ -1,0 +1,7 @@
+{
+  "name": "demo-repo",
+  "private": true,
+  "scripts": {
+    "gates": "bun test"
+  }
+}

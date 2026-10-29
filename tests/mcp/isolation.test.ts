@@ -76,7 +76,7 @@ export function localDependencies(pkg: unknown): string[] {
     return [];
   }
   const record = pkg as Record<string, unknown>;
-  const names: string[] = [];
+  const messages: string[] = [];
   for (const section of [
     "dependencies",
     "devDependencies",
@@ -98,11 +98,11 @@ export function localDependencies(pkg: unknown): string[] {
         spec.startsWith(".") ||
         spec.startsWith("/")
       ) {
-        names.push(name);
+        messages.push(`dependency "${name}" points into the file system: ${spec}`);
       }
     }
   }
-  return names;
+  return messages;
 }
 
 export function checkTarget(
@@ -274,10 +274,24 @@ test("checkTarget gates closure edges by location and file type (X4 Y6)", () => 
 test("root package dependencies never point into the file system (X4 Y8)", () => {
   const pkg: unknown = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
   expect(localDependencies(pkg)).toEqual([]);
-  expect(localDependencies({ dependencies: { zzpkg: "file:./src/zzpkg" } })).toEqual(["zzpkg"]);
+  expect(localDependencies({ dependencies: { zzpkg: "file:./src/zzpkg" } })).toEqual([
+    'dependency "zzpkg" points into the file system: file:./src/zzpkg',
+  ]);
   expect(localDependencies({ devDependencies: { a: "link:../a", b: "workspace:*" } })).toEqual([
-    "a",
-    "b",
+    'dependency "a" points into the file system: link:../a',
+    'dependency "b" points into the file system: workspace:*',
+  ]);
+  expect(
+    localDependencies({
+      dependencies: { c: "./src/zzpkg", d: "/abs/zzpkg" },
+      optionalDependencies: { e: "file:./src/zze" },
+      peerDependencies: { f: "file:./src/zzf" },
+    }),
+  ).toEqual([
+    'dependency "c" points into the file system: ./src/zzpkg',
+    'dependency "d" points into the file system: /abs/zzpkg',
+    'dependency "e" points into the file system: file:./src/zze',
+    'dependency "f" points into the file system: file:./src/zzf',
   ]);
 });
 

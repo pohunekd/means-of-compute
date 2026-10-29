@@ -1045,7 +1045,6 @@ test("MT9 a missing marker parks in auditing and returns otherwise", async () =>
         expect(commentCalls).toBe(0);
         const li = await readItem(seed.ctx.statePath);
         expect(li.park).toMatchObject({ code: "marker-missing" });
-        await reconcile(seed.ctx.storePath, item().id, li, seed.ctx);
         const parked = (await Bun.file(seed.ctx.storePath).json()) as { items: WorkItem[] };
         expect(parked.items[0]?.status).toBe("parked");
         expect(li.rounds).toHaveLength(0);
@@ -1594,9 +1593,8 @@ test("MT21 a failed trial in merging audits again then closes trial-failed", asy
           passed: false,
         });
         expect(mid.rounds).toHaveLength(0);
-        await seedFinishedSession(seed.harness.registryPath);
-        const second = await mergeCheck(seed.ctx, item());
-        expect(second).toBe("idle");
+        const next = await mergeCheck(seed.ctx, item());
+        expect(next).toBe("idle");
         const li = await readItem(seed.ctx.statePath);
         expect(li.phase).toBe("idle");
         expect(seed.head).not.toBe("");
@@ -1657,8 +1655,7 @@ test("MT22 a finalizing close skips the stall decision", async () => {
           ...seed.ctx,
           stall: { maxStagnantRounds: 1, maxRetries: 2 },
         };
-        const outcome = await mergeCheck(stalled, item());
-        expect(outcome).toBe("done");
+        await expect(mergeCheck(stalled, item())).resolves.toBe("done");
         const li = await readItem(stalled.statePath);
         expect(li.phase).toBe("final");
         expect(li.finalize).toEqual({ result: "success", done: true });

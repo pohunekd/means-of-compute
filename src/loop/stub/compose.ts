@@ -7,7 +7,13 @@ import { isWorkItem } from "../../../contracts/v1/validate.js";
 import type { AuditDeps } from "../../auditor/audit-types.js";
 import { createCliBudgetGate } from "../../budget/gate.js";
 import { utcCalendarDay } from "../../budget/cost.js";
-import { closeAll, schedulerContextOf, withRegistryLock, type Closer } from "../compose.js";
+import {
+  LoopStartupError,
+  closeAll,
+  schedulerContextOf,
+  withRegistryLock,
+  type Closer,
+} from "../compose.js";
 import type { LoopConfigs } from "../compose.js";
 import { digestFor, writeDigestFile } from "../digest.js";
 import { openLoopLog } from "../log.js";
@@ -18,7 +24,7 @@ import { readInputText, statInputPath } from "../../fs/input.js";
 import { createStubGitHub } from "./github.js";
 import { createStubCollector } from "./observations.js";
 import { createStubWorker } from "./worker.js";
-import { prepareSandbox } from "./sandbox.js";
+import { prepareSandbox, SandboxError } from "./sandbox.js";
 import { createMeteredPort } from "../../meter/metered-port.js";
 import { startMeter } from "../../meter/meter.js";
 import { systemTimers } from "../../meter/timers.js";
@@ -50,12 +56,12 @@ export interface StubRunDeps {
 
 function readScripts(scripts: unknown, path: string): Record<string, readonly string[]> {
   if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) {
-    throw new Error(`queue ${path}: scripts must be an object`);
+    throw new LoopStartupError(`queue ${path}: scripts must be an object`);
   }
   const out: Record<string, string[]> = {};
   for (const [id, value] of Object.entries(scripts as Record<string, unknown>)) {
     if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-      throw new Error(`queue ${path}: scripts for ${id} must be a string array`);
+      throw new LoopStartupError(`queue ${path}: scripts for ${id} must be a string array`);
     }
     out[id] = [...(value as string[])];
   }
@@ -63,23 +69,29 @@ function readScripts(scripts: unknown, path: string): Record<string, readonly st
 }
 
 async function readQueue(path: string): Promise<StubQueue> {
-  const text = await readFile(path, "utf8");
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(`queue ${path}: cannot read (${detail})`);
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`queue ${path}: not valid JSON`);
+    throw new LoopStartupError(`queue ${path}: not valid JSON`);
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new Error(`queue ${path}: must hold items and scripts`);
+    throw new LoopStartupError(`queue ${path}: must hold items and scripts`);
   }
   const record = raw as { items?: unknown; scripts?: unknown };
   if (!Array.isArray(record.items)) {
-    throw new Error(`queue ${path}: items must be an array`);
+    throw new LoopStartupError(`queue ${path}: items must be an array`);
   }
   for (const item of record.items) {
     if (!isWorkItem(item)) {
-      throw new Error(`queue ${path}: an item fails the WorkItem contract`);
+      throw new LoopStartupError(`queue ${path}: an item fails the WorkItem contract`);
     }
   }
   return { items: record.items as WorkItem[], scripts: readScripts(record.scripts, path) };
@@ -92,23 +104,38 @@ async function loopbackDescriptors(
   dir: string,
   url: string,
 ): Promise<Readonly<Record<string, ProviderDescriptor>>> {
-  const schema = await loadProviderSchema();
+  let schema: import("../../providers/schema.js").ProviderSchema;
+  try {
+    schema = await loadProviderSchema();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
   const descriptors: Record<string, ProviderDescriptor> = {};
   for (const id of ids) {
     const file = join(dir, `${id}.json`);
-    if ((await statInputPath("Provider descriptor", file)) === "absent") {
-      throw new Error(`Provider descriptor ${file}: file is missing`);
+    let text: string;
+    try {
+      if ((await statInputPath("Provider descriptor", file)) === "absent") {
+        throw new LoopStartupError(`Provider descriptor ${file}: file is missing`);
+      }
+      text = await readInputText("Provider descriptor", file);
+    } catch (error: unknown) {
+      if (error instanceof LoopStartupError) {
+        throw error;
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
     }
-    const text = await readInputText("Provider descriptor", file);
     let raw: unknown;
     try {
       raw = JSON.parse(text) as unknown;
     } catch {
-      throw new Error(`Provider descriptor ${file}: not valid JSON`);
+      throw new LoopStartupError(`Provider descriptor ${file}: not valid JSON`);
     }
     const errors = schema.descriptorErrors({ ...(raw as Record<string, unknown>), baseUrl: url });
     if (errors !== null) {
-      throw new Error(`provider ${id}: ${errors}`);
+      throw new LoopStartupError(`provider ${id}: ${errors}`);
     }
     const descriptor = raw as ProviderDescriptor;
     descriptors[id] = { ...descriptor, baseUrl: url, apiKeyEnv: undefined };
@@ -117,16 +144,27 @@ async function loopbackDescriptors(
 }
 
 async function observedAliases(path: string): Promise<readonly string[]> {
-  const text = await readFile(path, "utf8");
-  const parsed: unknown = JSON.parse(text) as unknown;
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new LoopStartupError("observations file is not valid JSON");
+  }
   if (!Array.isArray(parsed)) {
-    throw new Error("observations file must hold an array");
+    throw new LoopStartupError("observations file must hold an array");
   }
   const aliases: string[] = [];
   for (const entry of parsed) {
     const alias = (entry as { hostAlias?: unknown }).hostAlias;
     if (typeof alias !== "string") {
-      throw new Error("observations entry has no hostAlias");
+      throw new LoopStartupError("observations entry has no hostAlias");
     }
     aliases.push(alias);
   }
@@ -149,20 +187,20 @@ export async function runStub(deps: StubRunDeps): Promise<0 | 1 | 3> {
   const statePath = resolve(loop.statePath);
   const storePath = resolve(configs.work.storePath);
   const approvalsPath = resolve(configs.approvals.requestsPath);
-  for (const [label, path] of [
-    ["meter usage log", meterLogPath],
-    ["ledger", ledgerPath],
-    ["verdict dir", verdictDir],
-    ["loop state", statePath],
-    ["work store", storePath],
-    ["approvals requests", approvalsPath],
+  for (const [key, path] of [
+    ["usageLogPath", meterLogPath],
+    ["ledgerPath", ledgerPath],
+    ["verdictDir", verdictDir],
+    ["statePath", statePath],
+    ["storePath", storePath],
+    ["requestsPath", approvalsPath],
   ] as const) {
     if (!within(path)) {
-      throw new Error(`${label} ${path} is outside the sandbox`);
+      throw new LoopStartupError(`stub path outside the sandbox: ${key}`);
     }
   }
   if (within(registryPath)) {
-    throw new Error(`registry ${registryPath} is inside the sandbox`);
+    throw new LoopStartupError("stub path outside the sandbox: registryPath");
   }
   const queue = await readQueue(resolve(deps.queuePath));
   await mkdir(dirname(registryPath), { recursive: true });
@@ -198,15 +236,22 @@ async function runInside(
   const digestDir = resolve(loop.digest.dir);
   const scratchDir = resolve(loop.trialMerge.scratchDir);
   const configDir = resolve(loop.github.configDir);
-  await prepareSandbox({
-    sandboxDir,
-    demoRepoDir: resolve(stub.demoRepoDir),
-    registryPath,
-    ownedDirs: [verdictDir, digestDir, scratchDir, configDir],
-    configDir: "config",
-    ledgerPath,
-    git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
-  });
+  try {
+    await prepareSandbox({
+      sandboxDir,
+      demoRepoDir: resolve(stub.demoRepoDir),
+      registryPath,
+      ownedDirs: [verdictDir, digestDir, scratchDir, configDir],
+      configDir: "config",
+      ledgerPath,
+      git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
+    });
+  } catch (error: unknown) {
+    if (error instanceof SandboxError) {
+      throw new LoopStartupError(error.message, { cause: error });
+    }
+    throw error;
+  }
   const refusal = checkItems(
     queue.items,
     configs.work.maxItemBytes,
@@ -214,7 +259,7 @@ async function runInside(
     new Set(configs.specs.map((spec) => spec.repo)),
   );
   if (refusal !== null) {
-    throw new Error(`queue refused: ${refusal.code}`);
+    throw new LoopStartupError(`queue refused: ${refusal.code}`);
   }
   await updateWorkStore(storePath, (store) => {
     const applied = applySubmission(
@@ -225,19 +270,36 @@ async function runInside(
       configs.work.maxStoreItems,
     );
     if (applied.value.kind === "refused") {
-      throw new Error(`queue refused: ${applied.value.refusal.code}`);
+      throw new LoopStartupError(`queue refused: ${applied.value.refusal.code}`);
     }
     return Promise.resolve({ next: applied.next, value: undefined });
   });
-  await requireWritableTarget("loop state", statePath);
-  await requireWritableTarget("work store", storePath);
-  await requireWritableTarget("ledger", ledgerPath);
-  await requireWritableTarget("approvals", approvalsPath);
-  await requireWritableTarget("results", resultsPath);
-  const log = await openLoopLog(loop.logPath, () => new Date());
+  try {
+    await requireWritableTarget("loop state", statePath);
+    await requireWritableTarget("work store", storePath);
+    await requireWritableTarget("ledger", ledgerPath);
+    await requireWritableTarget("approvals", approvalsPath);
+    await requireWritableTarget("results", resultsPath);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
+  let log: import("../log.js").LoopLog;
+  try {
+    log = await openLoopLog(loop.logPath, () => new Date());
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
   closers.push({ name: "loop-log", close: () => log.close() });
   log.log({ event: "factory-start" });
-  const loopback = await startLoopback(resolve(stub.recordingsPath));
+  let loopback: import("../../providers/loopback.js").LoopbackControl;
+  try {
+    loopback = await startLoopback(resolve(stub.recordingsPath));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
   closers.push({
     name: "loopback",
     close: () => {
@@ -252,8 +314,18 @@ async function runInside(
   }
   providerIds.add(configs.auditor.mergeAuditor.providerId);
   const sandboxProvidersDir = join(sandboxDir, "config", "providers");
-  const descriptors = await loopbackDescriptors([...providerIds], sandboxProvidersDir, url);
-  const aliases = await observedAliases(resolve(stub.observationsPath));
+  let descriptors: Readonly<Record<string, import("../../providers/types.js").ProviderDescriptor>>;
+  let aliases: readonly string[];
+  try {
+    descriptors = await loopbackDescriptors([...providerIds], sandboxProvidersDir, url);
+    aliases = await observedAliases(resolve(stub.observationsPath));
+  } catch (error: unknown) {
+    if (error instanceof LoopStartupError) {
+      throw error;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
   const hostsPath = join(sandboxDir, "meter-hosts.json");
   const hostsFile: Record<string, readonly string[]> = {};
   const hostAddresses = new Map<string, ReadonlySet<string>>();
@@ -262,20 +334,26 @@ async function runInside(
     hostAddresses.set(alias, new Set(["127.0.0.1"]));
   }
   await writeFile(hostsPath, `${JSON.stringify(hostsFile)}\n`, { mode: 0o600 });
-  const meter = await startMeter({
-    config: configs.meter,
-    env: {
-      listen: { host: "127.0.0.1", port: 0 },
-      secret: randomBytes(32),
-      hostAddresses,
-      hostAddressesFile: hostsPath,
-    },
-    providers: descriptors,
-    now: () => new Date(),
-    log: () => undefined,
-    timers: systemTimers,
-    logIo: systemUsageLogIo,
-  });
+  let meter: import("../../meter/meter.js").Meter;
+  try {
+    meter = await startMeter({
+      config: configs.meter,
+      env: {
+        listen: { host: "127.0.0.1", port: 0 },
+        secret: randomBytes(32),
+        hostAddresses,
+        hostAddressesFile: hostsPath,
+      },
+      providers: descriptors,
+      now: () => new Date(),
+      log: () => undefined,
+      timers: systemTimers,
+      logIo: systemUsageLogIo,
+    });
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
   closers.push({ name: "meter", close: () => meter.close() });
   const budgetGate = createCliBudgetGate({
     command: ["bun", resolve("src/budget/check.ts")],
@@ -295,11 +373,19 @@ async function runInside(
     log: () => undefined,
     settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
   });
+  const spec = configs.specs[0];
+  if (spec === undefined) {
+    throw new LoopStartupError("stub needs exactly one factory spec repo");
+  }
+  const login = loop.github.factoryLogin;
+  if (login === null) {
+    throw new LoopStartupError("stub needs github.factoryLogin");
+  }
   const github: GitHubPort = createStubGitHub({
-    repo: configs.specs[0]?.repo ?? "example/demo-repo",
+    repo: spec.repo,
     originDir: join(sandboxDir, "origin.git"),
     baseBranch: configs.dispatcher.baseBranch,
-    factoryLogin: loop.github.factoryLogin ?? "moc-demo",
+    factoryLogin: login,
     git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
     scratchDir,
     ci: () => "success",

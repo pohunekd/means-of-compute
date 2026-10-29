@@ -1,6 +1,5 @@
 // Shared loop composition: config loading, the registry lock, the
 // closers and the scheduler context the production mode reuses.
-import { dirname, resolve } from "node:path";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import { loadApprovalsConfig, type ApprovalsConfig } from "../approvals/config.js";
 import { createApprovalsView, type ApprovalsView } from "./approvals-view.js";
@@ -11,14 +10,14 @@ import { loadBudgetGateConfig } from "../budget/gate.js";
 import { loadDispatcherConfig, type DispatcherConfig } from "../dispatcher/config.js";
 import { FileLockError, withFileLock } from "../fs/lock.js";
 import { loadLedgerConfig } from "../ledger/read.js";
-import { createMergeMutex, type MergeContext, type MergeMutex } from "./merge.js";
+import { createMergeMutex, type MergeMutex } from "./merge.js";
 import { loadMeterConfig, type MeterConfig } from "../meter/config.js";
 import { loadPlacementConfig, type PlacementConfig } from "../placement/config.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import type { GitHubPort } from "./github.js";
 import type { GitDeps } from "./git.js";
 import type { HostStateCollector } from "../hoststate/collector.js";
-import { createScheduler, type SchedulerContext } from "./scheduler.js";
+import type { SchedulerContext } from "./scheduler.js";
 import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { loadLoopConfig, type LoopConfig, type LoopMode } from "./config.js";
@@ -144,7 +143,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
   if (configs.loop.github.factoryLogin === null) {
     throw new LoopStartupError("github.factoryLogin is not set");
   }
-  const factoryLogin = configs.loop.github.factoryLogin as string;
+  const factoryLogin = configs.loop.github.factoryLogin;
   const mergeMutex: MergeMutex = createMergeMutex();
   const approvals: ApprovalsView = createApprovalsView(configs.approvals.requestsPath);
   const git: GitDeps = { PATH: ports.gitPath, timeoutMs: configs.loop.github.timeoutMs };

@@ -1,6 +1,6 @@
 // Demo stub run: the MS4/MS5 composition over the merged modules.
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { WorkItem } from "../../../contracts/v1/types.js";
 import { isWorkItem } from "../../../contracts/v1/validate.js";
@@ -149,7 +149,6 @@ export async function runStub(deps: StubRunDeps): Promise<0 | 1 | 3> {
   const statePath = resolve(loop.statePath);
   const storePath = resolve(configs.work.storePath);
   const approvalsPath = resolve(configs.approvals.requestsPath);
-  const resultsPath = resolve(loop.resultsPath);
   for (const [label, path] of [
     ["meter usage log", meterLogPath],
     ["ledger", ledgerPath],
@@ -162,8 +161,8 @@ export async function runStub(deps: StubRunDeps): Promise<0 | 1 | 3> {
       throw new Error(`${label} ${path} is outside the sandbox`);
     }
   }
-  if (!within(registryPath)) {
-    throw new Error(`registry ${registryPath} is outside the sandbox`);
+  if (within(registryPath)) {
+    throw new Error(`registry ${registryPath} is inside the sandbox`);
   }
   const queue = await readQueue(resolve(deps.queuePath));
   await mkdir(dirname(registryPath), { recursive: true });
@@ -217,7 +216,7 @@ async function runInside(
   if (refusal !== null) {
     throw new Error(`queue refused: ${refusal.code}`);
   }
-  await updateWorkStore(storePath, async (store) => {
+  await updateWorkStore(storePath, (store) => {
     const applied = applySubmission(
       store,
       queue.items,
@@ -228,7 +227,7 @@ async function runInside(
     if (applied.value.kind === "refused") {
       throw new Error(`queue refused: ${applied.value.refusal.code}`);
     }
-    return { next: applied.next, value: undefined };
+    return Promise.resolve({ next: applied.next, value: undefined });
   });
   await requireWritableTarget("loop state", statePath);
   await requireWritableTarget("work store", storePath);
@@ -408,7 +407,6 @@ async function runInside(
     );
     await writeDigestFile(digestDir, today, text);
   }
-  const finalStore = await readWorkStore(storePath);
   const finalState = await readLoopState(statePath);
   let merged = 0;
   let blocked = 0;
@@ -423,7 +421,6 @@ async function runInside(
       parked += 1;
     }
   }
-  void finalStore;
   deps.out(
     `loop: stub run done merged=${String(merged)} blocked=${String(blocked)} parked=${String(parked)}`,
   );

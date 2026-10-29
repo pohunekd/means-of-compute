@@ -37,6 +37,7 @@ import {
   runMuseSession,
   type MuseSessionResult,
 } from "./session.js";
+import { readSurface, runSurfaceProbe, type SurfaceVerdict } from "./surface.js";
 
 type Phase = "plan" | "watch" | "full";
 
@@ -514,6 +515,57 @@ async function runSession(
       stop = "signal";
     }
     let result: MuseSessionResult | null = null;
+    let sessionSurfaceOk = true;
+    if (stop === null && !controller.signal.aborted) {
+      const probeSession: MuseSession = { ...session, sessionId: randomUUID() };
+      const probe = await runSurfaceProbe(
+        { config, session: probeSession, signal: controller.signal },
+        { env: childEnv },
+      );
+      if (probe.kind === "checked") {
+        const verdict = probe.verdict;
+        const ok = verdict.ok;
+        await log.append({
+          ts: new Date().toISOString(),
+          event: "surface",
+          k: 1,
+          stage: "probe",
+          ok,
+          reason: ok ? null : (verdict as { readonly reason: string }).reason,
+          extra: ok ? [] : (verdict as { readonly extra: readonly string[] }).extra,
+          missing: ok ? [] : (verdict as { readonly missing: readonly string[] }).missing,
+        });
+        if (!ok) {
+          stop = "tool-surface";
+        }
+      } else if (probe.kind === "probe-failed") {
+        await log.append({
+          ts: new Date().toISOString(),
+          event: "surface",
+          k: 1,
+          stage: "probe",
+          ok: false,
+          reason: probe.reason,
+          extra: [],
+          missing: [],
+        });
+        stop = "tool-surface";
+      } else if (probe.kind === "spawn-failed") {
+        await log.append({
+          ts: new Date().toISOString(),
+          event: "surface",
+          k: 1,
+          stage: "probe",
+          ok: false,
+          reason: "probe-spawn",
+          extra: [],
+          missing: [],
+        });
+        stop = "muse-unavailable";
+      } else {
+        stop = "signal";
+      }
+    }
     if (stop === null && !controller.signal.aborted) {
       const onSpawn = (pid: number): void => {
         writeFileSync(recordPath, `${JSON.stringify({ runId, k: 1, pid })}\n`, {
@@ -542,6 +594,23 @@ async function runSession(
         exportOk: result.exportOk,
         attentionKeys: [],
       });
+      if (result.outcome.kind !== "spawn-failed") {
+        const verdict: SurfaceVerdict = result.exportOk
+          ? await readSurface(join(runDir, "session-1-export.json"))
+          : { ok: false, reason: "unreadable", extra: [], missing: [] };
+        const ok = verdict.ok;
+        await log.append({
+          ts: new Date().toISOString(),
+          event: "surface",
+          k: 1,
+          stage: "session",
+          ok,
+          reason: ok ? null : (verdict as { readonly reason: string }).reason,
+          extra: ok ? [] : (verdict as { readonly extra: readonly string[] }).extra,
+          missing: ok ? [] : (verdict as { readonly missing: readonly string[] }).missing,
+        });
+        sessionSurfaceOk = ok;
+      }
     } else if (stop === null) {
       stop = "signal";
     }
@@ -570,6 +639,8 @@ async function runSession(
         stop = "muse-unavailable";
       } else if (result !== null && result.outcome.kind === "aborted") {
         stop = "signal";
+      } else if (!sessionSurfaceOk) {
+        stop = "tool-surface";
       } else if (calls.some((call) => call.tool === "submit_work" && call.outcome === "ok")) {
         stop = "plan-done";
       } else {

@@ -126,7 +126,6 @@ function parseScript(text: string): FakeScript {
 
 async function runExec(): Promise<void> {
   const scriptPath = readScriptEnv("FAKE_MUSE_SCRIPT");
-  const recordPath = readScriptEnv("FAKE_MUSE_RECORD");
   const script = parseScript(await Bun.file(scriptPath).text());
   const providerIndex = process.argv.indexOf("--provider");
   const provider = providerIndex === -1 ? undefined : process.argv[providerIndex + 1];
@@ -142,7 +141,12 @@ async function runExec(): Promise<void> {
     await mkdir(`${home}/fake-muse-sessions`, { recursive: true });
     await Bun.write(`${home}/fake-muse-sessions/${sessionValue}`, `${String(provider)}\n`);
   }
+  if (provider === "echo") {
+    await readStdinBytes();
+    process.exit(0);
+  }
   const stdinBytes = await readStdinBytes();
+  const recordPath = readScriptEnv("FAKE_MUSE_RECORD");
   const record = {
     argv: process.argv.slice(2),
     envKeys: Object.keys(process.env).sort(),
@@ -153,9 +157,6 @@ async function runExec(): Promise<void> {
   };
   await Bun.write(recordPath, `${JSON.stringify(record)}\n`);
   await chmod(recordPath, 0o600);
-  if (provider === "echo") {
-    process.exit(0);
-  }
   if (script.hang) {
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
       detached: false,

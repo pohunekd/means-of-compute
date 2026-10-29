@@ -6,6 +6,7 @@ import { InputPathError } from "../fs/input.js";
 import { finalizeUsage } from "../ledger/store.js";
 import { GitHubError, type GitHubPort } from "./github.js";
 import type { StallDecision } from "./policy.js";
+import { fileBlockedFollowup } from "./followups.js";
 import { LoopStateDataError, readLoopItem, updateLoopState, writeLoopItem } from "./state.js";
 import type { Escalation, LoopItem } from "./types.js";
 import type { CoreContext } from "./rounds.js";
@@ -19,6 +20,8 @@ export interface ParkContext extends CoreContext {
   readonly readyLabel: string;
   readonly blockedLabel: string;
   readonly maxRetries: number;
+  readonly followupLabels: readonly string[];
+  readonly verdictDir: string;
 }
 
 export type ParkProgress = "done" | "pending";
@@ -297,6 +300,10 @@ async function advanceStall(
 async function advanceBlocked(ctx: ParkContext, item: WorkItem): Promise<ParkProgress> {
   const finalized = await finalizeItem(ctx, item);
   if (finalized === "pending") {
+    return "pending";
+  }
+  const filed = await fileBlockedFollowup(ctx, item);
+  if (filed === "pending") {
     return "pending";
   }
   if (item.issue === null) {

@@ -16,6 +16,7 @@ import {
   previousRoundOf,
   publishStep,
 } from "./review.js";
+import { runDigest } from "./digest.js";
 import type { PlacementConfig } from "../placement/config.js";
 import { placeObserved } from "../placement/observed.js";
 import type { LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
@@ -64,6 +65,9 @@ export interface SchedulerContext extends MergeContext {
   readonly intake: LoopIntakeConfig;
   readonly trustedAssociations: readonly string[];
   readonly maxItemBytes: number;
+  readonly digestDir: string;
+  readonly providersDir: string;
+  readonly nvidiaProviderId: string;
 }
 
 export interface TickReport {
@@ -558,6 +562,7 @@ async function tickOnce(
   }
   if (!isStopped() && getFailure() === null) {
     await runIntake(ctx, intake);
+    await runDigest(ctx);
   }
   const carry: ClaimCarry = { active: 0, running: [], claimed: [], launched: [] };
   const counted = await readWorkStore(ctx.storePath);

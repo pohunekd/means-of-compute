@@ -10,6 +10,7 @@
     "audit": "bun run src/auditor/cli.ts",
     "budget:check": "bun run src/budget/check.ts",
     "coord": "bun run src/coord/main.ts",
+    "coord:evidence": "bun run src/coord/evidence.ts",
     "ledger:record": "bun run src/ledger/cli.ts record",
     "ledger:query": "bun run src/ledger/cli.ts query",
     "factory:serve": "bun run src/factory/serve.ts",

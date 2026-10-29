@@ -257,6 +257,11 @@ export async function closeReviewRound(
     ...(input.finalize === undefined ? {} : { finalize: input.finalize }),
   };
   const decision = await closeRound(ctx, item, close);
+  if (close.finalize !== undefined) {
+    const stored = await readReviewItem(ctx, item.id);
+    await reconcile(ctx.storePath, item.id, stored, ctx);
+    return "idle";
+  }
   if (decision.kind === "park") {
     await parkStall(ctx, item, decision);
     return "parked";

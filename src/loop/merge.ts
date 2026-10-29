@@ -3,19 +3,12 @@
 // merge outcome closes the round through review.ts.
 import { resolve } from "node:path";
 import type { AuditVerdict, FactorySpec, WorkItem } from "../../contracts/v1/types.js";
+import { m1, type M1Result } from "./merge-rule.js";
 import { readVerdicts } from "../auditor/store.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
 import { fetchRefs, isAncestor, trialMerge, GitError } from "./git.js";
 import { GitHubError } from "./github.js";
-import {
-  baseCheck,
-  ciStatus,
-  factoryMarkers,
-  m1,
-  markerMatches,
-  mergeStep,
-  verdictCheck,
-} from "./merge-rule.js";
+import { baseCheck, ciStatus, factoryMarkers, markerMatches, mergeStep, verdictCheck } from "./merge-rule.js";
 import { escalate, finalizeItem, parkOperator } from "./park.js";
 import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
 import type { LoopItem } from "./types.js";
@@ -62,8 +55,8 @@ export interface MergeContext extends ReviewContext {
 type DecideInput =
   | {
       readonly kind: "early";
-      early: "draft" | "head-moved" | "merged" | "operator";
-      detail: { readonly kind: string; readonly code?: string } | null | number | string | boolean;
+      early: Exclude<M1Result["kind"], "pass">;
+      detail: M1Result;
       mergeCommit: string | null;
     }
   | {
@@ -84,11 +77,8 @@ async function decideMerge(
     return "pending";
   }
   if (tag === "head-moved") {
-    const detail = input.kind === "early" ? input.detail : null;
     const moved =
-      detail !== null && typeof detail === "object" && "headSha" in detail
-        ? (detail as { readonly headSha: string }).headSha
-        : h;
+      input.kind === "early" && input.detail.kind === "head-moved" ? input.detail.headSha : h;
     const fresh = await readReviewItem(ctx, item.id);
     await writeReviewItem(ctx, item.id, {
       ...(await readReviewItem(ctx, item.id)),
@@ -113,19 +103,21 @@ async function decideMerge(
     throw new LoopStateDataError(`loop state ${ctx.statePath}: MERGED view without a handler`);
   }
   if (tag === "operator") {
-    const detail = input.kind === "early" ? input.detail : null;
-    const code =
-      input.kind === "full" && input.step.kind === "operator"
-        ? input.step.code
-        : detail !== null &&
-            typeof detail === "object" &&
-            "kind" in detail &&
-            (detail as { readonly kind: string }).kind === "operator" &&
-            "code" in detail &&
-            typeof (detail as { readonly code: unknown }).code === "string"
-          ? (detail as { readonly code: "base-mismatch" | "merged-elsewhere" | "pull-closed" }).code
-          : "pull-closed";
-    await parkOperator(ctx, item, code);
+    if (input.kind === "early") {
+      if (input.detail.kind !== "operator") {
+        throw new LoopStateDataError(
+          `loop state ${ctx.statePath}: unexpected early merge result`,
+        );
+      }
+      await parkOperator(ctx, item, input.detail.code);
+      return "parked";
+    }
+    if (input.step.kind !== "operator") {
+      throw new LoopStateDataError(
+        `loop state ${ctx.statePath}: unexpected merge result`,
+      );
+    }
+    await parkOperator(ctx, item, input.step.code);
     return "parked";
   }
   if (input.kind === "early") {
@@ -146,15 +138,8 @@ async function decideMerge(
   }
   if (step.kind === "audit-missing") {
     const fresh = await readReviewItem(ctx, item.id);
-    if (fresh.phase !== "auditing") {
-      await writeReviewItem(ctx, item.id, {
-        ...(await readReviewItem(ctx, item.id)),
-        phase: "auditing",
-      });
-      return "auditing";
-    }
-    await parkOperator(ctx, item, "audit-missing");
-    return "parked";
+    await writeReviewItem(ctx, item.id, { ...fresh, phase: "auditing" });
+    return "auditing";
   }
   if (step.kind === "verdict-invalid") {
     await parkOperator(ctx, item, "verdict-invalid");
@@ -210,6 +195,10 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" moved under a ready merge`,
     );
+  }
+  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
+  if (spec === undefined) {
+    throw new Error(`merge: no factory spec for ${item.repo}`);
   }
   const view = await ctx.github.viewPull(item.repo, pull.number);
   const first = m1(view, h, baseBranch);
@@ -297,6 +286,14 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
       trial: { baseSha: base, headSha: h, passed },
     });
     if (!passed) {
+      const beforeClose = await readReviewItem(ctx, item.id);
+      if (beforeClose.phase === "merging") {
+        await writeReviewItem(ctx, item.id, {
+          ...beforeClose,
+          phase: "auditing",
+          trial: { baseSha: base, headSha: h, passed: false },
+        });
+      }
       await closeReviewRound(ctx, item, {
         outcome: "trial-failed",
         headSha: h,
@@ -376,11 +373,15 @@ export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"d
 }
 
 export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<MergeOutcome> {
+  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
+  if (spec === undefined) {
+    throw new Error(`merge: no factory spec for ${item.repo}`);
+  }
   const heads = await mergeHeads(ctx, item);
   const { li, baseBranch, pull } = heads;
   const h = pull.headSha;
   try {
-    return await decideOnView(ctx, item, li, h, baseBranch);
+    return await decideOnView(ctx, item, li, h, baseBranch, pull.number);
   } catch (error: unknown) {
     const failure = githubErrorOf(error);
     if (failure !== null) {
@@ -412,6 +413,14 @@ async function mergeHeads(
   if (li.phase !== "auditing" && li.phase !== "awaiting-approval" && li.phase !== "merging") {
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" is "${li.phase}", not a merge phase`,
+    );
+  }
+  if (
+    li.phase === "merging" &&
+    (li.trial === null || li.trial.headSha !== li.pull?.headSha || !li.trial.passed)
+  ) {
+    throw new LoopStateDataError(
+      `loop state ${ctx.statePath}: item "${item.id}" is merging without a passed trial`,
     );
   }
   const pull = li.pull;
@@ -563,8 +572,9 @@ async function decideOnView(
   li: LoopItem,
   h: string,
   baseBranch: string,
+  pullNumber: number,
 ): Promise<MergeOutcome> {
-  const view = await ctx.github.viewPull(item.repo, li.pull?.number ?? 0);
+  const view = await ctx.github.viewPull(item.repo, pullNumber);
   const first = m1(view, h, baseBranch);
   if (first.kind !== "pass") {
     return decideMerge(
@@ -578,19 +588,16 @@ async function decideOnView(
   const runs = await ctx.github.checkRuns(item.repo, h);
   const verdict = verdictCheck(
     await readVerdicts(ctx.auditor.config.verdictDir, item.id),
-    li.pull?.number ?? 0,
+    pullNumber,
     h,
     authorModelsOf(await readLedger("Loop ledger", ctx.ledgerPath), item.id),
   );
   const markerOk =
     (verdict.kind === "clean" || verdict.kind === "findings") &&
     markerMatches(
-      factoryMarkers(
-        await ctx.github.commentFirstLines(item.repo, li.pull?.number ?? 0),
-        ctx.factoryLogin,
-      ),
+      factoryMarkers(await ctx.github.commentFirstLines(item.repo, pullNumber), ctx.factoryLogin),
       item.repo,
-      li.pull?.number ?? 0,
+      pullNumber,
       h,
       verdict.verdict,
     );
@@ -600,7 +607,7 @@ async function decideOnView(
   }
   const approved =
     spec.mergeMode === "human-approval" &&
-    (await ctx.approvals.approvedMerge(item.id, li.pull?.number ?? 0, h));
+    (await ctx.approvals.approvedMerge(item.id, pullNumber, h));
   return decideMerge(
     ctx,
     item,

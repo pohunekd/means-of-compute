@@ -110,6 +110,15 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - After the merge, the loop claims rule 3 only when the merge commit's parents are exactly the tested base and the head. Otherwise it sets the global merge hold, escalates once, and still finishes the item with `baseRace` in the round record.
 - The merged close moves the item to `finalizing` in one write; `finishMerge` runs the ledger finalize, then writes `final`. A merge seen outside `merging` counts as a human intervention.
 
+## Scheduler (PR 6a)
+
+`src/loop/scheduler.ts` runs one tick at a time over every loop item:
+
+- A tick appends missing result lines, reports orphan sessions once and escalates them, clears the merge hold when the base contains the merge and its checks are green, reconciles each item fresh with no call in flight, and launches one step call per item by phase: start, watch, publish, CI (at most every `ciPollMs`), audit and merge in one call, merge, finalize, or the park step. No new call or claim starts after `stop()` or a latched failure, even mid-tick.
+- A running item also gets the session timeout check. A failed call stops the scheduler: the next tick rejects with that error, and `settled()` rejects with it once every non-watch call has settled.
+- Unless the fleet is paused, it claims ready items in store order up to `maxActiveItems`, outside their backoff window, with the model rule, placement over the collected hosts minus the item's excluded hosts and counting `starting` items from earlier ticks and the same tick, and the brief; a brief over `maxBriefBytes` parks the item as operator `brief-too-large`.
+- At startup, a `running` or `review` store item without a loop item, or with an idle one, stops the factory with `loop state missing for <ids>`.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.
@@ -134,16 +143,3 @@ scratch cleanup is best effort and never changes the result.
 `stderrPrefix` are cut on UTF-8 boundaries; an unspawnable step is
 `step-failed` with `rc: null`; merge rc 1 without the conflict line is
 `GitError` `failed`.
-
-## Scheduler (PR 6a)
-
-`src/loop/scheduler.ts` runs one tick over every loop item with `createScheduler(ctx)`:
-`tick()` launches at most one step call per item plus at most one timeout call per running item, `settled()` waits for the in-flight calls, and `stop()` drains them. A step failure latches and every later `tick()` throws it.
-
-- `recoverAtStartup` exits 2 with `loop state missing for <id>` when a `running` or `review` store item has no loop item; otherwise it writes missing loop items for `running` store rows and calls `appendMissingResults`.
-- Each tick first appends missing result lines, then files each registry session that names no live loop item as `orphan-session` and escalates `orphan:<requestId>` once without cancelling it.
-- A set merge hold fetches the base and clears the hold in one write only when the head is green and contains the merge, escalating `race-cleared` and logging `merge-hold-cleared`; red checks, a moved-away head, and a GitHub or git error keep the hold.
-- Reconcile runs first for every item, then one step per phase: a `lost` park unparks, any other park advances, `starting` drives, `running` watches, `publishing` publishes, `ci` polls at most every `ciPollMs`, `auditing` audits and merges in the same call on `audited`, `awaiting-approval` and `merging` merge, and `finalizing` finishes.
-- `running` items also launch `checkSessionTimeout`, which reads the durable registry `startedAt` and stall-cancels an overdue session once per tick.
-- Claims run last when the fleet is not paused: ready items in store order, skipping in-flight, backed-off, parked and finalizing items, sharing one result and verdict read per tick. Each claim picks the model, places the session on the running set including same-tick claims, logs `no-host` when no host fits, and parks `brief-too-large` on an oversized brief.
-- A failed tick writes one log line per step start, result, timeout and GitHub error through the shared log chain.

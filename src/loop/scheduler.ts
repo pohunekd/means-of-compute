@@ -242,10 +242,7 @@ async function reportOrphans(
 
 // One merge-hold clear attempt: fetch the base, then clear only when the
 // stored merge is an ancestor of the base and its checks are green.
-async function clearMergeHold(
-  ctx: SchedulerContext,
-  steps: ReadonlySet<string>,
-): Promise<void> {
+async function clearMergeHold(ctx: SchedulerContext, steps: ReadonlySet<string>): Promise<void> {
   const state = await readLoopState(ctx.statePath);
   if (state.mergeHold === null) {
     return;

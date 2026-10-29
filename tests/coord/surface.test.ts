@@ -74,7 +74,20 @@ test("a non-named toolset fails the mode check (U4)", () => {
 });
 
 test("empty or broken documents are unreadable (U5)", () => {
-  for (const doc of [{ events: [] }, {}, { events: [{ envelope: { payload_type: "runtime.session", payload: { event: { kind: "model_request_configured" } } } }] }]) {
+  for (const doc of [
+    { events: [] },
+    {},
+    {
+      events: [
+        {
+          envelope: {
+            payload_type: "runtime.session",
+            payload: { event: { kind: "model_request_configured" } },
+          },
+        },
+      ],
+    },
+  ]) {
     expect(checkSurface(doc)).toEqual({
       ok: false,
       reason: "unreadable",

@@ -101,14 +101,24 @@ function parseScript(text: string): FakeScript {
   if (typeof surfaceRaw !== "object" || surfaceRaw === null) {
     fail("script is not a fake muse script");
   }
-  const surface = surfaceRaw as { readonly provider?: unknown; readonly activeTools?: unknown; readonly contextSources?: unknown };
+  const surface = surfaceRaw as {
+    readonly provider?: unknown;
+    readonly activeTools?: unknown;
+    readonly contextSources?: unknown;
+  };
   if (surface.provider !== "echo" && surface.provider !== "meta") {
     fail("script is not a fake muse script");
   }
-  if (!Array.isArray(surface.activeTools) || !surface.activeTools.every((e: unknown) => typeof e === "string")) {
+  if (
+    !Array.isArray(surface.activeTools) ||
+    !surface.activeTools.every((e: unknown) => typeof e === "string")
+  ) {
     fail("script is not a fake muse script");
   }
-  if (!Array.isArray(surface.contextSources) || !surface.contextSources.every((e: unknown) => typeof e === "string")) {
+  if (
+    !Array.isArray(surface.contextSources) ||
+    !surface.contextSources.every((e: unknown) => typeof e === "string")
+  ) {
     fail("script is not a fake muse script");
   }
   return {
@@ -117,9 +127,13 @@ function parseScript(text: string): FakeScript {
     hang,
     exportFails,
     surface: {
-      provider: surface.provider,
-      activeTools: surface.activeTools as readonly string[],
-      contextSources: surface.contextSources as readonly string[],
+      provider: surface.provider === "echo" ? "echo" : "meta",
+      activeTools: surface.activeTools.filter(
+        (entry): entry is string => typeof entry === "string",
+      ),
+      contextSources: surface.contextSources.filter(
+        (entry): entry is string => typeof entry === "string",
+      ),
     },
   };
 }
@@ -127,21 +141,21 @@ function parseScript(text: string): FakeScript {
 async function runExec(): Promise<void> {
   const scriptPath = readScriptEnv("FAKE_MUSE_SCRIPT");
   const script = parseScript(await Bun.file(scriptPath).text());
-  const providerIndex = process.argv.indexOf("--provider");
-  const provider = providerIndex === -1 ? undefined : process.argv[providerIndex + 1];
-  const sessionIndex = process.argv.indexOf("--session-id");
-  const sessionId = sessionIndex === -1 ? undefined : process.argv[sessionIndex + 1];
-  if (provider === undefined || sessionId === undefined || sessionId === "") {
+  const providerFlag = process.argv.indexOf("--provider");
+  const sessionFlag = process.argv.indexOf("--session-id");
+  const providerRaw = providerFlag === -1 ? undefined : process.argv[providerFlag + 1];
+  const sessionRaw = sessionFlag === -1 ? undefined : process.argv[sessionFlag + 1];
+  if (providerRaw === undefined || sessionRaw === undefined || sessionRaw === "") {
     fail("missing provider or session id");
   }
-  const sessionValue: string = sessionId;
+  const sessionValue: string = sessionRaw;
   const home = process.env["HOME"] ?? "";
   if (home !== "") {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(`${home}/fake-muse-sessions`, { recursive: true });
-    await Bun.write(`${home}/fake-muse-sessions/${sessionValue}`, `${String(provider)}\n`);
+    await Bun.write(`${home}/fake-muse-sessions/${sessionValue}`, `${providerRaw}\n`);
   }
-  if (provider === "echo") {
+  if (providerRaw === "echo") {
     await readStdinBytes();
     process.exit(0);
   }

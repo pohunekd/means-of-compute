@@ -1,1 +1,26 @@
-{"calls":[{"argumentsFile":"notes-dag.json","tool":"submit_work"}],"exit":0,"exportFails":false,"hang":false,"surface":{"activeTools":["mcp__factory__fleet_status","mcp__factory__list_work","mcp__factory__audit_results","mcp__factory__submit_work","mcp__factory__approve","mcp__factory__pause_fleet","read_file"],"contextSources":["capability_policy","meta_context_note","security_mode","session_identity","skills","workspace_identity"],"provider":"echo"}}
+{
+  "calls": [{ "argumentsFile": "notes-dag.json", "tool": "submit_work" }],
+  "exit": 0,
+  "exportFails": false,
+  "hang": false,
+  "surface": {
+    "activeTools": [
+      "mcp__factory__fleet_status",
+      "mcp__factory__list_work",
+      "mcp__factory__audit_results",
+      "mcp__factory__submit_work",
+      "mcp__factory__approve",
+      "mcp__factory__pause_fleet",
+      "read_file"
+    ],
+    "contextSources": [
+      "capability_policy",
+      "meta_context_note",
+      "security_mode",
+      "session_identity",
+      "skills",
+      "workspace_identity"
+    ],
+    "provider": "echo"
+  }
+}

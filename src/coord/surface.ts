@@ -20,7 +20,8 @@ export const ALLOWED_CONTEXT_SOURCES: readonly string[] = [
   "workspace_identity",
 ];
 
-export type SurfaceReason = "unreadable" | "mode" | "tools" | "context" | "delegation" | "reminders";
+export type SurfaceReason =
+  "unreadable" | "mode" | "tools" | "context" | "delegation" | "reminders";
 
 export type SurfaceVerdict =
   | { readonly ok: true }
@@ -61,11 +62,13 @@ function toRecord(event: unknown): SurfaceRecord | null {
   if (typeof record.toolset !== "object" || record.toolset === null) {
     return null;
   }
-  const toolset = record.toolset as { readonly mode?: unknown; readonly active_tools?: unknown };
-  if (typeof toolset.mode !== "string" || !Array.isArray(toolset.active_tools)) {
-    return null;
-  }
-  if (!toolset.active_tools.every((entry: unknown) => typeof entry === "string")) {
+  const toolset = record.toolset as { readonly mode?: unknown; readonly active_tools: unknown };
+  const activeTools: unknown = toolset.active_tools;
+  if (
+    typeof toolset.mode !== "string" ||
+    !Array.isArray(activeTools) ||
+    !activeTools.every((entry: unknown) => typeof entry === "string")
+  ) {
     return null;
   }
   if (!Array.isArray(record.run_context_messages)) {
@@ -92,15 +95,20 @@ function toRecord(event: unknown): SurfaceRecord | null {
   if (typeof record.reminder_roster !== "object" || record.reminder_roster === null) {
     return null;
   }
-  const agents = (record.reminder_roster as { readonly agents?: unknown }).agents;
-  if (!Array.isArray(agents)) {
+  const roster = record.reminder_roster as { readonly agents: unknown };
+  if (!Array.isArray(roster.agents)) {
     return null;
   }
+  const agentCount = roster.agents.length;
+  const tools: string[] = [];
+  for (const entry of activeTools) {
+    tools.push(entry);
+  }
   return {
-    toolset: { mode: toolset.mode, activeTools: toolset.active_tools as readonly string[] },
+    toolset: { mode: toolset.mode, activeTools: tools },
     sources,
     delegationState: state,
-    agentCount: agents.length,
+    agentCount,
   };
 }
 
@@ -208,15 +216,23 @@ export interface SurfaceProbeOpts {
   readonly signal: AbortSignal;
 }
 
+function signalAborted(signal: AbortSignal): boolean {
+  return (signal as { readonly aborted: boolean }).aborted;
+}
+
 export interface SurfaceProbeDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
-export async function runSurfaceProbe(opts: SurfaceProbeOpts, deps: SurfaceProbeDeps): Promise<ProbeResult> {
+export async function runSurfaceProbe(
+  opts: SurfaceProbeOpts,
+  deps: SurfaceProbeDeps,
+): Promise<ProbeResult> {
   const { config, session, signal } = opts;
   const runDir = session.runDir;
   const stem = `probe-${String(session.k)}`;
-  if (signal.aborted) {
+  const abortedBeforeOpen = signalAborted(signal);
+  if (abortedBeforeOpen) {
     return { kind: "aborted" };
   }
   const stdoutHandle = await open(join(runDir, `${stem}.jsonl`), "wx", 0o600);
@@ -242,22 +258,24 @@ export async function runSurfaceProbe(opts: SurfaceProbeOpts, deps: SurfaceProbe
     await stderrHandle.close();
     return { kind: "spawn-failed", code: spawnCode(error) };
   }
-  const state = { timedOut: false, aborted: false, killError: null as unknown };
+  const probeTimedOut = { value: false };
+  const probeAborted = { value: false };
+  const probeKillError: { value: unknown } = { value: null };
   const timer = setTimeout(() => {
-    state.timedOut = true;
+    probeTimedOut.value = true;
     try {
       killGroup(proc.pid, "SIGKILL");
     } catch (error: unknown) {
-      state.killError = error;
+      probeKillError.value = error;
     }
   }, config.exportTimeoutMs);
   const onAbort = (): void => {
-    state.aborted = true;
+    probeAborted.value = true;
     try {
       killGroup(proc.pid, "SIGKILL");
     } catch (error: unknown) {
-      if (state.killError === null) {
-        state.killError = error;
+      if (probeKillError.value === null) {
+        probeKillError.value = error;
       }
     }
   };
@@ -270,13 +288,13 @@ export async function runSurfaceProbe(opts: SurfaceProbeOpts, deps: SurfaceProbe
     await stdoutHandle.close();
     await stderrHandle.close();
   }
-  if (state.killError !== null) {
-    throw state.killError as Error;
+  if (probeKillError.value !== null) {
+    throw probeKillError.value as Error;
   }
-  if (state.aborted || signal.aborted) {
+  if (probeAborted.value || signalAborted(signal)) {
     return { kind: "aborted" };
   }
-  if (state.timedOut) {
+  if (probeTimedOut.value) {
     return { kind: "probe-failed", reason: "probe-timeout" };
   }
   if (exitRc(proc.exitCode, proc.signalCode) !== 0) {

@@ -453,7 +453,9 @@ test("a bad muse command reports muse-unavailable (M10)", async () => {
   };
   expect(report.sessions).toEqual([]);
   const coordLines = (await Bun.file(join(runDir, "coord.jsonl")).text()).trim().split("\n");
-  const surfaces = coordLines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry["event"] === "surface");
+  const surfaces = coordLines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => entry["event"] === "surface");
   expect(surfaces.length).toBe(1);
   const only = surfaces[0] as Record<string, unknown>;
   expect(only["k"]).toBe(1);

@@ -94,11 +94,14 @@ runs `probeArgv` without `--api-key-stdin`, `--no-parallel-tool-calls`,
 Meta calls and writes `probe-<k>.jsonl`, `probe-<k>.stderr` and
 `probe-<k>-export.json`. After the session the runner checks the
 session's own export the same way. Both checks require `mode named`, the
-exact tool set, the six sources (`capability_policy`, `meta_context_note`,
-`security_mode`, `session_identity`, `skills`, `workspace_identity`), an
+exact tool set, every context source to be one of the six (`capability_policy`,
+`meta_context_note`, `security_mode`, `session_identity`, `skills`,
+`workspace_identity`), an
 inactive delegation posture and an empty reminder roster. Each check
 appends a `surface` event with `k`, `stage`, `ok`, `reason`, `extra` and
-`missing`. A failed probe or session check stops the run with
+`missing`. A probe spawn failure stops the run with `muse-unavailable`
+(reason `probe-spawn`), an abort stops `signal`, and any other failed
+probe or session check stops the run with
 `tool-surface` and exit 3. `runsDir` stays in the checkout because the
 untrusted workspace skips `AGENTS.md`, and a `rules_file` source fails
 the check.

@@ -420,8 +420,9 @@ test("an onSpawn throw rejects without session-end (S11)", async () => {
     },
   );
   expect(pids.length).toBe(1);
-  // onSpawn ran (the pid was pushed) and then threw, which aborts the
-  // session before the fake writes its record; there is no grandchild to
-  // wait for, and no session-end is logged.
+  expect(Number.isInteger(pids[0] as number)).toBe(true);
+  // The onSpawn throw kills the group before the fake starts, so the fake
+  // never writes its record: there is no grandchild to wait for, and no
+  // session-end is logged.
   expect(setup.entries.map((entry) => entry["event"])).toEqual(["session-start"]);
 }, 30000);

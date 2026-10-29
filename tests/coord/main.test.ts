@@ -1,8 +1,8 @@
 // Coordinator plan-run tests (M1-M15): arg parsing, startup checks,
 // dry run, session, report and exit codes.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { constants } from "node:os";
-import { readdirSync, realpathSync } from "node:fs";
+import { chmodSync, readdirSync, realpathSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { loadCoordConfig } from "../../src/coord/config.js";
@@ -22,6 +22,7 @@ function checkoutLogNames(): string[] {
 }
 
 let checkoutBefore: string[] = [];
+const lockedRunsDirs: string[] = [];
 
 beforeAll(() => {
   checkoutBefore = checkoutLogNames();
@@ -29,6 +30,16 @@ beforeAll(() => {
 
 afterAll(() => {
   expect(checkoutLogNames()).toEqual(checkoutBefore);
+});
+
+afterEach(() => {
+  for (const dir of lockedRunsDirs.splice(0)) {
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // The dir may already be gone; modes restore best-effort.
+    }
+  }
 });
 
 async function waitGrandchildGone(pid: number): Promise<void> {
@@ -596,6 +607,26 @@ test("the d1 fixture resolves to the demo store (M14)", async () => {
     mcpConfigPath: "tests/fixtures/mcp/demo/mcp.json",
   };
   expect({ ...(config as unknown as Record<string, unknown>) }).toEqual(expected);
+}, 30000);
+
+test("a step 13 write failure exits 1 with one coord line (M19)", async () => {
+  const env = await createCoordTestEnv();
+  await Bun.write(join(env.runsDir, "coordinator.lock"), "");
+  chmodSync(env.runsDir, 0o555);
+  lockedRunsDirs.push(env.runsDir);
+  const spawned = await spawnMain(env, "tests/fixtures/coord/goals/notes.json", "plan", [
+    "--dry-run",
+  ]);
+  const [rc, , stderr] = await Promise.all([
+    spawned.run.waitExit(),
+    spawned.run.stdoutText(),
+    spawned.run.stderrText(),
+  ]);
+  expect(rc).toBe(1);
+  const lines = stderr.split("\n").filter((line) => line.length > 0);
+  expect(lines.length).toBe(1);
+  expect(lines[0] as string).toMatch(/^coord: /);
+  expect(await listRunDirs(env.runsDir)).toEqual([]);
 }, 30000);
 
 test("arg errors name the flag (M15)", async () => {

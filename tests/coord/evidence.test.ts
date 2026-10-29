@@ -67,7 +67,6 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
   const configText = `${JSON.stringify(configJson)}\n`;
   await Bun.write(configPath, configText);
   const runDir = join(env.dir, "run");
-  const { mkdirSync } = await import("node:fs");
   mkdirSync(runDir, { recursive: true });
   await Bun.write(
     join(runDir, "report.json"),

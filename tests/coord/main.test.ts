@@ -536,6 +536,77 @@ test("a failed post-session check stops the run (M21)", async () => {
   expect(second["missing"]).toEqual([]);
 }, 30000);
 
+test("a probe that exits non-zero stops before the session (M22)", async () => {
+  const env = await createCoordTestEnv();
+  const { run } = await spawnMain(
+    env,
+    "tests/fixtures/coord/goals/notes.json",
+    "plan",
+    [],
+    {},
+    "surface-echo-exit.json",
+  );
+  const [rc, stdout] = await Promise.all([run.waitExit(), run.stdoutText()]);
+  const stderr = await run.stderrText();
+  expect(stderr).not.toContain("fake-muse");
+  expect(rc).toBe(3);
+  expect(stdout.trim().split("\n").at(-1)).toMatch(/^coord: run \S+ stop=tool-surface submitted=0/);
+  const dirs = await listRunDirs(env.runsDir);
+  expect(dirs.length).toBe(1);
+  const runDir = join(env.runsDir, dirs[0] as string);
+  const report = (await Bun.file(join(runDir, "report.json")).json()) as {
+    readonly sessions: readonly unknown[];
+  };
+  expect(report.sessions).toEqual([]);
+  expect(await Bun.file(env.recordPath).exists()).toBe(false);
+  const coordLines = (await Bun.file(join(runDir, "coord.jsonl")).text()).trim().split("\n");
+  const events = coordLines.map((line) => (JSON.parse(line) as { event: string }).event);
+  expect(events).toEqual(["run-start", "gate", "surface", "report", "run-end"]);
+  const entry = JSON.parse(coordLines[2] as string) as Record<string, unknown>;
+  expect(entry["event"]).toBe("surface");
+  expect(entry["k"]).toBe(1);
+  expect(entry["stage"]).toBe("probe");
+  expect(entry["ok"]).toBe(false);
+  expect(entry["reason"]).toBe("probe-exit");
+  expect(entry["extra"]).toEqual([]);
+  expect(entry["missing"]).toEqual([]);
+}, 30000);
+
+test("a failed session export stops the run (M23)", async () => {
+  const env = await createCoordTestEnv();
+  const { run } = await spawnMain(
+    env,
+    "tests/fixtures/coord/goals/notes.json",
+    "plan",
+    [],
+    {},
+    "surface-session-export-fails.json",
+  );
+  const [rc, stdout] = await Promise.all([run.waitExit(), run.stdoutText()]);
+  await run.stderrText();
+  expect(rc).toBe(3);
+  expect(stdout.trim().split("\n").at(-1)).toMatch(/^coord: run \S+ stop=tool-surface submitted=1/);
+  const dirs = await listRunDirs(env.runsDir);
+  expect(dirs.length).toBe(1);
+  const runDir = join(env.runsDir, dirs[0] as string);
+  const report = (await Bun.file(join(runDir, "report.json")).json()) as {
+    readonly sessions: readonly unknown[];
+  };
+  expect(report.sessions.length).toBe(1);
+  const coordLines = (await Bun.file(join(runDir, "coord.jsonl")).text()).trim().split("\n");
+  const surfaces = coordLines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((lineEntry) => lineEntry["event"] === "surface");
+  expect(surfaces.length).toBe(2);
+  const second = surfaces[1] as Record<string, unknown>;
+  expect(second["k"]).toBe(1);
+  expect(second["stage"]).toBe("session");
+  expect(second["ok"]).toBe(false);
+  expect(second["reason"]).toBe("unreadable");
+  expect(second["extra"]).toEqual([]);
+  expect(second["missing"]).toEqual([]);
+}, 30000);
+
 test("watch with dry-run is rejected (M11)", async () => {
   const env = await createCoordTestEnv();
   const gateRefusePath = join(env.dir, "gate-refuse.json");

@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 interface FakeCall {
   readonly tool: string;
@@ -18,6 +18,8 @@ interface FakeSurface {
   readonly provider: "echo" | "meta";
   readonly activeTools: readonly string[];
   readonly contextSources: readonly string[];
+  readonly echoExit?: number;
+  readonly sessionExportFails?: boolean;
 }
 
 interface FakeScript {
@@ -105,6 +107,8 @@ function parseScript(text: string): FakeScript {
     readonly provider?: unknown;
     readonly activeTools?: unknown;
     readonly contextSources?: unknown;
+    readonly echoExit?: unknown;
+    readonly sessionExportFails?: unknown;
   };
   if (surface.provider !== "echo" && surface.provider !== "meta") {
     fail("script is not a fake muse script");
@@ -121,6 +125,14 @@ function parseScript(text: string): FakeScript {
   ) {
     fail("script is not a fake muse script");
   }
+  const echoExit: unknown = surface.echoExit;
+  if (echoExit !== undefined && typeof echoExit !== "number") {
+    fail("script is not a fake muse script");
+  }
+  const sessionExportFails: unknown = surface.sessionExportFails;
+  if (sessionExportFails !== undefined && typeof sessionExportFails !== "boolean") {
+    fail("script is not a fake muse script");
+  }
   return {
     calls,
     exit,
@@ -134,6 +146,8 @@ function parseScript(text: string): FakeScript {
       contextSources: surface.contextSources.filter(
         (entry): entry is string => typeof entry === "string",
       ),
+      echoExit: typeof echoExit === "number" ? echoExit : undefined,
+      sessionExportFails: sessionExportFails === true,
     },
   };
 }
@@ -157,7 +171,12 @@ async function runExec(): Promise<void> {
   }
   if (providerRaw === "echo") {
     await readStdinBytes();
-    process.exit(0);
+    const echoSurface = script.surface;
+    const echoExitCode =
+      echoSurface !== undefined && echoSurface.provider === "echo"
+        ? (echoSurface.echoExit ?? 0)
+        : 0;
+    process.exit(echoExitCode);
   }
   const stdinBytes = await readStdinBytes();
   const recordPath = readScriptEnv("FAKE_MUSE_RECORD");
@@ -319,6 +338,10 @@ async function runExport(): Promise<void> {
   const sessionId = sessionIndex === -1 ? undefined : process.argv[sessionIndex + 1];
   const script = parseScript(await Bun.file(scriptPath).text());
   if (script.exportFails) {
+    process.exit(5);
+  }
+  const sessionOnly = script.surface?.sessionExportFails ?? false;
+  if (sessionOnly && basename(outPath).startsWith("session-")) {
     process.exit(5);
   }
   let provider = "meta";

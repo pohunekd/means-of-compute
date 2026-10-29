@@ -53,6 +53,22 @@ test("an extra or missing tool fails the tool check (U2)", () => {
     extra: [],
     missing: ["mcp__factory__approve"],
   });
+  const swapped = SIX_TOOLS.map((t) =>
+    t === "mcp__factory__approve" ? "read_file" : t,
+  );
+  expect(checkSurface({ events: [rec({ activeTools: swapped })] })).toEqual({
+    ok: false,
+    reason: "tools",
+    extra: ["read_file"],
+    missing: ["mcp__factory__approve"],
+  });
+  const duplicated = [...SIX_TOOLS, "mcp__factory__list_work"];
+  expect(checkSurface({ events: [rec({ activeTools: duplicated })] })).toEqual({
+    ok: false,
+    reason: "tools",
+    extra: [],
+    missing: [],
+  });
 });
 
 test("an unknown context source fails the context check (U3)", () => {

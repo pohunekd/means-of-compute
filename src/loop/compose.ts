@@ -1,6 +1,5 @@
 // Shared loop composition: config loading, the registry lock, the
 // closers and the scheduler context the production mode reuses.
-import type { WorkItem } from "../../contracts/v1/types.js";
 import { loadApprovalsConfig, type ApprovalsConfig } from "../approvals/config.js";
 import { createApprovalsView, type ApprovalsView } from "./approvals-view.js";
 import { loadAuditorConfig, type AuditorConfig } from "../auditor/config.js";
@@ -13,7 +12,6 @@ import { loadLedgerConfig } from "../ledger/read.js";
 import { createMergeMutex, type MergeMutex } from "./merge.js";
 import { loadMeterConfig, type MeterConfig } from "../meter/config.js";
 import { loadPlacementConfig, type PlacementConfig } from "../placement/config.js";
-import { PROVIDERS_DIR } from "../providers/paths.js";
 import type { GitHubPort } from "./github.js";
 import type { GitDeps } from "./git.js";
 import type { HostStateCollector } from "../hoststate/collector.js";
@@ -86,7 +84,7 @@ export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<Loo
 
 function loopMessage(path: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
-  return `loop: ${path}: ${detail}`;
+  return `${path}: ${detail}`;
 }
 
 export async function withRegistryLock<T>(
@@ -201,6 +199,3 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     verdictDir: configs.auditor.verdictDir,
   };
 }
-
-export { PROVIDERS_DIR };
-export type { WorkItem };

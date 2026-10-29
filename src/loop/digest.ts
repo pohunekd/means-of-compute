@@ -40,10 +40,9 @@ export interface DigestInput {
   readonly running: readonly {
     readonly id: string;
     readonly status: string;
-    readonly phase: string;
-    readonly round: number;
+    readonly loop: { readonly phase: string; readonly round: number } | null;
   }[];
-  readonly parkedBlocked: readonly { readonly id: string; readonly statusReason: string }[];
+  readonly parkedBlocked: readonly { readonly id: string; readonly statusReason: string | null }[];
   readonly daySpend: string;
   readonly totalSpend: string;
 }
@@ -89,7 +88,9 @@ export function renderDigest(input: DigestInput): string {
   } else {
     for (const entry of input.running) {
       lines.push(
-        `- ${entry.id}: ${entry.status}, phase ${entry.phase}, round ${String(entry.round)}`,
+        entry.loop === null
+          ? `- ${entry.id}: ${entry.status}, no loop item`
+          : `- ${entry.id}: ${entry.status}, phase ${entry.loop.phase}, round ${String(entry.loop.round)}`,
       );
     }
   }
@@ -98,15 +99,40 @@ export function renderDigest(input: DigestInput): string {
     lines.push("- none");
   } else {
     for (const entry of input.parkedBlocked) {
-      lines.push(`- ${entry.id}: ${entry.statusReason}`);
+      lines.push(`- ${entry.id}: ${entry.statusReason ?? "-"}`);
     }
   }
   lines.push("", "## Spend", "", `- Day: ${input.daySpend}`, `- Total: ${input.totalSpend}`, "");
   return lines.join("\n");
 }
 
-// Joins merged result lines with the loop item (PR) and its round record
-// (head and base race). A merged line without either is a data error.
+// Links the temp file to the day's name; EEXIST means the day is
+// already written, so the first bytes stay.
+async function linkOnce(tmp: string, target: string): Promise<"written" | "exists"> {
+  try {
+    await link(tmp, target);
+    return "written";
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return "exists";
+    }
+    throw error;
+  }
+}
+
+// The temp file may be gone already; any other unlink failure is real.
+async function removeTemp(tmp: string): Promise<void> {
+  try {
+    await unlink(tmp);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+// Writes a temp file and links it to <day>.md, so the write is exclusive;
+// the temp file is removed on every path.
 export async function writeDigestFile(
   dir: string,
   day: string,
@@ -114,23 +140,19 @@ export async function writeDigestFile(
 ): Promise<"written" | "exists"> {
   const tmp = join(dir, `.${day}.md.${String(process.pid)}.${randomUUID()}.tmp`);
   const handle = await open(tmp, "wx", 0o600);
+  let outcome: "written" | "exists";
   try {
-    await handle.writeFile(text, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    await link(tmp, join(dir, `${day}.md`));
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      return "exists";
+    try {
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
-    throw error;
+    outcome = await linkOnce(tmp, join(dir, `${day}.md`));
   } finally {
-    await unlink(tmp).catch(() => undefined);
+    await removeTemp(tmp);
   }
-  return "written";
+  return outcome;
 }
 
 // Runs once per tick after intake: sets a null last run to today without
@@ -182,24 +204,18 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
     }
     merged.push(mergedOf(line, state));
   }
-  const running: {
-    readonly id: string;
-    readonly status: string;
-    readonly phase: string;
-    readonly round: number;
-  }[] = [];
-  const parkedBlocked: { readonly id: string; readonly statusReason: string }[] = [];
+  const running: DigestInput["running"][number][] = [];
+  const parkedBlocked: DigestInput["parkedBlocked"][number][] = [];
   for (const item of store.items) {
     if (item.status === "running" || item.status === "review") {
       const li = state.items[item.id] as unknown as LoopItem | undefined;
       running.push({
         id: item.id,
         status: item.status,
-        phase: li === undefined ? "unknown" : li.phase,
-        round: li === undefined ? 0 : li.round,
+        loop: li === undefined ? null : { phase: li.phase, round: li.round },
       });
     } else if (item.status === "parked" || item.status === "blocked") {
-      parkedBlocked.push({ id: item.id, statusReason: item.statusReason ?? "" });
+      parkedBlocked.push({ id: item.id, statusReason: item.statusReason });
     }
   }
   const providerIds = new Set<string>();
@@ -227,6 +243,8 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
   });
 }
 
+// Joins merged result lines with the loop item (PR) and its round record
+// (head and base race). A merged line without either is a data error.
 function mergedOf(line: ResultLine, state: LoopState): DigestInput["merged"][number] {
   const li = state.items[line.workItemId] as unknown as LoopItem | undefined;
   if (li === undefined || li.pull === null) {

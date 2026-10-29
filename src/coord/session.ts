@@ -1,6 +1,6 @@
 // Muse session runner: isolated env, process-group kill and redacted export.
 // The key travels only in the exec stdin bytes, never in argv, env or logs.
-import { chmod, mkdir, open, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -210,6 +210,13 @@ async function runSessionExport(
   if (exportState.killError !== null) {
     throw exportState.killError as Error;
   }
+  try {
+    if ((await lstat(exportPath)).isFile()) {
+      await chmod(exportPath, 0o600);
+    }
+  } catch {
+    // No export file: the branches below report the failure.
+  }
   const at = now();
   if (exportState.timedOut) {
     await log.append({
@@ -235,12 +242,11 @@ async function runSessionExport(
   }
   let regular: boolean;
   try {
-    regular = (await stat(exportPath)).isFile();
+    regular = (await lstat(exportPath)).isFile();
   } catch {
     regular = false;
   }
   if (regular) {
-    await chmod(exportPath, 0o600);
     await log.append({ ts: at.toISOString(), event: "export", k, ok: true });
     return true;
   }

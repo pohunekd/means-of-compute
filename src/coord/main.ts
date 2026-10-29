@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { readdir, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { openCallLog } from "../mcp/call-log.js";
-import { ClientError, runClientCall } from "../mcp/client.js";
+import { ClientError, definedEnv, runClientCall } from "../mcp/client.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { readInputText } from "../fs/input.js";
@@ -23,9 +23,14 @@ import { museArgv, type MuseSession } from "./argv.js";
 import { loadGoal, type Goal } from "./goal.js";
 import { renderPlanPrompt } from "./prompt.js";
 import { readCoordCalls, type CoordCallEnd } from "./calls.js";
-import { parseListSnapshot } from "./report.js";
-import { buildReport, renderReportMd } from "./report.js";
-import type { FinalSnapshot, ReportGate, ReportSession } from "./report.js";
+import {
+  buildReport,
+  parseListSnapshot,
+  renderReportMd,
+  type FinalSnapshot,
+  type ReportGate,
+  type ReportSession,
+} from "./report.js";
 import {
   checkSessionEnv,
   prepareSessionDirs,
@@ -276,10 +281,6 @@ async function run(argv: readonly string[]): Promise<number> {
     process.stderr.write(`${failPrefix((error as Error).message)}\n`);
     return 2;
   }
-  // Steps 1 to 12 never return normally: runStartup either returns the run
-  // outcome or throws, so reaching this line is a defect.
-  process.stderr.write("coord: unreachable startup return\n");
-  return 1;
 }
 
 interface Startup {
@@ -314,17 +315,14 @@ async function runStartup(args: PlanArgs): Promise<number> {
     throw new Error("coord: seed is not implemented");
   }
   let key: string | null = null;
-  const childEnv: Record<string, string> = {};
+  let childEnv: Record<string, string> = {};
   if (!args.dryRun) {
     checkSessionEnv(config.envPassthrough, apiKeyEnv, process.env);
     key = process.env[apiKeyEnv] as string;
     // Bun.spawn without env inherits the launch environment, so the cleaned
     // environment is copied explicitly for every child except Muse.
-    for (const [name, value] of Object.entries(process.env)) {
-      if (value !== undefined && name !== apiKeyEnv) {
-        childEnv[name] = value;
-      }
-    }
+    childEnv = definedEnv(process.env);
+    Reflect.deleteProperty(childEnv, apiKeyEnv);
   }
   const workConfig = await loadWorkConfig(mcp.workConfigPath);
   const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
@@ -333,10 +331,9 @@ async function runStartup(args: PlanArgs): Promise<number> {
     workConfig,
     specs,
   });
-  const spec = specs.find((entry) => entry.repo === goal.repo);
-  if (spec === undefined) {
-    throw new Error(`coord: no factory spec for repo ${goal.repo}`);
-  }
+  // loadGoal rejects a repo with no factory spec, so the find below always
+  // returns an entry.
+  const spec = specs.find((entry) => entry.repo === goal.repo) as { readonly mergeMode: MergeMode };
   let gate: BudgetGate | null = null;
   if (!args.dryRun) {
     const gateConfig = await loadBudgetGateConfig(config.budgetGateConfigPath);
@@ -363,29 +360,31 @@ async function runStartup(args: PlanArgs): Promise<number> {
 async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> {
   const { config, loaded, goal, gate, key } = startup;
   const { mcp, skill } = loaded;
-  const runFn = async (): Promise<number> => {
-    const recordPath = join(config.runsDir, "coordinator-session.json");
-    await checkSessionRecord(recordPath);
-    const t0 = new Date();
-    const { day, stamp } = runIdTimestamp(t0);
-    if (!args.dryRun) {
-      const count = await countRunsToday(config.runsDir, day);
-      if (count >= config.maxRunsPerDay) {
-        process.stderr.write(`coord: run-cap ${String(count)} runs today\n`);
-        return 3;
-      }
-      const pre = await loadGoalPrecondition(
-        config.mcpConfigPath,
-        mcp.serverInfo.version,
-        mcp.clientTimeoutMs,
-        goal.goalId,
-        goal.idPrefix,
-        startup.childEnv,
-      );
-      if (!pre.ok) {
-        throw new Error(`coord: goal ${goal.goalId} precondition failed (${pre.code})`);
-      }
+  const recordPath = join(config.runsDir, "coordinator-session.json");
+  await checkSessionRecord(recordPath);
+  const t0 = new Date();
+  const { day, stamp } = runIdTimestamp(t0);
+  if (!args.dryRun) {
+    const count = await countRunsToday(config.runsDir, day);
+    if (count >= config.maxRunsPerDay) {
+      process.stderr.write(`coord: run-cap ${String(count)} runs today\n`);
+      return 3;
     }
+    const pre = await loadGoalPrecondition(
+      config.mcpConfigPath,
+      mcp.serverInfo.version,
+      mcp.clientTimeoutMs,
+      goal.goalId,
+      goal.idPrefix,
+      startup.childEnv,
+    );
+    if (!pre.ok) {
+      throw new Error(`coord: goal ${goal.goalId} precondition failed (${pre.code})`);
+    }
+  }
+  // From step 13 on, every failure prints one coord line and exits 1 by
+  // construction: only throws from steps 1 to 12 reach run's rc 2 mapping.
+  try {
     const suffix = randomBytes(3).toString("hex");
     const runId = `${stamp}-${goal.goalId}-${suffix}${args.dryRun ? "-dry" : ""}`;
     const runDir = resolve(config.runsDir, runId);
@@ -429,7 +428,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
     if (gate === null || key === null) {
       throw new Error("coord: unreachable dry-run gate");
     }
-    return runSession(
+    return await runSession(
       config,
       startup.loaded,
       goal,
@@ -443,8 +442,10 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       key,
       startup.childEnv,
     );
-  };
-  return runFn();
+  } catch (error: unknown) {
+    process.stderr.write(`${failPrefix((error as Error).message)}\n`);
+    return 1;
+  }
 }
 
 async function runSession(

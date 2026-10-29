@@ -788,7 +788,7 @@ test("RT13 a verdict row with a stale marker posts the stored verdict again", as
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
     try {
-      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
       await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
       await git(harness.sandbox.seed, ["add", "b.txt"]);
@@ -904,7 +904,7 @@ test("RT16 no author models parks no-authors with the operator label", async () 
   await withTempDir(async (dir) => {
     const harness = await makeHarness(dir);
     try {
-      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
       await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
       await git(harness.sandbox.seed, ["add", "b.txt"]);
@@ -992,7 +992,7 @@ test("RT18 budget refusal defers the audit without a round", async () => {
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
     try {
-      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
       await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
       await git(harness.sandbox.seed, ["add", "b.txt"]);
@@ -1177,12 +1177,16 @@ test("RT21 previousRoundOf skips the running round and parses the query", () => 
   };
   // previousRoundOf reports the latest stored round and skips lost closes.
   expect(previousRoundOf({ ...base, round: 2 }, [])?.outcome).toBe("ci-timeout");
+  const second = base.rounds[1] ?? base.rounds[0];
+  if (second === undefined) {
+    throw new Error("base rounds must hold two records");
+  }
   expect(
     previousRoundOf(
       {
         ...base,
         round: 1,
-        rounds: [...base.rounds, { ...base.rounds[1]!, outcome: "lost" as const, round: 2 }],
+        rounds: [...base.rounds, { ...second, outcome: "lost" as const, round: 2 }],
       },
       [],
     )?.outcome,
@@ -1228,8 +1232,9 @@ async function makeSandbox(repoDir: string, seedFiles = true): Promise<Sandbox> 
     origin,
     seed,
     scratchDir,
-    cleanup: async () => {
+    cleanup: () => {
       rmSync(dir, { recursive: true, force: true });
+      return Promise.resolve();
     },
   };
 }

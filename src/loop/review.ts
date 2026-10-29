@@ -18,9 +18,9 @@ import {
   pullDecision,
   verdictCheck,
 } from "./merge-rule.js";
-import { GitHubError, utf8Prefix, type CheckRun, type GitHubPort } from "./github.js";
+import { GitHubError, utf8Prefix, type CheckRun } from "./github.js";
 import type { BriefPrevious } from "./brief.js";
-import { parkOperator, parkStall, type ParkContext } from "./park.js";
+import { parkOperator, parkStall } from "./park.js";
 import { reconcile } from "./project.js";
 import { closeRound, type RoundClose } from "./rounds.js";
 import { updateLoopState, LoopStateDataError } from "./state.js";
@@ -194,19 +194,13 @@ async function reviewAttemptOf(
   return outcome.attempt;
 }
 
-interface AddedOutcome {
-  readonly requestId: string | null;
-}
-
 async function closeReviewRound(
   ctx: ReviewContext,
   item: WorkItem,
-  added: AddedOutcome,
   outcome: RoundOutcome,
   headSha: string | null,
   failingChecks: readonly string[],
 ): Promise<ReviewStep> {
-  void added;
   const fresh = await readReviewItem(ctx, item.id);
   if (fresh.session === null) {
     throw new LoopStateDataError(
@@ -281,11 +275,11 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
   }
   if (head === null) {
     const outcome = attempt === "success" ? "no-push" : "session-failed";
-    return closeReviewRound(ctx, item, { requestId: li.requestId }, outcome, null, []);
+    return closeReviewRound(ctx, item, outcome, null, []);
   }
   if (li.pull !== null && head === li.pull.headSha) {
     const outcome = attempt === "success" ? "no-new-commit" : "session-failed";
-    return closeReviewRound(ctx, item, { requestId: li.requestId }, outcome, head, []);
+    return closeReviewRound(ctx, item, outcome, head, []);
   }
   let number: number;
   let code: string;
@@ -387,7 +381,6 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
     return closeReviewRound(
       ctx,
       item,
-      { requestId: li.requestId },
       "red-ci",
       pull.headSha,
       failingChecksOf(runs, ctx.requiredChecks),
@@ -402,7 +395,7 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
       sha: pull.headSha,
       code: "timeout",
     });
-    return closeReviewRound(ctx, item, { requestId: li.requestId }, "ci-timeout", pull.headSha, []);
+    return closeReviewRound(ctx, item, "ci-timeout", pull.headSha, []);
   }
   return "ci";
 }
@@ -464,7 +457,7 @@ async function auditRefusedStep(
       const stored = await readVerdicts(ctx.auditor.config.verdictDir, item.id);
       const atHead = stored.find((entry) => entry.headSha === h);
       if (atHead !== undefined) {
-        return postVerdict(ctx, item, atHead, h, li.round);
+        return await postVerdict(ctx, item, atHead, h, li.round);
       }
     } catch (error: unknown) {
       return auditErrorStep(ctx, item, li, h, error);
@@ -472,10 +465,10 @@ async function auditRefusedStep(
     return auditErrorStep(ctx, item, li, h, new Error(reason));
   }
   if (reason.startsWith("nothing to audit at ")) {
-    return closeReviewRound(ctx, item, { requestId: li.requestId }, "empty-diff", h, []);
+    return closeReviewRound(ctx, item, "empty-diff", h, []);
   }
   if (reason.startsWith("diff too large for one audit ")) {
-    return closeReviewRound(ctx, item, { requestId: li.requestId }, "diff-too-large", h, []);
+    return closeReviewRound(ctx, item, "diff-too-large", h, []);
   }
   if (reason.startsWith("no eligible auditor")) {
     await parkOperator(ctx, item, "no-eligible-auditor");

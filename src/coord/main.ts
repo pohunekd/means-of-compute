@@ -1,14 +1,22 @@
 // Coordinator plan runner: arg parsing, startup checks, dry run, session.
 import { randomBytes, randomUUID } from "node:crypto";
-import { readdir, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { readdir, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { openCallLog } from "../mcp/call-log.js";
 import { ClientError, runClientCall } from "../mcp/client.js";
 import { withFileLock, FileLockError } from "../fs/lock.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { readInputText } from "../fs/input.js";
-import { createCliBudgetGate, loadBudgetGateConfig, BudgetGateError } from "../budget/gate.js";
+import {
+  createCliBudgetGate,
+  loadBudgetGateConfig,
+  BudgetGateError,
+  type Admission,
+  type BudgetGate,
+} from "../budget/gate.js";
 import { loadWorkConfig } from "../work/config.js";
+import type { MergeMode } from "../../contracts/v1/types.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { COORD_CONFIG_PATH, loadCoordConfig, type LoadedCoordConfig } from "./config.js";
 import { museArgv, type MuseSession } from "./argv.js";
@@ -16,13 +24,8 @@ import { loadGoal, type Goal } from "./goal.js";
 import { renderPlanPrompt } from "./prompt.js";
 import { readCoordCalls, type CoordCallEnd } from "./calls.js";
 import { parseListSnapshot } from "./report.js";
-import {
-  buildReport,
-  renderReportMd,
-  type FinalSnapshot,
-  type ReportGate,
-  type ReportSession,
-} from "./report.js";
+import { buildReport, renderReportMd } from "./report.js";
+import type { FinalSnapshot, ReportGate, ReportSession } from "./report.js";
 import {
   checkSessionEnv,
   prepareSessionDirs,
@@ -257,7 +260,7 @@ async function loadGoalPrecondition(
   return snapshot;
 }
 
-export async function run(argv: readonly string[]): Promise<number> {
+async function run(argv: readonly string[]): Promise<number> {
   let parsed: PlanArgs;
   try {
     parsed = parseArgs(argv);
@@ -266,31 +269,27 @@ export async function run(argv: readonly string[]): Promise<number> {
     return 2;
   }
   try {
-    return await runPlan(parsed);
+    return await runStartup(parsed);
   } catch (error: unknown) {
     process.stderr.write(`${failPrefix((error as Error).message)}\n`);
-    const message = (error as Error).message;
-    if (message.startsWith("coord: ")) {
-      const startupSignals = [
-        "is not a means-of-compute checkout",
-        "is not a valid session record",
-        "may still be running",
-        "ended without its launcher",
-        "already planned",
-        "precondition failed",
-        "run-cap",
-        "another coordinator run is active",
-        "seed is not implemented",
-      ];
-      if (startupSignals.some((signal) => message.includes(signal))) {
-        return 2;
-      }
-    }
-    return 1;
+    return 2;
   }
+  // Steps 1 to 12 never return normally: runStartup either returns the run
+  // outcome or throws, so reaching this line is a defect.
+  process.stderr.write("coord: unreachable startup return\n");
+  return 1;
 }
 
-async function runPlan(args: PlanArgs): Promise<number> {
+interface Startup {
+  readonly config: LoadedCoordConfig["config"];
+  readonly loaded: LoadedCoordConfig;
+  readonly goal: Goal;
+  readonly mergeMode: MergeMode;
+  readonly gate: BudgetGate | null;
+  readonly key: string | null;
+}
+
+async function runStartup(args: PlanArgs): Promise<number> {
   const checkoutText = await readInputText("Checkout", join(process.cwd(), "package.json"));
   let checkout: unknown;
   try {
@@ -307,14 +306,16 @@ async function runPlan(args: PlanArgs): Promise<number> {
     throw new Error(`coord: ${process.cwd()} is not a means-of-compute checkout`);
   }
   const loaded: LoadedCoordConfig = await loadCoordConfig(args.configPath);
-  const { config, apiKeyEnv, mcp, skill } = loaded;
+  const { config, apiKeyEnv, mcp } = loaded;
   if (config.seed !== null) {
     throw new Error("coord: seed is not implemented");
   }
+  let key: string | null = null;
   if (!args.dryRun) {
     checkSessionEnv(config.envPassthrough, apiKeyEnv, process.env);
+    key = process.env[apiKeyEnv] as string;
   }
-  const workConfig = await loadWorkConfig(loaded.mcp.workConfigPath);
+  const workConfig = await loadWorkConfig(mcp.workConfigPath);
   const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
   const goal: Goal = await loadGoal(args.goalPath, {
     maxOutcomeChars: config.maxOutcomeChars,
@@ -325,13 +326,32 @@ async function runPlan(args: PlanArgs): Promise<number> {
   if (spec === undefined) {
     throw new Error(`coord: no factory spec for repo ${goal.repo}`);
   }
-  const mergeMode = spec.mergeMode;
-  let gate: { admit(): Promise<{ admit: boolean; reason?: string; line?: string }> } | null = null;
+  let gate: BudgetGate | null = null;
   if (!args.dryRun) {
     const gateConfig = await loadBudgetGateConfig(config.budgetGateConfigPath);
     gate = createCliBudgetGate({ ...gateConfig, cwd: process.cwd() });
   }
   await mkdir(config.runsDir, { recursive: true, mode: 0o700 });
+  // The key leaves process.env before the first child spawn below.
+  if (!args.dryRun) {
+    Reflect.deleteProperty(process.env, apiKeyEnv);
+  }
+  const startup: Startup = { config, loaded, goal, mergeMode: spec.mergeMode, gate, key };
+  try {
+    return await withFileLock("coordinator runs", join(config.runsDir, "coordinator"), () =>
+      runFromStep13(startup, args),
+    );
+  } catch (error: unknown) {
+    if (error instanceof FileLockError && error.code === "busy") {
+      throw new Error("coord: another coordinator run is active", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> {
+  const { config, loaded, goal, gate, key } = startup;
+  const { mcp, skill } = loaded;
   const runFn = async (): Promise<number> => {
     const recordPath = join(config.runsDir, "coordinator-session.json");
     await checkSessionRecord(recordPath);
@@ -379,7 +399,7 @@ async function runPlan(args: PlanArgs): Promise<number> {
         skill,
         goal,
         runId,
-        mergeMode,
+        mergeMode: startup.mergeMode,
         limits: { maxSubmitAttempts: config.plan.maxSubmitAttempts },
       }),
     );
@@ -394,9 +414,12 @@ async function runPlan(args: PlanArgs): Promise<number> {
       process.stdout.write(`${line}\n`);
       return 0;
     }
+    if (gate === null || key === null) {
+      throw new Error("coord: unreachable dry-run gate");
+    }
     return runSession(
       config,
-      loaded,
+      startup.loaded,
       goal,
       args,
       runId,
@@ -404,23 +427,11 @@ async function runPlan(args: PlanArgs): Promise<number> {
       session,
       recordPath,
       t0,
-      gate as {
-        admit(): Promise<{
-          readonly admit: boolean;
-          readonly reason?: string;
-          readonly line?: string;
-        }>;
-      },
+      gate,
+      key,
     );
   };
-  try {
-    return await withFileLock("coordinator runs", join(config.runsDir, "coordinator"), runFn);
-  } catch (error: unknown) {
-    if (error instanceof FileLockError && error.code === "busy") {
-      throw new Error("coord: another coordinator run is active", { cause: error });
-    }
-    throw error;
-  }
+  return runFn();
 }
 
 async function runSession(
@@ -433,9 +444,8 @@ async function runSession(
   session: MuseSession,
   recordPath: string,
   t0: Date,
-  gate: {
-    admit(): Promise<{ readonly admit: boolean; readonly reason?: string; readonly line?: string }>;
-  },
+  gate: BudgetGate,
+  key: string,
 ): Promise<number> {
   const { apiKeyEnv, mcp } = loaded;
   const log = await openCallLog(join(runDir, "coord.jsonl"));
@@ -460,15 +470,13 @@ async function runSession(
     let stop: string | null = null;
     const gates: ReportGate[] = [];
     const sessions: ReportSession[] = [];
-    let admissionReason: string | null = null;
     if (!controller.signal.aborted) {
       try {
-        const admission = await gate.admit();
+        const admission: Admission = await gate.admit();
         if (admission.admit) {
           gates.push({ k: 1, admit: true, reason: null });
         } else {
-          admissionReason = (admission as { readonly reason?: string }).reason ?? "unknown";
-          gates.push({ k: 1, admit: false, reason: admissionReason });
+          gates.push({ k: 1, admit: false, reason: admission.reason });
           stop = "budget-refused";
         }
       } catch (error: unknown) {
@@ -479,12 +487,13 @@ async function runSession(
           throw error;
         }
       }
+      const first = gates[0] as ReportGate;
       await log.append({
         ts: new Date().toISOString(),
         event: "gate",
         k: 1,
-        admit: gates[0]?.admit ?? false,
-        reason: (gates[0]?.admit ?? false) ? null : (gates[0] as ReportGate).reason,
+        admit: first.admit,
+        reason: first.admit ? null : first.reason,
       });
     } else {
       stop = "signal";
@@ -492,26 +501,23 @@ async function runSession(
     let result: MuseSessionResult | null = null;
     if (stop === null && !controller.signal.aborted) {
       const onSpawn = (pid: number): void => {
-        writeFile(recordPath, `${JSON.stringify({ runId, k: 1, pid })}\n`, {
+        writeFileSync(recordPath, `${JSON.stringify({ runId, k: 1, pid })}\n`, {
           flag: "wx",
           mode: 0o600,
-        }).catch(() => {});
+        });
       };
-      try {
-        result = await runMuseSession(
-          {
-            config,
-            session,
-            apiKeyEnv,
-            timeoutMs: config.plan.timeoutMs,
-            killGraceMs: config.killGraceMs,
-            signal: controller.signal,
-          },
-          { env: process.env, log, now: () => new Date(), onSpawn },
-        );
-      } finally {
-        await rm(recordPath, { force: true });
-      }
+      result = await runMuseSession(
+        {
+          config,
+          session,
+          apiKeyEnv,
+          timeoutMs: config.plan.timeoutMs,
+          killGraceMs: config.killGraceMs,
+          signal: controller.signal,
+        },
+        { env: { ...process.env, [apiKeyEnv]: key }, log, now: () => new Date(), onSpawn },
+      );
+      await rm(recordPath, { force: true });
       sessions.push({
         k: 1,
         kind: "plan",

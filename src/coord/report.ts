@@ -146,10 +146,6 @@ const STATUSES: readonly WorkItemStatus[] = [
   "done",
 ];
 
-function isWorkItemStatus(value: string): value is WorkItemStatus {
-  return STATUSES.some((status) => status === value);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -172,7 +168,7 @@ function parseListRow(row: unknown): ListRow | null {
   if (typeof id !== "string") {
     return null;
   }
-  if (typeof status !== "string" || !isWorkItemStatus(status)) {
+  if (typeof status !== "string" || !(STATUSES as readonly string[]).includes(status)) {
     return null;
   }
   if (typeof statusReason !== "string" && statusReason !== null) {
@@ -184,10 +180,8 @@ function parseListRow(row: unknown): ListRow | null {
   if (!Array.isArray(dependencies)) {
     return null;
   }
-  const deps: readonly string[] = dependencies.filter(
-    (entry: unknown): entry is string => typeof entry === "string",
-  );
-  if (deps.length !== dependencies.length) {
+  const deps = dependencies as readonly string[];
+  if (!deps.every((entry: unknown) => typeof entry === "string")) {
     return null;
   }
   if (!isRecord(dod)) {
@@ -203,7 +197,7 @@ function parseListRow(row: unknown): ListRow | null {
   }
   return {
     id,
-    status,
+    status: status as WorkItemStatus,
     statusReason,
     pullNumber,
     dependencies: deps,
@@ -316,19 +310,16 @@ function parseSubmitSummary(call: CoordCallEnd): {
   const submissionId: unknown = summary["submissionId"];
   const itemIds: unknown = summary["itemIds"];
   const replayed: unknown = summary["replayed"];
-  if (
-    typeof submissionId !== "string" ||
-    !Array.isArray(itemIds) ||
-    typeof replayed !== "boolean"
-  ) {
+  if (typeof submissionId !== "string" || !Array.isArray(itemIds)) {
     throw new ReportDataError(
       `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
     );
   }
-  const ids: readonly string[] = itemIds.filter(
-    (entry: unknown): entry is string => typeof entry === "string",
-  );
-  if (ids.length !== itemIds.length) {
+  const ids = itemIds as readonly string[];
+  if (
+    !ids.every((entry: unknown) => typeof entry === "string") ||
+    typeof replayed !== "boolean"
+  ) {
     throw new ReportDataError(
       `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
     );

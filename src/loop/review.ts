@@ -10,6 +10,7 @@ import { BudgetGateError } from "../budget/gate.js";
 import { InputPathError } from "../fs/input.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
 import type { LoopRepoConfig } from "./config.js";
+import { readRegistry } from "../dispatcher/registry.js";
 import { fetchRefs, GitError, type GitDeps, remoteBranchSha, revParse } from "./git.js";
 import {
   ciStatus,
@@ -86,13 +87,17 @@ export function previousRoundOf(
     return null;
   }
   let audited: { readonly headSha: string; readonly verdict: AuditVerdict } | null = null;
+  let auditedHead: string | null = null;
   for (const record of li.rounds) {
-    if (record.verdict === null) {
+    if (record.verdict === null || record.headSha === null) {
       continue;
     }
-    const verdict = verdicts.find((entry) => entry.headSha === record.headSha);
-    if (verdict !== undefined && record.headSha !== null) {
-      audited = { headSha: record.headSha, verdict };
+    auditedHead = record.headSha;
+  }
+  if (auditedHead !== null) {
+    const verdict = verdicts.find((entry) => entry.headSha === auditedHead);
+    if (verdict !== undefined) {
+      audited = { headSha: auditedHead, verdict };
     }
   }
   return {
@@ -143,6 +148,17 @@ function checkoutDirOf(ctx: ReviewContext, item: WorkItem): string {
   return resolve(entry.checkoutDir);
 }
 
+async function registryBranchOf(ctx: ReviewContext, item: WorkItem, li: LoopItem): Promise<string> {
+  const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
+  const entry = entries.find((candidate) => candidate.requestId === li.requestId);
+  if (entry === undefined) {
+    throw new LoopStateDataError(
+      `loop state ${ctx.statePath}: item "${item.id}" has no registry entry for request "${li.requestId ?? "null"}"`,
+    );
+  }
+  return entry.branch;
+}
+
 async function requireHeads(
   ctx: ReviewContext,
   item: WorkItem,
@@ -166,7 +182,7 @@ async function requireHeads(
     );
   }
   const checkoutDir = checkoutDirOf(ctx, item);
-  const branch = `${ctx.branchPrefix}${item.id}`;
+  const branch = await registryBranchOf(ctx, item, li);
   const baseBranch = ctx.dispatcherConfig.baseBranch;
   return { li, checkoutDir, branch, baseBranch, pull };
 }
@@ -250,7 +266,7 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
     );
   }
   const checkoutDir = checkoutDirOf(ctx, item);
-  const branch = `${ctx.branchPrefix}${item.id}`;
+  const branch = await registryBranchOf(ctx, item, li);
   const baseBranch = ctx.dispatcherConfig.baseBranch;
   const attempt = await reviewAttemptOf(ctx, li.requestId);
   let decision: ReturnType<typeof pullDecision>;
@@ -453,14 +469,15 @@ async function auditRefusedStep(
   reason: string,
 ): Promise<ReviewStep> {
   if (reason.startsWith("verdict exists for ")) {
+    let atHead: AuditVerdict | undefined;
     try {
       const stored = await readVerdicts(ctx.auditor.config.verdictDir, item.id);
-      const atHead = stored.find((entry) => entry.headSha === h);
-      if (atHead !== undefined) {
-        return await postVerdict(ctx, item, atHead, h, li.round);
-      }
+      atHead = stored.find((entry) => entry.headSha === h);
     } catch (error: unknown) {
       return auditErrorStep(ctx, item, li, h, error);
+    }
+    if (atHead !== undefined) {
+      return postVerdict(ctx, item, atHead, h, li.round);
     }
     return auditErrorStep(ctx, item, li, h, new Error(reason));
   }

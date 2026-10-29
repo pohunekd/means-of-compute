@@ -19,7 +19,7 @@ import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { checkWorkStore } from "../work/store.js";
 import { loadApprovalsConfig } from "../approvals/config.js";
 import { loadDispatcherConfig } from "../dispatcher/config.js";
-import type { MergeMode } from "../../contracts/v1/types.js";
+import type { FactorySpec, MergeMode } from "../../contracts/v1/types.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { COORD_CONFIG_PATH, loadCoordConfig, type LoadedCoordConfig } from "./config.js";
 import { museArgv, type MuseSession } from "./argv.js";
@@ -306,6 +306,7 @@ interface Startup {
   readonly goal: Goal;
   readonly mergeMode: MergeMode;
   readonly workConfig: WorkConfig;
+  readonly specs: readonly FactorySpec[];
   readonly gate: BudgetGate | null;
   readonly key: string | null;
   readonly childEnv: Record<string, string>;
@@ -330,7 +331,7 @@ async function seedStateDir(
   ];
   const stateDir = resolve(seed.stateDir);
   for (const [key, path] of pairs) {
-    if (!(resolve(path) + "/").startsWith(`${stateDir}/`)) {
+    if (!resolve(path).startsWith(`${stateDir}/`)) {
       throw new Error(`coord: seed ${key} ${path} is outside ${seed.stateDir}`);
     }
   }
@@ -436,6 +437,7 @@ async function runStartup(args: PlanArgs): Promise<number> {
     goal,
     mergeMode: spec.mergeMode,
     workConfig,
+    specs,
     gate,
     key,
     childEnv,
@@ -542,6 +544,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       session,
       recordPath,
       t0,
+      startup.specs,
       gate,
       key,
       startup.childEnv,
@@ -557,6 +560,8 @@ interface RunCtx {
   readonly loaded: LoadedCoordConfig;
   readonly goal: Goal;
   readonly skill: SkillText;
+  readonly t0: Date;
+  readonly specs: readonly FactorySpec[];
   readonly runId: string;
   readonly runDir: string;
   readonly recordPath: string;
@@ -740,19 +745,25 @@ async function sessionStep(
   return null;
 }
 
+class PollReadError extends Error {
+  constructor(
+    readonly tool: string,
+    readonly code: string,
+  ) {
+    super(`${tool}: ${code}`);
+  }
+}
+
 async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Promise<string> {
   const { config, loaded, goal } = ctx;
   const { mcp } = loaded;
   const watch = config.watch;
-  const t0 = Date.now();
   const consumed = ctx.consumed;
   let reactSessions = 0;
   let failedInRow = 0;
   let pollErrors = 0;
   let k = firstK;
-  const workConfig = await loadWorkConfig(mcp.workConfigPath);
-  const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
-  const mergeModes = new Map(specs.map((entry) => [entry.repo, entry.mergeMode] as const));
+  const mergeModes = new Map(ctx.specs.map((entry) => [entry.repo, entry.mergeMode] as const));
   const goalId = goal.goalId;
   const idPrefix = goal.idPrefix;
   const callerEnv = ctx.childEnv;
@@ -784,11 +795,12 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
     if (ctx.controller.signal.aborted) {
       return "signal";
     }
-    if (Date.now() - t0 >= watch.deadlineMs) {
+    if (Date.now() - ctx.t0.getTime() >= watch.deadlineMs) {
       return "deadline";
     }
+    const followupsFiled = await readFiledFollowups();
     let rows: readonly WatchRow[];
-    let revision = 0;
+    const pollState: { revision: number } = { revision: 0 };
     let fleet: { readonly paused: boolean; readonly pendingTools: readonly string[] };
     const verdicts = new Map<
       string,
@@ -799,6 +811,7 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
         readonly counts: { readonly high: number; readonly medium: number; readonly low: number };
       }[]
     >();
+    let tool = "list_work";
     try {
       const rowsPayload = await runClientCall({
         tool: "list_work",
@@ -810,10 +823,11 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
       });
       const rowsParsed = parseWatchRows(rowsPayload);
       if (!rowsParsed.ok) {
-        throw new Error(rowsParsed.code);
+        throw new PollReadError(tool, rowsParsed.code);
       }
       rows = rowsParsed.value.rows;
-      revision = rowsParsed.value.revision;
+      pollState.revision = rowsParsed.value.revision;
+      tool = "fleet_status";
       const fleetPayload = await runClientCall({
         tool: "fleet_status",
         args: {},
@@ -824,10 +838,9 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
       });
       const fleetParsed = parseFleet(fleetPayload);
       if (!fleetParsed.ok) {
-        throw new Error(fleetParsed.code);
+        throw new PollReadError(tool, fleetParsed.code);
       }
       fleet = fleetParsed.value;
-      const followupsFiled = await readFiledFollowups();
       const watchCtx: WatchContext = {
         goalId,
         idPrefix,
@@ -838,6 +851,7 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
         consumed,
       };
       for (const id of auditTargets(rows, watchCtx)) {
+        tool = "audit_results";
         const verdictPayload = await runClientCall({
           tool: "audit_results",
           args: { workItemId: id },
@@ -848,19 +862,25 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
         });
         const verdictsParsed = parseVerdicts(verdictPayload);
         if (!verdictsParsed.ok) {
-          throw new Error(verdictsParsed.code);
+          throw new PollReadError(tool, verdictsParsed.code);
         }
         verdicts.set(id, verdictsParsed.value);
       }
       pollErrors = 0;
     } catch (error: unknown) {
-      const code = error instanceof ClientError ? "client-error" : "client-error";
-      const tool = "list_work";
+      let code: string;
+      if (error instanceof PollReadError) {
+        tool = error.tool;
+        code = error.code;
+      } else if (error instanceof ClientError) {
+        code = "client-error";
+      } else {
+        throw error;
+      }
       pollErrors += 1;
       await ctx.log.append({
         ts: new Date().toISOString(),
         event: "poll-error",
-        revision,
         tool,
         code,
       });
@@ -880,7 +900,6 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
       });
       continue;
     }
-    const followupsFiled = await readFiledFollowups();
     const watchCtx: WatchContext = {
       goalId,
       idPrefix,
@@ -894,7 +913,7 @@ async function watchLoop(ctx: RunCtx, firstK: number, mergeMode: MergeMode): Pro
     await ctx.log.append({
       ts: new Date().toISOString(),
       event: "poll",
-      revision,
+      revision: pollState.revision,
       scope: scopeRows(rows, idPrefix).length,
       attention: attention.length,
     });
@@ -975,6 +994,7 @@ async function runSession(
   session: MuseSession,
   recordPath: string,
   t0: Date,
+  specs: readonly FactorySpec[],
   gate: BudgetGate,
   key: string,
   childEnv: Record<string, string>,
@@ -1007,6 +1027,8 @@ async function runSession(
       loaded,
       goal,
       skill: loaded.skill,
+      t0,
+      specs,
       runId,
       runDir,
       recordPath,

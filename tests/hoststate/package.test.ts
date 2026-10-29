@@ -34,7 +34,7 @@ async function buildPackage(out: string): Promise<string> {
   const r = await run(["bun", "run", "plugin:build", "--out", out]);
   expect(r.exitCode).toBe(0);
   const entries = readdirSync(out);
-  expect(entries).toEqual(["moc-host-state-0.2.0"]);
+  expect(entries).toEqual(["moc-host-state-0.3.0"]);
   return join(out, entries[0] as string);
 }
 

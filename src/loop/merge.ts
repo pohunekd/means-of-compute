@@ -8,7 +8,14 @@ import { readVerdicts } from "../auditor/store.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
 import { fetchRefs, isAncestor, trialMerge, GitError } from "./git.js";
 import { GitHubError } from "./github.js";
-import { baseCheck, ciStatus, factoryMarkers, markerMatches, mergeStep, verdictCheck } from "./merge-rule.js";
+import {
+  baseCheck,
+  ciStatus,
+  factoryMarkers,
+  markerMatches,
+  mergeStep,
+  verdictCheck,
+} from "./merge-rule.js";
 import { escalate, finalizeItem, parkOperator } from "./park.js";
 import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
 import type { LoopItem } from "./types.js";
@@ -105,17 +112,13 @@ async function decideMerge(
   if (tag === "operator") {
     if (input.kind === "early") {
       if (input.detail.kind !== "operator") {
-        throw new LoopStateDataError(
-          `loop state ${ctx.statePath}: unexpected early merge result`,
-        );
+        throw new LoopStateDataError(`loop state ${ctx.statePath}: unexpected early merge result`);
       }
       await parkOperator(ctx, item, input.detail.code);
       return "parked";
     }
     if (input.step.kind !== "operator") {
-      throw new LoopStateDataError(
-        `loop state ${ctx.statePath}: unexpected merge result`,
-      );
+      throw new LoopStateDataError(`loop state ${ctx.statePath}: unexpected merge result`);
     }
     await parkOperator(ctx, item, input.step.code);
     return "parked";

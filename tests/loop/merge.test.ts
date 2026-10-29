@@ -1575,7 +1575,7 @@ test("MT21 a failed trial in merging audits again then closes trial-failed", asy
           dispatcher: {
             start: seed.ctx.dispatcher.start.bind(seed.ctx.dispatcher),
             cancel: seed.ctx.dispatcher.cancel.bind(seed.ctx.dispatcher),
-            watch: () => Promise.reject(new Error("fault: close")) as never,
+            watch: () => Promise.reject(new Error("fault: close")),
           },
         };
         let thrown: unknown = null;
@@ -1584,6 +1584,7 @@ test("MT21 a failed trial in merging audits again then closes trial-failed", asy
         } catch (error: unknown) {
           thrown = error;
         }
+        expect(thrown).toBeInstanceOf(Error);
         expect((thrown as Error).message).toBe("fault: close");
         const mid = await readItem(seed.ctx.statePath);
         expect(mid.phase).toBe("auditing");

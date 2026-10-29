@@ -17,6 +17,7 @@ import {
 import type { LoopConfigs } from "../compose.js";
 import { digestFor, writeDigestFile } from "../digest.js";
 import { openLoopLog } from "../log.js";
+import { openCallLog } from "../../mcp/call-log.js";
 import { createDispatcher } from "../../dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../dispatcher/memory-port.js";
 import type { GitHubPort } from "../github.js";
@@ -293,6 +294,36 @@ async function runInside(
   }
   closers.push({ name: "loop-log", close: () => log.close() });
   log.log({ event: "factory-start" });
+  let portsLog: import("../../mcp/call-log.js").FileCallLog;
+  try {
+    portsLog = await openCallLog(join(sandboxDir, "ports.jsonl"));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new LoopStartupError(detail, { cause: error });
+  }
+  closers.push({ name: "ports-log", close: () => portsLog.close() });
+  let portsLogFailed = false;
+  const portsAppend = (
+    source: "meter" | "port" | "dispatcher",
+    event: Record<string, unknown>,
+  ): void => {
+    portsLog
+      .append({ ts: new Date().toISOString(), source, ...event })
+      .catch(() => {
+        portsLogFailed = true;
+      });
+  };
+  const meterLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
+    portsAppend("meter", { ...(event as unknown as Record<string, unknown>) });
+  };
+  const portLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
+    portsAppend("port", { ...(event as unknown as Record<string, unknown>) });
+  };
+  const dispatcherLog = (
+    event: import("../../dispatcher/dispatcher.js").DispatchLogEvent,
+  ): void => {
+    portsAppend("dispatcher", { ...(event as unknown as Record<string, unknown>) });
+  };
   let loopback: import("../../providers/loopback.js").LoopbackControl;
   try {
     loopback = await startLoopback(resolve(stub.recordingsPath));
@@ -346,7 +377,7 @@ async function runInside(
       },
       providers: descriptors,
       now: () => new Date(),
-      log: () => undefined,
+      log: meterLog,
       timers: systemTimers,
       logIo: systemUsageLogIo,
     });
@@ -362,7 +393,7 @@ async function runInside(
     env: { PATH: process.env.PATH ?? "", HOME: sandboxDir },
   });
   const control = createMemoryPort();
-  const memoryPort = createMeteredPort(control.port, meter, () => undefined);
+  const memoryPort = createMeteredPort(control.port, meter, portLog);
   const dispatcher = createDispatcher({
     port: memoryPort,
     budget: budgetGate,
@@ -370,7 +401,7 @@ async function runInside(
     config: configs.dispatcher,
     now: () => new Date(),
     sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
-    log: () => undefined,
+    log: dispatcherLog,
     settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
   });
   const spec = configs.specs[0];
@@ -443,6 +474,10 @@ async function runInside(
     }
     await scheduler.tick();
     await worker.step();
+    if (portsLogFailed) {
+      deps.out("loop: ports log failed");
+      return 1;
+    }
     if (log.failed()) {
       return 1;
     }

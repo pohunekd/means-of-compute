@@ -42,6 +42,8 @@ export function museArgv(config: CoordConfig, session: MuseSession): readonly st
     "--prompt-file",
     join(session.runDir, `prompt-${String(session.k)}.md`),
     "--api-key-stdin",
+    "--preset",
+    "empty",
     "--provider",
     "meta",
     "--model",
@@ -71,6 +73,40 @@ export function museArgv(config: CoordConfig, session: MuseSession): readonly st
     "--no-foreign-personal-context",
     "-c",
     `mcpServers.factory=${JSON.stringify(factoryEntry(session))}`,
+  ];
+}
+
+export function probeArgv(config: CoordConfig, session: MuseSession): readonly string[] {
+  const full = museArgv(config, session);
+  const out: string[] = [];
+  for (let i = 0; i < full.length; i += 1) {
+    const flag = full[i] as string;
+    if (flag === "--api-key-stdin" || flag === "--no-parallel-tool-calls") {
+      continue;
+    }
+    if (flag === "--model" || flag === "--reasoning-effort") {
+      i += 1;
+      continue;
+    }
+    if (flag === "--provider") {
+      out.push(flag, "echo");
+      i += 1;
+      continue;
+    }
+    out.push(flag);
+  }
+  return out;
+}
+
+export function probeExportArgv(config: CoordConfig, session: MuseSession): readonly string[] {
+  return [
+    ...config.museCommand,
+    "export",
+    "--session",
+    session.sessionId,
+    "--redacted",
+    "--out",
+    join(session.runDir, `probe-${String(session.k)}-export.json`),
   ];
 }
 

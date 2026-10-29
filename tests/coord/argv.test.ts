@@ -1,7 +1,14 @@
-// Muse argv tests (A1-A3): the plan literal, the react phase switch and the
-// redacted export.
+// Muse argv tests (A1-A5): the plan literal, the react phase switch, the
+// redacted export, and the keyless probe pair.
 import { expect, test } from "bun:test";
-import { exportArgv, factoryEntry, museArgv, type MuseSession } from "../../src/coord/argv.js";
+import {
+  exportArgv,
+  factoryEntry,
+  museArgv,
+  probeArgv,
+  probeExportArgv,
+  type MuseSession,
+} from "../../src/coord/argv.js";
 import { loadCoordConfig } from "../../src/coord/config.js";
 
 const SESSION: MuseSession = {
@@ -24,6 +31,8 @@ test("the plan argv matches the pinned flags (A1)", async () => {
     "--prompt-file",
     `${R}/prompt-1.md`,
     "--api-key-stdin",
+    "--preset",
+    "empty",
     "--provider",
     "meta",
     "--model",
@@ -102,5 +111,55 @@ test("the export argv stays redacted (A3)", async () => {
     "--redacted",
     "--out",
     `${R}/session-1-export.json`,
+  ]);
+});
+
+test("the probe argv drops the key, model and effort (A4)", async () => {
+  const { config } = await loadCoordConfig("config/coordinator.json");
+  expect(probeArgv(config, SESSION)).toEqual([
+    "muse",
+    "exec",
+    "--json",
+    "--prompt-file",
+    `${R}/prompt-1.md`,
+    "--preset",
+    "empty",
+    "--provider",
+    "echo",
+    "--contributor-mode",
+    "on",
+    "--max-model-steps",
+    "40",
+    "--max-tool-output-bytes",
+    "65536",
+    "--session-id",
+    "0b7e6f52-3c1d-4e8a-9f20-6a5d4c3b2a19",
+    "--workspace",
+    `${R}/workspace`,
+    "--approval-mode",
+    "never",
+    "--approval-judge",
+    "off",
+    "--disable-shell",
+    "--disable-write",
+    "--disable-web-tools",
+    "--disable-reminders",
+    "--disable-request-user-input",
+    "--no-foreign-personal-context",
+    "-c",
+    'mcpServers.factory={"command":"/opt/bun/bin/bun","args":["--cwd=/srv/moc","src/mcp/serve.ts","--caller","coordinator","--config","/srv/moc/logs/coord-runs/20261028T100000Z-notes-abcdef/mcp.json"]}',
+  ]);
+});
+
+test("the probe export lands beside the session export (A5)", async () => {
+  const { config } = await loadCoordConfig("config/coordinator.json");
+  expect(probeExportArgv(config, SESSION)).toEqual([
+    "muse",
+    "export",
+    "--session",
+    "0b7e6f52-3c1d-4e8a-9f20-6a5d4c3b2a19",
+    "--redacted",
+    "--out",
+    `${R}/probe-1-export.json`,
   ]);
 });

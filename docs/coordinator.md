@@ -30,11 +30,12 @@ its own ignore line.
 
 ## Launcher config and Muse argv
 
-`loadCoordConfig` reads `config/coordinator.json` with 19 required keys:
+`loadCoordConfig` reads `config/coordinator.json` with 20 required keys:
 `museCommand`, `providerId`, `model`, `contributorMode`, `approvalMode`,
 `envPassthrough`, `mcpConfigPath`, `budgetGateConfigPath`, `skillDir`,
 `runsDir`, `maxRunsPerDay`, `maxOutcomeChars`, `maxToolOutputBytes`,
-`killGraceMs`, `exportTimeoutMs`, `plan`, `react`, `watch` and `seed`.
+`killGraceMs`, `exportTimeoutMs`, `plan`, `react`, `watch`, `seed` and
+`evidenceDenyPatterns`.
 The provider and model stay pinned to `meta-api` and
 `muse-spark-1.3-contributor`. The config names the key variable only:
 `apiKeyEnv` comes from the provider descriptor and its value is never
@@ -59,7 +60,7 @@ the redacted `export`, except for an abort seen at the entry check, which runs n
 with an ISO timestamp. `buildReport` folds call-ends, gates, sessions
 and the final `list_work` snapshot into `report.json`, and
 `renderReportMd` renders the same data as `report.md`; neither file
-holds the key or any env value. `report-expected.md` pins the exact
+holds the key or any env value. Exports are set to mode 600 once written. `report-expected.md` pins the exact
 render, so `.prettierignore` excludes it from formatting.
 
 ## Plan runs
@@ -132,7 +133,22 @@ The seed wipes and reseeds `stateDir`, each refusal exiting 2: `coord: seed <key
 `coord: seed storeSeedPath <path> is not valid JSON`. The G2 watch precondition
 refuses `coord: no items with prefix <idPrefix>-`. Each poll checks the signal, then the deadline measured
 from the run start, reads `list_work` + `fleet_status` + `audit_results`, decides,
-and runs one session. The log carries `poll`, `poll-error {tool, code}` and
+runs one session when attention is non-empty, then sleeps `watch.pollMs`. The log carries `poll`, `poll-error {tool, code}` and
 `attention`; `consumed` keys never repeat within a run. Stops are `plan-done`,
 `signal`, `goal-terminal` and `deadline` (exit 0), plus `max-sessions`,
 `session-failed` and `factory-unreadable` (exit 3). `full` runs plan then watch.
+
+## Evidence and judge path
+
+`bun run coord:evidence --run <runDir> --out <dir>` copies `report.md`,
+`report.json`, `mcp-calls.jsonl` plus `prompt-<n>.md` and
+`session-<n>-export.json` files. Paths redact cwd to `<checkout>` then home
+to `~`. Each line is scanned against the config deny patterns plus the key
+value; a hit exits 3 and keeps the out dir. Bad args exit 2, a clean bundle
+exits 0 and prints each out file. Encrypted reasoning in an export blob may
+hit a pattern, and the scan is never weakened. The judge path runs
+`bun install`, `bun run gates`, then
+`bun run mcp:call submit_work --file tests/fixtures/coord/replay/d1-submit.json --config tests/fixtures/mcp/demo/mcp.json`,
+which gives `sub-6b9641d69cb833e3` and then `replayed:true` on a second run.
+The daily cost stays within at most `4 x (40 + 8 x 20) = 800` model steps;
+measured E1 0.0045 USD and E2 0.0065 USD at the `meta-api` prices.

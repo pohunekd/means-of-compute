@@ -53,8 +53,7 @@ kills the whole process group with `SIGTERM`, then `SIGKILL` after
 `killGraceMs`. A `SIGTERM`/`SIGKILL` failure other than `ESRCH` is
 rethrown after the leader exits, before the export. After `exited`,
 `timeout` or `aborted`, the launcher runs
-the redacted `export`, except for an abort before the spawn, which runs
-no session and no export; the outcome is `exited`, `timeout`, `aborted` or
+the redacted `export`, except for an abort seen at the entry check, which runs no session and no export; an abort during setup kills the spawned session and still exports; the outcome is `exited`, `timeout`, `aborted` or
 `spawn-failed` with its stage and code. The log carries `session-start`
 (with the argv hash), `session-end` and `export` events, each starting
 with an ISO timestamp. `buildReport` folds call-ends, gates, sessions
@@ -62,3 +61,26 @@ and the final `list_work` snapshot into `report.json`, and
 `renderReportMd` renders the same data as `report.md`; neither file
 holds the key or any env value. `report-expected.md` pins the exact
 render, so `.prettierignore` excludes it from formatting.
+
+## Plan runs
+
+`bun run coord --goal <goal> --phase plan [--config <path>] [--dry-run]`
+starts a plan run. Unknown arguments, repeated flags and missing values
+exit 2, as do a bad checkout, a bad session record, a seed, a failed
+precondition, lock contention and an over-cap runs dir. Startup checks run
+before the body: args, checkout, config, key, goal with spec lookup, gate,
+runs dir, then the coordinator lock and the record check. The daily cap
+counts non-dry run dirs for today and exits 3 past `maxRunsPerDay`; the G1
+`list_work` snapshot refuses ids with the goal prefix. The run dir holds
+`home`, `workspace`, `mcp.json`, `prompt-1.md`, `coord.jsonl`,
+`report.json`, `report.md` and session files. A dry run prints one JSON
+line with `runDir`, `cwd`, `argv`, `phase` and `covers`, creating only
+`home`, `mcp.json`, `prompt-1.md` and `workspace`. Stops are `plan-done`,
+`no-submission`, `budget-refused`, `muse-unavailable` and `signal`, with
+exit 0 for `plan-done` and `signal` and exit 3 for the failing stops; a
+failed final snapshot turns 0 into 3. Stdout ends with
+`coord: run <runId> stop=<stop> submitted=<n> items=<n|unknown>`
+`followups=<n> report=<path>`. The `coordinator-session.json` record names
+the run and group while the session runs; the next run refuses while the
+group answers instead of killing it, since no portable proof of the old
+group identity exists. The export group is not recorded.

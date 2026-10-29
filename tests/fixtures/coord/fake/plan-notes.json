@@ -1,0 +1,6 @@
+{
+  "calls": [{ "tool": "submit_work", "argumentsFile": "notes-dag.json" }],
+  "exit": 0,
+  "hang": false,
+  "exportFails": false
+}

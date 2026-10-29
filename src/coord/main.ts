@@ -12,11 +12,7 @@ import { createCliBudgetGate, loadBudgetGateConfig, BudgetGateError } from "../b
 import { loadWorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { sha256Hex } from "../work/canonical.js";
-import {
-  COORD_CONFIG_PATH,
-  loadCoordConfig,
-  type LoadedCoordConfig,
-} from "./config.js";
+import { COORD_CONFIG_PATH, loadCoordConfig, type LoadedCoordConfig } from "./config.js";
 import { museArgv, type MuseSession } from "./argv.js";
 import { loadGoal, type Goal } from "./goal.js";
 import { renderPlanPrompt } from "./prompt.js";
@@ -207,8 +203,8 @@ async function checkSessionRecord(recordPath: string): Promise<void> {
 
 function runIdTimestamp(date: Date): { readonly day: string; readonly stamp: string } {
   const iso = date.toISOString();
-  const day = iso.slice(0, 10);
-  const stamp = `${day.replaceAll("-", "")}T${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
+  const day = iso.slice(0, 10).replaceAll("-", "");
+  const stamp = `${day}T${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
   return { day, stamp };
 }
 
@@ -256,7 +252,9 @@ async function loadGoalPrecondition(
   if (snapshot.ok) {
     for (const row of snapshot.snapshot.items) {
       if (row.id.startsWith(`${idPrefix}-`)) {
-        throw new Error(`coord: goal ${goalId} already planned (ids with prefix ${idPrefix}- exist)`);
+        throw new Error(
+          `coord: goal ${goalId} already planned (ids with prefix ${idPrefix}- exist)`,
+        );
       }
     }
   }
@@ -411,7 +409,11 @@ async function runPlan(args: PlanArgs): Promise<number> {
       recordPath,
       t0,
       gate as {
-        admit(): Promise<{ readonly admit: boolean; readonly reason?: string; readonly line?: string }>;
+        admit(): Promise<{
+          readonly admit: boolean;
+          readonly reason?: string;
+          readonly line?: string;
+        }>;
       },
     );
   };
@@ -550,15 +552,14 @@ async function runSession(
         throw error;
       }
     }
-    const calls: readonly CoordCallEnd[] = (await readCoordCalls(join(runDir, "mcp-calls.jsonl"))) ?? [];
+    const calls: readonly CoordCallEnd[] =
+      (await readCoordCalls(join(runDir, "mcp-calls.jsonl"))) ?? [];
     if (stop === null) {
       if (result !== null && result.outcome.kind === "spawn-failed") {
         stop = "muse-unavailable";
       } else if (result !== null && result.outcome.kind === "aborted") {
         stop = "signal";
-      } else if (
-        calls.some((call) => call.tool === "submit_work" && call.outcome === "ok")
-      ) {
+      } else if (calls.some((call) => call.tool === "submit_work" && call.outcome === "ok")) {
         stop = "plan-done";
       } else {
         stop = "no-submission";
@@ -588,7 +589,11 @@ async function runSession(
       `${JSON.stringify(report, null, 2)}\n`,
     );
     await writeFileAtomic("Run report markdown", join(runDir, "report.md"), renderReportMd(report));
-    await log.append({ ts: new Date().toISOString(), event: "report", path: join(runDir, "report.md") });
+    await log.append({
+      ts: new Date().toISOString(),
+      event: "report",
+      path: join(runDir, "report.md"),
+    });
     await log.append({ ts: new Date().toISOString(), event: "run-end", stop });
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
@@ -596,8 +601,7 @@ async function runSession(
     const okSubmits = calls.filter(
       (call) => call.tool === "submit_work" && call.outcome === "ok",
     ).length;
-    const itemsText =
-      report.items === null ? "unknown" : String(report.items.length);
+    const itemsText = report.items === null ? "unknown" : String(report.items.length);
     process.stdout.write(
       `coord: run ${runId} stop=${stop} submitted=${String(okSubmits)} items=${itemsText} followups=${String(report.followups.length)} report=${join(runDir, "report.md")}\n`,
     );

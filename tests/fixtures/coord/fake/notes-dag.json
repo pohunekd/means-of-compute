@@ -1,0 +1,88 @@
+{
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "id": "notes-parse",
+      "repo": "example/demo-repo",
+      "title": "Parse notes from text",
+      "goal": "Add src/notes/parse.ts that parses \"# title\" plus body text into a Note, and tests/notes/parse.test.ts. Text without a title line throws ParseError. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Notes parse into title and body, and text without a title line throws ParseError: bun test tests/notes/parse.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": [],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "notes-store",
+      "repo": "example/demo-repo",
+      "title": "Store notes in a JSONL file",
+      "goal": "Add src/notes/store.ts that appends a Note to a JSONL file and lists the stored notes in order, and tests/notes/store.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Two appended notes list back in order: bun test tests/notes/store.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["notes-parse"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "notes-cli",
+      "repo": "example/demo-repo",
+      "title": "Add and list notes from the command line",
+      "goal": "Add src/notes/cli.ts with an add command that stores a note and a list command that prints the stored titles, and tests/notes/cli.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "add then list prints the added title: bun test tests/notes/cli.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["notes-store"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    }
+  ]
+}

@@ -3,8 +3,10 @@
 import { mkdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import Ajv from "ajv/dist/2020";
 import { writeFileAtomic } from "../fs/write.js";
 import type { LoopGithubConfig } from "./config.js";
+import intakeSchema from "./intake.schema.json" with { type: "json" };
 
 export type GitHubErrorKind = "unavailable" | "rejected" | "invalid-output" | "unverified";
 
@@ -55,6 +57,14 @@ export interface IssueFirstLine {
   readonly number: number;
   readonly first: string;
 }
+export interface IntakeIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly authorAssociation: string;
+  readonly isPullRequest: boolean;
+}
 export interface GitHubPort {
   viewerLogin(): Promise<string>;
   checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]>;
@@ -85,8 +95,11 @@ export interface GitHubPort {
     add: readonly string[],
     remove: readonly string[],
   ): Promise<void>;
+  readyIssues(repo: string, labels: readonly string[]): Promise<readonly IntakeIssue[]>;
+  issueState(repo: string, issue: number): Promise<"open" | "closed">;
 }
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
+const validateIntakeIssue = new Ajv({ strict: true }).compile(intakeSchema);
 
 function redact(token: string, value: string): string {
   return token.length === 0 ? value : value.split(token).join("[redacted]");
@@ -605,6 +618,61 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     await runGh(config, env, step, argv);
   }
 
+  async function readyIssues(
+    repo: string,
+    labels: readonly string[],
+  ): Promise<readonly IntakeIssue[]> {
+    const step = "readyIssues";
+    const { stdout } = await runGh(config, env, step, [
+      "api",
+      "-X",
+      "GET",
+      `repos/${repo}/issues`,
+      "-f",
+      "state=open",
+      "-f",
+      `labels=${labels.join(",")}`,
+      "-f",
+      "per_page=100",
+      "--paginate",
+      "--jq",
+      '.[] | {number, title, body: (.body // ""), labels: [.labels[].name], author_association, pull_request: (.pull_request != null)}',
+    ]);
+    const rows: IntakeIssue[] = [];
+    for (const value of parseJsonLines(stdout, step)) {
+      if (!validateIntakeIssue(value)) {
+        throw new GitHubError("invalid-output", step, "readyIssues: issue fails the intake schema");
+      }
+      const record = value as Record<string, unknown>;
+      const labelsValue = record["labels"];
+      rows.push({
+        number: record["number"] as number,
+        title: record["title"] as string,
+        body: record["body"] as string,
+        labels: Array.isArray(labelsValue) ? (labelsValue as string[]) : [],
+        authorAssociation: record["author_association"] as string,
+        isPullRequest: record["pull_request"] as boolean,
+      });
+    }
+    return rows;
+  }
+
+  async function issueState(repo: string, issue: number): Promise<"open" | "closed"> {
+    const step = "issueState";
+    const { stdout } = await runGh(config, env, step, [
+      "api",
+      `repos/${repo}/issues/${String(issue)}`,
+      "--jq",
+      ".state",
+    ]);
+    const lines = nonEmptyLines(stdout);
+    const state = lines.length === 1 ? lines[0] : undefined;
+    if (state !== "open" && state !== "closed") {
+      throw new GitHubError("invalid-output", step, "issueState: state is not open or closed");
+    }
+    return state;
+  }
+
   return {
     viewerLogin,
     checkRuns,
@@ -619,5 +687,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     createIssue,
     factoryIssues,
     editIssueLabels,
+    readyIssues,
+    issueState,
   };
 }

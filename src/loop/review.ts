@@ -111,7 +111,6 @@ export function previousRoundOf(
 interface ReviewHeads {
   readonly li: LoopItem;
   readonly checkoutDir: string;
-  readonly branch: string;
   readonly baseBranch: string;
   readonly pull: { readonly number: number; readonly headSha: string };
 }
@@ -162,9 +161,8 @@ async function requireHeads(
     );
   }
   const checkoutDir = checkoutDirOf(ctx, item);
-  const branch = await registryBranchOf(ctx, item, li);
   const baseBranch = ctx.dispatcherConfig.baseBranch;
-  return { li, checkoutDir, branch, baseBranch, pull };
+  return { li, checkoutDir, baseBranch, pull };
 }
 
 export function logGithubError(
@@ -595,7 +593,8 @@ async function auditErrorStep(
 
 export async function auditStep(ctx: ReviewContext, item: WorkItem): Promise<ReviewStep> {
   const heads = await requireHeads(ctx, item, "auditing");
-  const { li, checkoutDir, branch, baseBranch, pull } = heads;
+  const { li, checkoutDir, baseBranch, pull } = heads;
+  const branch = await registryBranchOf(ctx, item, li);
   if (li.backoffUntil !== null && ctx.now().getTime() < Date.parse(li.backoffUntil)) {
     return "pending";
   }

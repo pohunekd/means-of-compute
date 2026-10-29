@@ -463,6 +463,66 @@ test("red-ci changes neither excludedHosts nor startRejections (U14)", async () 
     expect(li.startRejections).toBe(2);
   });
 });
+test("a merged close with finalize moves to finalizing (MT20)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(ctx.statePath, loopItem({ phase: "merging" }));
+    const decision = await closeRound(ctx, item(), {
+      outcome: "merged",
+      attempt: "success",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: "abc123",
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+      finalize: { humanMerge: true },
+    });
+    expect(decision).toEqual({ kind: "continue", stallRounds: 0 });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.phase).toBe("finalizing");
+    expect(li.finalize).toEqual({ result: "success", done: false });
+    expect(li.humanInterventions).toBe(1);
+    expect(li.round).toBe(1);
+    expect(li.requestId).toBe(null);
+    const lines = readFileSync(ctx.resultsPath, "utf8")
+      .split("\n")
+      .filter((line) => line !== "");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string)).toMatchObject({
+      outcome: "merged",
+      routingResult: "success",
+    });
+  });
+});
+
+test("a merged close without finalize stays idle (MT20)", async () => {
+  await withTempDir(async (dir) => {
+    const { ctx } = ctxFor(dir);
+    await writeState(ctx.statePath, loopItem({ phase: "merging" }));
+    await closeRound(ctx, item(), {
+      outcome: "merged",
+      attempt: "success",
+      requestId: "req-000001",
+      model: PREFERRED,
+      providerId: PROVIDER,
+      hostAlias: "host-a",
+      headSha: "abc123",
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
+    const state = await readLoopState(ctx.statePath);
+    const li = state.items["gh-moc-5"] as unknown as LoopItem;
+    expect(li.phase).toBe("idle");
+    expect(li.finalize).toBe(null);
+    expect(li.humanInterventions).toBe(0);
+  });
+});
+
 test("appendMissingResults repairs one deleted line and is then a no-op (C9)", async () => {
   await withTempDir(async (dir) => {
     const { ctx } = ctxFor(dir);

@@ -22,6 +22,7 @@ export interface RoundClose {
   readonly failingChecks: readonly string[];
   readonly verdict: RoundRecord["verdict"];
   readonly baseRace: boolean;
+  readonly finalize?: { readonly humanMerge: boolean };
 }
 
 export interface CoreContext extends ProjectionContext {
@@ -69,17 +70,22 @@ export async function closeRound(
     const startRejections =
       close.outcome === "start-rejected" ? li.startRejections + 1 : li.startRejections;
     // A close from phase starting keeps rule (b): the intent is gone.
+    // A close with finalize moves to finalizing in the same write.
+    const finalized = close.finalize !== undefined;
     const nextItem: Record<string, unknown> = {
       ...li,
       failures: failuresAfter(li.failures, record),
       round: li.round + 1,
       session: null,
       requestId: null,
-      phase: "idle",
+      phase: finalized ? "finalizing" : "idle",
       start: null,
       rounds,
       excludedHosts,
       startRejections,
+      finalize: finalized ? { result: "success", done: false } : null,
+      humanInterventions:
+        close.finalize?.humanMerge === true ? li.humanInterventions + 1 : li.humanInterventions,
     };
     return Promise.resolve({
       next: { ...state, items: { ...state.items, [item.id]: nextItem } },

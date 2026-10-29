@@ -25,7 +25,7 @@ import { parkOperator, parkStall } from "./park.js";
 import { reconcile } from "./project.js";
 import { closeRound, type RoundClose } from "./rounds.js";
 import { updateLoopState, LoopStateDataError } from "./state.js";
-import type { LoopItem, RoundAttempt, RoundOutcome } from "./types.js";
+import type { LoopItem, RoundAttempt, RoundOutcome, RoundRecord } from "./types.js";
 import type { StartContext } from "./start.js";
 
 export interface ReviewContext extends StartContext {
@@ -116,7 +116,7 @@ interface ReviewHeads {
   readonly pull: { readonly number: number; readonly headSha: string };
 }
 
-async function readReviewItem(ctx: ReviewContext, id: string): Promise<LoopItem> {
+export async function readReviewItem(ctx: ReviewContext, id: string): Promise<LoopItem> {
   return updateLoopState(ctx.statePath, (state) => {
     const found = state.items[id] as unknown as LoopItem | undefined;
     if (found === undefined) {
@@ -126,7 +126,11 @@ async function readReviewItem(ctx: ReviewContext, id: string): Promise<LoopItem>
   });
 }
 
-async function writeReviewItem(ctx: ReviewContext, id: string, next: LoopItem): Promise<LoopItem> {
+export async function writeReviewItem(
+  ctx: ReviewContext,
+  id: string,
+  next: LoopItem,
+): Promise<LoopItem> {
   return updateLoopState(ctx.statePath, (state) => {
     const current = state.items[id] as unknown as LoopItem | undefined;
     if (current === undefined) {
@@ -140,7 +144,7 @@ async function writeReviewItem(ctx: ReviewContext, id: string, next: LoopItem): 
   });
 }
 
-function checkoutDirOf(ctx: ReviewContext, item: WorkItem): string {
+export function checkoutDirOf(ctx: ReviewContext, item: WorkItem): string {
   const entry = ctx.repos.find((candidate) => candidate.repo === item.repo);
   if (entry === undefined) {
     throw new Error(`review: no checkout for ${item.repo}`);
@@ -148,7 +152,11 @@ function checkoutDirOf(ctx: ReviewContext, item: WorkItem): string {
   return resolve(entry.checkoutDir);
 }
 
-async function registryBranchOf(ctx: ReviewContext, item: WorkItem, li: LoopItem): Promise<string> {
+export async function registryBranchOf(
+  ctx: ReviewContext,
+  item: WorkItem,
+  li: LoopItem,
+): Promise<string> {
   const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
   const entry = entries.find((candidate) => candidate.requestId === li.requestId);
   if (entry === undefined) {
@@ -187,7 +195,11 @@ async function requireHeads(
   return { li, checkoutDir, branch, baseBranch, pull };
 }
 
-function logGithubError(ctx: ReviewContext, item: WorkItem, error: GitHubError | GitError): void {
+export function logGithubError(
+  ctx: ReviewContext,
+  item: WorkItem,
+  error: GitHubError | GitError,
+): void {
   ctx.log.log({
     event: "github-error",
     workItemId: item.id,
@@ -210,12 +222,19 @@ async function reviewAttemptOf(
   return outcome.attempt;
 }
 
-async function closeReviewRound(
+export interface ReviewClose {
+  readonly outcome: RoundOutcome;
+  readonly headSha: string | null;
+  readonly failingChecks: readonly string[];
+  readonly verdict: RoundRecord["verdict"];
+  readonly baseRace: boolean;
+  readonly finalize?: { readonly humanMerge: boolean };
+}
+
+export async function closeReviewRound(
   ctx: ReviewContext,
   item: WorkItem,
-  outcome: RoundOutcome,
-  headSha: string | null,
-  failingChecks: readonly string[],
+  input: ReviewClose,
 ): Promise<ReviewStep> {
   const fresh = await readReviewItem(ctx, item.id);
   if (fresh.session === null) {
@@ -225,18 +244,24 @@ async function closeReviewRound(
   }
   const session = fresh.session;
   const close: RoundClose = {
-    outcome,
+    outcome: input.outcome,
     attempt: await reviewAttemptOf(ctx, fresh.requestId),
     requestId: fresh.requestId,
     model: session.model,
     providerId: session.providerId,
     hostAlias: session.hostAlias,
-    headSha,
-    failingChecks,
-    verdict: null,
-    baseRace: false,
+    headSha: input.headSha,
+    failingChecks: [...input.failingChecks],
+    verdict: input.verdict,
+    baseRace: input.baseRace,
+    ...(input.finalize === undefined ? {} : { finalize: input.finalize }),
   };
   const decision = await closeRound(ctx, item, close);
+  if (close.finalize !== undefined) {
+    const stored = await readReviewItem(ctx, item.id);
+    await reconcile(ctx.storePath, item.id, stored, ctx);
+    return "idle";
+  }
   if (decision.kind === "park") {
     await parkStall(ctx, item, decision);
     return "parked";
@@ -291,11 +316,23 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
   }
   if (head === null) {
     const outcome = attempt === "success" ? "no-push" : "session-failed";
-    return closeReviewRound(ctx, item, outcome, null, []);
+    return closeReviewRound(ctx, item, {
+      outcome,
+      headSha: null,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   if (li.pull !== null && head === li.pull.headSha) {
     const outcome = attempt === "success" ? "no-new-commit" : "session-failed";
-    return closeReviewRound(ctx, item, outcome, head, []);
+    return closeReviewRound(ctx, item, {
+      outcome,
+      headSha: head,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   let number: number;
   let code: string;
@@ -394,13 +431,13 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
       sha: pull.headSha,
       code: "red",
     });
-    return closeReviewRound(
-      ctx,
-      item,
-      "red-ci",
-      pull.headSha,
-      failingChecksOf(runs, ctx.requiredChecks),
-    );
+    return closeReviewRound(ctx, item, {
+      outcome: "red-ci",
+      headSha: pull.headSha,
+      failingChecks: failingChecksOf(runs, ctx.requiredChecks),
+      verdict: null,
+      baseRace: false,
+    });
   }
   const since = li.ciSince;
   if (since !== null && ctx.now().getTime() - Date.parse(since) >= ctx.ciTimeoutMs) {
@@ -411,7 +448,13 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
       sha: pull.headSha,
       code: "timeout",
     });
-    return closeReviewRound(ctx, item, "ci-timeout", pull.headSha, []);
+    return closeReviewRound(ctx, item, {
+      outcome: "ci-timeout",
+      headSha: pull.headSha,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   return "ci";
 }
@@ -482,10 +525,22 @@ async function auditRefusedStep(
     return auditErrorStep(ctx, item, li, h, new Error(reason));
   }
   if (reason.startsWith("nothing to audit at ")) {
-    return closeReviewRound(ctx, item, "empty-diff", h, []);
+    return closeReviewRound(ctx, item, {
+      outcome: "empty-diff",
+      headSha: h,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   if (reason.startsWith("diff too large for one audit ")) {
-    return closeReviewRound(ctx, item, "diff-too-large", h, []);
+    return closeReviewRound(ctx, item, {
+      outcome: "diff-too-large",
+      headSha: h,
+      failingChecks: [],
+      verdict: null,
+      baseRace: false,
+    });
   }
   if (reason.startsWith("no eligible auditor")) {
     await parkOperator(ctx, item, "no-eligible-auditor");

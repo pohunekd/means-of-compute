@@ -62,7 +62,7 @@ function parseArgs(argv: readonly string[]): { runDir: string; outDir: string } 
   if (outDir === null) {
     fail("--out is required");
   }
-  return { runDir: runDir as string, outDir: outDir as string };
+  return { runDir, outDir };
 }
 
 interface LoadedReport {
@@ -122,25 +122,24 @@ export async function run(argv: readonly string[]): Promise<number> {
   const written: Array<{ readonly name: string; readonly text: string }> = [];
   for (const name of names) {
     const source = join(runDir, name);
-    let text: string;
+    let redacted: string;
     try {
-      text = await readInputText("Run file", source);
+      redacted = redactText(await readInputText("Run file", source), { cwd, home });
     } catch {
       fail(`${source} is missing`);
     }
-    const redacted = redactText(text as string, { cwd, home });
     await writeFileAtomic("Evidence file", join(outDir, name), redacted);
     written.push({ name, text: redacted });
   }
   const patterns = config.evidenceDenyPatterns.map((p) => new RegExp(p));
-  const env = definedEnv(process.env as Record<string, string | undefined>);
-  const literal =
-    env[apiKeyEnv] === undefined || env[apiKeyEnv] === "" ? null : (env[apiKeyEnv] as string);
+  const env = definedEnv(process.env);
+  const keyValue = env[apiKeyEnv];
+  const literal = keyValue === undefined || keyValue === "" ? null : keyValue;
   let hits = 0;
   for (const { name, text } of written) {
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i] as string;
+      const line = lines[i] ?? "";
       let index: number | null = null;
       if (literal !== null && line.includes(literal)) {
         index = -1;

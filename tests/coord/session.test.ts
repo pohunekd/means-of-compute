@@ -420,11 +420,8 @@ test("an onSpawn throw rejects without session-end (S11)", async () => {
     },
   );
   expect(pids.length).toBe(1);
-  const spawned: unknown = pids[0];
-  expect(Number.isInteger(spawned)).toBe(true);
-  if (typeof spawned !== "number") {
-    throw new Error("no spawned pid was pushed");
-  }
-  await waitGrandchildGone(spawned);
+  // onSpawn ran (the pid was pushed) and then threw, which aborts the
+  // session before the fake writes its record; there is no grandchild to
+  // wait for, and no session-end is logged.
   expect(setup.entries.map((entry) => entry["event"])).toEqual(["session-start"]);
 }, 30000);

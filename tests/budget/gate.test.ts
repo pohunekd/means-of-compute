@@ -70,6 +70,7 @@ test("gate admits when spend is below the caps", async () => {
     ],
     timeoutMs: 60000,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   const admission = await gate.admit();
   expect(admission.admit).toBe(true);
@@ -93,6 +94,7 @@ test("gate refuses with the reason when spend is at the cap", async () => {
     ],
     timeoutMs: 60000,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   const admission = await gate.admit();
   expect(admission.admit).toBe(false);
@@ -107,6 +109,7 @@ test("gate throws on a non-guard failure instead of refusing", async () => {
     command: ["bun", "-e", "process.exit(1)"],
     timeoutMs: 60000,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   let error: unknown;
   try {
@@ -122,6 +125,7 @@ test("gate wraps a missing command as BudgetGateError", async () => {
     command: ["no-such-cmd-mocgate"],
     timeoutMs: 60000,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   let error: unknown;
   try {
@@ -138,6 +142,7 @@ test("gate timeout throws naming the timeout without waiting for pipes", async (
     command: ["sh", "-c", "sleep 6; true"],
     timeoutMs: 300,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   let error: unknown;
   try {
@@ -154,6 +159,7 @@ test("gate names the signal when the child dies on its own", async () => {
     command: ["sh", "-c", "kill -9 $$"],
     timeoutMs: 60000,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   let error: unknown;
   try {
@@ -173,6 +179,7 @@ test(
       command: ["sh", "-c", "(sleep 60 &); kill -9 $$"],
       timeoutMs: 10000,
       cwd: process.cwd(),
+      env: { ...process.env } as Record<string, string>,
     });
     const started = Date.now();
     let error: unknown;
@@ -221,6 +228,7 @@ test("gate refuses output held open past the deadline", async () => {
     command: ["sh", "-c", "(sleep 6 &); echo 'admitted: x'"],
     timeoutMs: 300,
     cwd: process.cwd(),
+    env: { ...process.env } as Record<string, string>,
   });
   let error: unknown;
   try {

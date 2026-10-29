@@ -327,24 +327,7 @@ test("four runs today refuse the fifth with run-cap (M7)", async () => {
 
 test("a held run lock refuses the run (M8)", async () => {
   const env = await createCoordTestEnv();
-  const { withFileLock } = await import("../../src/fs/lock.js");
   const holderPath = join(env.runsDir, "coordinator");
-  let releaseHolder: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    void withFileLock(
-      "coordinator runs",
-      holderPath,
-      () =>
-        new Promise<void>((done) => {
-          releaseHolder = (): void => {
-            resolve(undefined);
-          };
-          console.log("holder ready");
-          releaseHolder = done;
-        }),
-    );
-  });
-  void held;
   const holder = Bun.spawn(
     [process.execPath, join(process.cwd(), "tests", "work", "lock-holder.case.ts")],
     {
@@ -379,7 +362,6 @@ test("a held run lock refuses the run (M8)", async () => {
   expect(await listRunDirs(env.runsDir)).toEqual([]);
   holder.kill("SIGKILL");
   await holder.exited.catch(() => {});
-  releaseHolder();
 }, 30000);
 
 test("a dry run prints the spawn plan without gating or spawning (M9)", async () => {
@@ -612,11 +594,9 @@ test("the d1 fixture resolves to the demo store (M14)", async () => {
   const expected: Record<string, unknown> = {
     ...committed,
     mcpConfigPath: "tests/fixtures/mcp/demo/mcp.json",
+    runsDir: (config as unknown as Record<string, unknown>)["runsDir"],
   };
-  delete expected["runsDir"];
-  const actual: Record<string, unknown> = { ...(config as unknown as Record<string, unknown>) };
-  delete actual["runsDir"];
-  expect(actual).toEqual(expected);
+  expect({ ...(config as unknown as Record<string, unknown>) }).toEqual(expected);
 }, 30000);
 
 test("arg errors name the flag (M15)", async () => {
@@ -658,4 +638,83 @@ test("arg errors name the flag (M15)", async () => {
   await new Response(bogus.stdout).text();
   expect(rc2).toBe(2);
   expect(stderr2).toContain("coord: unknown argument --bogus");
+}, 30000);
+
+test("a missing goal file refuses the run, a missing key refuses without a run dir (M18)", async () => {
+  const env = await createCoordTestEnv();
+  const missing = await spawnMain(env, "tests/fixtures/coord/goals/missing.json", "plan", []);
+  const [missingRc, , missingStderr] = await Promise.all([
+    missing.run.waitExit(),
+    missing.run.stdoutText(),
+    missing.run.stderrText(),
+  ]);
+  expect(missingRc).toBe(2);
+  expect(missingStderr).toContain("coord: ");
+  expect(await listRunDirs(env.runsDir)).toEqual([]);
+  const keylessConfigPath = join(env.dir, "coordinator-keyless.json");
+  await Bun.write(
+    keylessConfigPath,
+    `${JSON.stringify({
+      ...env.configJson,
+      skillDir: join(process.cwd(), ".agents/skills/factory-coord"),
+    })}\n`,
+  );
+  const keyless = Bun.spawn(
+    [
+      process.execPath,
+      "run",
+      join(env.checkoutDir, "src/coord/main.ts"),
+      "--goal",
+      join(process.cwd(), "tests/fixtures/coord/goals/notes.json"),
+      "--phase",
+      "plan",
+      "--config",
+      keylessConfigPath,
+    ],
+    {
+      cwd: env.checkoutDir,
+      env: {
+        PATH: process.env["PATH"],
+        FAKE_MUSE_RECORD: env.recordPath,
+        FAKE_MUSE_SCRIPT: join(FAKE_DIR, "plan-notes.json"),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const [keylessRc, , keylessStderr] = await Promise.all([
+    (async (): Promise<number> => keyless.exited)(),
+    new Response(keyless.stdout).text(),
+    new Response(keyless.stderr).text(),
+  ]);
+  expect(keylessRc).toBe(2);
+  expect(keylessStderr).toContain("coord: META_API_KEY is not set");
+  expect(await listRunDirs(env.runsDir)).toEqual([]);
+}, 30000);
+
+test("the gate child never sees the key while the session still gets it (M16)", async () => {
+  const env = await createCoordTestEnv();
+  const probeOut = join(env.dir, "gate-key-state");
+  const probeConfigPath = join(env.dir, "gate-probe.json");
+  await Bun.write(
+    probeConfigPath,
+    JSON.stringify({
+      command: [
+        "bun",
+        join(process.cwd(), "tests", "fixtures", "coord", "gate-env-probe.ts"),
+        probeOut,
+      ],
+      timeoutMs: 30000,
+    }),
+  );
+  const spawned = await spawnMain(env, "tests/fixtures/coord/goals/notes.json", "plan", [], {
+    budgetGateConfigPath: probeConfigPath,
+  });
+  const [rc, stdout] = await Promise.all([spawned.run.waitExit(), spawned.run.stdoutText()]);
+  await spawned.run.stderrText();
+  expect(rc).toBe(0);
+  expect(stdout.trim().split("\n").at(-1)).toMatch(/^coord: run \S+ stop=plan-done /);
+  expect(await Bun.file(probeOut).text()).toBe("unset\n");
+  const record = (await Bun.file(env.recordPath).json()) as { readonly stdinSha256: string };
+  expect(record.stdinSha256).toBe(sha256Hex("test-key\n"));
 }, 30000);

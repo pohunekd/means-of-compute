@@ -32,6 +32,7 @@ import {
   finishMerge,
   mergeCheck,
   type MergeContext,
+  type MergeOutcome,
 } from "../../src/loop/merge.js";
 import { project, reconcile } from "../../src/loop/project.js";
 
@@ -1655,7 +1656,9 @@ test("MT22 a finalizing close skips the stall decision", async () => {
           ...seed.ctx,
           stall: { maxStagnantRounds: 1, maxRetries: 2 },
         };
-        await expect(mergeCheck(stalled, item())).resolves.toBe("done");
+        const pendingOutcome: Promise<MergeOutcome> = mergeCheck(stalled, item());
+        // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+        await expect(pendingOutcome).resolves.toBe("done");
         const li = await readItem(stalled.statePath);
         expect(li.phase).toBe("final");
         expect(li.finalize).toEqual({ result: "success", done: true });

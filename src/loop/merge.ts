@@ -198,7 +198,7 @@ async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise
     return "pending";
   }
   const heads = await mergeHeads(ctx, item);
-  const { checkoutDir, branch, baseBranch, pull, spec } = heads;
+  const { checkoutDir, branch, baseBranch, pull } = heads;
   if (pull.headSha !== h) {
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" moved under a ready merge`,

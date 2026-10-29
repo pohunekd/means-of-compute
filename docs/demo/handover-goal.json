@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "v1",
+  "goalId": "handover",
+  "idPrefix": "handover",
+  "repo": "pohunekd/means-of-compute",
+  "title": "Handover: docs link check and a work store summary",
+  "outcome": "Three small additions, one per issue. (1) Issue 125: scripts/docs-links.ts checks every relative Markdown link [text](target) in README.md, AGENTS.md and docs/*.md. Links inside fenced code blocks and targets with a URL scheme or a bare #anchor are skipped; a #fragment after a path is dropped. Each remaining target resolves against the directory of the file that holds the link and must exist. An optional --root <dir> (default: the current directory) sets where the three sources are read. It prints one line per broken link as <file>:<line>: <target> and exits 1 when any link is broken, otherwise 0. package.json gains \"docs:links\": \"bun run scripts/docs-links.ts\". tests/docs-links.test.ts runs it with --root on a temp dir: one good and one broken link reports exactly the broken one and exits 1; only good links exits 0. bun run docs:links exits 0 on this repository's own docs. (2) Issue 126: src/work/summary.ts exports summarizeStore(store) for a loaded WorkStore, with no I/O. It returns {revision, total, byStatus}: total is the number of items, and byStatus has exactly the six keys queued, running, review, parked, blocked and done in that order, each the number of items with that status. tests/work/summary.test.ts loads tests/fixtures/coord/d3/store.json (read only) with checkWorkStore from src/work/store.ts and expects {\"revision\":4,\"total\":3,\"byStatus\":{\"queued\":1,\"running\":0,\"review\":0,\"parked\":0,\"blocked\":1,\"done\":1}}. (3) Issue 127, which needs the summary of issue 126: scripts/work-summary.ts reads the work store with readWorkStore (an absent file is the empty store) at --store <path>, or at the storePath of config/work.json (loadWorkConfig) when the flag is absent, prints JSON.stringify(summarizeStore(store)) as one stdout line and exits 0. An unknown argument, a repeated or valueless --store, or a store error prints one line work:summary: <message> to stderr and exits 2. package.json gains \"work:summary\": \"bun run scripts/work-summary.ts\". docs/work-store.md gains a short section on the command. tests/work/summary-cli.test.ts spawns it: --store tests/fixtures/coord/d3/store.json prints the summary above and exits 0; --bogus exits 2 with one work:summary: line.",
+  "constraints": [
+    "Change no file under src/mcp, src/loop, src/approvals, src/coord, .agents or config.",
+    "Do not change src/work/store.ts or scripts/gates.ts.",
+    "No new dependencies.",
+    "Each item delivers exactly one issue and sets that issue number.",
+    "The item for issue 127 depends on the item for issue 126; the other two items have no dependencies.",
+    "Each item adds one test file with at most two tests, and bun run gates passes."
+  ],
+  "issues": [
+    { "number": 125, "title": "Check relative Markdown links in the docs" },
+    { "number": 126, "title": "Summarize the work store by status" },
+    { "number": 127, "title": "work:summary command for the work store" }
+  ],
+  "maxItems": 3,
+  "preferredModel": "meta/muse-glimmer-30b"
+}

@@ -129,7 +129,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 ## Stub ports (PR 8)
 
-`src/loop/stub/` holds the demo seams. `sandbox.ts` resets only a directory marked `.loop-demo` (the registry file goes, its lock stays), seeds `origin.git` and `checkout/` from the demo repo, creates the factory-owned directories and writes the budget guard copies with state inside the sandbox; its git runner allows only the subcommands the demo needs. `worker.ts` handles each live memory-port session once: one streamed call through the real meter, the scripted patch committed as `moc-demo` and pushed to the sandbox origin, then `finished`. `observations.ts` reports the HostCapacity documents of the observations file on every collect. `callProvider` is exported for the stub audit call.
+`src/loop/stub/` holds the demo seams. `sandbox.ts` resets only a directory marked `.loop-demo` (the registry file goes, its lock stays), seeds `origin.git` and `checkout/` from the demo repo, creates the factory-owned directories and writes the budget guard copies with state inside the sandbox; its git runner allows only the subcommands the demo needs. `worker.ts` handles each live memory-port session once: one streamed call through the real meter, the scripted patch committed as `moc-demo` and pushed to the sandbox origin, then `finished`; a failed meter or git step completes the session `failed`. `observations.ts` reports the HostCapacity documents of the observations file on every collect. `callProvider` is exported for the stub audit call.
 
 ## Driver park (PR 5b)
 

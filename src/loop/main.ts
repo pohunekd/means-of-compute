@@ -69,12 +69,16 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
   let stopping = false;
-  process.once("SIGINT", () => {
+  let seenSignal = false;
+  const onSignal = (): void => {
+    if (seenSignal) {
+      return;
+    }
+    seenSignal = true;
     stopping = true;
-  });
-  process.once("SIGTERM", () => {
-    stopping = true;
-  });
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   try {
     const configs = await loadLoopConfigs(resolve(args.config), "stub");
     const queue = args.queue as string;

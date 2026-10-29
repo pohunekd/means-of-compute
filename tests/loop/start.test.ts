@@ -1547,8 +1547,7 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     });
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     const control = createMemoryPort();
-    // The :0 entry holds a real `control.port.start` handle, like the
-    // live orphan the session had named in the earlier 5c build.
+    // The :0 entry names the session the port started.
     const orphanHandle = await control.port.start({
       requestId: "gh-demo-1:0",
       workItemId: "gh-demo-1",

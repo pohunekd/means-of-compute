@@ -7,15 +7,20 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { BudgetGate } from "../../src/budget/gate.js";
+import { BudgetGateError } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
+import type { ModelRequest, SingleCallResult } from "../../src/providers/router.js";
 import { readLoopState } from "../../src/loop/state.js";
 import type { LoopLog } from "../../src/loop/log.js";
 import { initialLoopItem } from "../../src/loop/start.js";
 import type { LoopItem } from "../../src/loop/types.js";
 import { admittingGate, applyTestEnv, refusingGate } from "../auditor/test-env.js";
+import { InputPathError } from "../../src/fs/input.js";
+import { renderComment } from "../../src/auditor/verdict.js";
+import { readVerdicts } from "../../src/auditor/store.js";
 import { callProviderOnce } from "../../src/providers/router.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { loadAuditorConfig } from "../../src/auditor/config.js";
@@ -310,9 +315,21 @@ function publishingItem(overrides: Partial<LoopItem> = {}): LoopItem {
   };
 }
 
+// The excerpt names a counting `call` wrapper, so every model call count
+// is asserted instead of inferred.
+function countingCall(
+  calls: { count: number },
+  inner: (providerId: string, request: ModelRequest) => Promise<SingleCallResult>,
+): (providerId: string, request: ModelRequest) => Promise<SingleCallResult> {
+  return (providerId, request) => {
+    calls.count += 1;
+    return inner(providerId, request);
+  };
+}
+
 test("RT1 pushed head, no PR: creates the pull and moves to ci", async () => {
   await withTempDir(async (dir) => {
-    const harness = await makeHarness(dir);
+    const harness = await makeHarness(dir, { branchPrefix: "alt/" });
     try {
       const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.ctx.repos[0]?.checkoutDir ?? dir, ["fetch", "origin"]);
@@ -330,7 +347,20 @@ test("RT1 pushed head, no PR: creates the pull and moves to ci", async () => {
       };
       expect(stored.items[0]?.status).toBe("review");
       expect(stored.items[0]?.pullNumber).toBe(1);
-      expect(stored.items[0]?.branch).toBe("moc/gh-demo-1");
+      // The registry branch wins over the diverging display prefix: the
+      // PR is created on moc/gh-demo-1 even though branchPrefix is alt/.
+      const createdPull = (
+        harness.ctx.github as unknown as {
+          snapshot(): { pulls: { head: string; body: string }[] };
+        }
+      )
+        .snapshot()
+        .pulls.at(0);
+      expect(createdPull?.head).toBe("moc/gh-demo-1");
+      expect(createdPull?.body).toBe(
+        "<!-- moc:work-item:gh-demo-1 -->\n\nDefinition of done:\n- [ ] D1: Done\n",
+      );
+      expect(stored.items[0]?.branch).toBe("alt/gh-demo-1");
       const pulls = harness.events.filter((line) => line.startsWith("pull:created:"));
       expect(pulls).toHaveLength(1);
     } finally {
@@ -460,6 +490,12 @@ test("RT4 absent branch: success gives no-push, a failed session gives session-f
       expect(step).toBe("idle");
       const li = await readItem(harness.ctx.statePath);
       expect(li.rounds[0]).toMatchObject({ outcome: "session-failed", headSha: null });
+      const failedStored = JSON.parse(await Bun.file(harness.ctx.storePath).text()) as {
+        items: WorkItem[];
+      };
+      expect(failedStored.items[0]?.status).toBe("queued");
+      expect(failedStored.items[0]?.stallRounds).toBe(1);
+      expect(failedStored.items[0]?.branch).toBeNull();
     } finally {
       await harness.sandbox.cleanup();
     }
@@ -527,11 +563,10 @@ test("RT6 github and git errors keep the phase and log github-error", async () =
     }
   });
   await withTempDir(async (dir) => {
-    const harness = await makeHarness(dir, {
-      repos: [{ repo: REPO, checkoutDir: "/nonexistent/x.git", idPrefix: "gh-" }],
-    });
+    const harness = await makeHarness(dir);
     try {
       await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      rmSync(join(dir, "checkout"), { recursive: true, force: true });
       await writeStore(harness.ctx.storePath, item());
       await writeLoopState(harness.ctx.statePath, publishingItem());
       const step = await publishStep(harness.ctx, item());
@@ -567,6 +602,7 @@ test("RT7 green CI moves the item to auditing", async () => {
       const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
       await git(checkout, ["fetch", "origin"]);
       await harness.ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
       await writeStore(harness.ctx.storePath, item());
       await writeLoopState(harness.ctx.statePath, ciItem(head, NOW));
       const step = await ciStep(harness.ctx, item());
@@ -667,6 +703,11 @@ test("RT10 pending CI times out exactly at ciSince plus ciTimeoutMs", async () =
       const li = await readItem(harness.ctx.statePath);
       expect(li.rounds[0]).toMatchObject({ outcome: "ci-timeout", headSha: head });
       expect(li.rounds[0]?.failingChecks).toEqual([]);
+      const lines = (await Bun.file(pendingCtx.resultsPath).text()).trim().split("\n");
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] ?? "") as { routingResult?: string }).toMatchObject({
+        routingResult: "excluded",
+      });
     } finally {
       await harness.sandbox.cleanup();
     }
@@ -678,12 +719,6 @@ test("RT11 moved CI head: resets the pull head and ciSince without a round", asy
     const harness = await makeHarness(dir);
     try {
       const headA = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
-      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
-      await git(checkout, ["fetch", "origin"]);
-      await harness.ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
-      await seedFinishedSession(harness.registryPath, "gh-demo-1");
-      await writeStore(harness.ctx.storePath, item());
-      await writeLoopState(harness.ctx.statePath, ciItem(headA, NOW));
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
       await Bun.write(join(harness.sandbox.seed, "b.txt"), "second\n");
       await git(harness.sandbox.seed, ["add", "b.txt"]);
@@ -691,7 +726,23 @@ test("RT11 moved CI head: resets the pull head and ciSince without a round", asy
       await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
       const headB = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
       expect(headB).not.toBe(headA);
-      const step = await ciStep(harness.ctx, item());
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      const movedGithub = createStubGitHub({
+        repo: REPO,
+        originDir: harness.sandbox.origin,
+        baseBranch: "main",
+        factoryLogin: FACTORY_LOGIN,
+        git: { PATH: GIT_ENV.PATH, timeoutMs: 30000 },
+        scratchDir: harness.sandbox.scratchDir,
+        ci: (sha) => (sha === headA ? "success" : "pending"),
+      });
+      const movedCtx = { ...harness.ctx, github: movedGithub };
+      await movedGithub.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(harness.ctx.storePath, item());
+      await writeLoopState(harness.ctx.statePath, ciItem(headA, NOW));
+      const step = await ciStep(movedCtx, item());
       expect(step).toBe("ci");
       const li = await readItem(harness.ctx.statePath);
       expect(li.pull).toEqual({ number: 1, headSha: headB });
@@ -705,7 +756,7 @@ test("RT11 moved CI head: resets the pull head and ciSince without a round", asy
   });
 });
 
-test("RT12 clean audit posts audited once on the first run and on retry", async () => {
+test("RT12 phase auditing at A with the branch moved to B returns to ci", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();
     const server = await startLoopback("tests/auditor/recordings/clean.json");
@@ -713,6 +764,7 @@ test("RT12 clean audit posts audited once on the first run and on retry", async 
     process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
@@ -722,7 +774,7 @@ test("RT12 clean audit posts audited once on the first run and on retry", async 
           verdictDir: join(dir, "verdicts"),
           maxDiffBytes: 1_000_000,
         },
-        call: callProviderOnce,
+        call: countingCall(calls, callProviderOnce),
       },
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
@@ -739,29 +791,17 @@ test("RT12 clean audit posts audited once on the first run and on retry", async 
       await git(checkout, ["fetch", "origin"]);
       await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
       await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
       await writeStore(ctx.storePath, item());
-      await writeLoopState(ctx.statePath, auditingItem(moved));
-      const findingsOutcome = await auditStep(ctx, item());
-      if (findingsOutcome !== "audited") {
-        const debugLi = await readItem(ctx.statePath);
-        throw new Error(
-          `outcome ${findingsOutcome} park=${JSON.stringify(debugLi.park)} events=${harness.events.join("|")}`,
-        );
-      }
-      expect(findingsOutcome).toBe("audited");
+      // The loop still names A while the branch already moved to B.
+      await writeLoopState(ctx.statePath, auditingItem(head));
+      expect(await auditStep(ctx, item())).toBe("ci");
       const li = await readItem(ctx.statePath);
-      expect(li.rounds).toHaveLength(0);
-      expect(li.phase).toBe("auditing");
-      const stub = ctx.github as unknown as {
-        snapshot(): { comments: { number: number; body: string }[] };
-      };
-      expect(stub.snapshot().comments).toHaveLength(1);
-      expect(stub.snapshot().comments[0]?.body ?? "").toContain("audit:v1:");
-      // Post retry: the verdict row exists, the verdict comment exists, the
-      // marker matches, so RS5 returns audited without a second post.
-      expect(await auditStep(ctx, item())).toBe("audited");
-      expect(stub.snapshot().comments).toHaveLength(1);
-      expect(harness.events.filter((line) => line.startsWith("verdict:"))).toHaveLength(1);
+      expect(li.pull).toEqual({ number: 1, headSha: moved });
+      expect(li.phase).toBe("ci");
+      expect(li.auditAttempts).toBeNull();
+      expect(calls.count).toBe(0);
+      expect(harness.events.filter((line) => line.startsWith("pull:moved:"))).toHaveLength(1);
     } finally {
       await server.stop();
       restoreEnv();
@@ -770,10 +810,15 @@ test("RT12 clean audit posts audited once on the first run and on retry", async 
   });
 });
 
-test("RT13 a verdict row with a stale marker posts the stored verdict again", async () => {
+test("RT13 clean.json posts audited once on the first run and on retry", async () => {
   await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    const server = await startLoopback("tests/auditor/recordings/clean.json");
+    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
@@ -783,7 +828,218 @@ test("RT13 a verdict row with a stale marker posts the stored verdict again", as
           verdictDir: join(dir, "verdicts"),
           maxDiffBytes: 1_000_000,
         },
-        call: () => Promise.reject(new Error("audit must not run when a verdict exists")),
+        call: countingCall(calls, callProviderOnce),
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      expect(moved).not.toBe(head);
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("audited");
+      const li = await readItem(ctx.statePath);
+      expect(li.rounds).toHaveLength(0);
+      expect(li.phase).toBe("auditing");
+      expect(li.auditAttempts).toEqual({ headSha: moved, count: 1 });
+      const stored = await readVerdicts(join(dir, "verdicts"), "gh-demo-1");
+      const verdict = stored.find((entry) => entry.headSha === moved);
+      if (verdict === undefined) {
+        throw new Error("expected a stored verdict at the audited head");
+      }
+      const stub = ctx.github as unknown as {
+        snapshot(): { comments: { number: number; login: string; body: string }[] };
+      };
+      const comments = stub.snapshot().comments;
+      expect(comments).toHaveLength(1);
+      expect(comments[0]?.body.split("\n")[0]).toBe(renderComment(verdict)?.split("\n")[0] ?? "");
+      expect(harness.events.filter((line) => line.startsWith("verdict:clean:"))).toHaveLength(1);
+      expect(calls.count).toBe(1);
+      expect(await auditStep(ctx, item())).toBe("audited");
+      expect(stub.snapshot().comments).toHaveLength(1);
+      expect(calls.count).toBe(1);
+      expect(harness.events.filter((line) => line.startsWith("verdict:clean:"))).toHaveLength(1);
+    } finally {
+      await server.stop();
+      restoreEnv();
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("RT14 a rejected postComment retries the stored verdict without a new audit", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    const server = await startLoopback("tests/auditor/recordings/clean.json");
+    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+    const harness = await makeHarness(dir);
+    const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
+    const postFailures = { count: 0 };
+    const countingGithub = {
+      ...harness.ctx.github,
+      async postComment(repo: string, pullNumber: number, body: string): Promise<void> {
+        if (postFailures.count === 0) {
+          postFailures.count += 1;
+          throw new GitHubError("unavailable", "postComment", "postComment: down");
+        }
+        return harness.ctx.github.postComment(repo, pullNumber, body);
+      },
+    };
+    const ctx = {
+      ...harness.ctx,
+      github: countingGithub,
+      auditor: {
+        ...harness.ctx.auditor,
+        config: {
+          ...auditorConfig,
+          verdictDir: join(dir, "verdicts"),
+          maxDiffBytes: 1_000_000,
+        },
+        call: countingCall(calls, callProviderOnce),
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      expect(moved).not.toBe(head);
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await countingGithub.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("pending");
+      const verdicts = await readVerdicts(join(dir, "verdicts"), "gh-demo-1");
+      expect(verdicts.some((entry) => entry.headSha === moved)).toBe(true);
+      const stub = countingGithub as unknown as {
+        snapshot(): { comments: { number: number; body: string }[] };
+      };
+      expect(stub.snapshot().comments).toHaveLength(0);
+      expect(calls.count).toBe(1);
+      expect(
+        harness.events.filter((line) => line.startsWith("github-error:unavailable:postComment:")),
+      ).toHaveLength(1);
+      expect(await auditStep(ctx, item())).toBe("audited");
+      expect(stub.snapshot().comments).toHaveLength(1);
+      expect(calls.count).toBe(1);
+      // The retry posts the stored verdict without a new audit, so it
+      // writes no further audit attempt.
+      expect((await readItem(ctx.statePath)).auditAttempts).toEqual({
+        headSha: moved,
+        count: 1,
+      });
+      expect(harness.events.filter((line) => line.startsWith("verdict:clean:"))).toHaveLength(1);
+    } finally {
+      await server.stop();
+      restoreEnv();
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("RT15 non-json with one retry parks audit-failed after two loopback calls", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    const server = await startLoopback("tests/auditor/recordings/non-json.json");
+    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
+    const harness = await makeHarness(dir, { auditRetries: 1 });
+    const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
+    const ctx = {
+      ...harness.ctx,
+      auditor: {
+        ...harness.ctx.auditor,
+        config: {
+          ...auditorConfig,
+          verdictDir: join(dir, "verdicts"),
+          maxDiffBytes: 1_000_000,
+        },
+        budget: admittingGate(dir),
+        call: countingCall(calls, callProviderOnce),
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      expect(moved).not.toBe(head);
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("pending");
+      let li = await readItem(ctx.statePath);
+      expect(li.auditAttempts).toEqual({ headSha: moved, count: 1 });
+      expect(calls.count).toBe(1);
+      expect(
+        harness.events.filter((line) => line.startsWith("audit-error:audit-model-error:")),
+      ).toHaveLength(1);
+      expect(await auditStep(ctx, item())).toBe("pending");
+      li = await readItem(ctx.statePath);
+      expect(li.auditAttempts).toEqual({ headSha: moved, count: 2 });
+      expect(calls.count).toBe(2);
+      expect(
+        harness.events.filter((line) => line.startsWith("audit-error:audit-model-error:")),
+      ).toHaveLength(2);
+      expect(await auditStep(ctx, item())).toBe("parked");
+      li = await readItem(ctx.statePath);
+      expect(li.park?.code).toBe("audit-failed");
+      expect(calls.count).toBe(2);
+    } finally {
+      await server.stop();
+      restoreEnv();
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("RT16(a) a budget refusal on the same head keeps attempts null on retry", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir);
+    const auditorConfig = await loadAuditorConfig();
+    const gateCalls = { count: 0 };
+    const inner = refusingGate(dir);
+    const ctx = {
+      ...harness.ctx,
+      budgetBackoffMs: 60_000,
+      auditor: {
+        ...harness.ctx.auditor,
+        config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
+        budget: {
+          admit: () => {
+            gateCalls.count += 1;
+            return inner.admit();
+          },
+        },
       },
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
@@ -797,41 +1053,32 @@ test("RT13 a verdict row with a stale marker posts the stored verdict again", as
       const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
       const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
       await git(checkout, ["fetch", "origin"]);
-      const pull = await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
-      expect(pull).toBe(1);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
       await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
       await writeStore(ctx.storePath, item());
       await writeLoopState(ctx.statePath, auditingItem(moved));
-      await mkdir(join(dir, "verdicts", "gh-demo-1"), { recursive: true });
-      await Bun.write(
-        join(dir, "verdicts", "gh-demo-1", `${moved}.json`),
-        `${JSON.stringify({
-          schemaVersion: "v1",
-          repo: REPO,
-          workItemId: "gh-demo-1",
-          pullNumber: 1,
-          headSha: moved,
-          authorModels: [PREFERRED],
-          auditorModel: FALLBACK,
-          counts: { high: 0, medium: 0, low: 0 },
-          findings: [],
-        })}\n`,
-      );
-      expect(await auditStep(ctx, item())).toBe("audited");
-      const posted = (
-        ctx.github as unknown as {
-          snapshot(): { comments: { number: number; body: string }[] };
-        }
-      ).snapshot().comments;
-      expect(posted).toHaveLength(1);
-      expect(posted[0]?.body ?? "").toContain("audit:v1:");
+      expect(await auditStep(ctx, item())).toBe("pending");
+      const li = await readItem(ctx.statePath);
+      expect(li.phase).toBe("auditing");
+      expect(li.rounds).toHaveLength(0);
+      expect(li.auditAttempts).toBeNull();
+      expect(li.backoffUntil).toBe(new Date(Date.parse(NOW) + 60_000).toISOString());
+      expect(
+        harness.events.filter((line) => line.startsWith("budget-refused:refused:")),
+      ).toHaveLength(1);
+      expect(await auditStep(ctx, item())).toBe("pending");
+      expect(gateCalls.count).toBe(1);
+      const retry = await readItem(ctx.statePath);
+      expect(retry.auditAttempts).toBeNull();
+      expect(retry.rounds).toHaveLength(0);
     } finally {
       await harness.sandbox.cleanup();
     }
   });
 });
 
-test("RT14 nothing to audit closes empty-diff and idles", async () => {
+test("RT17a the branch at the base closes empty-diff", async () => {
   await withTempDir(async (dir) => {
     const harness = await makeHarness(dir);
     try {
@@ -847,6 +1094,7 @@ test("RT14 nothing to audit closes empty-diff and idles", async () => {
       expect(await auditStep(harness.ctx, item())).toBe("idle");
       const li = await readItem(harness.ctx.statePath);
       expect(li.rounds[0]).toMatchObject({ outcome: "empty-diff", headSha: head });
+      expect(li.rounds[0]?.failingChecks).toEqual([]);
       expect(
         harness.events.filter((line) => line.startsWith("round-closed:empty-diff:")),
       ).toHaveLength(1);
@@ -856,7 +1104,93 @@ test("RT14 nothing to audit closes empty-diff and idles", async () => {
   });
 });
 
-test("RT15 diff too large closes diff-too-large with no failing checks", async () => {
+test("RT17c an empty ledger parks no-authors", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir);
+    const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
+    const ctx = {
+      ...harness.ctx,
+      auditor: {
+        ...harness.ctx.auditor,
+        config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
+        budget: admittingGate(dir),
+        call: countingCall(calls, () => Promise.reject(new Error("audit must not run"))),
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    try {
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await Bun.write(ctx.ledgerPath, "");
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("parked");
+      const li = await readItem(ctx.statePath);
+      expect(li.park?.code).toBe("no-authors");
+      expect(calls.count).toBe(0);
+    } finally {
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("RT17d an authoring auditor parks no-eligible-auditor", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir);
+    const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
+    const ctx = {
+      ...harness.ctx,
+      auditor: {
+        ...harness.ctx.auditor,
+        // The session model is the only configured auditor, so nobody
+        // may audit this head.
+        config: {
+          ...auditorConfig,
+          verdictDir: join(dir, "verdicts"),
+          auditors: [{ providerId: PROVIDER, model: PREFERRED }],
+        },
+        budget: admittingGate(dir),
+        call: countingCall(calls, () => Promise.reject(new Error("audit must not run"))),
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    try {
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("parked");
+      const li = await readItem(ctx.statePath);
+      expect(li.park?.code).toBe("no-eligible-auditor");
+      expect(calls.count).toBe(0);
+    } finally {
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("RT17b maxDiffBytes 10 closes diff-too-large", async () => {
   await withTempDir(async (dir) => {
     const restoreEnv = applyTestEnv();
     const server = await startLoopback("tests/auditor/recordings/clean.json");
@@ -864,12 +1198,13 @@ test("RT15 diff too large closes diff-too-large with no failing checks", async (
     process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
         ...harness.ctx.auditor,
-        config: { ...auditorConfig, verdictDir: join(dir, "verdicts"), maxDiffBytes: 1 },
-        call: callProviderOnce,
+        config: { ...auditorConfig, verdictDir: join(dir, "verdicts"), maxDiffBytes: 10 },
+        call: countingCall(calls, callProviderOnce),
       },
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
@@ -892,6 +1227,9 @@ test("RT15 diff too large closes diff-too-large with no failing checks", async (
       const li = await readItem(ctx.statePath);
       expect(li.rounds[0]).toMatchObject({ outcome: "diff-too-large", headSha: moved });
       expect(li.rounds[0]?.failingChecks).toEqual([]);
+      // The diff is refused before any model call, so the counting
+      // call never runs.
+      expect(calls.count).toBe(0);
     } finally {
       await server.stop();
       restoreEnv();
@@ -900,9 +1238,32 @@ test("RT15 diff too large closes diff-too-large with no failing checks", async (
   });
 });
 
-test("RT16 no author models parks no-authors with the operator label", async () => {
+test("RT16(b) an exiting gate defers budget-gate-error with no park", async () => {
   await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
     const harness = await makeHarness(dir);
+    const auditorConfig = await loadAuditorConfig();
+    const gateCalls = { count: 0 };
+    const exiting = {
+      admit: (): Promise<never> => {
+        gateCalls.count += 1;
+        return Promise.reject(
+          new Error('budget gate command ["bun","-e","process.exit(1);"] failed with rc 1: ', {
+            cause: new BudgetGateError("budget gate: command failed"),
+          }),
+        );
+      },
+    };
+    const ctx = {
+      ...harness.ctx,
+      budgetBackoffMs: 60_000,
+      auditor: {
+        ...harness.ctx.auditor,
+        config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
+        budget: exiting,
+      },
+    };
+    await mkdir(join(dir, "verdicts"), { recursive: true });
     try {
       await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
@@ -913,53 +1274,54 @@ test("RT16 no author models parks no-authors with the operator label", async () 
       const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
       const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
       await git(checkout, ["fetch", "origin"]);
-      await harness.ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
-      // The ledger holds no finished record, so there are no author models.
-      await Bun.write(harness.ctx.ledgerPath, "");
+      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(ctx.ledgerPath);
       await seedFinishedSession(harness.registryPath, "gh-demo-1");
-      await writeStore(harness.ctx.storePath, item());
-      await writeLoopState(harness.ctx.statePath, auditingItem(moved));
-      await mkdir(join(dir, "verdicts"), { recursive: true });
-      expect(await auditStep(harness.ctx, item())).toBe("parked");
-      const li = await readItem(harness.ctx.statePath);
-      expect(li.park?.code).toBe("no-authors");
+      await writeStore(ctx.storePath, item());
+      await writeLoopState(ctx.statePath, auditingItem(moved));
+      expect(await auditStep(ctx, item())).toBe("pending");
+      const li = await readItem(ctx.statePath);
+      expect(li.rounds).toHaveLength(0);
+      expect(li.phase).toBe("auditing");
+      expect(li.park).toBeNull();
+      expect(li.auditAttempts).toBeNull();
+      expect(li.backoffUntil).toBe(new Date(Date.parse(NOW) + 60_000).toISOString());
+      expect(gateCalls.count).toBe(1);
       expect(
-        harness.events.filter((line) => line.startsWith("escalation:op:gh-demo-1:no-authors:")),
+        harness.events.filter((line) => line.startsWith("budget-refused:budget-gate-error:")),
       ).toHaveLength(1);
+      expect(await auditStep(ctx, item())).toBe("pending");
+      expect(gateCalls.count).toBe(1);
     } finally {
+      restoreEnv();
       await harness.sandbox.cleanup();
     }
   });
 });
 
-test("RT17 no eligible auditor parks no-eligible-auditor", async () => {
+test("RT19 a throwing call parks audit-error with detail boom", async () => {
   await withTempDir(async (dir) => {
-    const restoreEnv = applyTestEnv();
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
-    // The author model equals the only auditor, so nobody may audit.
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
         ...harness.ctx.auditor,
-        config: {
-          ...auditorConfig,
-          verdictDir: join(dir, "verdicts"),
-          auditors: [{ providerId: PROVIDER, model: PREFERRED }],
-        },
-        call: () => Promise.reject(new Error("audit must not run without an auditor")),
+        config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
+        budget: admittingGate(dir),
+        call: countingCall(calls, () => Promise.reject(new Error("boom"))),
       },
     };
     await mkdir(join(dir, "verdicts"), { recursive: true });
     try {
-      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
       await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
       await git(harness.sandbox.seed, ["add", "b.txt"]);
       await git(harness.sandbox.seed, ["commit", "-m", "second"]);
       await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
       const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
-      expect(moved).not.toBe(head);
       const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
       await git(checkout, ["fetch", "origin"]);
       await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
@@ -969,81 +1331,34 @@ test("RT17 no eligible auditor parks no-eligible-auditor", async () => {
       await writeLoopState(ctx.statePath, auditingItem(moved));
       expect(await auditStep(ctx, item())).toBe("parked");
       const li = await readItem(ctx.statePath);
-      expect(li.park?.code).toBe("no-eligible-auditor");
-    } finally {
-      restoreEnv();
-      await harness.sandbox.cleanup();
-    }
-  });
-});
-
-test("RT18 budget refusal defers the audit without a round", async () => {
-  await withTempDir(async (dir) => {
-    const harness = await makeHarness(dir);
-    const auditorConfig = await loadAuditorConfig();
-    const ctx = {
-      ...harness.ctx,
-      budgetBackoffMs: 60_000,
-      auditor: {
-        ...harness.ctx.auditor,
-        config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
-        budget: refusingGate(dir),
-      },
-    };
-    await mkdir(join(dir, "verdicts"), { recursive: true });
-    try {
-      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
-      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
-      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
-      await git(harness.sandbox.seed, ["add", "b.txt"]);
-      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
-      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
-      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
-      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
-      await git(checkout, ["fetch", "origin"]);
-      await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
-      await seedSessionLedger(ctx.ledgerPath);
-      await seedFinishedSession(harness.registryPath, "gh-demo-1");
-      await writeStore(ctx.storePath, item());
-      await writeLoopState(ctx.statePath, auditingItem(moved));
-      expect(await auditStep(ctx, item())).toBe("pending");
-      const li = await readItem(ctx.statePath);
-      expect(li.rounds).toHaveLength(0);
-      expect(li.phase).toBe("auditing");
-      expect(li.backoffUntil).toBe(new Date(Date.parse(NOW) + 60_000).toISOString());
-      // The gate refused before any model call, so the counted attempt is
-      // restored to the value the round started with.
-      expect(li.auditAttempts).toBeNull();
+      expect(li.park?.code).toBe("audit-error");
+      expect(calls.count).toBe(1);
       expect(
-        harness.events.filter((line) => line.startsWith("budget-refused:refused:")),
+        harness.events.filter((line) => line.startsWith("audit-error:audit-error:boom")),
       ).toHaveLength(1);
-      // A refused head stays deferred: a call at the same clock returns
-      // pending before any gate call, so the attempts and events stand.
-      expect(await auditStep(ctx, item())).toBe("pending");
-      const retry = await readItem(ctx.statePath);
-      expect(retry.auditAttempts).toBeNull();
-      expect(retry.rounds).toHaveLength(0);
     } finally {
       await harness.sandbox.cleanup();
     }
   });
 });
 
-test("RT19 an audit model failure defers with audit-model-error", async () => {
+test("RT18 a removed verdict dir rejects with InputPathError", async () => {
   await withTempDir(async (dir) => {
-    const restoreEnv = applyTestEnv();
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
         ...harness.ctx.auditor,
         config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
         budget: admittingGate(dir),
-        call: () => Promise.reject(new TypeError("fetch failed")),
+        call: countingCall(calls, () => Promise.reject(new Error("audit must not run"))),
       },
     };
-    await mkdir(join(dir, "verdicts"), { recursive: true });
+    // The verdict directory is removed before the call, so the
+    // stored-verdict read rejects with InputPathError.
+    rmSync(join(dir, "verdicts"), { recursive: true, force: true });
     try {
       await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
@@ -1059,52 +1374,42 @@ test("RT19 an audit model failure defers with audit-model-error", async () => {
       await seedFinishedSession(harness.registryPath, "gh-demo-1");
       await writeStore(ctx.storePath, item());
       await writeLoopState(ctx.statePath, auditingItem(moved));
-      expect(await auditStep(ctx, item())).toBe("pending");
+      let failure: unknown = null;
+      try {
+        await auditStep(ctx, item());
+      } catch (error: unknown) {
+        failure = error;
+      }
+      if (failure === null) {
+        throw new Error("expected auditStep to reject when the verdict dir is gone");
+      }
+      expect((failure as Error).message).toContain("Verdict dir");
+      expect(failure).toBeInstanceOf(InputPathError);
+      expect(calls.count).toBe(0);
       const li = await readItem(ctx.statePath);
       expect(li.park).toBeNull();
       expect(li.phase).toBe("auditing");
-      expect(
-        harness.events.filter((line) => line.startsWith("audit-error:audit-model-error:")),
-      ).toHaveLength(1);
     } finally {
-      restoreEnv();
       await harness.sandbox.cleanup();
     }
   });
 });
 
-test("RT20 findings post the verdict and keep the audit phase", async () => {
+test("RT20 a stored verdict at A on PR 1 posts without a model call", async () => {
   await withTempDir(async (dir) => {
-    const restoreEnv = applyTestEnv();
-    const finding = {
-      status: 200,
-      body: {
-        choices: [
-          {
-            message: {
-              content:
-                '{"findings": [{"severity": "medium", "location": "b.txt:1", "defect": "line is short", "scenario": "a reader wants context", "fixDirection": "add more"}]}',
-            },
-          },
-        ],
-        usage: { prompt_tokens: 130, completion_tokens: 40 },
-      },
-    };
-    await Bun.write(join(dir, "finding.json"), `${JSON.stringify([finding])}\n`);
-    const server = await startLoopback(join(dir, "finding.json"));
-    process.env.PROVIDER_META_API_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
-    process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = `http://127.0.0.1:${String(server.port)}`;
     const harness = await makeHarness(dir);
     const auditorConfig = await loadAuditorConfig();
+    const calls = { count: 0 };
     const ctx = {
       ...harness.ctx,
       auditor: {
         ...harness.ctx.auditor,
         config: { ...auditorConfig, verdictDir: join(dir, "verdicts") },
-        call: callProviderOnce,
+        budget: admittingGate(dir),
+        call: countingCall(calls, () => Promise.reject(new Error("audit must not run"))),
       },
     };
-    await mkdir(join(dir, "verdicts"), { recursive: true });
+    await mkdir(join(dir, "verdicts", "gh-demo-1"), { recursive: true });
     try {
       await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
       await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
@@ -1117,28 +1422,79 @@ test("RT20 findings post the verdict and keep the audit phase", async () => {
       await git(checkout, ["fetch", "origin"]);
       await ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
       await seedSessionLedger(ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
       await writeStore(ctx.storePath, item());
       await writeLoopState(ctx.statePath, auditingItem(moved));
+      // The seeded file copies the A8-4 stored verdict shape with only
+      // workItemId, repo, pullNumber and headSha changed.
+      await Bun.write(
+        join(dir, "verdicts", "gh-demo-1", `${moved}.json`),
+        `${JSON.stringify({
+          schemaVersion: "v1",
+          repo: REPO,
+          workItemId: "gh-demo-1",
+          pullNumber: 99,
+          headSha: moved,
+          authorModels: [`${PROVIDER}/${FALLBACK}`],
+          auditorModel: PREFERRED,
+          counts: { high: 1, medium: 0, low: 0 },
+          findings: [
+            {
+              severity: "high",
+              location: "src/add.ts:2",
+              defect: "add subtracts instead of adding",
+              scenario: "any caller summing two numbers gets the wrong result",
+              fixDirection: "return a + b",
+            },
+          ],
+        })}\n`,
+      );
       expect(await auditStep(ctx, item())).toBe("audited");
       const li = await readItem(ctx.statePath);
       expect(li.rounds).toHaveLength(0);
+      expect(calls.count).toBe(0);
       const posted = (
         ctx.github as unknown as {
           snapshot(): { comments: { number: number; body: string }[] };
         }
       ).snapshot().comments;
-      expect(posted).toHaveLength(1);
-      expect(posted[0]?.body ?? "").toContain("audit:v1:");
-      expect(harness.events.filter((line) => line.startsWith("verdict:findings:"))).toHaveLength(1);
+      expect(posted.filter((comment) => comment.number === 1)).toHaveLength(0);
+      expect(posted.filter((comment) => comment.number === 99)).toHaveLength(0);
+      // A verdict for another pull is invalid for PR 1: it is audited
+      // without a post and without a verdict event.
+      expect(harness.events.filter((line) => line.startsWith("verdict:"))).toHaveLength(0);
     } finally {
-      await server.stop();
-      restoreEnv();
       await harness.sandbox.cleanup();
     }
   });
 });
 
-test("RT21 previousRoundOf skips the running round and parses the query", () => {
+test("RT21 verdict counts at A then start-rejected give the findings record", () => {
+  const fullVerdict = {
+    schemaVersion: "v1" as const,
+    repo: REPO,
+    workItemId: "gh-demo-1",
+    pullNumber: 1,
+    headSha: "a",
+    authorModels: [`${PROVIDER}/${PREFERRED}`],
+    auditorModel: PREFERRED,
+    counts: { high: 1, medium: 0, low: 0 },
+    findings: [
+      {
+        severity: "high" as const,
+        location: "src/add.ts:2",
+        defect: "add subtracts instead of adding",
+        scenario: "any caller summing two numbers gets the wrong result",
+        fixDirection: "return a + b",
+      },
+    ],
+  };
+  const verdict = {
+    auditorModel: PREFERRED,
+    high: 1,
+    medium: 0,
+    low: 0,
+  };
   const base = {
     ...initialLoopItem(),
     rounds: [
@@ -1150,10 +1506,10 @@ test("RT21 previousRoundOf skips the running round and parses the query", () => 
         providerId: PROVIDER,
         hostAlias: "host-a",
         attempt: "success" as const,
-        outcome: "red-ci" as const,
+        outcome: "findings" as const,
         headSha: "a",
         failingChecks: ["gates"],
-        verdict: null,
+        verdict,
         newlyMet: [],
         at: NOW,
         baseRace: false,
@@ -1165,8 +1521,8 @@ test("RT21 previousRoundOf skips the running round and parses the query", () => 
         model: PREFERRED,
         providerId: PROVIDER,
         hostAlias: "host-a",
-        attempt: "success" as const,
-        outcome: "ci-timeout" as const,
+        attempt: "failure" as const,
+        outcome: "start-rejected" as const,
         headSha: "b",
         failingChecks: [],
         verdict: null,
@@ -1176,22 +1532,13 @@ test("RT21 previousRoundOf skips the running round and parses the query", () => 
       },
     ],
   };
-  // previousRoundOf reports the latest stored round and skips lost closes.
-  expect(previousRoundOf({ ...base, round: 2 }, [])?.outcome).toBe("ci-timeout");
-  const second = base.rounds[1] ?? base.rounds[0];
-  if (second === undefined) {
-    throw new Error("base rounds must hold two records");
-  }
-  expect(
-    previousRoundOf(
-      {
-        ...base,
-        round: 1,
-        rounds: [...base.rounds, { ...second, outcome: "lost" as const, round: 2 }],
-      },
-      [],
-    )?.outcome,
-  ).toBe("ci-timeout");
+  // The last stored round is start-rejected, which previousRoundOf
+  // skips: the brief carries the findings record's outcome and checks
+  // plus the findings of the verdict at A.
+  const previous = previousRoundOf({ ...base, round: 2 }, [fullVerdict]);
+  expect(previous?.outcome).toBe("findings");
+  expect(previous?.failingChecks).toEqual(["gates"]);
+  expect(previous?.findings).toEqual({ headSha: "a", list: fullVerdict.findings });
   expect(previousRoundOf({ ...base, round: 0, rounds: [] }, [])).toBeNull();
 });
 

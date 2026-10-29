@@ -320,6 +320,17 @@ async function makeHarness(
     maxActiveItems: overrides.maxActiveItems ?? 4,
     maxBriefBytes: overrides.maxBriefBytes ?? 65536,
     ciPollMs: overrides.ciPollMs ?? 30_000,
+    intake: {
+      enabled: false,
+      optInLabel: "factory:auto",
+      readyLabel: "readiness:ready",
+      blockedLabel: "readiness:blocked",
+      pollMs: 300_000,
+      defaultModel: PREFERRED,
+      maxGoalChars: 12_000,
+    },
+    trustedAssociations: ["OWNER", "MEMBER", "COLLABORATOR"],
+    maxItemBytes: 16_384,
   };
   return {
     ctx,
@@ -1255,7 +1266,11 @@ test("R2-8a step in flight blocks a second launch", async () => {
       await scheduler.settled();
       armed = true;
       const secondTick = scheduler.tick();
-      await held;
+      const reached = await Promise.race([
+        held.then(() => "held" as const),
+        secondTick.then(() => "tick-finished" as const),
+      ]);
+      expect(reached).toBe("held");
       releaseWatch();
       await untilItem(ctx.statePath, "gh-demo-2", (li) => li?.phase !== "running");
       openStore();

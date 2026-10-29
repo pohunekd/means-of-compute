@@ -119,6 +119,10 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - Unless the fleet is paused, it claims ready items in store order up to `maxActiveItems`, outside their backoff window, with the model rule, placement over the collected hosts minus the item's excluded hosts and counting `starting` items from earlier ticks and the same tick, and the brief; a brief over `maxBriefBytes` parks the item as operator `brief-too-large`.
 - At startup, a `running` or `review` store item without a loop item, or with an idle one, stops the factory with `loop state missing for <ids>`.
 
+## Intake (PR 6b)
+
+`src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. An open issue that carries the opt-in and ready labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. An issue already imported under its own id is skipped silently; every other skipped issue logs `intake-skip` with its code, and an issue already tracked under another id logs once per process run.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.

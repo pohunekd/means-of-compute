@@ -25,6 +25,7 @@ export type LoopEventName =
   | "budget-refused"
   | "no-host"
   | "intake-skip"
+  | "intake-import"
   | "github-error"
   | "resolve-done"
   | "orphan-session"

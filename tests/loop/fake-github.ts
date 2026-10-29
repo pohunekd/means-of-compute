@@ -6,6 +6,7 @@ import type {
   CommentFirstLine,
   GitHubError,
   GitHubPort,
+  IntakeIssue,
   IssueFirstLine,
   PullRow,
   PullView,
@@ -165,6 +166,16 @@ export class FakeGitHub implements GitHubPort {
     this.takeFailure("editIssueLabels");
     this.labelEdits.push({ repo, issue, add: [...add], remove: [...remove] });
     return Promise.resolve();
+  }
+
+  readyIssues(repo: string, labels: readonly string[]): Promise<readonly IntakeIssue[]> {
+    this.calls.push({ method: "readyIssues", args: [repo, [...labels]] });
+    return unused();
+  }
+
+  issueState(repo: string, issue: number): Promise<"open" | "closed"> {
+    this.calls.push({ method: "issueState", args: [repo, issue] });
+    return unused();
   }
 
   callsOf(method: string): readonly FakeCall[] {

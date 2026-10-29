@@ -1,0 +1,17 @@
+{
+  "$id": "https://pohunekd.github.io/means-of-compute/src/loop/intake.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LoopIntakeIssue",
+  "description": "One line of the W2 issue list, as the readyIssues jq prints it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["number", "title", "body", "labels", "author_association", "pull_request"],
+  "properties": {
+    "number": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string" },
+    "body": { "type": "string" },
+    "labels": { "type": "array", "items": { "type": "string" } },
+    "author_association": { "type": "string", "minLength": 1 },
+    "pull_request": { "type": "boolean" }
+  }
+}

@@ -10,6 +10,7 @@ import {
   type CommentFirstLine,
   type GitHubPort,
   type IssueFirstLine,
+  type IntakeIssue,
   type PullRow,
   type PullView,
 } from "../github.js";
@@ -62,6 +63,15 @@ interface StubIssue {
   title: string;
   body: string;
   labels: string[];
+  authorAssociation: string;
+  state: "open" | "closed";
+}
+export interface StubIssueSeed {
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly authorAssociation: string;
+  readonly state: "open" | "closed";
 }
 
 interface StubComment {
@@ -204,6 +214,7 @@ export async function casUpdateRef(
 }
 
 export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
+  seedIssue(seed: StubIssueSeed): number;
   snapshot(): StubGitHubSnapshot;
 } {
   if (!isAbsolute(options.originDir)) {
@@ -552,7 +563,22 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     await Promise.resolve();
     const number = next;
     next += 1;
-    issues.set(number, { number, title, body, labels: [...labels] });
+    issues.set(number, {
+      number,
+      title,
+      body,
+      labels: [...labels],
+      authorAssociation: "NONE",
+      state: "open",
+    });
+    return number;
+  }
+
+  function seedIssue(seed: StubIssueSeed): number {
+    requireRepo("seedIssue", options.repo);
+    const number = next;
+    next += 1;
+    issues.set(number, { number, ...seed, labels: [...seed.labels] });
     return number;
   }
 
@@ -566,6 +592,33 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
         number: issue.number,
         first: issue.body.split("\n")[0] ?? "",
       }));
+  }
+
+  async function readyIssues(
+    repo: string,
+    labels: readonly string[],
+  ): Promise<readonly IntakeIssue[]> {
+    requireRepo("readyIssues", repo);
+    await Promise.resolve();
+    return [...issues.values()]
+      .filter(
+        (issue) => issue.state === "open" && labels.every((label) => issue.labels.includes(label)),
+      )
+      .sort((a, b) => b.number - a.number)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        body: issue.body,
+        labels: [...issue.labels],
+        authorAssociation: issue.authorAssociation,
+        isPullRequest: false,
+      }));
+  }
+
+  async function issueState(repo: string, n: number): Promise<"open" | "closed"> {
+    requireRepo("issueState", repo);
+    await Promise.resolve();
+    return requireIssue("issueState", n).state;
   }
 
   async function editIssueLabels(
@@ -597,8 +650,11 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     baseSha,
     commitParents,
     createIssue,
+    seedIssue,
     factoryIssues,
     editIssueLabels,
+    readyIssues,
+    issueState,
     snapshot,
   };
 }

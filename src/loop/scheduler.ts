@@ -18,7 +18,8 @@ import {
 } from "./review.js";
 import type { PlacementConfig } from "../placement/config.js";
 import { placeObserved } from "../placement/observed.js";
-import type { LoopRoutingConfig } from "./config.js";
+import type { LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
+import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
 import { chooseModel } from "./policy.js";
 import { briefBranchOf, buildBrief } from "./brief.js";
 import { reconcile } from "./project.js";
@@ -61,6 +62,9 @@ export interface SchedulerContext extends MergeContext {
   readonly maxActiveItems: number;
   readonly maxBriefBytes: number;
   readonly ciPollMs: number;
+  readonly intake: LoopIntakeConfig;
+  readonly trustedAssociations: readonly string[];
+  readonly maxItemBytes: number;
 }
 
 export interface TickReport {
@@ -80,6 +84,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const timeouts = new Map<string, Promise<unknown>>();
   const seenOrphans = new Set<string>();
   const ciDue = new Map<string, number>();
+  const intake = createIntakeState();
   let stopped = false;
   let failure: unknown = null;
 
@@ -168,6 +173,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         () => failure,
         seenOrphans,
         ciDue,
+        intake,
       ),
     stop: () => {
       stopped = true;
@@ -515,6 +521,7 @@ async function tickOnce(
   getFailure: () => unknown,
   seenOrphans: Set<string>,
   ciDue: Map<string, number>,
+  intake: IntakeState,
 ): Promise<TickReport> {
   if (isStopped()) {
     return { claimed: [], launched: [] };
@@ -563,6 +570,9 @@ async function tickOnce(
     }
     const target = { ...item };
     launchTimeout(item.id, () => checkSessionTimeout(ctx, target));
+  }
+  if (!isStopped() && getFailure() === null) {
+    await runIntake(ctx, intake);
   }
   const carry: ClaimCarry = { active: 0, running: [], claimed: [], launched: [] };
   const counted = await readWorkStore(ctx.storePath);

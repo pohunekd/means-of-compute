@@ -1,6 +1,6 @@
 // Demo sandbox: reset and seed for the loop demo. Only a directory marked
 // with the sandbox marker is ever removed; anything else is refused.
-import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export const SANDBOX_MARKER = ".loop-demo";
@@ -113,27 +113,33 @@ interface LedgerCopy {
   readonly ledgerPath: string;
 }
 
-// Reset the sandbox: refuse an unmarked directory, otherwise remove the
-// sandbox and the registry file (not its lock), then recreate the marker.
+// Reset the sandbox: a missing sandbox is created; an existing path must
+// be a directory carrying the marker file, otherwise it is refused and left
+// untouched. The registry file (not its lock) goes only after these checks.
 async function resetSandbox(sandboxDir: string, registryPath: string): Promise<void> {
-  let marked = false;
+  let dirStat: Awaited<ReturnType<typeof lstat>> | null = null;
   try {
-    await stat(join(sandboxDir, SANDBOX_MARKER));
-    marked = true;
-  } catch {
-    // An unmarked directory is never touched.
-  }
-  if (!marked) {
-    try {
-      await stat(sandboxDir);
-    } catch {
-      // A missing sandbox is created below.
+    dirStat = await lstat(sandboxDir);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
     }
-    const entries = await readdir(sandboxDir).catch(() => null);
-    if (entries !== null) {
+  }
+  if (dirStat !== null) {
+    if (!dirStat.isDirectory()) {
       throw new SandboxError("sandbox dir is not a loop demo sandbox");
     }
-  } else {
+    let marker: Awaited<ReturnType<typeof lstat>> | null = null;
+    try {
+      marker = await lstat(join(sandboxDir, SANDBOX_MARKER));
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    if (marker === null || !marker.isFile()) {
+      throw new SandboxError("sandbox dir is not a loop demo sandbox");
+    }
     await rm(sandboxDir, { recursive: true, force: true });
   }
   await rm(registryPath, { force: true });

@@ -40,7 +40,7 @@
   "github": {
     "tokenEnv": "MOC_GITHUB_TOKEN",
     "configDir": "logs/gh-config",
-    "factoryLogin": null,
+    "factoryLogin": "zajca",
     "timeoutMs": 30000,
     "ciPollMs": 30000,
     "ciTimeoutMs": 3600000,

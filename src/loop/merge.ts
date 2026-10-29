@@ -373,10 +373,6 @@ export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"d
 }
 
 export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<MergeOutcome> {
-  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
-  if (spec === undefined) {
-    throw new Error(`merge: no factory spec for ${item.repo}`);
-  }
   const heads = await mergeHeads(ctx, item);
   const { li, baseBranch, pull } = heads;
   const h = pull.headSha;
@@ -414,6 +410,10 @@ async function mergeHeads(
     throw new LoopStateDataError(
       `loop state ${ctx.statePath}: item "${item.id}" is "${li.phase}", not a merge phase`,
     );
+  }
+  const spec = ctx.specs.find((entry) => entry.repo === item.repo);
+  if (spec === undefined) {
+    throw new Error(`merge: no factory spec for ${item.repo}`);
   }
   if (
     li.phase === "merging" &&

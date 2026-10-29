@@ -37,7 +37,12 @@ export interface DigestInput {
     readonly model: string;
     readonly baseRace: boolean;
   }[];
-  readonly running: readonly { readonly id: string; readonly status: string; readonly phase: string; readonly round: number }[];
+  readonly running: readonly {
+    readonly id: string;
+    readonly status: string;
+    readonly phase: string;
+    readonly round: number;
+  }[];
   readonly parkedBlocked: readonly { readonly id: string; readonly statusReason: string }[];
   readonly daySpend: string;
   readonly totalSpend: string;
@@ -49,7 +54,11 @@ function previousDay(today: string): string {
   return new Date(date.getTime() - 86_400_000).toISOString().slice(0, 10);
 }
 
-function formatSpend(summary: { spentTodayNanoTimes1M: bigint; spentTotalNanoTimes1M: bigint; unknownWorkItemIds: readonly string[] }): {
+function formatSpend(summary: {
+  spentTodayNanoTimes1M: bigint;
+  spentTotalNanoTimes1M: bigint;
+  unknownWorkItemIds: readonly string[];
+}): {
   readonly day: string;
   readonly total: string;
 } {
@@ -79,7 +88,9 @@ export function renderDigest(input: DigestInput): string {
     lines.push("- none");
   } else {
     for (const entry of input.running) {
-      lines.push(`- ${entry.id}: ${entry.status}, phase ${entry.phase}, round ${String(entry.round)}`);
+      lines.push(
+        `- ${entry.id}: ${entry.status}, phase ${entry.phase}, round ${String(entry.round)}`,
+      );
     }
   }
   lines.push("", "## Parked and blocked", "");
@@ -96,7 +107,11 @@ export function renderDigest(input: DigestInput): string {
 
 // Joins merged result lines with the loop item (PR) and its round record
 // (head and base race). A merged line without either is a data error.
-export async function writeDigestFile(dir: string, day: string, text: string): Promise<"written" | "exists"> {
+export async function writeDigestFile(
+  dir: string,
+  day: string,
+  text: string,
+): Promise<"written" | "exists"> {
   const tmp = join(dir, `.${day}.md.${String(process.pid)}.${randomUUID()}.tmp`);
   const handle = await open(tmp, "wx", 0o600);
   try {
@@ -154,14 +169,25 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
     readResults(ctx.resultsPath),
     readLedger("Loop ledger", ctx.ledgerPath),
   ]);
-  const merged: { readonly id: string; readonly pull: number; readonly headSha: string; readonly model: string; readonly baseRace: boolean }[] = [];
+  const merged: {
+    readonly id: string;
+    readonly pull: number;
+    readonly headSha: string;
+    readonly model: string;
+    readonly baseRace: boolean;
+  }[] = [];
   for (const line of results) {
     if (line.outcome !== "merged" || utcCalendarDay(new Date(line.at)) !== day) {
       continue;
     }
     merged.push(mergedOf(line, state));
   }
-  const running: { readonly id: string; readonly status: string; readonly phase: string; readonly round: number }[] = [];
+  const running: {
+    readonly id: string;
+    readonly status: string;
+    readonly phase: string;
+    readonly round: number;
+  }[] = [];
   const parkedBlocked: { readonly id: string; readonly statusReason: string }[] = [];
   for (const item of store.items) {
     if (item.status === "running" || item.status === "review") {

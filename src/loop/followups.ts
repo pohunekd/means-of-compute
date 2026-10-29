@@ -118,7 +118,11 @@ export function blockedFollowup(
 
 // The stored verdict with headSha and pull number of the loop item pull.
 // A human merge with no audit at that head yields none.
-async function mergedVerdict(ctx: ParkContext, item: WorkItem, li: LoopItem): Promise<AuditVerdict | null> {
+async function mergedVerdict(
+  ctx: ParkContext,
+  item: WorkItem,
+  li: LoopItem,
+): Promise<AuditVerdict | null> {
   if (li.pull === null) {
     return null;
   }
@@ -130,7 +134,11 @@ async function mergedVerdict(ctx: ParkContext, item: WorkItem, li: LoopItem): Pr
 }
 
 // The verdict at the head of the last round record with a verdict.
-async function lastVerdict(ctx: ParkContext, item: WorkItem, li: LoopItem): Promise<AuditVerdict | null> {
+async function lastVerdict(
+  ctx: ParkContext,
+  item: WorkItem,
+  li: LoopItem,
+): Promise<AuditVerdict | null> {
   const record = [...li.rounds].reverse().find((entry) => entry.verdict !== null);
   if (record === undefined || record.headSha === null) {
     return null;
@@ -180,7 +188,10 @@ async function fileOne(
   try {
     const rows = await ctx.github.factoryIssues(item.repo, ctx.followupLabels[0] ?? "");
     const found = rows.find((row) => row.first === lookedUp.marker);
-    posted = found === undefined ? await ctx.github.createIssue(item.repo, draft.title, draft.body, ctx.followupLabels) : found.number;
+    posted =
+      found === undefined
+        ? await ctx.github.createIssue(item.repo, draft.title, draft.body, ctx.followupLabels)
+        : found.number;
   } catch (error: unknown) {
     if (error instanceof GitHubError) {
       ctx.log.log({
@@ -204,7 +215,10 @@ async function fileOne(
 
 // Files the low findings of the merged verdict in verdict order; the
 // first pending filing stops the run so the next tick retries it.
-export async function fileFindingFollowups(ctx: ParkContext, item: WorkItem): Promise<ParkProgress> {
+export async function fileFindingFollowups(
+  ctx: ParkContext,
+  item: WorkItem,
+): Promise<ParkProgress> {
   const li = await readLoopItem(ctx.statePath, item.id);
   const verdict = await mergedVerdict(ctx, item, li);
   if (verdict === null) {

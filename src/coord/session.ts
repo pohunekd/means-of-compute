@@ -210,12 +210,21 @@ async function runSessionExport(
   if (exportState.killError !== null) {
     throw exportState.killError as Error;
   }
+  let exportFile = false;
+  let modeFailed = false;
   try {
-    if ((await lstat(exportPath)).isFile()) {
-      await chmod(exportPath, 0o600);
+    exportFile = (await lstat(exportPath)).isFile();
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      modeFailed = true;
     }
-  } catch {
-    // No export file: the branches below report the failure.
+  }
+  if (exportFile) {
+    try {
+      await chmod(exportPath, 0o600);
+    } catch {
+      modeFailed = true;
+    }
   }
   const at = now();
   if (exportState.timedOut) {
@@ -238,6 +247,10 @@ async function runSessionExport(
       reason: "exit",
       rc,
     });
+    return false;
+  }
+  if (modeFailed) {
+    await log.append({ ts: at.toISOString(), event: "export", k, ok: false, reason: "mode", rc });
     return false;
   }
   let regular: boolean;

@@ -594,7 +594,6 @@ test("the d1 fixture resolves to the demo store (M14)", async () => {
   const expected: Record<string, unknown> = {
     ...committed,
     mcpConfigPath: "tests/fixtures/mcp/demo/mcp.json",
-    runsDir: (config as unknown as Record<string, unknown>)["runsDir"],
   };
   expect({ ...(config as unknown as Record<string, unknown>) }).toEqual(expected);
 }, 30000);

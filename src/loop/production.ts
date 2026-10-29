@@ -134,7 +134,6 @@ export async function runProduction(deps: ProductionRunDeps): Promise<0 | 1> {
   const registryPath = resolve(configs.dispatcher.registryPath);
   const statePath = resolve(loop.statePath);
   const storePath = resolve(configs.work.storePath);
-  const approvalsPath = resolve(configs.approvals.requestsPath);
   const resultsPath = resolve(loop.resultsPath);
   const ledgerPath = resolve(configs.ledgerPath);
   const usageLogPath = resolve(configs.meter.usageLogPath);
@@ -198,11 +197,9 @@ async function runInside(
       source: "meter" | "port" | "dispatcher" | "host-state",
       event: Record<string, unknown>,
     ): void => {
-      portsLog
-        .append({ ts: new Date().toISOString(), source, ...event })
-        .catch(() => {
-          portsState.failed = true;
-        });
+      portsLog.append({ ts: new Date().toISOString(), source, ...event }).catch(() => {
+        portsState.failed = true;
+      });
     };
     const meter = await startMeter({
       config: configs.meter,

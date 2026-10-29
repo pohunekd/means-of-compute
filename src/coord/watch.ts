@@ -250,14 +250,15 @@ export function attentionOf(snapshot: WatchSnapshot, ctx: WatchContext): readonl
       continue;
     }
     const verdicts = snapshot.verdicts.get(row.id) ?? [];
+    const pull = row.pullNumber;
     for (const verdict of verdicts) {
-      if (verdict.pullNumber !== row.pullNumber) {
+      if (verdict.pullNumber !== pull) {
         continue;
       }
       if (verdict.counts.high !== 0 || verdict.counts.medium !== 0) {
         continue;
       }
-      const key = `approve:${row.id}:${row.pullNumber}:${verdict.headSha}`;
+      const key = `approve:${row.id}:${String(pull)}:${verdict.headSha}`;
       if (ctx.consumed.has(key)) {
         continue;
       }
@@ -265,7 +266,7 @@ export function attentionOf(snapshot: WatchSnapshot, ctx: WatchContext): readonl
         kind: "approve",
         key,
         workItemId: row.id,
-        pullNumber: row.pullNumber,
+        pullNumber: pull,
         headSha: verdict.headSha,
         auditorModel: verdict.auditorModel,
       });

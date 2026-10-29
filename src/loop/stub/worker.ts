@@ -62,7 +62,11 @@ async function applyPatch(
   const base = listed.trim().length > 0 ? `origin/${branch}` : "origin/main";
   await sandboxGit(deps.git, cloneDir, ["checkout", "-B", branch, base]);
   await sandboxGit(deps.git, cloneDir, ["apply", "--index", patchPath]);
-  await sandboxGit(deps.git, cloneDir, ["commit", "-m", `Round ${String(round)} for ${workItemId}`]);
+  await sandboxGit(deps.git, cloneDir, [
+    "commit",
+    "-m",
+    `Round ${String(round)} for ${workItemId}`,
+  ]);
   await sandboxGit(deps.git, cloneDir, ["push", "origin", `HEAD:refs/heads/${branch}`]);
 }
 

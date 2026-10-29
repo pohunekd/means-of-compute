@@ -188,10 +188,10 @@ async function fileOne(
   let posted: number;
   try {
     const label = ctx.followupLabels[0];
-      if (label === undefined) {
-        throw new Error("follow-ups: followupLabels is empty; the first label is the lookup label");
-      }
-      const rows = await ctx.github.factoryIssues(item.repo, label);
+    if (label === undefined) {
+      throw new Error("follow-ups: followupLabels is empty; the first label is the lookup label");
+    }
+    const rows = await ctx.github.factoryIssues(item.repo, label);
     const found = rows.find((row) => row.first === lookedUp.marker);
     posted =
       found === undefined

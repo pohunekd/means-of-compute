@@ -1,6 +1,16 @@
 // Demo sandbox: reset and seed for the loop demo. Only a directory marked
 // with the sandbox marker is ever removed; anything else is refused.
-import { copyFile, cp, mkdir, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export const SANDBOX_MARKER = ".loop-demo";
@@ -150,7 +160,7 @@ async function seedOrigin(
   sandboxDir: string,
 ): Promise<void> {
   await mkdir(originDir, { recursive: true });
-  await sandboxGit(git, sandboxDir, ["init", "--bare", originDir]);
+  await sandboxGit(git, sandboxDir, ["init", "--bare", "-b", "main", originDir]);
   const seedDir = join(sandboxDir, "seed");
   await cp(demoRepoDir, seedDir, { recursive: true });
   try {
@@ -164,7 +174,7 @@ async function seedOrigin(
 }
 
 async function writeJsonFile(path: string, value: BudgetCopy | LedgerCopy): Promise<void> {
-  await writeFile(`${path}\n`, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }
 
 // Sandbox startup steps 4 and 5 except the queue items: reset, seed the
@@ -177,8 +187,7 @@ export async function prepareSandbox(input: SandboxInput): Promise<SandboxLayout
   const hostsDir = join(sandboxDir, "hosts");
   const configDir = join(sandboxDir, "config");
   await seedOrigin(input.demoRepoDir, originDir, input.git, sandboxDir);
-  await mkdir(checkoutDir, { recursive: true });
-  await sandboxGit(input.git, checkoutDir, ["clone", originDir, checkoutDir]);
+  await sandboxGit(input.git, sandboxDir, ["clone", originDir, checkoutDir]);
   await mkdir(hostsDir, { recursive: true });
   for (const dir of input.ownedDirs) {
     await mkdir(dir, { recursive: true });

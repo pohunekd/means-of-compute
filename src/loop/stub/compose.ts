@@ -11,11 +11,11 @@ import {
   LoopStartupError,
   closeAll,
   schedulerContextOf,
+  toStartupError,
   withRegistryLock,
   type Closer,
 } from "../compose.js";
 import type { LoopConfigs } from "../compose.js";
-import type { FactorySpec } from "../../../contracts/v1/types.js";
 import { digestFor, writeDigestFile } from "../digest.js";
 import { openLoopLog } from "../log.js";
 import { openCallLog } from "../../mcp/call-log.js";
@@ -145,19 +145,6 @@ async function loopbackDescriptors(
   return descriptors;
 }
 
-function singleSpec(specs: readonly FactorySpec[]): FactorySpec {
-  let found: FactorySpec | undefined;
-  let count = 0;
-  for (const spec of specs) {
-    count += 1;
-    found = spec;
-  }
-  if (count !== 1 || found === undefined) {
-    throw new LoopStartupError("stub needs exactly one factory spec repo");
-  }
-  return found;
-}
-
 async function observedAliases(path: string): Promise<readonly string[]> {
   let text: string;
   try {
@@ -190,7 +177,7 @@ export async function runStub(deps: StubRunDeps): Promise<0 | 1 | 3> {
   const { configs } = deps;
   const loop = configs.loop;
   if (loop.stub === null) {
-    throw new Error("stub mode requires the stub config");
+    throw new LoopStartupError("stub mode requires the stub config");
   }
   const sandboxDir = resolve(loop.stub.sandboxDir);
   const within = (path: string): boolean =>
@@ -218,7 +205,11 @@ export async function runStub(deps: StubRunDeps): Promise<0 | 1 | 3> {
     throw new LoopStartupError("stub path outside the sandbox: registryPath");
   }
   const queue = await readQueue(resolve(deps.queuePath));
-  await mkdir(dirname(registryPath), { recursive: true });
+  try {
+    await mkdir(dirname(registryPath), { recursive: true });
+  } catch (error: unknown) {
+    throw toStartupError(error);
+  }
   return withRegistryLock(registryPath, async () => {
     const closers: Closer[] = [];
     try {
@@ -236,338 +227,345 @@ async function runInside(
   sandboxDir: string,
   closers: Closer[],
 ): Promise<0 | 1 | 3> {
-  const loop = configs.loop;
-  const stub = loop.stub;
-  if (stub === null) {
-    throw new LoopStartupError("stub mode requires the stub config");
-  }
-  if (configs.specs.length !== 1) {
-    throw new LoopStartupError("stub needs exactly one factory spec repo");
-  }
-  if (loop.github.factoryLogin === null) {
-    throw new LoopStartupError("stub needs github.factoryLogin");
-  }
-  const registryPath = resolve(configs.dispatcher.registryPath);
-  const ledgerPath = resolve(configs.ledgerPath);
-  const verdictDir = resolve(configs.auditor.verdictDir);
-  const statePath = resolve(loop.statePath);
-  const storePath = resolve(configs.work.storePath);
-  const approvalsPath = resolve(configs.approvals.requestsPath);
-  const resultsPath = resolve(loop.resultsPath);
-  const digestDir = resolve(loop.digest.dir);
-  const scratchDir = resolve(loop.trialMerge.scratchDir);
-  const configDir = resolve(loop.github.configDir);
+  let running = false;
   try {
-    await prepareSandbox({
-      sandboxDir,
-      demoRepoDir: resolve(stub.demoRepoDir),
-      registryPath,
-      ownedDirs: [verdictDir, digestDir, scratchDir, configDir],
-      configDir: "config",
-      ledgerPath,
-      git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
+    const loop = configs.loop;
+    const stub = loop.stub;
+    if (stub === null) {
+      throw new LoopStartupError("stub mode requires the stub config");
+    }
+    const [stubSpec, ...extraSpecs] = configs.specs;
+    if (stubSpec === undefined || extraSpecs.length > 0) {
+      throw new LoopStartupError("stub needs exactly one factory spec repo");
+    }
+    const stubLogin = loop.github.factoryLogin;
+    if (stubLogin === null) {
+      throw new LoopStartupError("stub needs github.factoryLogin");
+    }
+    const registryPath = resolve(configs.dispatcher.registryPath);
+    const ledgerPath = resolve(configs.ledgerPath);
+    const verdictDir = resolve(configs.auditor.verdictDir);
+    const statePath = resolve(loop.statePath);
+    const storePath = resolve(configs.work.storePath);
+    const approvalsPath = resolve(configs.approvals.requestsPath);
+    const resultsPath = resolve(loop.resultsPath);
+    const digestDir = resolve(loop.digest.dir);
+    const scratchDir = resolve(loop.trialMerge.scratchDir);
+    const configDir = resolve(loop.github.configDir);
+    try {
+      await prepareSandbox({
+        sandboxDir,
+        demoRepoDir: resolve(stub.demoRepoDir),
+        registryPath,
+        ownedDirs: [verdictDir, digestDir, scratchDir, configDir],
+        configDir: "config",
+        ledgerPath,
+        git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
+      });
+    } catch (error: unknown) {
+      if (error instanceof SandboxError) {
+        throw new LoopStartupError(error.message, { cause: error });
+      }
+      throw error;
+    }
+    const refusal = checkItems(
+      queue.items,
+      configs.work.maxItemBytes,
+      configs.work.models,
+      new Set(configs.specs.map((spec) => spec.repo)),
+    );
+    if (refusal !== null) {
+      throw new LoopStartupError(`queue refused: ${refusal.code}`);
+    }
+    await updateWorkStore(storePath, (store) => {
+      const applied = applySubmission(
+        store,
+        queue.items,
+        "stub",
+        new Date().toISOString(),
+        configs.work.maxStoreItems,
+      );
+      if (applied.value.kind === "refused") {
+        throw new LoopStartupError(`queue refused: ${applied.value.refusal.code}`);
+      }
+      return Promise.resolve({ next: applied.next, value: undefined });
     });
+    try {
+      await requireWritableTarget("loop state", statePath);
+      await requireWritableTarget("work store", storePath);
+      await requireWritableTarget("ledger", ledgerPath);
+      await requireWritableTarget("approvals", approvalsPath);
+      await requireWritableTarget("results", resultsPath);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    let log: import("../log.js").LoopLog;
+    try {
+      log = await openLoopLog(loop.logPath, () => new Date());
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    closers.push({ name: "loop-log", close: () => log.close() });
+    log.log({ event: "factory-start" });
+    let portsLog: import("../../mcp/call-log.js").FileCallLog;
+    try {
+      portsLog = await openCallLog(join(sandboxDir, "ports.jsonl"));
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    closers.push({ name: "ports-log", close: () => portsLog.close() });
+    const portsState: { failed: boolean } = { failed: false };
+    const portsAppend = (
+      source: "meter" | "port" | "dispatcher",
+      event: Record<string, unknown>,
+    ): void => {
+      portsLog.append({ ts: new Date().toISOString(), source, ...event }).catch(() => {
+        portsState.failed = true;
+      });
+    };
+    const meterLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
+      portsAppend("meter", { ...(event as unknown as Record<string, unknown>) });
+    };
+    const portLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
+      portsAppend("port", { ...(event as unknown as Record<string, unknown>) });
+    };
+    const dispatcherLog = (
+      event: import("../../dispatcher/dispatcher.js").DispatchLogEvent,
+    ): void => {
+      portsAppend("dispatcher", { ...(event as unknown as Record<string, unknown>) });
+    };
+    let loopback: import("../../providers/loopback.js").LoopbackControl;
+    try {
+      loopback = await startLoopback(resolve(stub.recordingsPath));
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    closers.push({
+      name: "loopback",
+      close: () => {
+        const result = loopback.stop();
+        return result instanceof Promise ? result : Promise.resolve();
+      },
+    });
+    const url = `http://127.0.0.1:${String(loopback.port)}`;
+    const providerIds = new Set<string>(Object.values(loop.routing.models));
+    for (const entry of configs.auditor.auditors) {
+      providerIds.add(entry.providerId);
+    }
+    providerIds.add(configs.auditor.mergeAuditor.providerId);
+    const sandboxProvidersDir = join(sandboxDir, "config", "providers");
+    let descriptors: Readonly<
+      Record<string, import("../../providers/types.js").ProviderDescriptor>
+    >;
+    let aliases: readonly string[];
+    try {
+      descriptors = await loopbackDescriptors([...providerIds], sandboxProvidersDir, url);
+      aliases = await observedAliases(resolve(stub.observationsPath));
+    } catch (error: unknown) {
+      if (error instanceof LoopStartupError) {
+        throw error;
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    const hostsPath = join(sandboxDir, "meter-hosts.json");
+    const hostsFile: Record<string, readonly string[]> = {};
+    const hostAddresses = new Map<string, ReadonlySet<string>>();
+    for (const alias of aliases) {
+      hostsFile[alias] = ["127.0.0.1"];
+      hostAddresses.set(alias, new Set(["127.0.0.1"]));
+    }
+    await writeFile(hostsPath, `${JSON.stringify(hostsFile)}\n`, { mode: 0o600 });
+    let meter: import("../../meter/meter.js").Meter;
+    try {
+      meter = await startMeter({
+        config: configs.meter,
+        env: {
+          listen: { host: "127.0.0.1", port: 0 },
+          secret: randomBytes(32),
+          hostAddresses,
+          hostAddressesFile: hostsPath,
+        },
+        providers: descriptors,
+        now: () => new Date(),
+        log: meterLog,
+        timers: systemTimers,
+        logIo: systemUsageLogIo,
+      });
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new LoopStartupError(detail, { cause: error });
+    }
+    closers.push({ name: "meter", close: () => meter.close() });
+    const budgetGate = createCliBudgetGate({
+      command: ["bun", resolve("src/budget/check.ts")],
+      timeoutMs: configs.budgetGate.timeoutMs,
+      cwd: sandboxDir,
+      env: { PATH: process.env.PATH ?? "", HOME: sandboxDir },
+    });
+    const control = createMemoryPort();
+    const memoryPort = createMeteredPort(control.port, meter, portLog);
+    const dispatcher = createDispatcher({
+      port: memoryPort,
+      budget: budgetGate,
+      ledgerPath,
+      config: configs.dispatcher,
+      now: () => new Date(),
+      sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
+      log: dispatcherLog,
+      settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
+    });
+    const github: GitHubPort & { snapshot(): unknown } = createStubGitHub({
+      repo: stubSpec.repo,
+      originDir: join(sandboxDir, "origin.git"),
+      baseBranch: configs.dispatcher.baseBranch,
+      factoryLogin: stubLogin,
+      git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
+      scratchDir,
+      ci: () => "success",
+    });
+    const collector = createStubCollector(resolve(stub.observationsPath), () => new Date());
+    const auditCall: AuditDeps["call"] = async (
+      providerId: string,
+      request: ModelRequest,
+    ): Promise<SingleCallResult> => {
+      const descriptor = descriptors[providerId];
+      if (descriptor === undefined) {
+        throw new Error(`audit: unknown provider ${providerId}`);
+      }
+      const result = await callProvider(descriptor, request);
+      return {
+        providerId: descriptor.id,
+        model: descriptor.model,
+        content: result.content,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      };
+    };
+    const ctx = schedulerContextOf(configs, {
+      github,
+      dispatcher,
+      collector,
+      auditBudget: budgetGate,
+      auditCall,
+      log,
+      now: () => new Date(),
+      sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
+      home: sandboxDir,
+      gitPath: process.env.PATH ?? "",
+      providersDir: sandboxProvidersDir,
+    });
+    const scheduler = createScheduler(ctx);
+    await recoverAtStartup(ctx);
+    running = true;
+    deps.out("loop: running (stub)");
+    const worker = createStubWorker({
+      control,
+      meter: { port: meter.port, tokenFor: (id: string) => meter.tokenFor(id) },
+      sessionModelId: configs.meter.sessionModelId,
+      originDir: join(sandboxDir, "origin.git"),
+      hostsDir: join(sandboxDir, "hosts"),
+      git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
+      patchFor: (workItemId: string, round: number) => {
+        const scripts = queue.scripts[workItemId] ?? [];
+        const entry = scripts[round];
+        return entry === undefined ? null : resolve(entry);
+      },
+    });
+    for (;;) {
+      if (deps.stopping()) {
+        break;
+      }
+      await scheduler.tick();
+      await worker.step();
+      if (portsState.failed) {
+        deps.warn("loop: ports log failed");
+        return 1;
+      }
+      if (log.failed()) {
+        return 1;
+      }
+      const store = await readWorkStore(storePath);
+      const state = await readLoopState(statePath);
+      const active = store.items.some((entry) => {
+        const li = state.items[entry.id] as unknown as LoopItem | undefined;
+        return li !== undefined && li.phase !== "idle" && li.phase !== "final";
+      });
+      const parked = store.items.some((entry) => {
+        const li = state.items[entry.id] as unknown as LoopItem | undefined;
+        return (
+          li !== undefined &&
+          li.park !== null &&
+          li.park.kind !== "operator" &&
+          li.park.kind !== "blocked"
+        );
+      });
+      const unfinished = store.items.some((entry) => {
+        const li = state.items[entry.id] as unknown as LoopItem | undefined;
+        return li !== undefined && li.finalize !== null && !li.finalize.done;
+      });
+      if (!active && readyItems(store).length === 0 && !parked && !unfinished) {
+        break;
+      }
+      await new Promise<void>((done) => setTimeout(done, loop.tickMs));
+    }
+    scheduler.stop();
+    await scheduler.settled();
+    await writeFileAtomic(
+      "stub github snapshot",
+      join(sandboxDir, "github.json"),
+      `${JSON.stringify(github.snapshot())}\n`,
+    );
+    if (deps.stopping()) {
+      return 0;
+    }
+    if (loop.digest.onExit) {
+      const today = utcCalendarDay(new Date());
+      const text = await digestFor(
+        {
+          statePath,
+          storePath,
+          resultsPath,
+          ledgerPath,
+          digestDir,
+          providersDir: sandboxProvidersDir,
+          nvidiaProviderId: configs.nvidiaProviderId,
+          log,
+          now: () => new Date(),
+        },
+        today,
+      );
+      await writeDigestFile(digestDir, today, text);
+    }
+    const finalState = await readLoopState(statePath);
+    let merged = 0;
+    let blocked = 0;
+    let parked = 0;
+    for (const entry of queue.items) {
+      const li = finalState.items[entry.id] as unknown as LoopItem | undefined;
+      if (li?.finalize?.result === "success") {
+        merged += 1;
+      } else if (li?.park?.kind === "blocked") {
+        blocked += 1;
+      } else {
+        parked += 1;
+      }
+    }
+    deps.out(
+      `loop: stub run done merged=${String(merged)} blocked=${String(blocked)} parked=${String(parked)}`,
+    );
+    if (merged === queue.items.length) {
+      return 0;
+    }
+    return 3;
   } catch (error: unknown) {
-    if (error instanceof SandboxError) {
-      throw new LoopStartupError(error.message, { cause: error });
+    if (!running) {
+      throw toStartupError(error);
     }
     throw error;
   }
-  const refusal = checkItems(
-    queue.items,
-    configs.work.maxItemBytes,
-    configs.work.models,
-    new Set(configs.specs.map((spec) => spec.repo)),
-  );
-  if (refusal !== null) {
-    throw new LoopStartupError(`queue refused: ${refusal.code}`);
-  }
-  await updateWorkStore(storePath, (store) => {
-    const applied = applySubmission(
-      store,
-      queue.items,
-      "stub",
-      new Date().toISOString(),
-      configs.work.maxStoreItems,
-    );
-    if (applied.value.kind === "refused") {
-      throw new LoopStartupError(`queue refused: ${applied.value.refusal.code}`);
-    }
-    return Promise.resolve({ next: applied.next, value: undefined });
-  });
-  try {
-    await requireWritableTarget("loop state", statePath);
-    await requireWritableTarget("work store", storePath);
-    await requireWritableTarget("ledger", ledgerPath);
-    await requireWritableTarget("approvals", approvalsPath);
-    await requireWritableTarget("results", resultsPath);
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  let log: import("../log.js").LoopLog;
-  try {
-    log = await openLoopLog(loop.logPath, () => new Date());
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  closers.push({ name: "loop-log", close: () => log.close() });
-  log.log({ event: "factory-start" });
-  let portsLog: import("../../mcp/call-log.js").FileCallLog;
-  try {
-    portsLog = await openCallLog(join(sandboxDir, "ports.jsonl"));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  closers.push({ name: "ports-log", close: () => portsLog.close() });
-  const portsState: { failed: boolean } = { failed: false };
-  const portsAppend = (
-    source: "meter" | "port" | "dispatcher",
-    event: Record<string, unknown>,
-  ): void => {
-    portsLog.append({ ts: new Date().toISOString(), source, ...event }).catch(() => {
-      portsState.failed = true;
-    });
-  };
-  const meterLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
-    portsAppend("meter", { ...(event as unknown as Record<string, unknown>) });
-  };
-  const portLog = (event: import("../../meter/meter.js").MeterLogEvent): void => {
-    portsAppend("port", { ...(event as unknown as Record<string, unknown>) });
-  };
-  const dispatcherLog = (
-    event: import("../../dispatcher/dispatcher.js").DispatchLogEvent,
-  ): void => {
-    portsAppend("dispatcher", { ...(event as unknown as Record<string, unknown>) });
-  };
-  let loopback: import("../../providers/loopback.js").LoopbackControl;
-  try {
-    loopback = await startLoopback(resolve(stub.recordingsPath));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  closers.push({
-    name: "loopback",
-    close: () => {
-      const result = loopback.stop();
-      return result instanceof Promise ? result : Promise.resolve();
-    },
-  });
-  const url = `http://127.0.0.1:${String(loopback.port)}`;
-  const providerIds = new Set<string>(Object.values(loop.routing.models));
-  for (const entry of configs.auditor.auditors) {
-    providerIds.add(entry.providerId);
-  }
-  providerIds.add(configs.auditor.mergeAuditor.providerId);
-  const sandboxProvidersDir = join(sandboxDir, "config", "providers");
-  let descriptors: Readonly<Record<string, import("../../providers/types.js").ProviderDescriptor>>;
-  let aliases: readonly string[];
-  try {
-    descriptors = await loopbackDescriptors([...providerIds], sandboxProvidersDir, url);
-    aliases = await observedAliases(resolve(stub.observationsPath));
-  } catch (error: unknown) {
-    if (error instanceof LoopStartupError) {
-      throw error;
-    }
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  const hostsPath = join(sandboxDir, "meter-hosts.json");
-  const hostsFile: Record<string, readonly string[]> = {};
-  const hostAddresses = new Map<string, ReadonlySet<string>>();
-  for (const alias of aliases) {
-    hostsFile[alias] = ["127.0.0.1"];
-    hostAddresses.set(alias, new Set(["127.0.0.1"]));
-  }
-  await writeFile(hostsPath, `${JSON.stringify(hostsFile)}\n`, { mode: 0o600 });
-  let meter: import("../../meter/meter.js").Meter;
-  try {
-    meter = await startMeter({
-      config: configs.meter,
-      env: {
-        listen: { host: "127.0.0.1", port: 0 },
-        secret: randomBytes(32),
-        hostAddresses,
-        hostAddressesFile: hostsPath,
-      },
-      providers: descriptors,
-      now: () => new Date(),
-      log: meterLog,
-      timers: systemTimers,
-      logIo: systemUsageLogIo,
-    });
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
-  }
-  closers.push({ name: "meter", close: () => meter.close() });
-  const budgetGate = createCliBudgetGate({
-    command: ["bun", resolve("src/budget/check.ts")],
-    timeoutMs: configs.budgetGate.timeoutMs,
-    cwd: sandboxDir,
-    env: { PATH: process.env.PATH ?? "", HOME: sandboxDir },
-  });
-  const control = createMemoryPort();
-  const memoryPort = createMeteredPort(control.port, meter, portLog);
-  const dispatcher = createDispatcher({
-    port: memoryPort,
-    budget: budgetGate,
-    ledgerPath,
-    config: configs.dispatcher,
-    now: () => new Date(),
-    sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
-    log: dispatcherLog,
-    settleUsage: (requestId, state) => meter.settleRequest(requestId, state),
-  });
-  const stubSpec = singleSpec(configs.specs);
-  const rawLogin: unknown = loop.github.factoryLogin;
-  if (typeof rawLogin !== "string") {
-    throw new LoopStartupError("stub needs github.factoryLogin");
-  }
-  const stubLogin = rawLogin;
-  const github: GitHubPort & { snapshot(): unknown } = createStubGitHub({
-    repo: stubSpec.repo,
-    originDir: join(sandboxDir, "origin.git"),
-    baseBranch: configs.dispatcher.baseBranch,
-    factoryLogin: stubLogin,
-    git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
-    scratchDir,
-    ci: () => "success",
-  });
-  const collector = createStubCollector(resolve(stub.observationsPath), () => new Date());
-  const auditCall: AuditDeps["call"] = async (
-    providerId: string,
-    request: ModelRequest,
-  ): Promise<SingleCallResult> => {
-    const descriptor = descriptors[providerId];
-    if (descriptor === undefined) {
-      throw new Error(`audit: unknown provider ${providerId}`);
-    }
-    const result = await callProvider(descriptor, request);
-    return {
-      providerId: descriptor.id,
-      model: descriptor.model,
-      content: result.content,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-    };
-  };
-  const ctx = schedulerContextOf(configs, {
-    github,
-    dispatcher,
-    collector,
-    auditBudget: budgetGate,
-    auditCall,
-    log,
-    now: () => new Date(),
-    sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
-    home: sandboxDir,
-    gitPath: process.env.PATH ?? "",
-    providersDir: sandboxProvidersDir,
-  });
-  const scheduler = createScheduler(ctx);
-  await recoverAtStartup(ctx);
-  deps.out("loop: running (stub)");
-  const worker = createStubWorker({
-    control,
-    meter: { port: meter.port, tokenFor: (id: string) => meter.tokenFor(id) },
-    sessionModelId: configs.meter.sessionModelId,
-    originDir: join(sandboxDir, "origin.git"),
-    hostsDir: join(sandboxDir, "hosts"),
-    git: { PATH: process.env.PATH ?? "", timeoutMs: loop.github.timeoutMs },
-    patchFor: (workItemId: string, round: number) => {
-      const scripts = queue.scripts[workItemId] ?? [];
-      const entry = scripts[round];
-      return entry === undefined ? null : resolve(entry);
-    },
-  });
-  for (;;) {
-    if (deps.stopping()) {
-      break;
-    }
-    await scheduler.tick();
-    await worker.step();
-    if (portsState.failed) {
-      deps.out("loop: ports log failed");
-      return 1;
-    }
-    if (log.failed()) {
-      return 1;
-    }
-    const store = await readWorkStore(storePath);
-    const state = await readLoopState(statePath);
-    const active = store.items.some((entry) => {
-      const li = state.items[entry.id] as unknown as LoopItem | undefined;
-      return li !== undefined && li.phase !== "idle" && li.phase !== "final";
-    });
-    const parked = store.items.some((entry) => {
-      const li = state.items[entry.id] as unknown as LoopItem | undefined;
-      return (
-        li !== undefined &&
-        li.park !== null &&
-        li.park.kind !== "operator" &&
-        li.park.kind !== "blocked"
-      );
-    });
-    const unfinished = store.items.some((entry) => {
-      const li = state.items[entry.id] as unknown as LoopItem | undefined;
-      return li !== undefined && li.finalize !== null && !li.finalize.done;
-    });
-    if (!active && readyItems(store).length === 0 && !parked && !unfinished) {
-      break;
-    }
-    await new Promise<void>((done) => setTimeout(done, loop.tickMs));
-  }
-  scheduler.stop();
-  await scheduler.settled();
-  if (deps.stopping()) {
-    return 0;
-  }
-  if (loop.digest.onExit) {
-    const today = utcCalendarDay(new Date());
-    const text = await digestFor(
-      {
-        statePath,
-        storePath,
-        resultsPath,
-        ledgerPath,
-        digestDir,
-        providersDir: sandboxProvidersDir,
-        nvidiaProviderId: configs.nvidiaProviderId,
-        log,
-        now: () => new Date(),
-      },
-      today,
-    );
-    await writeDigestFile(digestDir, today, text);
-  }
-  await writeFileAtomic(
-    "stub github snapshot",
-    join(sandboxDir, "github.json"),
-    `${JSON.stringify(github.snapshot())}\n`,
-  );
-  const finalState = await readLoopState(statePath);
-  let merged = 0;
-  let blocked = 0;
-  let parked = 0;
-  for (const entry of queue.items) {
-    const li = finalState.items[entry.id] as unknown as LoopItem | undefined;
-    if (li?.finalize?.result === "success") {
-      merged += 1;
-    } else if (li?.park?.kind === "blocked") {
-      blocked += 1;
-    } else {
-      parked += 1;
-    }
-  }
-  deps.out(
-    `loop: stub run done merged=${String(merged)} blocked=${String(blocked)} parked=${String(parked)}`,
-  );
-  if (merged === queue.items.length) {
-    return 0;
-  }
-  return 3;
 }

@@ -87,20 +87,34 @@ function loopMessage(path: string, error: unknown): string {
   return `${path}: ${detail}`;
 }
 
+export function toStartupError(error: unknown): LoopStartupError {
+  if (error instanceof LoopStartupError) {
+    return error;
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return new LoopStartupError(detail, { cause: error });
+}
+
 export async function withRegistryLock<T>(
   registryPath: string,
   body: () => Promise<T>,
 ): Promise<T> {
+  const state: { entered: boolean } = { entered: false };
   try {
-    return await withFileLock("dispatcher registry", registryPath, body);
+    return await withFileLock("dispatcher registry", registryPath, () => {
+      state.entered = true;
+      return body();
+    });
   } catch (error: unknown) {
+    if (state.entered) {
+      throw error;
+    }
     if (error instanceof FileLockError && error.code === "busy") {
       throw new LoopStartupError("dispatcher registry is held by another process", {
         cause: error,
       });
     }
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LoopStartupError(detail, { cause: error });
+    throw toStartupError(error);
   }
 }
 

@@ -274,6 +274,8 @@ async function makeHarness(
     readyLabel: "moc-ready",
     blockedLabel: "moc-blocked",
     maxRetries: 2,
+    followupLabels: ["factory:followup", "readiness:design-needed"],
+    verdictDir: join(dir, "verdicts"),
     dispatcher,
     dispatcherConfig: configOf(registryPath),
     sessionTimeoutMs: 3_600_000,
@@ -323,6 +325,9 @@ async function makeHarness(
     },
     trustedAssociations: ["OWNER", "MEMBER", "COLLABORATOR"],
     maxItemBytes: 16_384,
+    digestDir: join(dir, "digest"),
+    providersDir: "config/providers",
+    nvidiaProviderId: "nvidia-build",
   };
   return {
     ctx,

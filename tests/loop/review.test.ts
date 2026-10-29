@@ -265,6 +265,8 @@ async function makeHarness(
     readyLabel: "moc-ready",
     blockedLabel: "moc-blocked",
     maxRetries: 2,
+    followupLabels: ["factory:followup", "readiness:design-needed"],
+    verdictDir: join(dir, "verdicts"),
     dispatcher,
     dispatcherConfig: configOf(registryPath),
     sessionTimeoutMs: 3_600_000,

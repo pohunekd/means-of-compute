@@ -33,6 +33,7 @@ import {
   registryBranchOf,
   type ReviewContext,
 } from "./review.js";
+import { fileFindingFollowups } from "./followups.js";
 import { reconcile } from "./project.js";
 import type { ApprovalsView } from "./approvals-view.js";
 import type { LoopTrialMergeConfig } from "./config.js";
@@ -348,6 +349,10 @@ export async function finishMerge(ctx: MergeContext, item: WorkItem): Promise<"d
   }
   const progress = await finalizeItem(ctx, item);
   if (progress === "pending") {
+    return "pending";
+  }
+  const findings = await fileFindingFollowups(ctx, item);
+  if (findings === "pending") {
     return "pending";
   }
   const fresh = await readLoopItem(ctx.statePath, item.id);

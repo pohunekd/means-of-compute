@@ -1058,9 +1058,7 @@ test("an unreachable drift cancel idles and the retry parks (U9e)", async () => 
     expect(kept.phase).toBe("starting");
     expect(kept.start?.requestId).toBe("gh-demo-1:0");
     expect(kept.park).toBeNull();
-    const unreachable = events.filter((line) =>
-      line.startsWith("drift-cancel-unreachable:"),
-    );
+    const unreachable = events.filter((line) => line.startsWith("drift-cancel-unreachable:"));
     expect(unreachable).toHaveLength(1);
     const parked = await driveStart(ctx, item());
     expect(parked).toBe("parked");
@@ -1679,8 +1677,6 @@ test("a meter-unavailable drift cancel rejects and keeps starting (U9f)", async 
     expect(kept.phase).toBe("starting");
     expect(kept.start?.requestId).toBe("gh-demo-1:0");
     expect(kept.park).toBeNull();
-    expect(events.filter((line) => line.startsWith("drift-cancel-unreachable:"))).toHaveLength(
-      0,
-    );
+    expect(events.filter((line) => line.startsWith("drift-cancel-unreachable:"))).toHaveLength(0);
   });
 });

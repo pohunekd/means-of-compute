@@ -6,23 +6,6 @@ import type { HostObservation, HostStateCollector } from "../hoststate/collector
 import { readRegistry } from "../dispatcher/registry.js";
 import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
 import type { LoopItem, MergeHold } from "./types.js";
-
-function asMergeHold(value: unknown): MergeHold | null {
-  if (value === null || typeof value !== "object") {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record["mergeSha"] !== "string" ||
-    typeof record["workItemId"] !== "string" ||
-    typeof record["expectedBase"] !== "string" ||
-    !Array.isArray(record["parents"]) ||
-    typeof record["since"] !== "string"
-  ) {
-    return null;
-  }
-  return value as MergeHold;
-}
 import type { MergeContext } from "./merge.js";
 import { mergeCheck, finishMerge } from "./merge.js";
 import {
@@ -54,6 +37,23 @@ import { fetchRefs, isAncestor, GitError, type GitDeps } from "./git.js";
 import { GitHubError, type CheckRun } from "./github.js";
 import { ciStatus } from "./merge-rule.js";
 
+function asMergeHold(value: unknown): MergeHold {
+  if (value === null || typeof value !== "object") {
+    throw new LoopStateDataError("loop state has a malformed merge hold");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record["mergeSha"] !== "string" ||
+    typeof record["workItemId"] !== "string" ||
+    typeof record["expectedBase"] !== "string" ||
+    !Array.isArray(record["parents"]) ||
+    typeof record["since"] !== "string"
+  ) {
+    throw new LoopStateDataError("loop state has a malformed merge hold");
+  }
+  return value as MergeHold;
+}
+
 export interface SchedulerContext extends MergeContext {
   readonly collector: HostStateCollector;
   readonly placementConfig: PlacementConfig;
@@ -75,12 +75,17 @@ export interface Scheduler {
 }
 
 export function createScheduler(ctx: SchedulerContext): Scheduler {
-  const steps = new Map<string, Promise<unknown>>();
+  const launches = new Map<string, { promise: Promise<unknown>; watch: boolean }>();
+  const steps = new Set<string>();
   const timeouts = new Map<string, Promise<unknown>>();
   const seenOrphans = new Set<string>();
   const ciDue = new Map<string, number>();
   let stopped = false;
   let failure: unknown = null;
+
+  function settled(): boolean {
+    return stopped || failure !== null;
+  }
 
   function fail(error: unknown): void {
     if (failure === null) {
@@ -88,25 +93,34 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
     }
   }
 
-  function launchStep(id: string, run: () => Promise<unknown>): void {
-    const running = run();
-    steps.set(id, running);
-    running.then(
+  function launchStep(id: string, run: () => Promise<unknown>, watch = false): void {
+    if (settled()) {
+      return;
+    }
+    const promise = run();
+    launches.set(id, { promise, watch });
+    steps.add(id);
+    promise.then(
       () => {
-        if (steps.get(id) === running) {
-          steps.delete(id);
+        if (launches.get(id)?.promise === promise) {
+          launches.delete(id);
         }
+        steps.delete(id);
       },
       (error: unknown) => {
         fail(error);
-        if (steps.get(id) === running) {
-          steps.delete(id);
+        if (launches.get(id)?.promise === promise) {
+          launches.delete(id);
         }
+        steps.delete(id);
       },
     );
   }
 
   function launchTimeout(id: string, run: () => Promise<unknown>): void {
+    if (settled()) {
+      return;
+    }
     const running = run();
     timeouts.set(id, running);
     running.then(
@@ -126,7 +140,10 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
 
   async function settledWait(): Promise<void> {
     for (;;) {
-      const pending = [...steps.values(), ...timeouts.values()];
+      const pending = [
+        ...[...launches.values()].filter((entry) => !entry.watch).map((entry) => entry.promise),
+        ...timeouts.values(),
+      ];
       if (pending.length === 0) {
         if (failure !== null) {
           throw failure as Error;
@@ -141,6 +158,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
     tick: () =>
       tickOnce(
         ctx,
+        launches,
         steps,
         timeouts,
         launchStep,
@@ -181,7 +199,7 @@ export async function recoverAtStartup(ctx: SchedulerContext): Promise<void> {
 async function reportOrphans(
   ctx: SchedulerContext,
   seen: Set<string>,
-  steps: ReadonlyMap<string, Promise<unknown>>,
+  steps: ReadonlySet<string>,
 ): Promise<void> {
   const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
   const state = await readLoopState(ctx.statePath);
@@ -226,16 +244,19 @@ async function reportOrphans(
 // stored merge is an ancestor of the base and its checks are green.
 async function clearMergeHold(
   ctx: SchedulerContext,
-  steps: ReadonlyMap<string, Promise<unknown>>,
+  steps: ReadonlySet<string>,
 ): Promise<void> {
   const state = await readLoopState(ctx.statePath);
-  const raw = asMergeHold(state.mergeHold);
-  if (raw === null) {
+  if (state.mergeHold === null) {
     return;
   }
+  const raw = asMergeHold(state.mergeHold);
   const store = await readWorkStore(ctx.storePath);
   const item = store.items.find((entry) => entry.id === raw.workItemId);
-  if (item === undefined || steps.has(item.id)) {
+  if (item === undefined) {
+    throw new LoopStateDataError(`loop state merge hold names unknown item ${raw.workItemId}`);
+  }
+  if (steps.has(item.id)) {
     return;
   }
   let base: string;
@@ -294,7 +315,7 @@ async function clearMergeHold(
     return;
   }
   const cleared = await updateLoopState(ctx.statePath, (current) => {
-    const hold = asMergeHold(current.mergeHold);
+    const hold = current.mergeHold === null ? null : asMergeHold(current.mergeHold);
     if (hold === null || hold.mergeSha !== raw.mergeSha) {
       return Promise.resolve({ next: null, value: false });
     }
@@ -378,9 +399,10 @@ async function claimOne(
 
 async function runClaims(
   ctx: SchedulerContext,
-  steps: ReadonlyMap<string, Promise<unknown>>,
+  steps: ReadonlySet<string>,
   launchStep: (id: string, run: () => Promise<unknown>) => void,
   carry: ClaimCarry,
+  isSettled: () => boolean,
 ): Promise<void> {
   const store = await readWorkStore(ctx.storePath);
   const state = await readLoopState(ctx.statePath);
@@ -398,7 +420,7 @@ async function runClaims(
     return backoff === null || ctx.now().getTime() >= Date.parse(backoff);
   });
   for (const item of candidates) {
-    if (carry.active >= ctx.maxActiveItems) {
+    if (isSettled() || carry.active >= ctx.maxActiveItems) {
       return;
     }
     const next = await claimOne(ctx, item, carry, launchStep, results, observations);
@@ -415,7 +437,7 @@ function launchItemStep(
   item: WorkItem,
   li: LoopItem,
   ciDue: Map<string, number>,
-  launch: (id: string, run: () => Promise<unknown>) => void,
+  launch: (id: string, run: () => Promise<unknown>, watch?: boolean) => void,
 ): void {
   if (li.park !== null) {
     if (li.park.kind === "lost") {
@@ -434,7 +456,7 @@ function launchItemStep(
   }
   if (li.phase === "running") {
     const target = { ...item };
-    launch(item.id, () => watchSession(ctx, target));
+    launch(item.id, () => watchSession(ctx, target), true);
     return;
   }
   if (li.phase === "publishing") {
@@ -477,9 +499,10 @@ function launchItemStep(
 // claim. Every step is awaited except the launched calls themselves.
 async function tickOnce(
   ctx: SchedulerContext,
-  steps: Map<string, Promise<unknown>>,
+  launches: Map<string, { promise: Promise<unknown>; watch: boolean }>,
+  steps: Set<string>,
   timeouts: Map<string, Promise<unknown>>,
-  launchStep: (id: string, run: () => Promise<unknown>) => void,
+  launchStep: (id: string, run: () => Promise<unknown>, watch?: boolean) => void,
   launchTimeout: (id: string, run: () => Promise<unknown>) => void,
   isStopped: () => boolean,
   getFailure: () => unknown,
@@ -502,17 +525,20 @@ async function tickOnce(
   }
   const launched: string[] = [];
   const fresh = await readWorkStore(ctx.storePath);
-  const freshState = await readLoopState(ctx.statePath);
   for (const item of fresh.items) {
     if (steps.has(item.id)) {
       continue;
     }
-    const li = freshState.items[item.id] as unknown as LoopItem | undefined;
+    const reread = await readLoopState(ctx.statePath);
+    const li = reread.items[item.id] as unknown as LoopItem | undefined;
     if (li === undefined) {
       continue;
     }
     await reconcile(ctx.storePath, item.id, li, ctx);
     launchItemStep(ctx, item, li, ciDue, (id, run) => {
+      if (isStopped() || getFailure() !== null) {
+        return;
+      }
       launchStep(id, run);
       launched.push(id);
     });
@@ -540,16 +566,30 @@ async function tickOnce(
     }
   }
   carry.running = counted.items.filter((entry) => entry.status === "running");
+  for (const item of counted.items) {
+    const li = countedState.items[item.id] as unknown as LoopItem | undefined;
+    if (li !== undefined && li.phase === "starting" && li.start !== null) {
+      carry.running.push({
+        ...item,
+        status: "running",
+        assignedHostAlias: li.start.decision.chosenHostAlias,
+      });
+    }
+  }
   const paused = await ctx.approvals.fleetPaused();
   if (!paused) {
     await runClaims(
       ctx,
       steps,
       (id, run) => {
+        if (isStopped() || getFailure() !== null) {
+          return;
+        }
         launchStep(id, run);
         carry.launched.push(id);
       },
       carry,
+      () => isStopped() || getFailure() !== null,
     );
   }
   return { claimed: carry.claimed, launched: [...launched, ...carry.launched] };

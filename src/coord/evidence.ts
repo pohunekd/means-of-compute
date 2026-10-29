@@ -1,8 +1,8 @@
 // Evidence bundle builder: redacts paths, copies run files and scans deny patterns.
 // The key value is compared in memory only, never printed or written.
 import { homedir } from "node:os";
-import { lstat, mkdir, readdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { sha256Hex } from "../work/canonical.js";
@@ -11,9 +11,13 @@ import { CoordConfigError, loadCoordConfig } from "./config.js";
 
 export function redactText(
   text: string,
-  paths: { readonly cwd: string; readonly home: string },
+  paths: { readonly runDirs: readonly string[]; readonly cwd: string; readonly home: string },
 ): string {
-  return text.replaceAll(paths.cwd, "<checkout>").replaceAll(paths.home, "~");
+  let out = text;
+  for (const runDir of paths.runDirs) {
+    out = out.replaceAll(join(runDir, "home"), "<run-home>");
+  }
+  return out.replaceAll(paths.cwd, "<checkout>").replaceAll(paths.home, "~");
 }
 
 const PROMPT_PATTERN = /^prompt-\d+\.md$/;
@@ -127,7 +131,7 @@ export async function run(argv: readonly string[]): Promise<number> {
     }
     let parentEntry: unknown;
     try {
-      parentEntry = await lstat(dirname(outDir));
+      parentEntry = await stat(dirname(outDir));
     } catch {
       parentEntry = null;
     }
@@ -155,6 +159,9 @@ export async function run(argv: readonly string[]): Promise<number> {
     names.sort();
     const cwd = process.cwd();
     const home = homedir();
+    const runAbs = resolve(runDir);
+    const runReal = await realpath(runAbs);
+    const runDirs = runReal === runAbs ? [runAbs] : [runReal, runAbs];
     const texts: Array<{ readonly name: string; readonly text: string }> = [];
     for (const name of names) {
       const source = join(runDir, name);
@@ -171,7 +178,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         }
         throw error;
       }
-      texts.push({ name, text: redactText(raw, { cwd, home }) });
+      texts.push({ name, text: redactText(raw, { runDirs, cwd, home }) });
     }
     prepared = {
       runDir,

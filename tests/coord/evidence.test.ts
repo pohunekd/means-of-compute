@@ -1,7 +1,7 @@
 // Evidence bundle tests (V1) and judge replay (J1).
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, sha256Hex } from "../../src/work/canonical.js";
 import { redactText } from "../../src/coord/evidence.js";
@@ -50,9 +50,13 @@ async function runEvidence(
 }
 
 test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
-  expect(redactText("/h/u/code/moc/a /h/u/b", { cwd: "/h/u/code/moc", home: "/h/u" })).toBe(
-    "<checkout>/a ~/b",
-  );
+  expect(
+    redactText("/h/u/code/moc/logs/r/home/.x /h/u/code/moc/a /h/u/b", {
+      runDirs: ["/h/u/code/moc/logs/r"],
+      cwd: "/h/u/code/moc",
+      home: "/h/u",
+    }),
+  ).toBe("<run-home>/.x <checkout>/a ~/b");
   const env = await createCoordTestEnv();
   const home = homedir();
   const configJson = {
@@ -70,14 +74,16 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
     `${JSON.stringify({ configPath, configSha256: sha256Hex(configText) })}\n`,
   );
   const checkoutReal = realpathSync(env.checkoutDir);
-  await Bun.write(join(runDir, "report.md"), `see ${checkoutReal}/a and ${home}/b\n`);
+  await Bun.write(join(runDir, "report.md"), `see ${checkoutReal}/a and ${home}/b task-x\n`);
   await Bun.write(join(runDir, "mcp-calls.jsonl"), `{"event":"server-start"}\n`);
   await Bun.write(join(runDir, "prompt-1.md"), "prompt\n");
-  const out1 = join(env.dir, "out1");
+  mkdirSync(join(env.dir, "outs-real"));
+  symlinkSync(join(env.dir, "outs-real"), join(env.dir, "outs"));
+  const out1 = join(env.dir, "outs", "out1");
   const first = await runEvidence(["--run", runDir, "--out", out1], checkoutReal, home);
   expect(first.rc).toBe(0);
   expect(first.stdout.trim().split("\n").length).toBe(4);
-  expect(await Bun.file(join(out1, "report.md")).text()).toBe("see <checkout>/a and ~/b\n");
+  expect(await Bun.file(join(out1, "report.md")).text()).toBe("see <checkout>/a and ~/b task-x\n");
   expect(statSync(out1).mode & 0o777).toBe(0o700);
   for (const name of ["report.md", "report.json", "mcp-calls.jsonl", "prompt-1.md"]) {
     expect(statSync(join(out1, name)).mode & 0o777).toBe(0o600);

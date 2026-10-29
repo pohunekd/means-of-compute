@@ -1,0 +1,7 @@
+[
+  {
+    "schemaVersion": "v1",
+    "repo": "example/demo-repo",
+    "mergeMode": "by-rule"
+  }
+]

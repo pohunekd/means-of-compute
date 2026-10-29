@@ -1,0 +1,72 @@
+[
+  {
+    "schemaVersion": "v1",
+    "hostAlias": "desktop",
+    "timestamp": "2026-10-26T10:00:00.000Z",
+    "idle": true,
+    "idleReason": "no user input for 42 minutes, on AC power",
+    "secondsSinceInput": 2520,
+    "acPower": true,
+    "batteryPercent": null,
+    "cpu": {
+      "cores": 8,
+      "load1m": 0.7
+    },
+    "memory": {
+      "totalMb": 32768,
+      "freeMb": 21000
+    },
+    "gpu": {
+      "present": false,
+      "name": null,
+      "freeMb": null
+    },
+    "localModels": {
+      "reachable": false,
+      "models": []
+    },
+    "policy": {
+      "allowedWindow": {
+        "start": "08:00",
+        "end": "22:00"
+      },
+      "insideWindow": true,
+      "maxConcurrentAgents": 2
+    }
+  },
+  {
+    "schemaVersion": "v1",
+    "hostAlias": "laptop-a",
+    "timestamp": "2026-10-26T10:00:00.000Z",
+    "idle": true,
+    "idleReason": "no user input for 42 minutes, on AC power",
+    "secondsSinceInput": 2520,
+    "acPower": true,
+    "batteryPercent": null,
+    "cpu": {
+      "cores": 8,
+      "load1m": 0.7
+    },
+    "memory": {
+      "totalMb": 32768,
+      "freeMb": 21000
+    },
+    "gpu": {
+      "present": false,
+      "name": null,
+      "freeMb": null
+    },
+    "localModels": {
+      "reachable": false,
+      "models": []
+    },
+    "policy": {
+      "allowedWindow": {
+        "start": "08:00",
+        "end": "22:00"
+      },
+      "insideWindow": true,
+      "maxConcurrentAgents": 2
+    }
+  }
+]

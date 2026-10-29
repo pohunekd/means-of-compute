@@ -1,0 +1,74 @@
+[
+  {
+    "status": 200,
+    "sseChunks": [
+      "data: {\"id\": \"chatcmpl-demo\", \"choices\": [{\"delta\": {\"content\": \"done\"}}]}\n\n",
+      "data: {\"usage\": {\"prompt_tokens\": 1200, \"completion_tokens\": 80}}\n\n",
+      "data: [DONE]\n\n"
+    ]
+  },
+  {
+    "status": 200,
+    "body": {
+      "choices": [
+        {
+          "message": {
+            "content": "{\"findings\": []}"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 300,
+        "completion_tokens": 8
+      }
+    }
+  },
+  {
+    "status": 200,
+    "sseChunks": [
+      "data: {\"id\": \"chatcmpl-demo\", \"choices\": [{\"delta\": {\"content\": \"done\"}}]}\n\n",
+      "data: {\"usage\": {\"prompt_tokens\": 1200, \"completion_tokens\": 80}}\n\n",
+      "data: [DONE]\n\n"
+    ]
+  },
+  {
+    "status": 200,
+    "body": {
+      "choices": [
+        {
+          "message": {
+            "content": "{\"findings\": []}"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 300,
+        "completion_tokens": 8
+      }
+    }
+  },
+  {
+    "status": 200,
+    "sseChunks": [
+      "data: {\"id\": \"chatcmpl-demo\", \"choices\": [{\"delta\": {\"content\": \"done\"}}]}\n\n",
+      "data: {\"usage\": {\"prompt_tokens\": 1200, \"completion_tokens\": 80}}\n\n",
+      "data: [DONE]\n\n"
+    ]
+  },
+  {
+    "status": 200,
+    "body": {
+      "choices": [
+        {
+          "message": {
+            "content": "{\"findings\": []}"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 300,
+        "completion_tokens": 8
+      }
+    }
+  }
+]

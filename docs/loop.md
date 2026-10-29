@@ -121,7 +121,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 ## Intake (PR 6b)
 
-`src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. An open issue that carries the opt-in and ready labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. Every other issue logs `intake-skip` with its code; an issue already tracked under another id logs once per process run.
+`src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. An open issue that carries the opt-in and ready labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. An issue already imported under its own id is skipped silently; every other skipped issue logs `intake-skip` with its code, and an issue already tracked under another id logs once per process run.
 
 ## Driver park (PR 5b)
 

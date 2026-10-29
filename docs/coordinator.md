@@ -108,14 +108,17 @@ the check.
 
 ## Watch rules
 
-Scope keeps rows whose id starts with `<idPrefix>-`, in store order. A blocked scope row
-without a `-fu` id, a `-fu` sibling, a null pull or an unflagged verdict yields
-`followup:<id>`; the cap keeps the first `maxFollowupsPerRun - followupsFiled` by id.
-A review row under `human-approval` with a clean verdict for its pull yields
-`approve:<id>:<pull>:<headSha>`. Enough blocked rows yield `pause:<goalId>` unless
-the fleet is paused, `pause_fleet` is pending, or the key is consumed. Order is
-followups, then approves by key, then pause. Audit targets are blocked rows without
-a `-fu` sibling plus `human-approval` review rows. The goal is terminal when every
-scope row is done, blocked, operator-parked, or stranded. Bad `list_work`,
-`audit_results` and `fleet_status` payloads report `invalid-list-work`,
-`invalid-audit-results` and `invalid-fleet-status`.
+Scope keeps rows whose id starts with `<idPrefix>-`, in store order; an empty scope is
+not terminal. A blocked scope row whose id is at most 45 characters, does not end
+in `-fu`, has no `<id>-fu` sibling, has a pull, has some verdict for its pull with
+high + medium > 0, and whose key `followup:<id>` is not consumed yields it; the cap
+keeps the first `maxFollowupsPerRun - followupsFiled` by id. A review row under
+`human-approval` with a clean verdict for its pull yields
+`approve:<id>:<pull>:<headSha>` when that key is not consumed. Enough blocked rows
+yield `pause:<goalId>` unless the fleet is paused, `pause_fleet` is pending, or the
+key is consumed. Order is followups, then approves by key, then pause. Audit targets
+are blocked rows that are not `-fu` rows and have no `-fu` sibling plus
+`human-approval` review rows. The goal is terminal when every scope row is done,
+blocked, operator-parked, or stranded. Bad `list_work`, `audit_results` and
+`fleet_status` payloads report `invalid-list-work`, `invalid-audit-results` and
+`invalid-fleet-status`.

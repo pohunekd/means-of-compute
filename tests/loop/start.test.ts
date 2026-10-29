@@ -17,6 +17,7 @@ import type { WorkItem } from "../../contracts/v1/types.js";
 import { readLedger } from "../../src/ledger/read.js";
 import { appendPending } from "../../src/ledger/store.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
+import { MeterUnavailableError } from "../../src/meter/meter.js";
 import { readLoopState } from "../../src/loop/state.js";
 import type { LoopLog } from "../../src/loop/log.js";
 import { FakeGitHub } from "./fake-github.js";
@@ -993,9 +994,10 @@ test("a drifted cancel before a crash parks with no live entry (U9d)", async () 
 });
 
 // U9e: the U9b setup with a port whose first cancel rejects with
-// PortUnreachableError. The first driveStart returns "idle" and keeps L
-// starting with the same intent; the next driveStart cancels the live
-// entry and parks with request-drift.
+// PortUnreachableError. The first driveStart returns "idle", keeps L
+// starting with the same intent, and logs one drift-cancel-unreachable
+// event; the next driveStart cancels the live entry and parks with
+// request-drift.
 test("an unreachable drift cancel idles and the retry parks (U9e)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -1027,7 +1029,7 @@ test("an unreachable drift cancel idles and the retry parks (U9e)", async () => 
       log: () => undefined,
       settleUsage: () => Promise.resolve(null),
     });
-    const { ctx } = makeCtx(dir, dispatcher, {
+    const { ctx, events } = makeCtx(dir, dispatcher, {
       ledgerPath,
       dispatcherConfig: configOf(registryPath),
     });
@@ -1056,6 +1058,8 @@ test("an unreachable drift cancel idles and the retry parks (U9e)", async () => 
     expect(kept.phase).toBe("starting");
     expect(kept.start?.requestId).toBe("gh-demo-1:0");
     expect(kept.park).toBeNull();
+    const unreachable = events.filter((line) => line.startsWith("drift-cancel-unreachable:"));
+    expect(unreachable).toHaveLength(1);
     const parked = await driveStart(ctx, item());
     expect(parked).toBe("parked");
     const li = await readItem(ctx.statePath);
@@ -1508,14 +1512,30 @@ test("watchSession drops a stale result under the S6 guard (U13)", async () => {
 });
 
 // U16: a live orphan that no loop item names survives an unreachable T2.
-// The retry with the same intent starts normally; the orphan keeps
-// terminal null and no cancel reason, and the sleep ran once.
+// The orphan entry holds a :0 control-port handle from a real
+// `control.port.start`, while the retry with the same intent starts
+// normally; the orphan keeps terminal null and no cancel reason, and the
+// sleep ran once. The PR body states the failing assertion.
 test("an unreachable retry over a live orphan starts the same intent (U16)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
     const { briefSha256Of } = await import("../../src/dispatcher/dispatcher.js");
     const { insertRegistryEntry } = await import("../../src/dispatcher/registry.js");
+    const control = createMemoryPort();
+    // The :0 entry is built from the session the port started.
+    const orphanHandle = await control.port.start({
+      requestId: "gh-demo-1:0",
+      workItemId: "gh-demo-1",
+      repo: "example/demo",
+      hostAlias: "host-a",
+      branch: "moc/gh-demo-1",
+      baseRef: "origin/main",
+      resume: false,
+      model: { providerId: PROVIDER, model: PREFERRED },
+      brief: "Another brief.",
+    });
+    expect(orphanHandle.sessionId).toBe("mem-1");
     await insertRegistryEntry(registryPath, {
       requestId: "gh-demo-1:0",
       workItemId: "gh-demo-1",
@@ -1526,8 +1546,8 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
       resume: false,
       model: { providerId: PROVIDER, model: PREFERRED },
       briefSha256: briefSha256Of("Another brief."),
-      sessionId: "mem-orphan",
-      worktree: "/memory-worktrees/host-a/mem-orphan",
+      sessionId: orphanHandle.sessionId,
+      worktree: orphanHandle.worktree,
       baseCommit: null,
       startedAt: NOW,
       cursor: null,
@@ -1540,7 +1560,6 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
       revision: 0,
     });
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
-    const control = createMemoryPort();
     let starts = 0;
     const flaky: DispatcherPort = {
       ...control.port,
@@ -1587,6 +1606,76 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     const orphan = entries.find((entry) => entry.requestId === "gh-demo-1:0");
     expect(orphan?.terminal).toBeNull();
     expect(orphan?.cancelReason).toBeNull();
+    expect(orphan?.sessionId).toBe("mem-1");
     expect(sleeps).toEqual([5_000]);
+  });
+});
+
+// U9f: the U9e setup, but the first cancel rejects with
+// MeterUnavailableError. driveStart rejects with that error; L stays
+// starting with the same intent, the park is null, and there is no
+// drift-cancel-unreachable event.
+test("a meter-unavailable drift cancel rejects and keeps starting (U9f)", async () => {
+  await withTempDir(async (dir) => {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    let starts = 0;
+    const flaky: DispatcherPort = {
+      ...control.port,
+      start(request: StartRequest) {
+        starts += 1;
+        return control.port.start(request);
+      },
+      async cancel() {
+        return Promise.reject(new MeterUnavailableError("meter: usage log failed"));
+      },
+    };
+    const dispatcher = createDispatcher({
+      port: flaky,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date(NOW),
+      sleep: () => Promise.resolve(),
+      log: () => undefined,
+      settleUsage: () => Promise.resolve(null),
+    });
+    const { ctx, events } = makeCtx(dir, dispatcher, {
+      ledgerPath,
+      dispatcherConfig: configOf(registryPath),
+    });
+    await writeStore(ctx.storePath, item());
+    await claimStart(ctx, item(), choice(PREFERRED, PROVIDER));
+    const stashed = await readItem(ctx.statePath);
+    const intent = stashed.start;
+    if (intent === null) {
+      throw new Error("U9f setup lost the start intent");
+    }
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
+    const seeded = await dispatcher.start(
+      { ...item(), status: "queued", branch: null },
+      intent.decision,
+      intent.model,
+      intent.brief,
+    );
+    if (seeded.kind !== "started") {
+      throw new Error("U9f setup did not start a session");
+    }
+    expect(seeded.request.requestId).toBe("gh-demo-1:1");
+    await writeLoopState(ctx.statePath, { ...stashed, phase: "starting" });
+    let error: unknown;
+    try {
+      await driveStart(ctx, item());
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(MeterUnavailableError);
+    expect(starts).toBe(1);
+    const kept = await readItem(ctx.statePath);
+    expect(kept.phase).toBe("starting");
+    expect(kept.start?.requestId).toBe("gh-demo-1:0");
+    expect(kept.park).toBeNull();
+    expect(events.filter((line) => line.startsWith("drift-cancel-unreachable:"))).toHaveLength(0);
   });
 });

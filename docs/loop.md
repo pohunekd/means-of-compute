@@ -88,7 +88,18 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - `claimStart` parks the item as operator `start-rejected` when its rejection count is already at `maxStartRejections`. Otherwise it creates the loop item with `initialLoopItem` for a fresh store item and writes the start intent with the request id derived from the ledger. It makes no store write, because `starting` projects to `queued`. `driveStart` derives the request id again before it calls `dispatcher.start` with the stored intent.
 - `rejectStart` closes a `start-rejected` round, and `closeRound` excludes the host and raises `startRejections` in the same write. When the count reaches `maxStartRejections`, the item parks as operator `start-rejected` after that round. The rejection code stays in the dispatcher: in the registry terminal detail for a ledgered rejection, and in the dispatcher's `start-rejected` log event otherwise.
 - A refused start returns to idle with a `budgetBackoffMs` backoff, and a failing gate logs `budget-gate-error`. On an unreachable host, `driveStart` sleeps `unreachableRetryMs` and retries the same intent until the dispatcher returns `lost`.
-- `watchSession` applies the terminal table. It drops a result when the item is no longer `running` with the same request id. `checkSessionTimeout` reads the durable registry `startedAt` and cancels an overdue session; the next watch replays `stalled` and moves the item to `publishing`. On a request drift, `driveStart` cancels every live session of the item before the operator park.
+- `watchSession` applies the terminal table. It drops a result when the item is no longer `running` with the same request id. `checkSessionTimeout` reads the durable registry `startedAt` and cancels an overdue session; the next watch replays `stalled` and moves the item to `publishing`. On a request drift, `driveStart` cancels every live session of the item before the operator park. An unreachable drift cancel logs `drift-cancel-unreachable` and returns idle; R6 reports the live session meanwhile.
+
+## Driver review (PR 5d)
+
+`src/loop/review.ts` drives an item from its finished session to an audited head:
+
+- `publishStep` takes the session attempt from a watch replay and the branch from the registry entry. It adopts the one open factory PR of the branch or creates one, and parks two open PRs as operator `duplicate-pulls`. When the branch has no new head, it closes the round as `no-push`, `no-new-commit` or `session-failed`. Otherwise it writes the pull, `ciSince` and phase `ci`.
+- `ciStep` reads the PR view first: a moved head on an open PR resets the pull head and `ciSince` without closing the round. Green checks move the item to `auditing`, red checks close `red-ci` with the failing check names, and checks still pending after `ciTimeoutMs` close `ci-timeout`.
+- `auditStep` waits out `backoffUntil`, fetches the branch and the base, and returns to `ci` when the fetched head moved. A stored verdict at the head is posted without a new audit. Otherwise it counts the attempt in `auditAttempts` before `runAudit`, and parks `audit-failed` once `1 + audit.retries` attempts at that head were used.
+- After `runAudit`: a budget refusal or a failing gate restores the count and sets the backoff; a model error retries; an empty or oversized diff closes the round; a missing author or auditor parks the item; an `InputPathError` is fatal; any other error parks `audit-error`.
+- A valid verdict is posted once as the factory marker, and the item stays in `auditing` for the merge slice. A GitHub or git error keeps the phase and logs `github-error`.
+- A red close appends the round and reconciles the store to `queued`; the pull and the branch stay. `previousRoundOf` gives the next brief the last session round and the findings of the last audited head.
 
 ## Driver park (PR 5b)
 

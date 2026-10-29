@@ -32,7 +32,9 @@ export type LoopEventName =
   | "ledger-finalize-refused"
   | "ledger-finalize-error"
   | "digest-written"
-  | "unparked";
+  | "unparked"
+  | "audit-error"
+  | "drift-cancel-unreachable";
 
 export interface LoopLogEvent {
   readonly event: LoopEventName;

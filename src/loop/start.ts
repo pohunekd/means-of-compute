@@ -375,6 +375,12 @@ async function parkDrift(ctx: StartContext, item: WorkItem): Promise<StartStep> 
     if (!(error instanceof PortUnreachableError)) {
       throw error;
     }
+    const unreachable = error;
+    ctx.log.log({
+      event: "drift-cancel-unreachable",
+      workItemId: item.id,
+      detail: unreachable.message,
+    });
     return "idle";
   }
   await parkOperator(ctx, item, "request-drift");

@@ -233,9 +233,11 @@ export async function run(argv: readonly string[]): Promise<number> {
   return 0;
 }
 
-try {
-  process.exitCode = await run(Bun.argv.slice(2));
-} catch (error: unknown) {
-  console.error(`coord:evidence: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (import.meta.main) {
+  try {
+    process.exitCode = await run(Bun.argv.slice(2));
+  } catch (error: unknown) {
+    console.error(`coord:evidence: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }

@@ -1,4 +1,4 @@
-// Driver merge tests (slice 5e rows MT1-MT19): the ready path, the
+// Driver merge tests (slice 5e rows MT1-MT23): the ready path, the
 // trial gate, the base race hold, human merges and the error latches.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -17,7 +17,7 @@ import {
   type StubCi,
   type StubGitHubSnapshot,
 } from "../../src/loop/stub/github.js";
-import { readLoopState } from "../../src/loop/state.js";
+import { readLoopState, updateLoopState } from "../../src/loop/state.js";
 import type { LoopItem } from "../../src/loop/types.js";
 import { initialLoopItem } from "../../src/loop/start.js";
 import { renderComment } from "../../src/auditor/verdict.js";
@@ -33,7 +33,7 @@ import {
   mergeCheck,
   type MergeContext,
 } from "../../src/loop/merge.js";
-import { writeReviewItem } from "../../src/loop/review.js";
+import { project, reconcile } from "../../src/loop/project.js";
 
 const PREFERRED = "muse-spark-1.3-contributor";
 const PROVIDER = "meta-api";
@@ -174,17 +174,19 @@ async function pushEmpty(seed: string, branch: string, from = "main"): Promise<s
   return (await git(seed, ["rev-parse", branch])).trim();
 }
 
-async function seedFinishedSession(registryPath: string): Promise<void> {
+async function seedFinishedSession(registryPath: string, requestId = "gh-demo-1:0"): Promise<void> {
+  const itemId = requestId.split(":")[0] ?? "gh-demo-1";
+  const branch = `moc/${itemId}`;
   await Bun.write(
     registryPath,
     `${JSON.stringify({
       sessions: [
         {
-          requestId: "gh-demo-1:0",
-          workItemId: "gh-demo-1",
+          requestId,
+          workItemId: itemId,
           repo: REPO,
           hostAlias: "host-a",
-          branch: "moc/gh-demo-1",
+          branch,
           baseRef: "origin/main",
           resume: false,
           model: { providerId: PROVIDER, model: PREFERRED },
@@ -236,9 +238,9 @@ async function writeStore(path: string, entry: WorkItem): Promise<void> {
   );
 }
 
-async function readItem(statePath: string): Promise<LoopItem> {
+async function readItem(statePath: string, id = "gh-demo-1"): Promise<LoopItem> {
   const state = await readLoopState(statePath);
-  return state.items["gh-demo-1"] as unknown as LoopItem;
+  return state.items[id] as unknown as LoopItem;
 }
 
 function withTempDir(body: (dir: string) => Promise<void>): Promise<void> {
@@ -513,14 +515,17 @@ interface ReadySeed {
   readonly base: string;
 }
 
+interface SeedOpts {
+  readonly branch?: string;
+  readonly ci?: (sha: string) => StubCi;
+  readonly skipMarker?: boolean;
+  readonly store?: (head: string, li: LoopItem, ctx: { readonly branchPrefix: string }) => WorkItem;
+}
+
 async function seedReadyItem(
   dir: string,
   overrides: Partial<LoopItem> = {},
-  opts: {
-    readonly branch?: string;
-    readonly ci?: (sha: string) => StubCi;
-    readonly skipMarker?: boolean;
-  } = {},
+  opts: SeedOpts = {},
 ): Promise<ReadySeed> {
   const extra = opts.ci === undefined ? {} : { ci: opts.ci };
   const harness = await makeHarness(dir, extra);
@@ -544,20 +549,48 @@ async function seedReadyItem(
   }
   await appendPending(harness.ctx.ledgerPath, pendingLedger());
   await seedFinishedSession(harness.registryPath);
-  await writeStore(harness.ctx.storePath, item());
-  await writeLoopState(harness.ctx.statePath, readyItem(head, overrides));
+  const seededItem = readyItem(head, overrides);
+  const seededStore =
+    opts.store === undefined ? item() : opts.store(head, seededItem, { branchPrefix: "moc/" });
+  await writeStore(harness.ctx.storePath, seededStore);
+  await writeLoopState(harness.ctx.statePath, seededItem);
   return { harness, ctx: harness.ctx, events: harness.events, head, base };
+}
+
+async function secondReviewItem(seed: ReadySeed): Promise<LoopItem> {
+  const checkoutDir = seed.ctx.repos[0]?.checkoutDir ?? seed.ctx.home;
+  const head2 = await pushEmpty(seed.harness.sandbox.seed, "moc/gh-demo-2");
+  await git(checkoutDir, ["fetch", "origin"]);
+  const pullNumber = await seed.ctx.github.createPull(REPO, "moc/gh-demo-2", "main", "t2", "b2");
+  const verdict2 = { ...cleanVerdict(head2, pullNumber), workItemId: "gh-demo-2" };
+  const verdictDir = join(seed.ctx.auditor.config.verdictDir, "gh-demo-2");
+  await mkdir(verdictDir, { recursive: true });
+  await Bun.write(join(verdictDir, `${head2}.json`), `${JSON.stringify(verdict2)}\n`);
+  const marker2 = renderComment(verdict2);
+  if (marker2 !== null) {
+    await seed.ctx.github.postComment(REPO, pullNumber, marker2);
+  }
+  await appendPending(seed.ctx.ledgerPath, { ...pendingLedger(), workItemId: "gh-demo-2" });
+  return {
+    ...initialLoopItem(),
+    session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
+    phase: "merging",
+    requestId: "gh-demo-2:0",
+    pull: { number: pullNumber, headSha: head2 },
+    ciSince: NOW,
+    trial: {
+      baseSha: await seed.ctx.github.baseSha(REPO, "main"),
+      headSha: head2,
+      passed: true,
+    },
+  };
 }
 
 async function withReadySeed(
   dir: string,
   body: (seed: ReadySeed) => Promise<void>,
   overrides: Partial<LoopItem> = {},
-  opts: {
-    readonly branch?: string;
-    readonly ci?: (sha: string) => StubCi;
-    readonly skipMarker?: boolean;
-  } = {},
+  opts: SeedOpts = {},
 ): Promise<void> {
   const restoreEnv = applyTestEnv();
   const seed = await seedReadyItem(dir, overrides, opts);
@@ -667,34 +700,35 @@ test("MT3 a raced merge sets the hold and escalates once", async () => {
       const mergedEvents = seed.harness.events.filter((line) => line.startsWith("merged:"));
       expect(mergedEvents).toHaveLength(1);
       expect(mergedEvents[0]).toContain(`:${mergeSha}:`);
-      // A set hold stops another ready item at MR3 step 1: seed the same
-      // work item in merging with a new head h2 and an open second pull,
-      // then the check waits with byte-equal state and no further merge.
-      const head2 = await pushEmpty(seed.harness.sandbox.seed, "moc/gh-demo-1-b");
-      const checkoutDir = seed.ctx.repos[0]?.checkoutDir ?? dir;
-      await git(checkoutDir, ["fetch", "origin"]);
-      await seed.ctx.github.createPull(REPO, "moc/gh-demo-1-b", "main", "t2", "b2");
-      const verdict2 = cleanVerdict(head2, 2);
-      await Bun.write(
-        join(dir, "verdicts", "gh-demo-1", `${head2}.json`),
-        `${JSON.stringify(verdict2)}\n`,
-      );
-      const marker2 = renderComment(verdict2);
-      if (marker2 !== null) {
-        await seed.ctx.github.postComment(REPO, 2, marker2);
+      // MT3's second call uses a fresh mutex and waits on the set hold
+      // before any second GitHub read: the state stays byte-equal and
+      // no further merge runs.
+      const secondLi = await secondReviewItem(seed);
+      const head2 = secondLi.pull?.headSha;
+      if (head2 === undefined) {
+        throw new Error("expected a second head");
       }
-      await writeReviewItem(
-        ctx,
-        item().id,
-        readyItem(head2, {
-          phase: "merging",
-          pull: { number: 2, headSha: head2 },
-          trial: { baseSha: base, headSha: head2, passed: true },
+      await writeStore(seed.ctx.storePath, {
+        ...item(),
+        id: "gh-demo-2",
+        modelRouting: { preferredModel: PREFERRED, attempts: 0, fallbackUsed: false },
+      });
+      await seedFinishedSession(seed.harness.registryPath, "gh-demo-2:0");
+      await updateLoopState<undefined>(seed.ctx.statePath, (state) =>
+        Promise.resolve({
+          next: {
+            ...state,
+            items: {
+              ...state.items,
+              "gh-demo-2": secondLi as unknown as Record<string, unknown>,
+            },
+          },
+          value: undefined,
         }),
       );
       const beforeHold = await Bun.file(ctx.statePath).text();
       const heldCtx: MergeContext = { ...ctx, mergeMutex: createMergeMutex() };
-      const next = await mergeCheck(heldCtx, item());
+      const next = await mergeCheck(heldCtx, { ...item(), id: "gh-demo-2" });
       expect(next).toBe("pending");
       expect(await Bun.file(ctx.statePath).text()).toBe(beforeHold);
       expect(mergeCalls).toBe(1);
@@ -882,6 +916,7 @@ test("MT7 a wrong base parks the item without closing a round", async () => {
       const li = await readItem(ctx.statePath);
       expect(li.park).toMatchObject({ code: "base-mismatch" });
       expect(li.rounds).toHaveLength(0);
+      expect(li.phase).toBe("idle");
     } finally {
       restoreEnv();
       await harness.sandbox.cleanup();
@@ -918,6 +953,7 @@ test("MT7 a wrong base parks the item without closing a round", async () => {
       const li = await readItem(ctx.statePath);
       expect(li.park).toMatchObject({ code: "merged-elsewhere" });
       expect(li.rounds).toHaveLength(0);
+      expect(li.phase).toBe("idle");
       const stored = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
       expect(stored.items[0]?.status).not.toBe("done");
     } finally {
@@ -973,8 +1009,16 @@ test("MT8 findings close the round without merging", async () => {
         headSha: head,
         verdict: { auditorModel: AUDITOR, high: 1, medium: 0, low: 0 },
       });
+      expect(li.rounds).toHaveLength(1);
       const stored = (await Bun.file(ctx.storePath).json()) as { items: WorkItem[] };
       expect(stored.items[0]?.status).toBe("queued");
+      await reconcile(ctx.storePath, item().id, li, ctx);
+      const projected = project(item(), li, ctx);
+      expect(projected.stallRounds).toBe(1);
+      expect(stored.items[0]).toMatchObject({
+        stallRounds: projected.stallRounds,
+        status: "queued",
+      });
     });
   });
 });
@@ -1001,6 +1045,9 @@ test("MT9 a missing marker parks in auditing and returns otherwise", async () =>
         expect(commentCalls).toBe(0);
         const li = await readItem(seed.ctx.statePath);
         expect(li.park).toMatchObject({ code: "marker-missing" });
+        await reconcile(seed.ctx.storePath, item().id, li, seed.ctx);
+        const parked = (await Bun.file(seed.ctx.storePath).json()) as { items: WorkItem[] };
+        expect(parked.items[0]?.status).toBe("parked");
         expect(li.rounds).toHaveLength(0);
       },
       {},
@@ -1040,6 +1087,7 @@ test("MT9 a missing marker parks in auditing and returns otherwise", async () =>
 });
 
 // MT10: human-approval waits for an approval of the exact triple.
+// A reconciled seed projects awaiting items as review.
 test("MT10 human-approval waits for an approval of the exact triple", async () => {
   await withTempDir(async (dir) => {
     const approveHead = async (ctx: MergeContext, head: string, pull: number): Promise<void> => {
@@ -1076,8 +1124,9 @@ test("MT10 human-approval waits for an approval of the exact triple", async () =
         expect(waiting).toBe("awaiting-approval");
         const stored = await readItem(human.statePath);
         expect(stored.phase).toBe("awaiting-approval");
+        await reconcile(human.storePath, item().id, stored, human);
         const saved = (await Bun.file(human.storePath).json()) as { items: WorkItem[] };
-        expect(saved.items[0]?.status).toBe("queued");
+        expect(saved.items[0]?.status).toBe("review");
         let mergeCalls = 0;
         const tracked: MergeContext = {
           ...human,
@@ -1100,7 +1149,26 @@ test("MT10 human-approval waits for an approval of the exact triple", async () =
         expect(mergeCalls).toBe(1);
       },
       {},
-      {},
+      {
+        store: (_head, li, projectionCtx) => {
+          const projected = project(item(), li, projectionCtx);
+          return {
+            ...item(),
+            status: projected.status,
+            statusReason: projected.statusReason,
+            assignedHostAlias: projected.assignedHostAlias,
+            branch: projected.branch,
+            pullNumber: projected.pullNumber,
+            modelRouting: projected.modelRouting,
+            retryCount: projected.retryCount,
+            stallRounds: projected.stallRounds,
+            dod: item().dod.map((entry) => ({
+              ...entry,
+              done: entry.id === "D1" ? projected.dodDone : entry.done,
+            })),
+          };
+        },
+      },
     );
   });
 });
@@ -1169,7 +1237,7 @@ test("MT13 a verdict authored by the session author parks as verdict-invalid", a
       const authored = {
         ...cleanVerdict(head),
         auditorModel: PREFERRED,
-        authorModels: [PREFERRED],
+        authorModels: [AUDITOR],
       };
       await Bun.write(
         join(dir, "verdicts", "gh-demo-1", `${head}.json`),
@@ -1183,7 +1251,9 @@ test("MT13 a verdict authored by the session author parks as verdict-invalid", a
       expect(outcome).toBe("parked");
       const li = await readItem(seed.ctx.statePath);
       expect(li.park).toMatchObject({ code: "verdict-invalid" });
-      expect(li.rounds).toHaveLength(0);
+      await reconcile(seed.ctx.storePath, item().id, li, seed.ctx);
+      const saved = (await Bun.file(seed.ctx.storePath).json()) as { items: WorkItem[] };
+      expect(saved.items[0]?.status).toBe("parked");
     });
   });
 });
@@ -1202,7 +1272,9 @@ test("MT14 rejected merges count attempts and then park as merge-failed", async 
           ...base.github,
           mergePull: (): Promise<void> => {
             mergeCalls += 1;
-            return Promise.reject(new GitHubError("unavailable", "mergePull", "rejected"));
+            return Promise.reject(
+              new GitHubError("rejected", "mergePull", "mergePull: merge conflict"),
+            );
           },
         },
       });
@@ -1223,6 +1295,9 @@ test("MT14 rejected merges count attempts and then park as merge-failed", async 
       expect(mergeCalls).toBe(2);
       const li = await readItem(seed.ctx.statePath);
       expect(li.park).toMatchObject({ code: "merge-failed" });
+      await reconcile(seed.ctx.storePath, item().id, li, seed.ctx);
+      const saved = (await Bun.file(seed.ctx.storePath).json()) as { items: WorkItem[] };
+      expect(saved.items[0]?.status).toBe("parked");
     });
   });
 });
@@ -1278,6 +1353,7 @@ test("MT15 a seeded merge hold stops the driver before any GitHub read", async (
 });
 
 // MT16: awaiting-approval without a verdict file returns to auditing.
+// MT16b: the same in auditing returns to auditing with no park.
 test("MT16 awaiting-approval without a verdict file returns to auditing", async () => {
   await withTempDir(async (dir) => {
     await withReadySeed(
@@ -1291,6 +1367,28 @@ test("MT16 awaiting-approval without a verdict file returns to auditing", async 
         expect(li.park).toBeNull();
       },
       { phase: "awaiting-approval" },
+    );
+  });
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        await Bun.$`rm ${join(dir, "verdicts", "gh-demo-1", `${seed.head}.json`)}`.quiet();
+        const outcome = await mergeCheck(seed.ctx, item());
+        expect(outcome).toBe("auditing");
+        const li = await readItem(seed.ctx.statePath);
+        expect(li.phase).toBe("auditing");
+        expect(li.park).toBeNull();
+        const issues = (
+          seed.ctx.github as unknown as {
+            snapshot(): StubGitHubSnapshot;
+          }
+        )
+          .snapshot()
+          .issues.filter((entry) => entry.labels.includes("moc-escalation"));
+        expect(issues).toHaveLength(0);
+      },
+      { phase: "auditing" },
     );
   });
 });
@@ -1386,6 +1484,24 @@ test("MT18 finishMerge finalizes the ledger once then writes final", async () =>
         ...readyItem(mergedHead),
         phase: "finalizing",
         finalize: { result: "success", done: false },
+        rounds: [
+          {
+            round: 0,
+            retry: 0,
+            requestId: "gh-demo-1:0",
+            model: PREFERRED,
+            providerId: PROVIDER,
+            hostAlias: "host-a",
+            attempt: "success",
+            outcome: "merged",
+            headSha: mergedHead,
+            failingChecks: [],
+            verdict: { auditorModel: AUDITOR, high: 0, medium: 0, low: 0 },
+            newlyMet: [],
+            at: NOW,
+            baseRace: false,
+          },
+        ],
       });
       const mid = await readItem(ctx.statePath);
       expect(mid.phase).toBe("finalizing");
@@ -1411,6 +1527,146 @@ test("MT18 finishMerge finalizes the ledger once then writes final", async () =>
       restoreEnv();
       await harness.sandbox.cleanup();
     }
+  });
+});
+
+// MT21: a failed trial in merging writes auditing and then closes trial-failed.
+test("MT21 a failed trial in merging audits again then closes trial-failed", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        const fetched = seed.ctx.repos[0]?.checkoutDir ?? dir;
+        await git(seed.harness.sandbox.seed, ["checkout", "main"]);
+        await Bun.write(join(seed.harness.sandbox.seed, "f.txt"), "main line\nconflict base\n");
+        await git(seed.harness.sandbox.seed, ["add", "f.txt"]);
+        await git(seed.harness.sandbox.seed, ["commit", "-m", "base-conflict"]);
+        await git(seed.harness.sandbox.seed, ["push", "origin", "main"]);
+        await git(fetched, ["fetch", "origin"]);
+        const movedBase = await seed.ctx.github.baseSha(REPO, "main");
+        expect(movedBase).not.toBe(seed.base);
+        await git(seed.harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+        await Bun.write(join(seed.harness.sandbox.seed, "f.txt"), "main line\nconflict head\n");
+        await git(seed.harness.sandbox.seed, ["add", "f.txt"]);
+        await git(seed.harness.sandbox.seed, ["commit", "--amend", "--no-edit"]);
+        await git(seed.harness.sandbox.seed, ["push", "--force", "origin", "moc/gh-demo-1"]);
+        await git(fetched, ["fetch", "origin"]);
+        const conflictedHead = (await seed.ctx.github.viewPull(REPO, 1)).headRefOid;
+        expect(conflictedHead).not.toBe(seed.head);
+        const verdict = cleanVerdict(conflictedHead);
+        await Bun.write(
+          join(dir, "verdicts", "gh-demo-1", `${conflictedHead}.json`),
+          `${JSON.stringify(verdict)}\n`,
+        );
+        const marker = renderComment(verdict);
+        if (marker !== null) {
+          await seed.ctx.github.postComment(REPO, 1, marker);
+        }
+        await writeLoopState(
+          seed.ctx.statePath,
+          readyItem(conflictedHead, {
+            phase: "merging",
+            pull: { number: 1, headSha: conflictedHead },
+            trial: { baseSha: seed.base, headSha: conflictedHead, passed: true },
+          }),
+        );
+        const outcome = await mergeCheck(seed.ctx, item());
+        expect(outcome).toBe("idle");
+        const li = await readItem(seed.ctx.statePath);
+        expect(li.phase).toBe("idle");
+        expect(seed.head).not.toBe("");
+        expect(li.trial).toEqual({ baseSha: movedBase, headSha: conflictedHead, passed: false });
+        expect(li.rounds).toHaveLength(1);
+        expect(li.rounds[0]).toMatchObject({ outcome: "trial-failed", headSha: conflictedHead });
+      },
+      {},
+    );
+  });
+});
+
+// MT22: a merged close with stagnant rounds finalizes with no stall park.
+test("MT22 a finalizing close skips the stall decision", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(
+      dir,
+      async (seed) => {
+        const fetched = seed.ctx.repos[0]?.checkoutDir ?? dir;
+        await git(fetched, ["fetch", "origin"]);
+        await seed.ctx.github.mergePull(REPO, 1, seed.head);
+        const mergedHead = (await seed.ctx.github.viewPull(REPO, 1)).headRefOid;
+        const stagnant: LoopItem = {
+          ...initialLoopItem(),
+          session: { hostAlias: "host-a", providerId: PROVIDER, model: PREFERRED },
+          phase: "auditing",
+          requestId: "gh-demo-1:0",
+          pull: { number: 1, headSha: mergedHead },
+          ciSince: NOW,
+          trial: { baseSha: seed.base, headSha: mergedHead, passed: true },
+          round: 1,
+          rounds: [
+            {
+              round: 0,
+              retry: 0,
+              requestId: "gh-demo-1:0",
+              model: PREFERRED,
+              providerId: PROVIDER,
+              hostAlias: "host-a",
+              attempt: "success",
+              outcome: "trial-failed",
+              headSha: mergedHead,
+              failingChecks: [],
+              verdict: null,
+              newlyMet: [],
+              at: "2026-10-28T09:00:00.000Z",
+              baseRace: false,
+            },
+          ],
+        };
+        await writeLoopState(seed.ctx.statePath, stagnant);
+        await writeStore(seed.ctx.storePath, {
+          ...item(),
+          status: "review",
+          statusReason: "stalled: 1 rounds without a newly met DoD item",
+        });
+        const stalled: MergeContext = {
+          ...seed.ctx,
+          stall: { maxStagnantRounds: 1, maxRetries: 2 },
+        };
+        const outcome = await mergeCheck(stalled, item());
+        expect(outcome).toBe("done");
+        const li = await readItem(stalled.statePath);
+        expect(li.phase).toBe("final");
+        expect(li.finalize).toEqual({ result: "success", done: true });
+        expect(li.park).toBeNull();
+        expect(li.rounds).toHaveLength(2);
+        expect(li.rounds[0]).toMatchObject({ outcome: "trial-failed" });
+        expect(li.rounds[1]).toMatchObject({ outcome: "merged", baseRace: false });
+        const mergedEvents = seed.events.filter((line) => line.startsWith("merged:"));
+        expect(mergedEvents).toHaveLength(1);
+        const stored = (await Bun.file(stalled.storePath).json()) as { items: WorkItem[] };
+        expect(stored.items[0]?.status).toBe("done");
+      },
+      {},
+    );
+  });
+});
+
+// MT23: a human-merged PR in a repo with no spec throws, and nothing is written.
+test("MT23 a repo without a factory spec throws before any write", async () => {
+  await withTempDir(async (dir) => {
+    await withReadySeed(dir, async (seed) => {
+      const missing: MergeContext = { ...seed.ctx, specs: [] };
+      const before = await Bun.file(missing.statePath).text();
+      let thrown: unknown = null;
+      try {
+        await mergeCheck(missing, item());
+      } catch (error: unknown) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe("merge: no factory spec for example/demo");
+      expect(await Bun.file(missing.statePath).text()).toBe(before);
+    });
   });
 });
 
@@ -1549,6 +1805,8 @@ test("MT1 ready with an ancestral base merges and finalizes", async () => {
       expect(mergedEvents).toHaveLength(1);
       expect(mergedEvents[0]).toContain(`:${mergeCommit}:`);
       expect(mergedEvents[0]).toContain(":gh-demo-1:0");
+      const mergedRound = Number(mergedEvents[0]?.split(":")[4] ?? "-1");
+      expect(mergedRound).toBe(li.round - 1);
     } finally {
       restoreEnv();
       await harness.sandbox.cleanup();

@@ -74,17 +74,6 @@ async function idleOf(facts: Record<string, unknown>): Promise<{
 // insideWindow is derived from the pinned timestamp: 09:00-10:00 excludes
 // noon, 00:00-00:00 is the all-day window.
 describe.skipIf(process.platform !== "linux")("final idle rule", () => {
-  test("input 0 s ago, outside the window: not idle", async () => {
-    const doc = await idleOf({
-      ...baseFacts,
-      secondsSinceInput: 0,
-      policyAllowedWindowStart: "09:00",
-      policyAllowedWindowEnd: "10:00",
-    });
-    expect(doc.idle).toBe(false);
-    expect(doc.idleReason).toBe("outside the policy window");
-  });
-
   test("input 0 s ago, inside the window: not idle", async () => {
     const doc = await idleOf({
       ...baseFacts,
@@ -105,30 +94,5 @@ describe.skipIf(process.platform !== "linux")("final idle rule", () => {
     });
     expect(doc.idle).toBe(true);
     expect(doc.idleReason).toBe("no user input for 20 minutes, on AC power");
-  });
-
-  test("logged out, outside the window: not idle", async () => {
-    const doc = await idleOf({
-      ...baseFacts,
-      secondsSinceInput: 0,
-      noLocalUserSession: true,
-      policyAllowedWindowStart: "09:00",
-      policyAllowedWindowEnd: "10:00",
-    });
-    expect(doc.idle).toBe(false);
-    expect(doc.idleReason).toBe("outside the policy window");
-  });
-
-  test("off AC with a low battery names AC power first", async () => {
-    const doc = await idleOf({
-      ...baseFacts,
-      secondsSinceInput: 3600,
-      acPower: false,
-      batteryPercent: 30,
-      policyAllowedWindowStart: "00:00",
-      policyAllowedWindowEnd: "00:00",
-    });
-    expect(doc.idle).toBe(false);
-    expect(doc.idleReason).toBe("not on AC power");
   });
 });

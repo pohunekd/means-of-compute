@@ -45,14 +45,29 @@ export function ciStatus(runs: readonly CheckRun[], requiredChecks: readonly str
 export type PullDecision =
   | { readonly kind: "adopt"; readonly pull: PullRow }
   | { readonly kind: "none" }
-  | { readonly kind: "duplicate" };
+  | { readonly kind: "duplicate" }
+  | { readonly kind: "foreign" };
 
-export function pullDecision(rows: readonly PullRow[], factoryLogin: string): PullDecision {
-  const open = rows.filter(
-    (row) => row.authorLogin === factoryLogin && !row.isCrossRepository && row.state === "OPEN",
+// First line of every factory pull body; it ties the pull to its work item.
+export function workItemMarker(workItemId: string): string {
+  return `<!-- moc:work-item:${workItemId} -->`;
+}
+
+// The factory login may also be a human's login, so a pull is the factory's
+// only when its body starts with the item's marker. Any other open pull on
+// the branch is foreign and is never adopted.
+export function pullDecision(
+  rows: readonly PullRow[],
+  factoryLogin: string,
+  marker: string,
+): PullDecision {
+  const openRows = rows.filter((row) => row.state === "OPEN");
+  const open = openRows.filter(
+    (row) =>
+      row.authorLogin === factoryLogin && !row.isCrossRepository && row.bodyFirstLine === marker,
   );
   if (open.length === 0) {
-    return { kind: "none" };
+    return openRows.length === 0 ? { kind: "none" } : { kind: "foreign" };
   }
   if (open.length > 1) {
     return { kind: "duplicate" };

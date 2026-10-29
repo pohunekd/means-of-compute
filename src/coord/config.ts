@@ -77,6 +77,7 @@ export interface CoordConfig {
   readonly react: CoordReactConfig;
   readonly watch: CoordWatchConfig;
   readonly seed: CoordSeedConfig | null;
+  readonly evidenceDenyPatterns: readonly string[];
 }
 
 export interface LoadedCoordConfig {
@@ -107,6 +108,7 @@ const TOP_LEVEL_KEYS = [
   "react",
   "watch",
   "seed",
+  "evidenceDenyPatterns",
 ] as const;
 
 const EFFORTS: readonly ReasoningEffort[] = [
@@ -408,6 +410,21 @@ function parseSeed(value: unknown, path: string): CoordSeedConfig | null {
   return { stateDir, storeSeedPath };
 }
 
+function parseEvidenceDenyPatterns(
+  record: Record<string, unknown>,
+  path: string,
+): string[] {
+  const patterns = requiredStringList(record, path, "", "evidenceDenyPatterns", 1);
+  try {
+    for (const p of patterns) {
+      new RegExp(p);
+    }
+  } catch {
+    throw invalid(path, "evidenceDenyPatterns");
+  }
+  return patterns;
+}
+
 export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> {
   const label = "Coordinator config";
   let text: string;
@@ -501,6 +518,7 @@ export async function loadCoordConfig(path: string): Promise<LoadedCoordConfig> 
     react: parseReact(record["react"], path),
     watch: parseWatch(record["watch"], path),
     seed: parseSeed(record["seed"], path),
+    evidenceDenyPatterns: parseEvidenceDenyPatterns(record, path),
   };
   return { config, configSha256: sha256Hex(text), apiKeyEnv, mcp, skill };
 }

@@ -1,0 +1,11 @@
+{
+  "serverInfo": { "name": "means-of-compute-factory", "version": "0.1.0" },
+  "callers": ["coordinator", "mcp-call"],
+  "callLogPath": "logs/coord-d3/mcp-calls.jsonl",
+  "maxMessageBytes": 1048576,
+  "clientTimeoutMs": 30000,
+  "workConfigPath": "tests/fixtures/coord/d3/work.json",
+  "auditorConfigPath": "tests/fixtures/coord/d3/auditor.json",
+  "dispatcherConfigPath": "tests/fixtures/coord/d3/dispatcher.json",
+  "approvalsConfigPath": "tests/fixtures/coord/d3/approvals.json"
+}

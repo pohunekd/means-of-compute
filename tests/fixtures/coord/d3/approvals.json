@@ -1,0 +1,6 @@
+{
+  "requestsPath": "logs/coord-d3/requests.json",
+  "operators": ["owner"],
+  "maxPendingRequests": 20,
+  "maxReasonChars": 2000
+}

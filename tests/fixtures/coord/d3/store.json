@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "v1",
+  "revision": 4,
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "id": "d3-parser",
+      "repo": "example/demo-repo",
+      "title": "Parse records",
+      "goal": "Add src/parser.ts that parses one record per line, and tests/parser.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Lines parse into records: bun test tests/parser.test.ts",
+          "done": true
+        }
+      ],
+      "dependencies": [],
+      "status": "done",
+      "statusReason": null,
+      "assignedHostAlias": "desktop",
+      "branch": "moc/d3-parser",
+      "pullNumber": 5,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 1,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "d3-writer",
+      "repo": "example/demo-repo",
+      "title": "Append records to a file",
+      "goal": "Add src/writer.ts that appends one record per line, and tests/writer.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Two appends read back as two records: bun test tests/writer.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["d3-parser"],
+      "status": "blocked",
+      "statusReason": "blocked: 2 retries used",
+      "assignedHostAlias": null,
+      "branch": "moc/d3-writer",
+      "pullNumber": 7,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 2,
+        "fallbackUsed": true
+      },
+      "retryCount": 2,
+      "stallRounds": 3
+    },
+    {
+      "schemaVersion": "v1",
+      "id": "d3-report",
+      "repo": "example/demo-repo",
+      "title": "Summarise records",
+      "goal": "Add src/report.ts that counts the written records, and tests/report.test.ts. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "The report counts two written records: bun test tests/report.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": ["d3-writer"],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    }
+  ],
+  "submissions": [
+    {
+      "submissionId": "sub-0000000000000d03",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "itemIds": ["d3-parser", "d3-writer", "d3-report"],
+      "caller": "coordinator",
+      "submittedAt": "2026-10-28T09:00:00.000Z"
+    }
+  ]
+}

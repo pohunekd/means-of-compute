@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "id": "d3-writer-fu",
+      "repo": "example/demo-repo",
+      "title": "Follow up d3-writer audit 7c1e5a9b: trailing newline",
+      "goal": "Fix the medium finding of audit 7c1e5a9b on pull 7 at src/writer.ts:14: write each record followed by a newline, and add a test that appends twice and reads two lines. Change no other file.",
+      "issue": null,
+      "dod": [
+        {
+          "id": "D1",
+          "text": "Two appends read back as two lines: bun test tests/writer.test.ts",
+          "done": false
+        }
+      ],
+      "dependencies": [],
+      "status": "queued",
+      "statusReason": null,
+      "assignedHostAlias": null,
+      "branch": null,
+      "pullNumber": null,
+      "modelRouting": {
+        "preferredModel": "meta/muse-glimmer-30b",
+        "attempts": 0,
+        "fallbackUsed": false
+      },
+      "retryCount": 0,
+      "stallRounds": 0
+    }
+  ]
+}

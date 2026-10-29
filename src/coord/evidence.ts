@@ -1,13 +1,13 @@
 // Evidence bundle builder: redacts paths, copies run files and scans deny patterns.
 // The key value is compared in memory only, never printed or written.
 import { homedir } from "node:os";
-import { mkdir, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { readInputText } from "../fs/input.js";
+import { lstat, mkdir, readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { sha256Hex } from "../work/canonical.js";
 import { definedEnv } from "../mcp/client.js";
-import { loadCoordConfig } from "./config.js";
+import { CoordConfigError, loadCoordConfig } from "./config.js";
 
 export function redactText(
   text: string,
@@ -20,11 +20,7 @@ const PROMPT_PATTERN = /^prompt-\d+\.md$/;
 const EXPORT_PATTERN = /^session-\d+-export\.json$/;
 const REQUIRED_FILES = ["report.md", "report.json", "mcp-calls.jsonl"] as const;
 
-function fail(message: string): never {
-  console.error(`coord:evidence: ${message}`);
-  process.exit(2);
-  throw new Error("unreachable");
-}
+class EvidenceInputError extends Error {}
 
 function parseArgs(argv: readonly string[]): { runDir: string; outDir: string } {
   let runDir: string | null = null;
@@ -36,31 +32,31 @@ function parseArgs(argv: readonly string[]): { runDir: string; outDir: string } 
     if (arg === "--run" || arg === "--out") {
       const value = argv[i + 1];
       if (value === undefined || value === "") {
-        fail(`${arg} needs a value`);
+        throw new EvidenceInputError(`${arg} needs a value`);
       }
       i += 1;
       if (arg === "--run") {
         runCount += 1;
         if (runCount > 1) {
-          fail("--run given more than once");
+          throw new EvidenceInputError("--run given more than once");
         }
         runDir = value;
       } else {
         outCount += 1;
         if (outCount > 1) {
-          fail("--out given more than once");
+          throw new EvidenceInputError("--out given more than once");
         }
         outDir = value;
       }
     } else {
-      fail(`unknown argument ${arg}`);
+      throw new EvidenceInputError(`unknown argument ${arg}`);
     }
   }
   if (runDir === null) {
-    fail("--run is required");
+    throw new EvidenceInputError("--run is required");
   }
   if (outDir === null) {
-    fail("--out is required");
+    throw new EvidenceInputError("--out is required");
   }
   return { runDir, outDir };
 }
@@ -72,12 +68,17 @@ interface LoadedReport {
 
 async function loadRunReport(runDir: string): Promise<LoadedReport> {
   const path = join(runDir, "report.json");
-  const text = await readInputText("Run report", path);
+  let text: string;
+  try {
+    text = await readInputText("Run report", path);
+  } catch {
+    throw new EvidenceInputError(`${path} is not a run report`);
+  }
   let doc: unknown;
   try {
     doc = JSON.parse(text) as unknown;
   } catch {
-    fail(`${path} is not a run report`);
+    throw new EvidenceInputError(`${path} is not a run report`);
   }
   if (
     typeof doc !== "object" ||
@@ -86,7 +87,7 @@ async function loadRunReport(runDir: string): Promise<LoadedReport> {
     typeof (doc as Record<string, unknown>)["configPath"] !== "string" ||
     typeof (doc as Record<string, unknown>)["configSha256"] !== "string"
   ) {
-    fail(`${path} is not a run report`);
+    throw new EvidenceInputError(`${path} is not a run report`);
   }
   const record = doc as Record<string, string>;
   return {
@@ -96,47 +97,107 @@ async function loadRunReport(runDir: string): Promise<LoadedReport> {
 }
 
 export async function run(argv: readonly string[]): Promise<number> {
-  const { runDir, outDir } = parseArgs(argv);
-  const report = await loadRunReport(runDir);
-  const configText = await readInputText("Evidence config", report.configPath);
-  if (sha256Hex(configText) !== report.configSha256) {
-    fail(`config ${report.configPath} changed since the run`);
-  }
-  const { config, apiKeyEnv } = await loadCoordConfig(report.configPath);
-  console.error(
-    `coord:evidence: config ${report.configPath}, ${String(config.evidenceDenyPatterns.length)} deny patterns`,
-  );
-  if ((await stat(outDir).catch(() => null)) !== null) {
-    fail(`${outDir} already exists`);
-  }
-  await mkdir(outDir, { mode: 0o700 });
-  const names: string[] = [...REQUIRED_FILES];
-  for (const entry of await readdir(runDir)) {
-    if (PROMPT_PATTERN.test(entry) || EXPORT_PATTERN.test(entry)) {
-      names.push(entry);
+  let prepared: {
+    readonly runDir: string;
+    readonly outDir: string;
+    readonly configPath: string;
+    readonly denyPatterns: readonly string[];
+    readonly apiKeyEnv: string;
+    readonly texts: Array<{ readonly name: string; readonly text: string }>;
+  };
+  try {
+    const { runDir, outDir } = parseArgs(argv);
+    const report = await loadRunReport(runDir);
+    const configText = await readInputText("Evidence config", report.configPath);
+    if (sha256Hex(configText) !== report.configSha256) {
+      throw new EvidenceInputError(`config ${report.configPath} changed since the run`);
     }
-  }
-  names.sort();
-  const cwd = process.cwd();
-  const home = homedir();
-  const written: Array<{ readonly name: string; readonly text: string }> = [];
-  for (const name of names) {
-    const source = join(runDir, name);
-    let redacted: string;
+    const { config, apiKeyEnv } = await loadCoordConfig(report.configPath);
+    console.error(
+      `coord:evidence: config ${report.configPath}, ${String(config.evidenceDenyPatterns.length)} deny patterns`,
+    );
+    let outEntry: unknown;
     try {
-      redacted = redactText(await readInputText("Run file", source), { cwd, home });
+      outEntry = await lstat(outDir);
     } catch {
-      fail(`${source} is missing`);
+      outEntry = null;
     }
-    await writeFileAtomic("Evidence file", join(outDir, name), redacted);
-    written.push({ name, text: redacted });
+    if (outEntry !== null) {
+      throw new EvidenceInputError(`${outDir} already exists`);
+    }
+    let parentEntry: unknown;
+    try {
+      parentEntry = await lstat(dirname(outDir));
+    } catch {
+      parentEntry = null;
+    }
+    if (
+      parentEntry === null ||
+      typeof (parentEntry as { isDirectory?: unknown }).isDirectory !== "function" ||
+      !(parentEntry as { isDirectory(): boolean }).isDirectory()
+    ) {
+      throw new EvidenceInputError(`${outDir} parent is not a directory`);
+    }
+    let entries: string[];
+    try {
+      entries = await readdir(runDir);
+    } catch (error: unknown) {
+      throw new EvidenceInputError(
+        `${runDir} cannot be read (${String((error as NodeJS.ErrnoException).code)})`,
+      );
+    }
+    const names: string[] = [...REQUIRED_FILES];
+    for (const entry of entries) {
+      if (PROMPT_PATTERN.test(entry) || EXPORT_PATTERN.test(entry)) {
+        names.push(entry);
+      }
+    }
+    names.sort();
+    const cwd = process.cwd();
+    const home = homedir();
+    const texts: Array<{ readonly name: string; readonly text: string }> = [];
+    for (const name of names) {
+      const source = join(runDir, name);
+      let raw: string;
+      try {
+        raw = await readInputText("Run file", source);
+      } catch (error: unknown) {
+        if (error instanceof InputPathError) {
+          const status = await statInputPath("Run file", source);
+          if (status === "absent") {
+            throw new EvidenceInputError(`${runDir}/${name} is missing`);
+          }
+          throw error;
+        }
+        throw error;
+      }
+      texts.push({ name, text: redactText(raw, { cwd, home }) });
+    }
+    prepared = {
+      runDir,
+      outDir,
+      configPath: report.configPath,
+      denyPatterns: config.evidenceDenyPatterns,
+      apiKeyEnv,
+      texts,
+    };
+  } catch (error: unknown) {
+    if (
+      error instanceof EvidenceInputError ||
+      error instanceof InputPathError ||
+      error instanceof CoordConfigError
+    ) {
+      console.error(`coord:evidence: ${error.message}`);
+      return 2;
+    }
+    throw error;
   }
-  const patterns = config.evidenceDenyPatterns.map((p) => new RegExp(p));
+  const patterns = prepared.denyPatterns.map((p) => new RegExp(p));
   const env = definedEnv(process.env);
-  const keyValue = env[apiKeyEnv];
+  const keyValue = env[prepared.apiKeyEnv];
   const literal = keyValue === undefined || keyValue === "" ? null : keyValue;
   let hits = 0;
-  for (const { name, text } of written) {
+  for (const { name, text } of prepared.texts) {
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] ?? "";
@@ -159,11 +220,15 @@ export async function run(argv: readonly string[]): Promise<number> {
       hits += 1;
     }
   }
+  await mkdir(prepared.outDir, { mode: 0o700 });
+  for (const { name, text } of prepared.texts) {
+    await writeFileAtomic("Evidence file", join(prepared.outDir, name), text);
+  }
   if (hits > 0) {
     return 3;
   }
-  for (const { name } of written) {
-    console.log(join(outDir, name));
+  for (const { name } of prepared.texts) {
+    console.log(join(prepared.outDir, name));
   }
   return 0;
 }

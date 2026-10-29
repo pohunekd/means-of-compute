@@ -1,5 +1,5 @@
-// Driver merge tests (kept row MT1): the ready path through the stub
-// GitHub, with one named mutation per row killed by its own assertion.
+// Driver merge tests (row MT1): the ready path merges and finalizes
+// through the stub GitHub.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir } from "node:fs/promises";

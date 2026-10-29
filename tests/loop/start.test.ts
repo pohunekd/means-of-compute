@@ -1,7 +1,7 @@
-// Driver start tests (kept rows U4, U10, U16): drive, watch and the
-// unreachable retry over a live orphan through the real dispatcher,
-// memory port and files, with one named mutation per row killed by its
-// own assertion.
+// Driver start tests (rows U4, U10, U16): drive opens the session on
+// the fallback model, watch publishes a finished session and closes a
+// lost host, and an unreachable retry over a live orphan starts the same
+// intent, through the real dispatcher, memory port and files.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -254,7 +254,7 @@ function grantUsage(
   };
 }
 
-// Kept row U4: drive opens the session on the fallback model.
+// Row U4: drive opens the session on the fallback model.
 test("driveStart opens the session on the fallback model (U4)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");

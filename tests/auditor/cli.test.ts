@@ -1,10 +1,9 @@
-// CLI tests (kept rows D1, D2): the CLI runs as a child process whose
-// cwd is a temp directory with its own config/ tree, so the committed
+// CLI tests (rows D1, D2): the CLI runs as a child process whose cwd
+// is a temp directory with its own config/ tree, so the committed
 // config is never touched and no real network or model is involved.
 // Config: ledger.json points into the temp dir, auditor.json holds a
 // temp verdictDir, budget-gate.json holds a stub that prints what the
-// real check prints for admit. Mutations: run the same recording for
-// both branches; drop the SHA binding between marker and verdict file.
+// real check prints for admit.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -146,7 +145,7 @@ async function runCliWithLoopback(
   }
 }
 
-// Kept row D1: the CLI posts a clean verdict bound to the head SHA.
+// Row D1: the CLI posts a clean verdict bound to the head SHA.
 
 test("D1: clean branch gets a clean verdict bound to the head SHA (mutation: bind the marker to the ref name)", async () => {
   const repo = await makeTempRepo();

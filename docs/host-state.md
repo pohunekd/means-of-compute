@@ -21,7 +21,7 @@ moc-host-state-<version>/
   runtime.toml                package manifest consumed by the host daemon
   bin/moc-host-state          bundled plugin entry (src/probe/plugin-entry.ts)
   config/plugin.json          fleet-wide host file path
-  config/probe.json           fleet-wide probe policy
+  config/probe.json           fleet-wide probe policy and macOS tool paths
   config/scenarios/*.json     scenario inputs (tests and diagnosis only)
   build.json                  { packageId, version, command, gitCommit, sourceDigest, bunVersion, binarySha256 }
 ```
@@ -70,8 +70,7 @@ itself stays outside the package, outside `HOME`, and outside the
 digest-pinned inputs. Writing it needs `sudo` once on every host.
 
 The launch `PATH` the daemon gives the plugin must provide `bun`, because the
-bundle starts with `#!/usr/bin/env bun`; on macOS that `PATH` must also
-contain `/usr/sbin`, which holds the system tools the probe calls.
+bundle starts with `#!/usr/bin/env bun`.
 
 The plugin
 reads this file for a live run (never the hostname, never

@@ -150,18 +150,18 @@ export async function runProbe(options: {
           secondsSinceInput = secs;
         }
       } else {
-        const owner = await macosConsoleOwner();
+        const owner = await macosConsoleOwner(cfg.macosTools.stat);
         if (owner === "root") {
           loggedOut = true;
         } else {
-          secondsSinceInput = await macosSecondsSinceInput();
+          secondsSinceInput = await macosSecondsSinceInput(cfg.macosTools.ioreg);
         }
       }
       if (loggedOut) {
         if (platform === "linux" && loggedOutSecs === null) {
           throw new Error("logged out but input time unreadable");
         }
-        secondsSinceInput = loggedOutSecs ?? (await macosHidIdle());
+        secondsSinceInput = loggedOutSecs ?? (await macosHidIdle(cfg.macosTools.ioreg));
       }
     } catch (e) {
       userActivityUnknown = true;
@@ -172,7 +172,10 @@ export async function runProbe(options: {
 
   if (facts.acPower === undefined || facts.batteryPercent === undefined) {
     try {
-      const p = platformOrThrow() === "linux" ? linuxPower(sysfsRoot) : await macosPower();
+      const p =
+        platformOrThrow() === "linux"
+          ? linuxPower(sysfsRoot)
+          : await macosPower(cfg.macosTools.pmset);
       if (facts.acPower === undefined) acPower = p.acPower;
       if (facts.batteryPercent === undefined) batteryPercent = p.batteryPercent;
     } catch (e) {
@@ -189,7 +192,7 @@ export async function runProbe(options: {
   }
 
   if (facts.cpuCores === undefined || facts.cpuLoad1m === undefined) {
-    const cpu = platformOrThrow() === "linux" ? linuxCpu() : await macosCpu();
+    const cpu = platformOrThrow() === "linux" ? linuxCpu() : await macosCpu(cfg.macosTools.sysctl);
     if (facts.cpuCores === undefined) cpuCores = cpu.cores;
     if (facts.cpuLoad1m === undefined) cpuLoad1m = cpu.load1m;
   }
@@ -199,7 +202,10 @@ export async function runProbe(options: {
     facts.gpuName === undefined ||
     facts.gpuFreeMb === undefined
   ) {
-    const gpu = platformOrThrow() === "linux" ? await linuxGpu(sysfsRoot) : await macosGpu();
+    const gpu =
+      platformOrThrow() === "linux"
+        ? await linuxGpu(sysfsRoot)
+        : await macosGpu(cfg.macosTools.systemProfiler);
     if (facts.gpuPresent === undefined) gpuPresent = gpu.present;
     if (facts.gpuName === undefined) gpuName = gpu.name;
     if (facts.gpuFreeMb === undefined) gpuFreeMb = gpu.freeMb;

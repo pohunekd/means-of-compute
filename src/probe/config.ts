@@ -3,12 +3,21 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+export type MacosTools = {
+  readonly stat: string;
+  readonly pmset: string;
+  readonly ioreg: string;
+  readonly sysctl: string;
+  readonly systemProfiler: string;
+};
+
 export type ProbeConfig = {
   idleMinutes: number;
   batteryThreshold: number;
   localModelsBaseUrl: string;
   localModelsTimeoutMs: number;
   sysfsRoot: string;
+  macosTools: MacosTools;
   policy: {
     allowedWindowStart: string;
     allowedWindowEnd: string;
@@ -31,6 +40,40 @@ export function readJson<T>(path: string): T {
   } catch (e) {
     throw new Error(`${path}: parse error`, { cause: e });
   }
+}
+
+const MACOS_TOOL_KEYS = ["stat", "pmset", "ioreg", "sysctl", "systemProfiler"] as const;
+
+function validateMacosTools(value: unknown): MacosTools {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("config probe.json: invalid macosTools");
+  }
+  const tools = value as Record<string, unknown>;
+  for (const key of Object.keys(tools)) {
+    if (!MACOS_TOOL_KEYS.includes(key as (typeof MACOS_TOOL_KEYS)[number])) {
+      throw new Error(`config probe.json: invalid macosTools.${key}`);
+    }
+    const v = tools[key];
+    if (typeof v !== "string" || !v.startsWith("/")) {
+      throw new Error(`config probe.json: invalid macosTools.${key}`);
+    }
+  }
+  for (const key of MACOS_TOOL_KEYS) {
+    const v = tools[key];
+    if (typeof v !== "string" || !v.startsWith("/")) {
+      throw new Error(`config probe.json: invalid macosTools.${key}`);
+    }
+  }
+  if (Object.keys(tools).length !== MACOS_TOOL_KEYS.length) {
+    throw new Error("config probe.json: invalid macosTools");
+  }
+  return {
+    stat: tools["stat"] as string,
+    pmset: tools["pmset"] as string,
+    ioreg: tools["ioreg"] as string,
+    sysctl: tools["sysctl"] as string,
+    systemProfiler: tools["systemProfiler"] as string,
+  };
 }
 
 export function loadConfig(path: string): ProbeConfig {
@@ -79,6 +122,7 @@ export function loadConfig(path: string): ProbeConfig {
     localModelsBaseUrl: str("localModelsBaseUrl"),
     localModelsTimeoutMs: num("localModelsTimeoutMs", 0),
     sysfsRoot,
+    macosTools: validateMacosTools(raw["macosTools"]),
     policy: {
       allowedWindowStart: policy["allowedWindowStart"] as string,
       allowedWindowEnd: policy["allowedWindowEnd"] as string,

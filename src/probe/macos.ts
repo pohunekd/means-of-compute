@@ -1,12 +1,12 @@
 import { cpus, freemem, totalmem } from "node:os";
 
-export async function macosGpu(): Promise<{
+export async function macosGpu(systemProfiler: string): Promise<{
   present: boolean;
   name: string | null;
   freeMb: number | null;
 }> {
   try {
-    const proc = Bun.spawn(["system_profiler", "SPDisplaysDataType", "-json"], {
+    const proc = Bun.spawn([systemProfiler, "SPDisplaysDataType", "-json"], {
       stdout: "pipe",
       stderr: "ignore",
     });
@@ -23,11 +23,11 @@ export async function macosGpu(): Promise<{
   }
 }
 
-export async function macosPower(): Promise<{
+export async function macosPower(pmset: string): Promise<{
   acPower: boolean;
   batteryPercent: number | null;
 }> {
-  const proc = Bun.spawn(["pmset", "-g", "batt"], { stdout: "pipe" });
+  const proc = Bun.spawn([pmset, "-g", "batt"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   if (proc.exitCode !== 0) throw new Error(`pmset failed: exit ${String(proc.exitCode)}`);
@@ -43,8 +43,8 @@ export async function macosPower(): Promise<{
   return { acPower: ac, batteryPercent };
 }
 
-export async function macosConsoleOwner(): Promise<string> {
-  const proc = Bun.spawn(["stat", "-f", "%Su", "/dev/console"], {
+export async function macosConsoleOwner(stat: string): Promise<string> {
+  const proc = Bun.spawn([stat, "-f", "%Su", "/dev/console"], {
     stdout: "pipe",
     stderr: "ignore",
   });
@@ -54,8 +54,8 @@ export async function macosConsoleOwner(): Promise<string> {
   return out;
 }
 
-export async function macosSecondsSinceInput(): Promise<number> {
-  const proc = Bun.spawn(["ioreg", "-c", "IOHIDSystem"], { stdout: "pipe" });
+export async function macosSecondsSinceInput(ioreg: string): Promise<number> {
+  const proc = Bun.spawn([ioreg, "-c", "IOHIDSystem"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   if (proc.exitCode !== 0) throw new Error("ioreg HIDIdleTime failed");
@@ -66,18 +66,18 @@ export async function macosSecondsSinceInput(): Promise<number> {
   return secs;
 }
 
-export async function macosHidIdle(): Promise<number> {
+export async function macosHidIdle(ioreg: string): Promise<number> {
   try {
-    return await macosSecondsSinceInput();
+    return await macosSecondsSinceInput(ioreg);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`activity unknown after logout: ${msg}`, { cause: e });
   }
 }
 
-export async function macosCpu(): Promise<{ cores: number; load1m: number }> {
+export async function macosCpu(sysctl: string): Promise<{ cores: number; load1m: number }> {
   const cores = cpus().length;
-  const proc = Bun.spawn(["sysctl", "-n", "vm.loadavg"], { stdout: "pipe" });
+  const proc = Bun.spawn([sysctl, "-n", "vm.loadavg"], { stdout: "pipe" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   if (proc.exitCode !== 0) throw new Error("sysctl vm.loadavg failed");

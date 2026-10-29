@@ -1,45 +1,46 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const probe = join(repoRoot, "factory-probe.ts");
+const darwinProbe = join(repoRoot, "tests/fixtures/darwin-probe.ts");
+const preload = join(repoRoot, "tests/fixtures/darwin-preload.ts");
 const pmsetBin = join(repoRoot, "tests/fixtures/pmset/bin");
 
 type RunResult = { exitCode: number; stdout: string; stderr: string };
 
 // Runs the probe as a darwin host: the preload shadows process.platform and
-// the pmset double answers from the fixture file named by MOC_PMSET_FIXTURE.
-// The window is evaluated in host local time; pin the zone so the tests
-// hold on machines in any time zone.
+// the temp config points macosTools.pmset at the double answering from the
+// fixture file named by MOC_PMSET_FIXTURE. The window is evaluated in host
+// local time; pin the zone so the tests hold on machines in any time zone.
 async function runDarwinProbe(fixture: string, factsPath: string): Promise<RunResult> {
-  const proc = Bun.spawn(
-    [
-      "bun",
-      "--preload",
-      join(repoRoot, "tests/fixtures/darwin-preload.ts"),
-      probe,
-      "--facts",
-      factsPath,
-    ],
-    {
+  const configDir = mkdtempSync(join(tmpdir(), "probe-config-"));
+  try {
+    cpSync(join(repoRoot, "config/probe.json"), join(configDir, "probe.json"));
+    const raw = JSON.parse(readFileSync(join(configDir, "probe.json"), "utf-8")) as {
+      macosTools: Record<string, string>;
+    };
+    raw.macosTools["pmset"] = join(pmsetBin, "pmset");
+    writeFileSync(join(configDir, "probe.json"), JSON.stringify(raw));
+    const proc = Bun.spawn(["bun", "--preload", preload, darwinProbe, configDir, factsPath], {
       stdout: "pipe",
       stderr: "pipe",
       env: {
         ...process.env,
         TZ: "UTC",
-        PATH: `${pmsetBin}:${process.env["PATH"] ?? ""}`,
         MOC_PMSET_FIXTURE: join(repoRoot, "tests/fixtures/pmset", fixture, "output.txt"),
       },
-    },
-  );
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode: proc.exitCode ?? 1, stdout, stderr };
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { exitCode: proc.exitCode ?? 1, stdout, stderr };
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
 }
 
 async function withFacts(

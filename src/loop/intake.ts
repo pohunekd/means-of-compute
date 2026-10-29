@@ -33,10 +33,13 @@ function sectionLines(body: string, name: string): string[] {
   const collected: string[] = [];
   let inside = false;
   for (const line of lines) {
-    if (/^#{1,6}\s/.test(line)) {
-      if (new RegExp(`^##\\s+${name}\\s*$`).exec(line) !== null) {
-        inside = true;
-      } else if (inside) {
+    const trimmed = line.trimEnd();
+    if (trimmed === `## ${name}`) {
+      inside = true;
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      if (inside) {
         break;
       }
       continue;
@@ -50,13 +53,19 @@ function sectionLines(body: string, name: string): string[] {
 
 export function parseIssueDod(body: string): readonly WorkItemDod[] | null {
   const items: WorkItemDod[] = [];
+  const seen = new Set<string>();
   for (const line of sectionLines(body, "DoD")) {
-    const match = /^- (D[0-9]+): (.+)$/.exec(line);
+    const match = /^- (D[0-9]+): (\S.*)$/.exec(line.trimEnd());
     const id = match?.[1];
     const text = match?.[2];
-    if (match !== null && id !== undefined && text !== undefined) {
-      items.push({ id, text: text.trim(), done: false });
+    if (match === null || id === undefined || text === undefined) {
+      continue;
     }
+    if (seen.has(id)) {
+      return null;
+    }
+    seen.add(id);
+    items.push({ id, text, done: false });
   }
   return items.length > 0 ? items : null;
 }

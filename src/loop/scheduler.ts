@@ -571,6 +571,9 @@ async function tickOnce(
     const target = { ...item };
     launchTimeout(item.id, () => checkSessionTimeout(ctx, target));
   }
+  if (!isStopped() && getFailure() === null) {
+    await runIntake(ctx, intake);
+  }
   const carry: ClaimCarry = { active: 0, running: [], claimed: [], launched: [] };
   const counted = await readWorkStore(ctx.storePath);
   const countedState = await readLoopState(ctx.statePath);
@@ -600,9 +603,6 @@ async function tickOnce(
       carry,
       () => isStopped() || getFailure() !== null,
     );
-  }
-  if (!isStopped() && getFailure() === null) {
-    await runIntake(ctx, intake);
   }
   return { claimed: carry.claimed, launched: [...launched, ...carry.launched] };
 }

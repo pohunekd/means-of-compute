@@ -182,6 +182,9 @@ async function decideMerge(
   return ctx.mergeMutex.run(() => readyMerge(ctx, item, h));
 }
 
+export type MergeOutcome =
+  "ci" | "auditing" | "awaiting-approval" | "done" | "idle" | "parked" | "pending";
+
 async function readyMerge(ctx: MergeContext, item: WorkItem, h: string): Promise<MergeOutcome> {
   const state = await readLoopState(ctx.statePath);
   if (state.mergeHold !== null) {
@@ -370,9 +373,6 @@ export async function mergeCheck(ctx: MergeContext, item: WorkItem): Promise<Mer
     throw error;
   }
 }
-
-export type MergeOutcome =
-  "ci" | "auditing" | "awaiting-approval" | "done" | "idle" | "parked" | "pending";
 
 function githubErrorOf(error: unknown): GitHubError | GitError | null {
   if (error instanceof GitHubError || error instanceof GitError) {

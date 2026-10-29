@@ -1522,32 +1522,8 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     const registryPath = join(dir, "registry.json");
     const { briefSha256Of } = await import("../../src/dispatcher/dispatcher.js");
     const { insertRegistryEntry } = await import("../../src/dispatcher/registry.js");
-    await insertRegistryEntry(registryPath, {
-      requestId: "gh-demo-1:0",
-      workItemId: "gh-demo-1",
-      repo: "example/demo",
-      hostAlias: "host-a",
-      branch: "moc/gh-demo-1",
-      baseRef: "origin/main",
-      resume: false,
-      model: { providerId: PROVIDER, model: PREFERRED },
-      briefSha256: briefSha256Of("Another brief."),
-      sessionId: "mem-1",
-      worktree: "/memory-worktrees/host-a/mem-1",
-      baseCommit: null,
-      startedAt: NOW,
-      cursor: null,
-      unreachableCount: 0,
-      lastSeenState: "starting",
-      lastSeenAt: NOW,
-      cancelReason: null,
-      terminal: null,
-      resolvedAt: null,
-      revision: 0,
-    });
-    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     const control = createMemoryPort();
-    // The :0 entry names the session the port started.
+    // The :0 entry is built from the session the port started.
     const orphanHandle = await control.port.start({
       requestId: "gh-demo-1:0",
       workItemId: "gh-demo-1",
@@ -1560,6 +1536,30 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
       brief: "Another brief.",
     });
     expect(orphanHandle.sessionId).toBe("mem-1");
+    await insertRegistryEntry(registryPath, {
+      requestId: "gh-demo-1:0",
+      workItemId: "gh-demo-1",
+      repo: "example/demo",
+      hostAlias: "host-a",
+      branch: "moc/gh-demo-1",
+      baseRef: "origin/main",
+      resume: false,
+      model: { providerId: PROVIDER, model: PREFERRED },
+      briefSha256: briefSha256Of("Another brief."),
+      sessionId: orphanHandle.sessionId,
+      worktree: orphanHandle.worktree,
+      baseCommit: null,
+      startedAt: NOW,
+      cursor: null,
+      unreachableCount: 0,
+      lastSeenState: "starting",
+      lastSeenAt: NOW,
+      cancelReason: null,
+      terminal: null,
+      resolvedAt: null,
+      revision: 0,
+    });
+    await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     let starts = 0;
     const flaky: DispatcherPort = {
       ...control.port,

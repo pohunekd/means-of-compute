@@ -1351,8 +1351,7 @@ test("RT16(b) an exiting gate defers budget-gate-error with no park", async () =
       command: ["bun", "-e", "process.exit(1);"],
       timeoutMs: 30000,
       cwd: dir,
-      // Required on newer main where BudgetGateOptions carries env;
-      // ignored here where the option does not exist yet.
+      // The gate child gets the test process environment.
       env: gateEnv,
     };
     const exitingGate = createCliBudgetGate(gateOptions);
@@ -1848,8 +1847,7 @@ async function pushEmpty(seed: string, branch: string, from = "main"): Promise<s
   return (await git(seed, ["rev-parse", branch])).trim();
 }
 
-// One finished usage record per author model, so authorModelsOf
-// finds both configured auditors for the item.
+// One finished usage record for `model`, so `authorModelsOf` names it as the author.
 async function seedSessionLedger(ledgerPath: string, model = PREFERRED): Promise<void> {
   await Bun.write(
     ledgerPath,

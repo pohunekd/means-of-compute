@@ -131,6 +131,10 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 `src/loop/stub/` holds the demo seams. `sandbox.ts` resets only a directory marked `.loop-demo` (the registry file goes, its lock stays), seeds `origin.git` and `checkout/` from the demo repo, creates the factory-owned directories and writes the budget guard copies with state inside the sandbox; its git runner allows only the subcommands the demo needs. `worker.ts` handles each live memory-port session once: one streamed call through the real meter, the scripted patch committed as `moc-demo` and pushed to the sandbox origin, then `finished`; a failed meter or git step completes the session `failed`. `observations.ts` reports the HostCapacity documents of the observations file on every collect. `callProvider` is exported for the stub audit call.
 
+## Stub run (PR 9)
+
+`bun run loop --stub --queue <file>` runs the demo with no login, no env and no network beyond 127.0.0.1. It holds the registry lock for the whole run, resets and seeds the marked sandbox, seeds the queue through the `submit_work` checks, starts the meter over the provider loopback, and drives the real scheduler, dispatcher, budget guard, audit and merge rule with the memory port, the stub GitHub and the stub worker until no queue item can move. It then writes the day's digest, prints `loop: stub run done merged=<m> blocked=<b> parked=<p>`, and exits 0 when every item merged or 3 otherwise; a startup error exits 2 and a runtime fatal 1. `src/loop/compose.ts` holds the config loading, the lock, the closers and the scheduler context that production mode reuses.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.

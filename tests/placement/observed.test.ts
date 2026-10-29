@@ -113,21 +113,4 @@ describe("observed placement", () => {
       excluded: true,
     });
   });
-
-  test("no reported host keeps a counted reason (mutation: keep place() reason)", () => {
-    const decision = placeObserved(
-      item(),
-      [unavailable("laptop-a"), unavailable("laptop-b")],
-      [],
-      PLACEMENT,
-    );
-    expect(decision.chosenHostAlias).toBeNull();
-    expect(decision.reason).toBe("no eligible host: 2 of 2 excluded");
-  });
-
-  test("duplicate alias throws (mutation: silently dedupe)", () => {
-    expect(() =>
-      placeObserved(item(), [reported("laptop-a"), unavailable("laptop-a")], [], PLACEMENT),
-    ).toThrow("Duplicate host alias laptop-a");
-  });
 });

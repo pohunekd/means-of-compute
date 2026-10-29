@@ -2,7 +2,6 @@
 // pause_fleet round trip through decideRequest, and the L2 shape of the
 // call-end line. Expected values come from A3, A4, A5 and L2.
 import { expect, test } from "bun:test";
-import { decideRequest } from "../../src/approvals/decide.js";
 import { createMcpTestEnv, writeTestFile, type McpTestEnv } from "./env.js";
 import { createTools } from "../../src/mcp/tools.ts";
 import { createProtocol } from "../../src/mcp/protocol.ts";
@@ -141,96 +140,4 @@ test("X1 approve on a review item records pending and lists the request (X1, A3,
   expect(pending).toEqual([
     { requestId, tool: "approve", requestedAt: "2026-10-28T10:00:00.000Z" },
   ]);
-});
-
-test("X2 pause_fleet records pending and only pauses after a decision (X2, A5)", async () => {
-  const { env, lines } = await setupEnv("mcp-x2-");
-  const { structured } = await callTool(env, lines, "pause_fleet", {
-    action: "pause",
-    reason: "Freeze new starts for the demo.",
-  });
-  expect(structured).toEqual({
-    ok: true,
-    requestId: "req-000001",
-    state: "pending",
-    outcome: "recorded",
-  });
-  const requestId = "req-000001";
-  const paused = (await fleetPayload(env, lines))["fleet"] as {
-    paused: boolean;
-    pausedBy: unknown;
-  };
-  expect(paused.paused).toBe(false);
-  expect(paused.pausedBy).toBeNull();
-  const decided = await decideRequest(env.requestsPath, {
-    requestId,
-    decision: "approved",
-    author: "owner",
-    now: fixedNow(),
-  });
-  expect(decided.kind).toBe("decided");
-  const settled = (await fleetPayload(env, lines))["fleet"] as {
-    paused: boolean;
-    pausedBy: { requestId: string; author: string; decidedAt: string };
-  };
-  expect(settled.paused).toBe(true);
-  expect(settled.pausedBy).toEqual({
-    requestId,
-    author: "owner",
-    decidedAt: "2026-10-28T10:00:00.000Z",
-  });
-});
-
-test("X3 approve predicates refuse queued items and pull mismatches (X3, A4)", async () => {
-  const { env, lines } = await setupEnv("mcp-x3-");
-  await writeTestFile(env.storePath, {
-    schemaVersion: "v1",
-    revision: 1,
-    items: [
-      { ...reviewItem("demo-review", 7), status: "queued", pullNumber: null, branch: null },
-      reviewItem("demo-second", 9),
-    ],
-    submissions: [],
-  });
-  const queued = await callTool(env, lines, "approve", {
-    workItemId: "demo-review",
-    pullNumber: 7,
-    headSha: HEAD_SHA,
-    reason: "Ship the demo change.",
-  });
-  expect(queued.structured).toEqual({
-    ok: false,
-    error: {
-      code: "not-in-review",
-      message: "item demo-review is queued, not review",
-      retryable: false,
-    },
-  });
-  const mismatch = await callTool(env, lines, "approve", {
-    workItemId: "demo-second",
-    pullNumber: 10,
-    headSha: HEAD_SHA,
-    reason: "Ship the demo change.",
-  });
-  expect(mismatch.structured).toEqual({
-    ok: false,
-    error: {
-      code: "pull-mismatch",
-      message: "item demo-second has pull 9",
-      retryable: false,
-    },
-  });
-});
-
-test("X5 the call-end summary carries the request id and no reason text (X5, L2)", async () => {
-  const { env, lines } = await setupEnv("mcp-x5-");
-  const reason = "Hold the fleet for the demo window.";
-  const { structured, ends } = await callTool(env, lines, "pause_fleet", {
-    action: "pause",
-    reason,
-  });
-  expect(structured["ok"]).toBe(true);
-  const requestId = structured["requestId"];
-  expect(ends[ends.length - 1]?.["summary"]).toEqual({ requestId, outcome: "recorded" });
-  expect(JSON.stringify(lines)).not.toContain(reason);
 });

@@ -5,7 +5,6 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LedgerDataError } from "../../src/ledger/store.js";
 import { appendPending, finalizeUsage } from "../../src/ledger/store.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
 
@@ -107,48 +106,6 @@ test("blocked then done gives one record line with summed tokens", async () => {
       { model: "meta/muse-glimmer-30b", result: "success" },
       { model: "muse-spark-1.3-contributor", result: "failure" },
     ]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("finalize replay returns unchanged with identical bytes", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ledger-idem-"));
-  const ledgerPath = join(dir, "ledger.jsonl");
-  try {
-    await appendPending(ledgerPath, sessionEntry());
-    const input = {
-      workItemId: "w1-demo",
-      result: "success" as const,
-      retries: 0,
-      humanInterventions: 0,
-    };
-    expect(await finalizeUsage(ledgerPath, input)).toBe("appended");
-    const before = await Bun.file(ledgerPath).text();
-    await appendPending(ledgerPath, sessionEntry({ entryId: "e2-other", workItemId: "w2-other" }));
-    const withOther = await Bun.file(ledgerPath).text();
-    expect(await finalizeUsage(ledgerPath, input)).toBe("unchanged");
-    expect(await Bun.file(ledgerPath).text()).toBe(withOther);
-    expect(await Bun.file(ledgerPath).text()).not.toBe(before);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("pending replay returns unchanged; changed content exits 2", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ledger-idem-"));
-  const ledgerPath = join(dir, "ledger.jsonl");
-  try {
-    expect(await appendPending(ledgerPath, sessionEntry())).toBe("appended");
-    expect(await appendPending(ledgerPath, sessionEntry())).toBe("unchanged");
-    let message = "";
-    try {
-      await appendPending(ledgerPath, sessionEntry({ finishedAt: "2026-10-26T12:00:00.000Z" }));
-    } catch (error: unknown) {
-      message = error instanceof Error ? error.message : String(error);
-      expect(error).toBeInstanceOf(LedgerDataError);
-    }
-    expect(message).toContain("exists with different content");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

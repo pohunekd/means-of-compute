@@ -127,6 +127,10 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 `src/loop/followups.ts` files one issue per low finding of the merged verdict before the item turns final, and one blocked issue (rounds, pull request, last findings) when an item is blocked. Each issue starts with a `moc:followup` key marker, finding text sits in code fences longer than any backtick run inside it, the key is recorded before the create, and an existing factory issue with the marker is adopted, so a replay files nothing twice. `src/loop/digest.ts` writes `<digest.dir>/<day>.md` once for the previous UTC day after each new day starts (merged, running, parked and blocked, spend), with no goal, finding or issue text.
 
+## Stub ports (PR 8)
+
+`src/loop/stub/` holds the demo seams. `sandbox.ts` resets only a directory marked `.loop-demo` (the registry file goes, its lock stays), seeds `origin.git` and `checkout/` from the demo repo, creates the factory-owned directories and writes the budget guard copies with state inside the sandbox; its git runner allows only the subcommands the demo needs. `worker.ts` handles each live memory-port session once: one streamed call through the real meter, the scripted patch committed as `moc-demo` and pushed to the sandbox origin, then `finished`; a failed meter or git step completes the session `failed`. `observations.ts` reports the HostCapacity documents of the observations file on every collect. `callProvider` is exported for the stub audit call.
+
 ## Driver park (PR 5b)
 
 `src/loop/park.ts` advances parked items: every tick first reconciles the fresh loop item as it stands, whatever its phase or park, so a busy store repairs itself on the next tick instead of throwing. A stall park escalates once per retry, retries them up to `stall.maxRetries` times, then turns blocked with a ledger finalize; it edits the item's issue labels when it has one. A lost park waits for the next tick, and an operator park holds for a human.

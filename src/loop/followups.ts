@@ -187,7 +187,11 @@ async function fileOne(
   }
   let posted: number;
   try {
-    const rows = await ctx.github.factoryIssues(item.repo, ctx.followupLabels[0] ?? "");
+    const label = ctx.followupLabels[0];
+    if (label === undefined) {
+      throw new Error("follow-ups: followupLabels is empty; the first label is the lookup label");
+    }
+    const rows = await ctx.github.factoryIssues(item.repo, label);
     const found = rows.find((row) => row.first === lookedUp.marker);
     posted =
       found === undefined
@@ -240,6 +244,9 @@ export async function fileFindingFollowups(
 // Files the single blocked follow-up listing the last verdict findings.
 export async function fileBlockedFollowup(ctx: ParkContext, item: WorkItem): Promise<ParkProgress> {
   const li = await readLoopItem(ctx.statePath, item.id);
+  if (li.followups.some((entry) => entry.kind === "blocked" && entry.posted !== null)) {
+    return "done";
+  }
   const verdict = await lastVerdict(ctx, item, li);
   return fileOne(ctx, item, blockedFollowup(item, li, verdict));
 }

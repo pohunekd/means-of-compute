@@ -79,7 +79,7 @@ function isAbortError(value: unknown): boolean {
   return value instanceof Error && value.name === "AbortError";
 }
 
-async function callProvider(
+export async function callProvider(
   provider: ProviderDescriptor,
   request: ModelRequest,
 ): Promise<Omit<SingleCallResult, "providerId" | "model">> {

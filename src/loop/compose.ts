@@ -225,13 +225,15 @@ export interface StopSignal {
 
 export function createStopSignal(): StopSignal {
   let stopped = false;
-  const handlers: (() => void)[] = [];
+  const handlers = new Set<() => void>();
   const stop = (): void => {
     if (stopped) {
       return;
     }
     stopped = true;
-    for (const handler of handlers.splice(0)) {
+    const pending = [...handlers];
+    handlers.clear();
+    for (const handler of pending) {
       handler();
     }
   };
@@ -243,7 +245,7 @@ export function createStopSignal(): StopSignal {
       if (stopped) {
         handler();
       } else {
-        handlers.push(handler);
+        handlers.add(handler);
       }
     },
     sleep: (ms) =>
@@ -252,25 +254,32 @@ export function createStopSignal(): StopSignal {
           done();
           return;
         }
-        const timer = setTimeout(done, ms);
-        handlers.push(() => {
+        const wake = (): void => {
           clearTimeout(timer);
           done();
-        });
+        };
+        const timer = setTimeout(() => {
+          handlers.delete(wake);
+          done();
+        }, ms);
+        handlers.add(wake);
       }),
   };
 }
 
 // Every exit path stops the scheduler before the closers run, and waits
-// for its non-watch calls at most shutdownGraceMs (P5).
+// for its non-watch calls at most shutdownGraceMs (P5). A failure that
+// settled() reports inside the window is rethrown to the caller.
 export async function stopScheduler(scheduler: Scheduler, graceMs: number): Promise<void> {
   scheduler.stop();
+  const settled = scheduler.settled();
+  settled.catch(() => undefined);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const grace = new Promise<void>((done) => {
     timer = setTimeout(done, graceMs);
   });
   try {
-    await Promise.race([scheduler.settled().catch(() => undefined), grace]);
+    await Promise.race([settled, grace]);
   } finally {
     clearTimeout(timer);
   }

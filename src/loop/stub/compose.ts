@@ -573,7 +573,7 @@ async function runInside(
     return 3;
   } catch (error: unknown) {
     if (started !== null) {
-      await stopScheduler(started, configs.loop.shutdownGraceMs);
+      await stopScheduler(started, configs.loop.shutdownGraceMs).catch(() => undefined);
     }
     if (!running) {
       throw toStartupError(error);

@@ -1,7 +1,7 @@
 // Loop entry point: parses the CLI args and runs the production or stub run.
 import { resolve } from "node:path";
-import { LoopStartupError, createStopSignal, loadLoopConfigs } from "./compose.js";
-import { runProduction } from "./production.js";
+import { LoopStartupError, createStopSignal, loadLoopConfigs, toStartupError } from "./compose.js";
+import { runProduction, type ProductionOpeners } from "./production.js";
 import { runStub } from "./stub/compose.js";
 
 export interface LoopArgs {
@@ -69,11 +69,17 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (!args.stub) {
     try {
       const configs = await loadLoopConfigs(resolve(args.config), "production");
-      // Imported here so the stub run never loads the Pohunek SDK.
-      const { productionOpeners } = await import("./production-openers.js");
+      let openers: ProductionOpeners;
+      try {
+        // Imported here so the stub run never loads the Pohunek SDK.
+        const { productionOpeners } = await import("./production-openers.js");
+        openers = productionOpeners(process.env);
+      } catch (error: unknown) {
+        throw toStartupError(error);
+      }
       const rc = await runProduction({
         configs,
-        openers: productionOpeners(process.env),
+        openers,
         stop,
         out: (line: string) => {
           process.stdout.write(`${line}\n`);

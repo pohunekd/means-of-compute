@@ -37,6 +37,7 @@ import { createMeteredPort } from "../meter/metered-port.js";
 import { startMeter } from "../meter/meter.js";
 import { systemTimers } from "../meter/timers.js";
 import { systemUsageLogIo } from "../meter/usage-log.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import type { MeterEnv } from "../meter/config.js";
 import type { MeterConfig } from "../meter/config.js";
 import type { ProviderDescriptor } from "../providers/types.js";
@@ -84,6 +85,14 @@ async function requireOwnedDir(key: string, path: string): Promise<void> {
   }
 }
 
+function requiredEnv(env: Readonly<Record<string, string | undefined>>, name: string): string {
+  const value = env[name];
+  if (value === undefined || value === "") {
+    throw new LoopStartupError(`${name} is not set`);
+  }
+  return value;
+}
+
 async function checkGitHub(
   config: LoopGithubConfig,
   env: Readonly<Record<string, string | undefined>>,
@@ -96,7 +105,7 @@ async function checkGitHub(
   if (config.factoryLogin === null) {
     throw new LoopStartupError("github.factoryLogin is not set");
   }
-  const port = openGitHub(config, { PATH: env["PATH"] ?? "", token });
+  const port = openGitHub(config, { PATH: requiredEnv(env, "PATH"), token });
   let login: string;
   try {
     login = await port.viewerLogin();
@@ -232,7 +241,7 @@ async function runInside(
       command: [...configs.budgetGate.command],
       timeoutMs: configs.budgetGate.timeoutMs,
       cwd: process.cwd(),
-      env: { PATH: openers.env["PATH"] ?? "", HOME: openers.env["HOME"] ?? "" },
+      env: { PATH: requiredEnv(openers.env, "PATH"), HOME: requiredEnv(openers.env, "HOME") },
     });
     const metered = createMeteredPort(port, meter, (event: MeterLogEvent) => {
       append("port", { ...(event as unknown as Record<string, unknown>) });
@@ -282,9 +291,9 @@ async function runInside(
       log,
       now: () => new Date(),
       sleep: (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
-      home: openers.env["HOME"] ?? "",
-      gitPath: openers.env["PATH"] ?? "",
-      providersDir: "config/providers",
+      home: requiredEnv(openers.env, "HOME"),
+      gitPath: requiredEnv(openers.env, "PATH"),
+      providersDir: PROVIDERS_DIR,
     });
     await recoverAtStartup(ctx);
     const state = await readLoopState(loop.statePath);
@@ -322,7 +331,7 @@ async function runInside(
       throw toStartupError(error);
     }
     if (started !== null) {
-      await stopScheduler(started, loop.shutdownGraceMs);
+      await stopScheduler(started, loop.shutdownGraceMs).catch(() => undefined);
     }
     throw error;
   }

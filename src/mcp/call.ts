@@ -3,25 +3,9 @@
 // true, 3 when ok is false, 2 for usage or a bad --file, 4 when the server
 // exits before answering, a JSON-RPC error comes back, a response is
 // malformed, or there is no answer within clientTimeoutMs.
-import { ClientError, runClientCall } from "./client.js";
+import { ClientError, definedEnv, runClientCall } from "./client.js";
 import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
-
-// Copies current defined environment entries for an explicit child spawn
-// environment. Bun.spawn without env inherits the launch environment, so
-// the current values must be read out explicitly. Entries whose value is an
-// empty string stay set: only undefined entries are dropped.
-export function definedEnv(
-  env: Readonly<Record<string, string | undefined>>,
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined) {
-      result[name] = value;
-    }
-  }
-  return result;
-}
 
 function parseFlags(args: readonly string[]): { file: string | null; configPath: string } {
   let file: string | null = null;

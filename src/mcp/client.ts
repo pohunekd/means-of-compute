@@ -12,6 +12,22 @@ export class ClientError extends Error {
   }
 }
 
+// Copies current defined environment entries for an explicit child spawn
+// environment. Bun.spawn without env inherits the launch environment, so
+// the current values must be read out explicitly. Entries whose value is an
+// empty string stay set: only undefined entries are dropped.
+export function definedEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      result[name] = value;
+    }
+  }
+  return result;
+}
+
 export interface ClientOptions {
   readonly tool: string;
   readonly args: unknown;

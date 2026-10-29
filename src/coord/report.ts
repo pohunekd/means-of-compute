@@ -316,10 +316,7 @@ function parseSubmitSummary(call: CoordCallEnd): {
     );
   }
   const ids = itemIds as readonly string[];
-  if (
-    !ids.every((entry: unknown) => typeof entry === "string") ||
-    typeof replayed !== "boolean"
-  ) {
+  if (!ids.every((entry: unknown) => typeof entry === "string") || typeof replayed !== "boolean") {
     throw new ReportDataError(
       `Report: call ${call.run}/${String(call.callId)} has an invalid submit_work summary`,
     );

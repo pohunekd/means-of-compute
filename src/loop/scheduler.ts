@@ -93,9 +93,9 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
     }
   }
 
-  function launchStep(id: string, run: () => Promise<unknown>, watch = false): void {
+  function launchStep(id: string, run: () => Promise<unknown>, watch = false): boolean {
     if (settled()) {
-      return;
+      return false;
     }
     const promise = run();
     launches.set(id, { promise, watch });
@@ -115,6 +115,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         steps.delete(id);
       },
     );
+    return true;
   }
 
   function launchTimeout(id: string, run: () => Promise<unknown>): void {
@@ -340,9 +341,10 @@ async function claimOne(
   ctx: SchedulerContext,
   item: WorkItem,
   carry: ClaimCarry,
-  launchStep: (id: string, run: () => Promise<unknown>) => void,
+  launchStep: (id: string, run: () => Promise<unknown>) => boolean,
   results: readonly ResultLine[],
   observations: readonly HostObservation[],
+  isSettled: () => boolean,
 ): Promise<boolean> {
   const state = await readLoopState(ctx.statePath);
   const stored = state.items[item.id] as unknown as LoopItem | undefined;
@@ -381,23 +383,31 @@ async function claimOne(
     await parkOperator(ctx, item, "brief-too-large");
     return true;
   }
+  if (isSettled()) {
+    return true;
+  }
   const outcome = await claimStart(ctx, item, { decision, choice, brief: brief.brief });
   if (outcome === "parked") {
     return true;
   }
+  if (isSettled()) {
+    return true;
+  }
   carry.active += 1;
+  const launched = launchStep(item.id, () => driveStart(ctx, { ...item }));
+  if (!launched) {
+    return true;
+  }
   carry.claimed.push(item.id);
   carry.launched.push(item.id);
   carry.running.push({ ...item, status: "running", assignedHostAlias: decision.chosenHostAlias });
-  const claimed = { ...item };
-  launchStep(item.id, () => driveStart(ctx, claimed));
   return true;
 }
 
 async function runClaims(
   ctx: SchedulerContext,
   steps: ReadonlySet<string>,
-  launchStep: (id: string, run: () => Promise<unknown>) => void,
+  launchStep: (id: string, run: () => Promise<unknown>) => boolean,
   carry: ClaimCarry,
   isSettled: () => boolean,
 ): Promise<void> {
@@ -420,7 +430,7 @@ async function runClaims(
     if (isSettled() || carry.active >= ctx.maxActiveItems) {
       return;
     }
-    const next = await claimOne(ctx, item, carry, launchStep, results, observations);
+    const next = await claimOne(ctx, item, carry, launchStep, results, observations, isSettled);
     if (!next) {
       return;
     }
@@ -499,7 +509,7 @@ async function tickOnce(
   launches: Map<string, { promise: Promise<unknown>; watch: boolean }>,
   steps: Set<string>,
   timeouts: Map<string, Promise<unknown>>,
-  launchStep: (id: string, run: () => Promise<unknown>, watch?: boolean) => void,
+  launchStep: (id: string, run: () => Promise<unknown>, watch?: boolean) => boolean,
   launchTimeout: (id: string, run: () => Promise<unknown>) => void,
   isStopped: () => boolean,
   getFailure: () => unknown,
@@ -532,12 +542,13 @@ async function tickOnce(
       continue;
     }
     await reconcile(ctx.storePath, item.id, li, ctx);
-    launchItemStep(ctx, item, li, ciDue, (id, run) => {
+    launchItemStep(ctx, item, li, ciDue, (id, run, watch) => {
       if (isStopped() || getFailure() !== null) {
         return;
       }
-      launchStep(id, run);
-      launched.push(id);
+      if (launchStep(id, run, watch)) {
+        launched.push(id);
+      }
     });
   }
   const runningState = await readLoopState(ctx.statePath);
@@ -578,13 +589,7 @@ async function tickOnce(
     await runClaims(
       ctx,
       steps,
-      (id, run) => {
-        if (isStopped() || getFailure() !== null) {
-          return;
-        }
-        launchStep(id, run);
-        carry.launched.push(id);
-      },
+      (id, run) => launchStep(id, run),
       carry,
       () => isStopped() || getFailure() !== null,
     );

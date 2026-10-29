@@ -1,2 +1,0 @@
-Now drawing from 'AC Power'
- -InternalBattery-0 (id=1)	charging; present: true

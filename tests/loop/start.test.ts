@@ -1,6 +1,7 @@
-// Driver start tests (slice 5c rows U1-U13, L31, L51, L52): claim,
-// drive, watch and timeout through the real dispatcher, memory port and
-// files, with one named mutation per row killed by its own assertion.
+// Driver start tests (rows U4, U10, U16): drive opens the session on
+// the fallback model, watch publishes a finished session and closes a
+// lost host, and an unreachable retry over a live orphan starts the same
+// intent, through the real dispatcher, memory port and files.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -253,8 +254,7 @@ function grantUsage(
   };
 }
 
-// Rows U1 to U5: claim, the started write and the refused write.
-
+// Row U4: drive opens the session on the fallback model.
 test("driveStart opens the session on the fallback model (U4)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -346,36 +346,9 @@ test("driveStart opens the session on the fallback model (U4)", async () => {
   });
 });
 
-// Rows U6 to U9: the unreachable retry and the rejected, conflicting
-// and drifted starts through the real dispatcher.
-// M1: an intent seeded with a past backoff is a retry of the same
-// intent, not a re-claim. The row keeps backoffUntil, sleeps once and
-// starts with the stored request id and host.
-
-// U9b (crash a): a drifted T2 settled before a crash leaves a live :1
-// entry. The next driveStart finds the drift in the pre-check and
-// cancels the live entry with no new start.
-
-// U9c (post-start): the T2 appends the anomalous line and returns a
-// started with another request id. The drift park cancels that entry.
-
-// U9d (crash b): the cancel ran before the crash but the park write did
-// not. The pre-check finds the drift again with no live entry left and
-// parks with no new start.
-
-// U9e: the U9b setup with a port whose first cancel rejects with
-// PortUnreachableError. The first driveStart returns "idle", keeps L
-// starting with the same intent, and logs one drift-cancel-unreachable
-// event; the next driveStart cancels the live entry and parks with
-// request-drift.
-
-// C19 keeps the dispatcher's own revision with the flag set, while the
-// ledger line stays appended; neither row lets the port start. U15 keeps
-// the previous state with the flag unset.
-
-// Rows U10 to U13 and U16: the watcher terminal table, the timeout
-// bound, the rejected watch, the S6 guard, and the unreachable retry
-// over a live orphan through the real dispatcher.
+// The watcher through the real dispatcher: a finished session publishes
+// and closes a lost host (U10), and an unreachable retry over a live
+// orphan starts the same intent (U16).
 test("watchSession publishes a finished session and closes a lost host (U10)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
@@ -554,8 +527,3 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     expect(sleeps).toEqual([5_000]);
   });
 });
-
-// U9f: the U9e setup, but the first cancel rejects with
-// MeterUnavailableError. driveStart rejects with that error; L stays
-// starting with the same intent, the park is null, and there is no
-// drift-cancel-unreachable event.

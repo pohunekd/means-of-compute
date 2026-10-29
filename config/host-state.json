@@ -1,12 +1,12 @@
 {
   "package": {
     "id": "moc.host-state",
-    "version": "0.3.0",
-    "sourceDigest": "sha256:96d15479f1e93b2675a8d99aacde35c56a693ecde370be4a255507c7788b343c",
+    "version": "0.4.0",
+    "sourceDigest": "sha256:21738b4c721f73fb8af5069378af64f854653fdf548946c6c60aefaf99963a37",
     "command": "host-state"
   },
   "collector": {
-    "acceptedVersions": ["0.3.0"],
+    "acceptedVersions": ["0.3.0", "0.4.0"],
     "pluginTimeoutMs": 10000,
     "transportMarginMs": 2000,
     "maxOutputBytes": 16384,

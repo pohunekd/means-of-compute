@@ -11,7 +11,7 @@
   "approvalsConfigPath": "tests/fixtures/loop/demo/approvals.json",
   "meterConfigPath": "tests/fixtures/loop/demo/meter.json",
   "adapterConfigPath": null,
-  "dashboardConfigPath": null,
+  "hostStateConfigPath": null,
   "tickMs": 200,
   "maxActiveItems": 1,
   "shutdownGraceMs": 2000,

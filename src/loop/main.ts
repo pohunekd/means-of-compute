@@ -1,6 +1,7 @@
-// Loop entry point: parses the CLI args and runs the stub demo run.
+// Loop entry point: parses the CLI args and runs the production or stub run.
 import { resolve } from "node:path";
-import { LoopStartupError, loadLoopConfigs } from "./compose.js";
+import { LoopStartupError, createStopSignal, loadLoopConfigs, toStartupError } from "./compose.js";
+import { runProduction, type ProductionOpeners } from "./production.js";
 import { runStub } from "./stub/compose.js";
 
 export interface LoopArgs {
@@ -64,28 +65,47 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write(`loop: ${detail}\n`);
     return 2;
   }
+  const stop = createStopSignal();
   if (!args.stub) {
-    process.stderr.write("loop: production mode is not available in this build; use --stub\n");
-    return 2;
-  }
-  let stopping = false;
-  let seenSignal = false;
-  const onSignal = (): void => {
-    if (seenSignal) {
-      return;
+    try {
+      const configs = await loadLoopConfigs(resolve(args.config), "production");
+      let openers: ProductionOpeners;
+      try {
+        // Imported here so the stub run never loads the Pohunek SDK.
+        const { productionOpeners } = await import("./production-openers.js");
+        openers = productionOpeners(process.env);
+      } catch (error: unknown) {
+        throw toStartupError(error);
+      }
+      const rc = await runProduction({
+        configs,
+        openers,
+        stop,
+        out: (line: string) => {
+          process.stdout.write(`${line}\n`);
+        },
+        warn: (line: string) => {
+          process.stderr.write(`${line}\n`);
+        },
+      });
+      return rc;
+    } catch (error: unknown) {
+      if (error instanceof LoopStartupError) {
+        process.stderr.write(`loop: ${error.message}\n`);
+        return 2;
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`loop: ${detail}\n`);
+      return 1;
     }
-    seenSignal = true;
-    stopping = true;
-  };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  }
   try {
     const configs = await loadLoopConfigs(resolve(args.config), "stub");
     const queue = args.queue as string;
     const rc = await runStub({
       configs,
       queuePath: resolve(queue),
-      stopping: () => stopping,
+      stop,
       out: (line: string) => {
         process.stdout.write(`${line}\n`);
       },

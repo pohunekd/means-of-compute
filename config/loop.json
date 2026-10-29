@@ -11,7 +11,7 @@
   "approvalsConfigPath": "config/approvals.json",
   "meterConfigPath": "config/meter.json",
   "adapterConfigPath": "config/pohunek-adapter.json",
-  "dashboardConfigPath": "config/dashboard.json",
+  "hostStateConfigPath": "config/host-state.json",
   "tickMs": 5000,
   "maxActiveItems": 4,
   "shutdownGraceMs": 30000,

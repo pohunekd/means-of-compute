@@ -11,9 +11,11 @@ import {
   LoopStartupError,
   closeAll,
   schedulerContextOf,
+  stopScheduler,
   toStartupError,
   withRegistryLock,
   type Closer,
+  type StopSignal,
 } from "../compose.js";
 import type { LoopConfigs } from "../compose.js";
 import { digestFor, writeDigestFile } from "../digest.js";
@@ -42,6 +44,7 @@ import { readLoopState } from "../state.js";
 import { requireWritableTarget, writeFileAtomic } from "../../fs/write.js";
 import { createScheduler, recoverAtStartup } from "../scheduler.js";
 import type { LoopItem } from "../types.js";
+import type { Scheduler } from "../scheduler.js";
 
 export interface StubQueue {
   readonly items: readonly WorkItem[];
@@ -51,7 +54,7 @@ export interface StubQueue {
 export interface StubRunDeps {
   readonly configs: LoopConfigs;
   readonly queuePath: string;
-  readonly stopping: () => boolean;
+  readonly stop: StopSignal;
   readonly out: (line: string) => void;
   readonly warn: (line: string) => void;
 }
@@ -228,6 +231,7 @@ async function runInside(
   closers: Closer[],
 ): Promise<0 | 1 | 3> {
   let running = false;
+  let started: Scheduler | null = null;
   try {
     const loop = configs.loop;
     const stub = loop.stub;
@@ -460,6 +464,10 @@ async function runInside(
       providersDir: sandboxProvidersDir,
     });
     const scheduler = createScheduler(ctx);
+    started = scheduler;
+    deps.stop.onStop(() => {
+      scheduler.stop();
+    });
     await recoverAtStartup(ctx);
     running = true;
     deps.out("loop: running (stub)");
@@ -477,16 +485,18 @@ async function runInside(
       },
     });
     for (;;) {
-      if (deps.stopping()) {
+      if (deps.stop.stopping()) {
         break;
       }
       await scheduler.tick();
       await worker.step();
       if (portsState.failed) {
         deps.warn("loop: ports log failed");
+        await stopScheduler(scheduler, loop.shutdownGraceMs);
         return 1;
       }
       if (log.failed()) {
+        await stopScheduler(scheduler, loop.shutdownGraceMs);
         return 1;
       }
       const store = await readWorkStore(storePath);
@@ -511,16 +521,15 @@ async function runInside(
       if (!active && readyItems(store).length === 0 && !parked && !unfinished) {
         break;
       }
-      await new Promise<void>((done) => setTimeout(done, loop.tickMs));
+      await deps.stop.sleep(loop.tickMs);
     }
-    scheduler.stop();
-    await scheduler.settled();
+    await stopScheduler(scheduler, loop.shutdownGraceMs);
     await writeFileAtomic(
       "stub github snapshot",
       join(sandboxDir, "github.json"),
       `${JSON.stringify(github.snapshot())}\n`,
     );
-    if (deps.stopping()) {
+    if (deps.stop.stopping()) {
       return 0;
     }
     if (loop.digest.onExit) {
@@ -563,6 +572,9 @@ async function runInside(
     }
     return 3;
   } catch (error: unknown) {
+    if (started !== null) {
+      await stopScheduler(started, configs.loop.shutdownGraceMs).catch(() => undefined);
+    }
     if (!running) {
       throw toStartupError(error);
     }

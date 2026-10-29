@@ -15,7 +15,7 @@ import { loadPlacementConfig, type PlacementConfig } from "../placement/config.j
 import type { GitHubPort } from "./github.js";
 import type { GitDeps } from "./git.js";
 import type { HostStateCollector } from "../hoststate/collector.js";
-import type { SchedulerContext } from "./scheduler.js";
+import type { Scheduler, SchedulerContext } from "./scheduler.js";
 import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { loadLoopConfig, type LoopConfig, type LoopMode } from "./config.js";
@@ -213,4 +213,74 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     followupLabels: configs.loop.github.followupLabels,
     verdictDir: configs.auditor.verdictDir,
   };
+}
+
+// P5: the first SIGINT or SIGTERM stops the run, later ones are ignored.
+// Handlers stop the scheduler at once, and a pending tick sleep wakes.
+export interface StopSignal {
+  stopping(): boolean;
+  onStop(handler: () => void): void;
+  sleep(ms: number): Promise<void>;
+}
+
+export function createStopSignal(): StopSignal {
+  let stopped = false;
+  const handlers = new Set<() => void>();
+  const stop = (): void => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    const pending = [...handlers];
+    handlers.clear();
+    for (const handler of pending) {
+      handler();
+    }
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  return {
+    stopping: () => stopped,
+    onStop: (handler) => {
+      if (stopped) {
+        handler();
+      } else {
+        handlers.add(handler);
+      }
+    },
+    sleep: (ms) =>
+      new Promise<void>((done) => {
+        if (stopped) {
+          done();
+          return;
+        }
+        const wake = (): void => {
+          clearTimeout(timer);
+          done();
+        };
+        const timer = setTimeout(() => {
+          handlers.delete(wake);
+          done();
+        }, ms);
+        handlers.add(wake);
+      }),
+  };
+}
+
+// Every exit path stops the scheduler before the closers run, and waits
+// for its non-watch calls at most shutdownGraceMs (P5). A failure that
+// settled() reports inside the window is rethrown to the caller.
+export async function stopScheduler(scheduler: Scheduler, graceMs: number): Promise<void> {
+  scheduler.stop();
+  const settled = scheduler.settled();
+  settled.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const grace = new Promise<void>((done) => {
+    timer = setTimeout(done, graceMs);
+  });
+  try {
+    await Promise.race([settled, grace]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -63,7 +63,7 @@ type DecideInput =
   | {
       readonly kind: "early";
       early: "draft" | "head-moved" | "merged" | "operator";
-      detail: unknown;
+      detail: { readonly kind: string; readonly code?: string } | null | number | string | boolean;
       mergeCommit: string | null;
     }
   | {
@@ -113,8 +113,18 @@ async function decideMerge(
     throw new LoopStateDataError(`loop state ${ctx.statePath}: MERGED view without a handler`);
   }
   if (tag === "operator") {
+    const detail = input.kind === "early" ? input.detail : null;
     const code =
-      input.kind === "full" && input.step.kind === "operator" ? input.step.code : "pull-closed";
+      input.kind === "full" && input.step.kind === "operator"
+        ? input.step.code
+        : detail !== null &&
+            typeof detail === "object" &&
+            "kind" in detail &&
+            (detail as { readonly kind: string }).kind === "operator" &&
+            "code" in detail &&
+            typeof (detail as { readonly code: unknown }).code === "string"
+          ? (detail as { readonly code: "base-mismatch" | "merged-elsewhere" | "pull-closed" }).code
+          : "pull-closed";
     await parkOperator(ctx, item, code);
     return "parked";
   }

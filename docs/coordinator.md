@@ -126,9 +126,13 @@ blocked, operator-parked, or stranded. Bad `list_work`, `audit_results` and
 
 ## Watch runs
 
-The seed wipes and reseeds `stateDir`, refusing paths outside it, a `runsDir`
-inside it, a non-demo dir, and a bad store seed; the watch precondition
-needs a row with the id prefix. Each poll reads work, fleet and verdicts,
-then reacts to attention until the goal is terminal, the deadline or a
-session cap stops it. The log carries `poll`, `poll-error` and `attention`
-events; `consumed` keys never repeat. `full` runs plan then watch.
+The seed wipes and reseeds `stateDir`, each refusal exiting 2: `coord: seed <key>
+<path> is outside <stateDir>`, `coord: runsDir is inside seed stateDir`,
+`coord: <stateDir> is not a coordinator demo dir`, and
+`coord: seed storeSeedPath <path> is not valid JSON`. The G2 watch precondition
+refuses `coord: no items with prefix <idPrefix>-`. Each poll checks the signal, then the deadline measured
+from the run start, reads `list_work` + `fleet_status` + `audit_results`, decides,
+and runs one session. The log carries `poll`, `poll-error {tool, code}` and
+`attention`; `consumed` keys never repeat within a run. Stops are `plan-done`,
+`signal`, `goal-terminal` and `deadline` (exit 0), plus `max-sessions`,
+`session-failed` and `factory-unreadable` (exit 3). `full` runs plan then watch.

@@ -48,6 +48,10 @@ A pull request merges only when all hold:
 4. The merge uses a head guard (`gh pr merge --match-head-commit <sha>`) and is
    verified afterwards.
 
+Branches under `moc/` and their pull requests belong to the factory loop. Nobody
+creates a `moc/` branch or pull request by hand. The coordinator never merges or
+closes a `moc/` pull request and never posts an audit verdict marker on one.
+
 ## Handoff and stalls
 
 - A handoff is an issue comment: branch, commit, gates run with rcs, remaining

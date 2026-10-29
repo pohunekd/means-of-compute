@@ -367,6 +367,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
         isDraft: false,
         isCrossRepository: false,
         authorLogin: options.factoryLogin,
+        bodyFirstLine: pull.body.split("\n")[0] as string,
       });
     }
     return rows;

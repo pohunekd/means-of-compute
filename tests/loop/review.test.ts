@@ -25,6 +25,8 @@ import { loadAuditorConfig } from "../../src/auditor/config.js";
 import { createStubGitHub } from "../../src/loop/stub/github.js";
 import type { GitDeps } from "../../src/loop/git.js";
 import { auditStep, ciStep, publishStep, type ReviewContext } from "../../src/loop/review.js";
+import { pullDecision, workItemMarker } from "../../src/loop/merge-rule.js";
+import type { PullRow } from "../../src/loop/github.js";
 
 const PREFERRED = "muse-spark-1.3-contributor";
 const PROVIDER = "meta-api";
@@ -549,3 +551,20 @@ function auditingItem(head: string, overrides: Partial<LoopItem> = {}): LoopItem
     ...overrides,
   };
 }
+
+test("RT22 adopts only an own pull whose body starts with the item marker", () => {
+  const row: PullRow = {
+    number: 7,
+    state: "OPEN",
+    headRefOid: "a".repeat(40),
+    baseRefName: "main",
+    isDraft: false,
+    isCrossRepository: false,
+    authorLogin: FACTORY_LOGIN,
+    bodyFirstLine: "A pull opened by hand on the factory branch",
+  };
+  const marker = workItemMarker("demo-1");
+  expect(pullDecision([row], FACTORY_LOGIN, marker)).toEqual({ kind: "foreign" });
+  const own = { ...row, bodyFirstLine: marker };
+  expect(pullDecision([own], FACTORY_LOGIN, marker)).toEqual({ kind: "adopt", pull: own });
+});

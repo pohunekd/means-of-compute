@@ -45,6 +45,7 @@ export interface PullRow {
   readonly isDraft: boolean;
   readonly isCrossRepository: boolean;
   readonly authorLogin: string;
+  readonly bodyFirstLine: string;
 }
 export interface PullView {
   readonly state: "OPEN" | "CLOSED" | "MERGED";
@@ -384,7 +385,16 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
   function toPullRow(value: unknown, step: string): PullRow {
     const record = requireFields(
       value,
-      ["number", "state", "headRefOid", "baseRefName", "isDraft", "isCrossRepository", "author"],
+      [
+        "number",
+        "state",
+        "headRefOid",
+        "baseRefName",
+        "isDraft",
+        "isCrossRepository",
+        "author",
+        "body",
+      ],
       step,
       "pull row",
     );
@@ -401,6 +411,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
       isDraft: asBoolean(record["isDraft"], step, "pull draft"),
       isCrossRepository: asBoolean(record["isCrossRepository"], step, "pull cross repo"),
       authorLogin,
+      bodyFirstLine: asString(record["body"], step, "pull body").split(/\r?\n/)[0] as string,
     };
   }
 
@@ -416,7 +427,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
       "--state",
       "all",
       "--json",
-      "number,state,headRefOid,baseRefName,isDraft,isCrossRepository,author",
+      "number,state,headRefOid,baseRefName,isDraft,isCrossRepository,author,body",
       "--limit",
       "20",
     ]);

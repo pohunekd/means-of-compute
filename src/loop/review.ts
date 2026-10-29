@@ -17,6 +17,7 @@ import {
   factoryMarkers,
   markerMatches,
   pullDecision,
+  workItemMarker,
   verdictCheck,
 } from "./merge-rule.js";
 import { GitHubError, utf8Prefix, type CheckRun } from "./github.js";
@@ -260,7 +261,7 @@ export async function closeReviewRound(
 }
 
 function pullBodyOf(item: WorkItem): string {
-  const lines = [`<!-- moc:work-item:${item.id} -->`];
+  const lines = [workItemMarker(item.id)];
   if (item.issue !== null) {
     lines.push(`Refs #${String(item.issue)}`);
   }
@@ -286,9 +287,14 @@ export async function publishStep(ctx: ReviewContext, item: WorkItem): Promise<R
     const decision = pullDecision(
       await ctx.github.pullsForBranch(item.repo, branch),
       ctx.factoryLogin,
+      workItemMarker(item.id),
     );
-    if (decision.kind === "duplicate") {
-      await parkOperator(ctx, item, "duplicate-pulls");
+    if (decision.kind === "duplicate" || decision.kind === "foreign") {
+      await parkOperator(
+        ctx,
+        item,
+        decision.kind === "duplicate" ? "duplicate-pulls" : "foreign-pull",
+      );
       return { parked: true as const, decision, head: null as string | null };
     }
     const head =

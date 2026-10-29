@@ -88,6 +88,7 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
     expect(statSync(join(out1, name)).mode & 0o777).toBe(0o600);
   }
   await Bun.write(join(runDir, "session-1-export.json"), `{"x":"192.168.1.5"}\n`);
+  await Bun.write(join(runDir, "session-2-export.json"), `{"k":"sk-a1"}\n`);
   const out2 = join(env.dir, "out2");
   const second = await runEvidence(["--run", runDir, "--out", out2], checkoutReal, home);
   expect(second.rc).toBe(3);
@@ -95,6 +96,9 @@ test("evidence bundle redacts paths and scans deny patterns (V1)", async () => {
     second.stderr.includes("coord:evidence: session-1-export.json:1 matches deny pattern 2"),
   ).toBe(true);
   expect(second.stderr.includes("192.168")).toBe(false);
+  expect(
+    second.stderr.includes("coord:evidence: session-2-export.json:1 matches deny pattern 5"),
+  ).toBe(true);
   expect(statSync(out2).isDirectory()).toBe(true);
   const third = await runEvidence(["--run", runDir, "--out", out1], checkoutReal, home);
   expect(third.rc).toBe(2);

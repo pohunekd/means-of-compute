@@ -78,7 +78,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `LoopItem` carries `retry`, `park`, `session` and `fallbackUsed`; rule (f) keeps parks on `idle` or `final` and ties a `blocked` park to a `blocked` finalize.
 `src/loop/log.ts` appends one JSON line per event through one chain and latches `failed()` on the first failed write.
 `src/loop/project.ts` projects every store field from the loop item and `reconcile` rewrites a differing item, reports `busy` on a held lock, and throws the rule (a) text on an unknown id. Rounds with outcome start-rejected or lost never count toward modelRouting.attempts.
-`src/loop/rounds.ts` appends the round record, then the result line, logs `round-closed`, and returns the stall decision; `appendMissingResults` backfills missing lines.
+`src/loop/rounds.ts` appends the round record, then the result line, logs `round-closed`, and returns the stall decision; `appendMissingResults` backfills missing lines. A close with `finalize` moves the item to `finalizing` with a success finalize in the same write.
 `src/loop/approvals-view.ts` re-reads the requests file on every call and reports the pause state and the merge triple match.
 
 ## Driver start (PR 5c)
@@ -100,6 +100,15 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - After `runAudit`: a budget refusal or a failing gate restores the count and sets the backoff; a model error retries; an empty or oversized diff closes the round; a missing author or auditor parks the item; an `InputPathError` is fatal; any other error parks `audit-error`.
 - A valid verdict is posted once as the factory marker, and the item stays in `auditing` for the merge slice. A GitHub or git error keeps the phase and logs `github-error`.
 - A red close appends the round and reconciles the store to `queued`; the pull and the branch stay. `previousRoundOf` gives the next brief the last session round and the findings of the last audited head.
+
+## Driver merge (PR 5e)
+
+`src/loop/merge.ts` takes an audited item to merged:
+
+- `mergeCheck` reads a fresh PR view and evaluates M1 to M5 through `mergeStep`: a moved head returns to `ci`, CI that is not green returns to `ci` with a new `ciSince`, findings close the round, an invalid verdict or a closed or wrongly based PR parks the item, and `human-approval` waits for an approval of the exact item, pull and head.
+- A ready item merges under one mutex: no merge starts while `mergeHold` is set; a base that is not an ancestor of the head needs a passed trial merge, and a failed trial closes `trial-failed`; the item enters `merging` with the base in `trial`, and a moved base restarts the step. Merge attempts are bounded by `github.mergeRetries`.
+- After the merge, the loop claims rule 3 only when the merge commit's parents are exactly the tested base and the head. Otherwise it sets the global merge hold, escalates once, and still finishes the item with `baseRace` in the round record.
+- The merged close moves the item to `finalizing` in one write; `finishMerge` runs the ledger finalize, then writes `final`. A merge seen outside `merging` counts as a human intervention.
 
 ## Driver park (PR 5b)
 

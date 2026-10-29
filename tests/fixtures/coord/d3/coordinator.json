@@ -39,5 +39,16 @@
   "seed": {
     "stateDir": "logs/coord-d3",
     "storeSeedPath": "tests/fixtures/coord/d3/store.json"
-  }
+  },
+  "evidenceDenyPatterns": [
+    "/home/",
+    "/Users/",
+    "192\\.168\\.",
+    "\\b10\\.\\d+\\.\\d+\\.\\d+\\b",
+    "\\.ts\\.net",
+    "sk-[A-Za-z0-9]",
+    "nvapi-",
+    "moc1\\.",
+    "BEGIN [A-Z ]*PRIVATE KEY"
+  ]
 }

@@ -2,7 +2,7 @@
 // failed-probe stop.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { constants } from "node:os";
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readCoordCalls } from "../../src/coord/calls.js";
@@ -156,6 +156,9 @@ test("a plan run submits the DAG and reports plan-done (M1)", async () => {
   const dirs = await listRunDirs(env.runsDir);
   expect(dirs.length).toBe(1);
   const runDir = join(env.runsDir, dirs[0] as string);
+  for (const name of ["session-1-export.json", "probe-1-export.json"]) {
+    expect(statSync(join(runDir, name)).mode & 0o777).toBe(0o600);
+  }
   const report = (await Bun.file(join(runDir, "report.json")).json()) as {
     readonly submissions: readonly unknown[];
     readonly configSha256: string;

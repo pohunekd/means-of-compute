@@ -1,0 +1,103 @@
+{
+  "items": [
+    {
+      "branch": null,
+      "dependencies": [],
+      "dod": [
+        {
+          "done": false,
+          "id": "D1",
+          "text": "Parses '# title' plus body text into a Note and rejects malformed input: bun test tests/notes/parse.test.ts"
+        },
+        {
+          "done": false,
+          "id": "D2",
+          "text": "Full notes suite still passes: bun test"
+        }
+      ],
+      "goal": "Add src/notes/parse.ts that parses '# title' plus body text into a Note, and tests/notes/parse.test.ts covering title, body, and malformed input. Change no other file. Do not change package.json and add no new dependencies.",
+      "id": "notes-parse",
+      "issue": null,
+      "modelRouting": {
+        "attempts": 0,
+        "fallbackUsed": false,
+        "preferredModel": "meta/muse-glimmer-30b"
+      },
+      "pullNumber": null,
+      "repo": "example/demo-repo",
+      "retryCount": 0,
+      "schemaVersion": "v1",
+      "stallRounds": 0,
+      "status": "queued",
+      "statusReason": null,
+      "title": "Parse notes from title plus body text",
+      "assignedHostAlias": null
+    },
+    {
+      "branch": null,
+      "dependencies": ["notes-parse"],
+      "dod": [
+        {
+          "done": false,
+          "id": "D1",
+          "text": "Notes append to a JSONL file and list back in order: bun test tests/notes/store.test.ts"
+        },
+        {
+          "done": false,
+          "id": "D2",
+          "text": "Full notes suite still passes: bun test"
+        }
+      ],
+      "goal": "Add src/notes/store.ts that appends notes to a JSONL file and lists them in order, and tests/notes/store.test.ts using a temp file. Builds on the Note type from src/notes/parse.ts. Change no other file. Do not change package.json and add no new dependencies.",
+      "id": "notes-store",
+      "issue": null,
+      "modelRouting": {
+        "attempts": 0,
+        "fallbackUsed": false,
+        "preferredModel": "meta/muse-glimmer-30b"
+      },
+      "pullNumber": null,
+      "repo": "example/demo-repo",
+      "retryCount": 0,
+      "schemaVersion": "v1",
+      "stallRounds": 0,
+      "status": "queued",
+      "statusReason": null,
+      "title": "Append and list notes in JSONL store",
+      "assignedHostAlias": null
+    },
+    {
+      "branch": null,
+      "dependencies": ["notes-parse", "notes-store"],
+      "dod": [
+        {
+          "done": false,
+          "id": "D1",
+          "text": "CLI adds and lists notes: bun test tests/notes/cli.test.ts"
+        },
+        {
+          "done": false,
+          "id": "D2",
+          "text": "Full notes suite still passes: bun test"
+        }
+      ],
+      "goal": "Add src/notes/cli.ts that adds and lists notes via the parse and store modules, and tests/notes/cli.test.ts covering add and list commands plus usage errors. Change no other file. Do not change package.json and add no new dependencies.",
+      "id": "notes-cli",
+      "issue": null,
+      "modelRouting": {
+        "attempts": 0,
+        "fallbackUsed": false,
+        "preferredModel": "meta/muse-glimmer-30b"
+      },
+      "pullNumber": null,
+      "repo": "example/demo-repo",
+      "retryCount": 0,
+      "schemaVersion": "v1",
+      "stallRounds": 0,
+      "status": "queued",
+      "statusReason": null,
+      "title": "Add and list notes from the command line",
+      "assignedHostAlias": null
+    }
+  ]
+}

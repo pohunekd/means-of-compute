@@ -400,7 +400,6 @@ async function runExport(): Promise<void> {
     ],
   };
   await Bun.write(outPath, `${JSON.stringify(doc)}\n`);
-  await chmod(outPath, 0o600);
   process.exit(0);
 }
 

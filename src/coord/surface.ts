@@ -2,7 +2,7 @@
 // no built-in, the allowed context sources, and an inactive posture with an
 // empty reminder roster. The echo probe runs without the key, so the check
 // reads only the export documents.
-import { open } from "node:fs/promises";
+import { chmod, open, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { CoordConfig } from "./config.js";
 import { COORD_TOOLS } from "./report.js";
@@ -339,5 +339,9 @@ export async function runSurfaceProbe(
   if (exportAborted.value || signal.aborted) {
     return { kind: "aborted" };
   }
-  return { kind: "checked", verdict: await readSurface(join(runDir, `${stem}-export.json`)) };
+  const exportPath = join(runDir, `${stem}-export.json`);
+  if ((await stat(exportPath).catch(() => null))?.isFile() === true) {
+    await chmod(exportPath, 0o600);
+  }
+  return { kind: "checked", verdict: await readSurface(exportPath) };
 }

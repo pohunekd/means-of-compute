@@ -7,6 +7,22 @@ import { ClientError, runClientCall } from "./client.js";
 import { MCP_CONFIG_PATH, loadMcpConfig } from "./config.js";
 import { InputPathError, readInputText, statInputPath } from "../fs/input.js";
 
+// Copies current defined environment entries for an explicit child spawn
+// environment. Bun.spawn without env inherits the launch environment, so
+// the current values must be read out explicitly. Entries whose value is an
+// empty string stay set: only undefined entries are dropped.
+export function definedEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      result[name] = value;
+    }
+  }
+  return result;
+}
+
 function parseFlags(args: readonly string[]): { file: string | null; configPath: string } {
   let file: string | null = null;
   let configPath = MCP_CONFIG_PATH;
@@ -113,6 +129,7 @@ async function run(argv: readonly string[]): Promise<number> {
       configPath,
       serverVersion: config.serverInfo.version,
       clientTimeoutMs: config.clientTimeoutMs,
+      env: definedEnv(process.env),
     })) as { ok?: unknown };
     process.stdout.write(`${JSON.stringify(structured)}\n`);
     return structured.ok === true ? 0 : 3;

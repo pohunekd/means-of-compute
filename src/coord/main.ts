@@ -231,6 +231,7 @@ async function loadGoalPrecondition(
   clientTimeoutMs: number,
   goalId: string,
   idPrefix: string,
+  env: Record<string, string>,
 ): Promise<FinalSnapshot> {
   let payload: unknown;
   try {
@@ -240,6 +241,7 @@ async function loadGoalPrecondition(
       configPath: mcpConfigPath,
       serverVersion,
       clientTimeoutMs,
+      env,
     });
   } catch (error: unknown) {
     if (error instanceof ClientError) {
@@ -287,6 +289,7 @@ interface Startup {
   readonly mergeMode: MergeMode;
   readonly gate: BudgetGate | null;
   readonly key: string | null;
+  readonly childEnv: Record<string, string>;
 }
 
 async function runStartup(args: PlanArgs): Promise<number> {
@@ -311,9 +314,17 @@ async function runStartup(args: PlanArgs): Promise<number> {
     throw new Error("coord: seed is not implemented");
   }
   let key: string | null = null;
+  const childEnv: Record<string, string> = {};
   if (!args.dryRun) {
     checkSessionEnv(config.envPassthrough, apiKeyEnv, process.env);
     key = process.env[apiKeyEnv] as string;
+    // Bun.spawn without env inherits the launch environment, so the cleaned
+    // environment is copied explicitly for every child except Muse.
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value !== undefined && name !== apiKeyEnv) {
+        childEnv[name] = value;
+      }
+    }
   }
   const workConfig = await loadWorkConfig(mcp.workConfigPath);
   const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
@@ -329,14 +340,14 @@ async function runStartup(args: PlanArgs): Promise<number> {
   let gate: BudgetGate | null = null;
   if (!args.dryRun) {
     const gateConfig = await loadBudgetGateConfig(config.budgetGateConfigPath);
-    gate = createCliBudgetGate({ ...gateConfig, cwd: process.cwd() });
+    gate = createCliBudgetGate({ ...gateConfig, cwd: process.cwd(), env: childEnv });
   }
   await mkdir(config.runsDir, { recursive: true, mode: 0o700 });
   // The key leaves process.env before the first child spawn below.
   if (!args.dryRun) {
     Reflect.deleteProperty(process.env, apiKeyEnv);
   }
-  const startup: Startup = { config, loaded, goal, mergeMode: spec.mergeMode, gate, key };
+  const startup: Startup = { config, loaded, goal, mergeMode: spec.mergeMode, gate, key, childEnv };
   try {
     return await withFileLock("coordinator runs", join(config.runsDir, "coordinator"), () =>
       runFromStep13(startup, args),
@@ -369,6 +380,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
         mcp.clientTimeoutMs,
         goal.goalId,
         goal.idPrefix,
+        startup.childEnv,
       );
       if (!pre.ok) {
         throw new Error(`coord: goal ${goal.goalId} precondition failed (${pre.code})`);
@@ -429,6 +441,7 @@ async function runFromStep13(startup: Startup, args: PlanArgs): Promise<number> 
       t0,
       gate,
       key,
+      startup.childEnv,
     );
   };
   return runFn();
@@ -446,6 +459,7 @@ async function runSession(
   t0: Date,
   gate: BudgetGate,
   key: string,
+  childEnv: Record<string, string>,
 ): Promise<number> {
   const { apiKeyEnv, mcp } = loaded;
   const log = await openCallLog(join(runDir, "coord.jsonl"));
@@ -538,6 +552,7 @@ async function runSession(
         configPath: join(runDir, "mcp.json"),
         serverVersion: mcp.serverInfo.version,
         clientTimeoutMs: mcp.clientTimeoutMs,
+        env: childEnv,
       });
       finalSnapshot = parseListSnapshot(payload);
     } catch (error: unknown) {

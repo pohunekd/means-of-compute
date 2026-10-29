@@ -18,6 +18,7 @@ export interface ClientOptions {
   readonly configPath: string;
   readonly serverVersion: string;
   readonly clientTimeoutMs: number;
+  readonly env: Record<string, string>;
 }
 
 function sendLine(sink: { write(chunk: string): void }, value: unknown): void {
@@ -41,6 +42,7 @@ export async function runClientCall(options: ClientOptions): Promise<unknown> {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",
+      env: options.env,
     });
   } catch (error: unknown) {
     throw new ClientError(4, `mcp:call: cannot start server (${String(error)})`, { cause: error });

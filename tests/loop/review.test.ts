@@ -1011,16 +1011,17 @@ test("RT18 budget refusal defers the audit without a round", async () => {
       expect(li.rounds).toHaveLength(0);
       expect(li.phase).toBe("auditing");
       expect(li.backoffUntil).toBe(new Date(Date.parse(NOW) + 60_000).toISOString());
-      // The attempt recorded before the audit call stands.
-      expect(li.auditAttempts).toEqual({ headSha: moved, count: 1 });
+      // The gate refused before any model call, so the counted attempt is
+      // restored to the value the round started with.
+      expect(li.auditAttempts).toBeNull();
       expect(
         harness.events.filter((line) => line.startsWith("budget-refused:refused:")),
       ).toHaveLength(1);
-      // A refused head stays deferred: the retry keeps the phase and the count.
-      await writeLoopState(ctx.statePath, { ...li, backoffUntil: null });
+      // A refused head stays deferred: a call at the same clock returns
+      // pending before any gate call, so the attempts and events stand.
       expect(await auditStep(ctx, item())).toBe("pending");
       const retry = await readItem(ctx.statePath);
-      expect(retry.auditAttempts).toEqual({ headSha: moved, count: 2 });
+      expect(retry.auditAttempts).toBeNull();
       expect(retry.rounds).toHaveLength(0);
     } finally {
       await harness.sandbox.cleanup();

@@ -479,12 +479,12 @@ async function auditRefusedStep(
     return "parked";
   }
   if (reason.startsWith("budget: ")) {
-    const fresh = await readReviewItem(ctx, item.id);
-    const prior = fresh.auditAttempts ?? li.auditAttempts;
+    // The gate refused before any model call, so the attempt recorded
+    // in step 6 is restored to the value the round started with.
     await writeReviewItem(ctx, item.id, {
       ...(await readReviewItem(ctx, item.id)),
       backoffUntil: new Date(ctx.now().getTime() + ctx.budgetBackoffMs).toISOString(),
-      auditAttempts: prior,
+      auditAttempts: li.auditAttempts,
     });
     ctx.log.log({
       event: "budget-refused",
@@ -514,12 +514,12 @@ async function auditErrorStep(
     throw error;
   }
   if (cause instanceof BudgetGateError) {
-    const fresh = await readReviewItem(ctx, item.id);
-    const prior = fresh.auditAttempts ?? li.auditAttempts;
+    // The gate threw before any model call, so the attempt recorded
+    // in step 6 is restored to the value the round started with.
     await writeReviewItem(ctx, item.id, {
       ...(await readReviewItem(ctx, item.id)),
       backoffUntil: new Date(ctx.now().getTime() + ctx.budgetBackoffMs).toISOString(),
-      auditAttempts: prior,
+      auditAttempts: li.auditAttempts,
     });
     ctx.log.log({
       event: "budget-refused",

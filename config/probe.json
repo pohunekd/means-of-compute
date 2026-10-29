@@ -4,6 +4,13 @@
   "localModelsBaseUrl": "",
   "localModelsTimeoutMs": 2000,
   "sysfsRoot": "/sys",
+  "macosTools": {
+    "stat": "/usr/bin/stat",
+    "pmset": "/usr/bin/pmset",
+    "ioreg": "/usr/sbin/ioreg",
+    "sysctl": "/usr/sbin/sysctl",
+    "systemProfiler": "/usr/sbin/system_profiler"
+  },
   "policy": {
     "allowedWindowStart": "08:00",
     "allowedWindowEnd": "22:00",

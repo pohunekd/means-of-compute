@@ -1,9 +1,0 @@
-[
-  {
-    "status": 200,
-    "body": {
-      "choices": [{ "message": { "content": null } }],
-      "usage": { "prompt_tokens": 140, "completion_tokens": 3 }
-    }
-  }
-]

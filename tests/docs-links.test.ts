@@ -34,18 +34,31 @@ test("docs links good case exits 0", () => {
 test("docs links broken case reports exactly the broken one", () => {
   const tmp = makeTmp();
   try {
-    writeFileSync(join(tmp, "README.md"), "[good](docs/good.md)\n[bad](docs/missing.md)\n");
-    mkdirSync(join(tmp, "docs"));
-    writeFileSync(join(tmp, "docs", "good.md"), "# good\n");
+    const content =
+      [
+        "~~~",
+        "[inside](missing-inside.md)",
+        "~~~",
+        "",
+        "Line with inline ``` code",
+        "[outside](missing-outside.md)",
+        "",
+        '[t](good.md "title")',
+        "[abs](/abs.md)",
+      ].join("\n") + "\n";
+    writeFileSync(join(tmp, "README.md"), content);
+    writeFileSync(join(tmp, "good.md"), "# good\n");
     const broken = checkRoot(tmp);
     if (broken.length !== 1) {
-      throw new Error(`Expected 1 broken link, got ${String(broken.length)}`);
+      throw new Error(
+        `Expected 1 broken link, got ${String(broken.length)}: ${JSON.stringify(broken)}`,
+      );
     }
     const b = broken[0];
     if (!b) throw new Error("broken link missing");
     if (b.file !== "README.md") throw new Error(`Wrong file ${b.file}`);
-    if (b.line !== 2) throw new Error(`Wrong line ${String(b.line)}`);
-    if (b.target !== "docs/missing.md") throw new Error(`Wrong target ${b.target}`);
+    if (b.line !== 6) throw new Error(`Wrong line ${String(b.line)}`);
+    if (b.target !== "missing-outside.md") throw new Error(`Wrong target ${b.target}`);
   } finally {
     cleanup(tmp);
   }

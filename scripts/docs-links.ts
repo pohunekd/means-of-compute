@@ -11,9 +11,18 @@ function parseRootArg(): string {
   const args = process.argv.slice(2);
   let root = process.cwd();
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--root" && args[i + 1]) {
-      root = String(args[i + 1]);
+    const arg = args[i];
+    if (arg === "--root") {
+      const next = args[i + 1];
+      if (!next || next.startsWith("--")) {
+        process.stderr.write("docs:links: missing value for --root\n");
+        process.exit(2);
+      }
+      root = next;
       i++;
+    } else if (arg) {
+      process.stderr.write(`docs:links: unknown argument: ${arg}\n`);
+      process.exit(2);
     }
   }
   return root;
@@ -55,8 +64,8 @@ export function checkRoot(root: string): BrokenLink[] {
     let inCodeBlock = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";
-      const fenceCount = (line.match(/```/g) || []).length;
-      if (fenceCount > 0) {
+      const trimmedStart = line.trimStart();
+      if (trimmedStart.startsWith("```") || trimmedStart.startsWith("~~~")) {
         inCodeBlock = !inCodeBlock;
         continue;
       }
@@ -67,18 +76,16 @@ export function checkRoot(root: string): BrokenLink[] {
       while ((match = linkRegex.exec(line)) !== null) {
         const targetRaw = (match[2] ?? "").trim();
         if (!targetRaw) continue;
-        if (targetRaw.startsWith("#")) continue;
-        if (isUrlScheme(targetRaw)) continue;
+        const targetWithoutTitle = targetRaw.split(/\s+/)[0] ?? "";
+        if (!targetWithoutTitle) continue;
+        if (targetWithoutTitle.startsWith("#")) continue;
+        if (isUrlScheme(targetWithoutTitle)) continue;
+        if (targetWithoutTitle.startsWith("/")) continue;
 
-        const targetNoFrag = targetRaw.split("#")[0];
+        const targetNoFrag = targetWithoutTitle.split("#")[0];
         if (!targetNoFrag) continue;
 
-        let resolvedPath: string;
-        if (targetNoFrag.startsWith("/")) {
-          resolvedPath = join(root, targetNoFrag.slice(1));
-        } else {
-          resolvedPath = resolve(dirname(filePath), targetNoFrag);
-        }
+        const resolvedPath = resolve(dirname(filePath), targetNoFrag);
 
         if (!existsSync(resolvedPath)) {
           const relFile = relative(root, filePath);

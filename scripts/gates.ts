@@ -11,6 +11,7 @@ const gates: readonly Gate[] = [
   { name: "typecheck", cmd: ["bunx", "tsc", "--noEmit"] },
   { name: "contracts", cmd: ["bun", "run", "contracts:check"] },
   { name: "providers", cmd: ["bun", "run", "providers:check"] },
+  { name: "plugin-digest", cmd: ["bun", "run", "plugin:digest"] },
   {
     name: "test",
     cmd: [

@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const { factsPath, scenario } = parseArgs(Bun.argv.slice(2));
   const output = await runProbe({
     configDir,
-    resolveHostAlias: () => loadHostFile(loadPluginConfig(join(configDir, "plugin.json")).hostFile),
+    resolveHost: () => loadHostFile(loadPluginConfig(join(configDir, "plugin.json")).hostFile),
     factsPath,
     scenario,
   });

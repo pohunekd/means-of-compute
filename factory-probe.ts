@@ -25,7 +25,7 @@ async function main(): Promise<void> {
 
   const output = await runProbe({
     configDir,
-    resolveHostAlias: () => loadHostAlias(configDir, hostname()),
+    resolveHost: () => ({ hostAlias: loadHostAlias(configDir, hostname()), unattended: null }),
     factsPath,
     scenario,
   });

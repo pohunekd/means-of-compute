@@ -1,0 +1,24 @@
+#!/bin/sh
+# loginctl double for the wayland-active case: one active local graphical
+# session with recent input.
+case "$*" in
+  "list-sessions --no-legend")
+    echo "2 1000 user wayland"
+    ;;
+  "show-session 2 -p Class -p Remote")
+    echo "Class=user"
+    echo "Remote=no"
+    ;;
+  "show-session 2 -p Active -p Type -p Seat")
+    echo "Active=yes"
+    echo "Type=wayland"
+    echo "Seat=seat0"
+    ;;
+  "show-session 2 -p IdleHint -p IdleSinceHint")
+    echo "IdleHint=no"
+    echo "IdleSinceHint=0"
+    ;;
+  *)
+    exit 2
+    ;;
+esac

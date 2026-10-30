@@ -102,7 +102,7 @@ export function loadConfig(path: string): ProbeConfig {
   const policy = policyRaw as Record<string, unknown>;
   for (const key of ["allowedWindowStart", "allowedWindowEnd"]) {
     const v = policy[key];
-    if (typeof v !== "string" || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v)) {
+    if (typeof v !== "string" || !timeOfDayPattern.test(v)) {
       throw new Error(`config probe.json: invalid policy.${key}`);
     }
   }
@@ -179,9 +179,15 @@ export function loadHostAlias(configDir: string, hostnameVal: string): string {
   return alias;
 }
 
+const timeOfDayPattern = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
 const hostAliasPattern = /^[a-z][a-z0-9-]{0,31}$/;
 
-export function loadHostFile(path: string): string {
+export type TimeWindow = { readonly start: string; readonly end: string };
+
+export type HostFile = { readonly hostAlias: string; readonly unattended: TimeWindow | null };
+
+export function loadHostFile(path: string): HostFile {
   let text: string;
   try {
     text = readFileSync(path, "utf-8");
@@ -195,15 +201,42 @@ export function loadHostFile(path: string): string {
   } catch (e) {
     throw new Error(`host file ${path}: invalid hostAlias`, { cause: e });
   }
-  if (
-    typeof raw !== "object" ||
-    raw === null ||
-    Array.isArray(raw) ||
-    Object.keys(raw).length !== 1 ||
-    typeof (raw as Record<string, unknown>)["hostAlias"] !== "string" ||
-    !hostAliasPattern.test((raw as Record<string, unknown>)["hostAlias"] as string)
-  ) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error(`host file ${path}: invalid hostAlias`);
   }
-  return (raw as { hostAlias: string }).hostAlias;
+  const record = raw as Record<string, unknown>;
+  const alias = record["hostAlias"];
+  if (typeof alias !== "string" || !hostAliasPattern.test(alias)) {
+    throw new Error(`host file ${path}: invalid hostAlias`);
+  }
+  const keys = Object.keys(record);
+  for (const key of keys) {
+    if (key !== "hostAlias" && key !== "unattended") {
+      throw new Error(`host file ${path}: invalid ${key}`);
+    }
+  }
+  const unattendedRaw = record["unattended"];
+  if (unattendedRaw === undefined) {
+    return { hostAlias: alias, unattended: null };
+  }
+  if (
+    typeof unattendedRaw !== "object" ||
+    unattendedRaw === null ||
+    Array.isArray(unattendedRaw) ||
+    Object.keys(unattendedRaw).length !== 2
+  ) {
+    throw new Error(`host file ${path}: invalid unattended`);
+  }
+  const window = unattendedRaw as Record<string, unknown>;
+  const start = window["start"];
+  const end = window["end"];
+  if (
+    typeof start !== "string" ||
+    typeof end !== "string" ||
+    !timeOfDayPattern.test(start) ||
+    !timeOfDayPattern.test(end)
+  ) {
+    throw new Error(`host file ${path}: invalid unattended`);
+  }
+  return { hostAlias: alias, unattended: { start, end } };
 }

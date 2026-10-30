@@ -11,7 +11,7 @@ if (!configDir || !factsPath) {
 
 const doc = await runProbe({
   configDir,
-  resolveHostAlias: () => "laptop-mac",
+  resolveHost: () => ({ hostAlias: "laptop-mac", unattended: null }),
   factsPath,
 });
 console.log(JSON.stringify(doc));

@@ -10,7 +10,7 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import type { DispatcherPort, StartRequest } from "../../src/dispatcher/port.js";
+import type { DispatcherPort, SessionRef, StartRequest } from "../../src/dispatcher/port.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
@@ -481,6 +481,7 @@ test("an unreachable retry over a live orphan keeps the orphan and rejects (U16)
     });
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     let starts = 0;
+    const retiredFor: string[] = [];
     const flaky: DispatcherPort = {
       ...control.port,
       start(request: StartRequest) {
@@ -489,6 +490,10 @@ test("an unreachable retry over a live orphan keeps the orphan and rejects (U16)
           return Promise.reject(new PortUnreachableError("host host-a unreachable"));
         }
         return control.port.start(request);
+      },
+      retire(ref: SessionRef) {
+        retiredFor.push(ref.sessionId);
+        return control.port.retire(ref);
       },
     };
     const dispatcher = createDispatcher({
@@ -528,6 +533,7 @@ test("an unreachable retry over a live orphan keeps the orphan and rejects (U16)
     expect(orphan?.terminal).toBeNull();
     expect(orphan?.cancelReason).toBeNull();
     expect(orphan?.sessionId).toBe("mem-1");
+    expect(retiredFor).not.toContain("mem-1");
     expect(sleeps).toEqual([5_000]);
   });
 });

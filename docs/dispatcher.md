@@ -65,7 +65,7 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
 
-`retire(ref)` removes a terminal session and its worktree on the host and keeps the branch (Pohunek `session.remove_accepting_unconfirmed`, because a same-user process with an unreadable environment would otherwise block every removal; such processes are not signalled); an unknown session is `absent`. Before every start the dispatcher retires the item's earlier ledgered sessions on the target host and logs `retired`, because a host keeps a finished session's worktree and git refuses a second worktree for that branch (`worktree-branch-in-use`).
+`retire(ref)` removes a terminal session and its worktree on the host and keeps the branch (Pohunek `session.remove_accepting_unconfirmed`, because a same-user process with an unreadable environment would otherwise block every removal; such processes are not signalled); an unknown session is `absent`; a session the host still reports live is refused `session-live`, so a round whose earlier session was closed as lost but still runs ends start-rejected and escalates. Before every start the dispatcher retires the item's earlier ledgered sessions on the target host and logs `retired`, because a host keeps a finished session's worktree and git refuses a second worktree for that branch (`worktree-branch-in-use`).
 
 `release` (`src/dispatcher/port.ts` `ReleaseRef`) stops every session on the host
 that is either the known `sessionId` or bound to the `requestId` and removes

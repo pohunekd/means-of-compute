@@ -16,7 +16,7 @@ import {
   type AdapterLogEvent,
 } from "../../../src/dispatcher/adapter/pohunek-port.js";
 import type { PohunekAdapterConfig } from "../../../src/dispatcher/adapter/config.js";
-import type { StartRequest } from "../../../src/dispatcher/port.js";
+import { PortRejectedError, type StartRequest } from "../../../src/dispatcher/port.js";
 
 const CONFIG: PohunekAdapterConfig = {
   agentProfile: "moc-worker",
@@ -128,6 +128,14 @@ test("retire removes a finished session through session.remove_accepting_unconfi
       null,
     );
     expect(result.state).toBe("finished");
+    const live = await port.start(request({ requestId: "req-live" }));
+    const liveRetire = await port.retire({ sessionId: live.sessionId, hostAlias: "laptop-a" }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(liveRetire).toBeInstanceOf(PortRejectedError);
+    expect((liveRetire as PortRejectedError).code).toBe("session-live");
+    expect(fake.sessions("laptop-a").some((info) => info.id === live.sessionId)).toBe(true);
     const first = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
     expect(first).toBe("removed");
     expect(methodNames(fake, "laptop-a")).toContain("session.remove_accepting_unconfirmed");

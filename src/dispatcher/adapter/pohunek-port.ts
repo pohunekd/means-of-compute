@@ -30,6 +30,7 @@ import {
   MOC_METADATA,
   acceptanceFailure,
   hostPreflightFailure,
+  isLiveSessionState,
   isSessionNotFound,
   lookupDecision,
   portErrorOf,
@@ -688,6 +689,19 @@ async function retireSession(port: PortInternals, ref: SessionRef): Promise<Reti
     throw new PohunekAdapterError("closed");
   }
   const client = await clientFor(port, ref.hostAlias);
+  let info: SessionInfo;
+  try {
+    info = await client.call("session.inspect", ref.sessionId);
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return "absent";
+    }
+    throw await mappedError(port, ref.hostAlias, error);
+  }
+  if (isLiveSessionState(info.state)) {
+    // A session the dispatcher closed as lost (watch unreachable) can still run on the host.
+    throw new PortRejectedError("session-live");
+  }
   try {
     await client.call("session.remove_accepting_unconfirmed", ref.sessionId);
   } catch (error) {

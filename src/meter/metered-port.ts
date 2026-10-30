@@ -101,7 +101,7 @@ export function createMeteredPort(
     await inner.close();
   }
 
-  async function release(ref: ReleaseRef): Promise<ReleaseResult> {
+  function release(ref: ReleaseRef): Promise<ReleaseResult> {
     return inner.release(ref);
   }
 

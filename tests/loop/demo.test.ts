@@ -20,7 +20,12 @@ async function runDemo(): Promise<{ readonly rc: number; readonly stdout: string
   return { rc, stdout };
 }
 
-function ledgerRecords(): { workItemId: string; result: string; tokens: unknown[] }[] {
+function ledgerRecords(): {
+  workItemId: string;
+  result: string;
+  tokens: unknown[];
+  attempts: unknown[];
+}[] {
   return readFileSync("logs/loop-demo/ledger.jsonl", "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
@@ -29,6 +34,7 @@ function ledgerRecords(): { workItemId: string; result: string; tokens: unknown[
     workItemId: string;
     result: string;
     tokens: unknown[];
+    attempts: unknown[];
   }[];
 }
 
@@ -61,6 +67,7 @@ test(
         ["demo-c", "success"],
       ]);
       const demoA = records.find((record) => record.workItemId === "demo-a");
+      expect(demoA?.attempts).toHaveLength(2);
       expect(demoA?.tokens).toEqual([
         {
           provider: "nvidia-build",

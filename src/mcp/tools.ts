@@ -8,7 +8,7 @@ import { readRegistry } from "../dispatcher/registry.js";
 import { loadWorkConfig } from "../work/config.js";
 import { readWorkStore } from "../work/store.js";
 import { createAuditResultsTool, createListWorkTool } from "./read-tools.js";
-import { createApproveTool, createPauseFleetTool } from "./sensitive.js";
+import { createApproveTool, createPauseFleetTool, createResolveSessionTool } from "./sensitive.js";
 import { createSubmitWorkTool } from "./submit.js";
 import type {
   ToolContext,
@@ -190,5 +190,6 @@ export function createTools(paths: ToolPaths): readonly ToolDefinition[] {
     createSubmitWorkTool(paths),
     createApproveTool(paths),
     createPauseFleetTool(paths),
+    createResolveSessionTool(paths),
   ];
 }

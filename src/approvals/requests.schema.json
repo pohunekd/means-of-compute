@@ -28,7 +28,7 @@
         "properties": {
           "requestId": { "type": "string", "pattern": "^req-[0-9]{6,}$" },
           "seq": { "type": "integer", "minimum": 1 },
-          "tool": { "enum": ["approve", "pause_fleet"] },
+          "tool": { "enum": ["approve", "pause_fleet", "resolve_session"] },
           "args": { "type": "object" },
           "argsSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "caller": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
@@ -80,6 +80,28 @@
                   "required": ["action", "reason"],
                   "properties": {
                     "action": { "enum": ["pause", "resume"] },
+                    "reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "tool": { "const": "resolve_session" } },
+              "required": ["tool"]
+            },
+            "then": {
+              "properties": {
+                "args": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["requestId", "reason"],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,62}:(0|[1-9][0-9]*)$"
+                    },
                     "reason": { "type": "string", "minLength": 1 }
                   }
                 }

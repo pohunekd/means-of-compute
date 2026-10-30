@@ -1,6 +1,6 @@
-// Sensitive tools: approve and pause_fleet record a pending approval
-// request for out-of-band confirmation. Neither tool executes anything;
-// decisions are taken only by the approvals CLI (A9).
+// Sensitive tools: approve, pause_fleet and resolve_session record a pending
+// approval request for out-of-band confirmation. None of these tools executes
+// anything; decisions are taken only by the approvals CLI (A9).
 import Ajv from "ajv/dist/2020";
 import { loadApprovalsConfig, type ApprovalsConfig } from "../approvals/config.js";
 import {
@@ -70,6 +70,16 @@ const APPROVE_SCHEMA = {
   },
 } as const;
 
+const RESOLVE_SESSION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["requestId", "reason"],
+  properties: {
+    requestId: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,62}:(0|[1-9][0-9]*)$" },
+    reason: { type: "string", minLength: 1 },
+  },
+} as const;
+
 const PAUSE_FLEET_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -102,8 +112,19 @@ const PAUSE_FLEET_INPUT_SCHEMA: Record<string, unknown> = {
   },
 };
 
+const RESOLVE_SESSION_INPUT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["requestId", "reason"],
+  properties: {
+    requestId: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,62}:(0|[1-9][0-9]*)$" },
+    reason: { type: "string", minLength: 1 },
+  },
+};
+
 const approveValidate = ajv.compile(APPROVE_SCHEMA);
 const pauseFleetValidate = ajv.compile(PAUSE_FLEET_SCHEMA);
+const resolveSessionValidate = ajv.compile(RESOLVE_SESSION_SCHEMA);
 
 function firstError(
   errors: readonly { instancePath?: string; keyword?: string }[] | null | undefined,
@@ -206,6 +227,15 @@ async function record(
   return { payload: outcomePayload(outcome), summary: outcomeSummary(outcome), detail: null };
 }
 
+function validateResolveSession(
+  args: unknown,
+): { readonly path: string; readonly keyword: string } | null {
+  if (resolveSessionValidate(args)) {
+    return null;
+  }
+  return firstError(resolveSessionValidate.errors);
+}
+
 async function runApprove(args: unknown, ctx: ToolContext, paths: ToolPaths): Promise<ToolOutcome> {
   const typed = args as { readonly reason: string };
   const checked = await checkReason(paths, typed);
@@ -268,6 +298,20 @@ async function runPauseFleet(
   return record("pause_fleet", checked.approvals, ctx, { ...submitted });
 }
 
+async function runResolveSession(
+  args: unknown,
+  ctx: ToolContext,
+  paths: ToolPaths,
+): Promise<ToolOutcome> {
+  const typed = args as { readonly reason: string };
+  const checked = await checkReason(paths, typed);
+  if ("payload" in checked) {
+    return { payload: checked.payload, summary: null, detail: checked.detail };
+  }
+  const submitted = args as { readonly requestId: string; readonly reason: string };
+  return record("resolve_session", checked.approvals, ctx, { ...submitted });
+}
+
 export function createApproveTool(paths: ToolPaths): ToolDefinition {
   return {
     name: "approve",
@@ -278,6 +322,19 @@ export function createApproveTool(paths: ToolPaths): ToolDefinition {
     inputSchema: APPROVE_INPUT_SCHEMA,
     validate: validateApprove,
     run: (args, ctx) => runApprove(args, ctx, paths),
+  };
+}
+
+export function createResolveSessionTool(paths: ToolPaths): ToolDefinition {
+  return {
+    name: "resolve_session",
+    title: "Resolve session",
+    toolClass: "sensitive",
+    description:
+      "[sensitive: records a request a human must confirm out of band; never executes] Requests a human resolution of one stuck dispatcher session.",
+    inputSchema: RESOLVE_SESSION_INPUT_SCHEMA,
+    validate: validateResolveSession,
+    run: (args, ctx) => runResolveSession(args, ctx, paths),
   };
 }
 

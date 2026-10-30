@@ -1,10 +1,13 @@
-// Sensitive tool tests (matrix X1-X3, X5): approve predicates, the
-// pause_fleet round trip through decideRequest, and the L2 shape of the
-// call-end line. Expected values come from A3, A4, A5 and L2.
+// Sensitive tool and approvals view tests (matrix X1, X7): resolve_session
+// records one pending request with the sensitive class; the approvals view
+// returns an approved resolve and ignores a pending one. Expected values
+// come from #114 and the existing A3/A4/A6 consumption rules.
 import { expect, test } from "bun:test";
 import { createMcpTestEnv, writeTestFile, type McpTestEnv } from "./env.js";
 import { createTools } from "../../src/mcp/tools.ts";
 import { createProtocol } from "../../src/mcp/protocol.ts";
+import { decideRequest } from "../../src/approvals/decide.ts";
+import { createApprovalsView } from "../../src/loop/approvals-view.js";
 import type { CallLog } from "../../src/mcp/call-log.ts";
 
 function fixedNow(): () => Date {
@@ -139,5 +142,61 @@ test("X1 approve on a review item records pending and lists the request (X1, A3,
   const pending = (fleet["fleet"] as { pendingRequests: readonly unknown[] }).pendingRequests;
   expect(pending).toEqual([
     { requestId, tool: "approve", requestedAt: "2026-10-28T10:00:00.000Z" },
+  ]);
+});
+
+test("X7 resolve_session records one sensitive request and nothing else (X7, A3, #114)", async () => {
+  const { env, lines } = await setupEnv("mcp-x7-");
+  const { structured, ends } = await callTool(env, lines, "resolve_session", {
+    requestId: "demo-review:0",
+    reason: "Session stalled on a hung start.",
+  });
+  expect(structured).toEqual({
+    ok: true,
+    requestId: "req-000001",
+    state: "pending",
+    outcome: "recorded",
+  });
+  const last = ends[ends.length - 1] as Record<string, unknown>;
+  expect(last["tool"]).toBe("resolve_session");
+  expect(last["class"]).toBe("sensitive");
+  expect(last["summary"]).toEqual({ requestId: "req-000001", outcome: "recorded" });
+  const stored = (await Bun.file(env.requestsPath).json()) as {
+    readonly requests: readonly {
+      readonly tool: string;
+      readonly args: unknown;
+      readonly state: string;
+    }[];
+  };
+  expect(stored.requests).toHaveLength(1);
+  expect(stored.requests[0]?.tool).toBe("resolve_session");
+  expect(stored.requests[0]?.state).toBe("pending");
+  expect(stored.requests[0]?.args).toEqual({
+    requestId: "demo-review:0",
+    reason: "Session stalled on a hung start.",
+  });
+});
+
+test("X7 approvals view exposes an approved resolve and ignores a pending one (#114, A6)", async () => {
+  const { env, lines } = await setupEnv("mcp-x7-view-");
+  await callTool(env, lines, "resolve_session", {
+    requestId: "demo-review:0",
+    reason: "Resolve the stuck session.",
+  });
+  await callTool(env, lines, "resolve_session", {
+    requestId: "demo-review:1",
+    reason: "A second stuck session.",
+  });
+  const view = createApprovalsView(env.requestsPath);
+  expect(await view.approvedResolves()).toEqual([]);
+  const decided = await decideRequest(env.requestsPath, {
+    requestId: "req-000001",
+    decision: "approved",
+    author: "owner",
+    now: fixedNow(),
+  });
+  expect(decided.kind).toBe("decided");
+  expect(await view.approvedResolves()).toEqual([
+    { requestId: "demo-review:0", reason: "Resolve the stuck session." },
   ]);
 });

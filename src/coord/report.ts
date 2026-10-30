@@ -11,6 +11,7 @@ export const COORD_TOOLS = [
   "submit_work",
   "approve",
   "pause_fleet",
+  "resolve_session",
 ] as const;
 export type CoordTool = (typeof COORD_TOOLS)[number];
 
@@ -289,6 +290,7 @@ function emptyCalls(): Record<CoordTool, CallCounts> {
     submit_work: { ...empty },
     approve: { ...empty },
     pause_fleet: { ...empty },
+    resolve_session: { ...empty },
   };
 }
 
@@ -386,7 +388,10 @@ export function buildReport(input: ReportInput): Report {
         }
       }
     }
-    if ((call.tool === "approve" || call.tool === "pause_fleet") && call.outcome === "ok") {
+    if (
+      (call.tool === "approve" || call.tool === "pause_fleet" || call.tool === "resolve_session") &&
+      call.outcome === "ok"
+    ) {
       requests.push(parseRequestSummary(call));
     }
     if (call.outcome === "refused" || call.outcome === "error") {

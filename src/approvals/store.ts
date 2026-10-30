@@ -10,7 +10,7 @@ import { writeFileAtomic } from "../fs/write.js";
 import { canonicalJson, sha256Hex } from "../work/canonical.js";
 import requestsSchema from "./requests.schema.json" with { type: "json" };
 
-export type ApprovalTool = "approve" | "pause_fleet";
+export type ApprovalTool = "approve" | "pause_fleet" | "resolve_session";
 
 export interface ApproveArgs {
   readonly workItemId: string;
@@ -24,7 +24,12 @@ export interface PauseFleetArgs {
   readonly reason: string;
 }
 
-export type ApprovalArgs = ApproveArgs | PauseFleetArgs;
+export interface ResolveSessionArgs {
+  readonly requestId: string;
+  readonly reason: string;
+}
+
+export type ApprovalArgs = ApproveArgs | PauseFleetArgs | ResolveSessionArgs;
 
 export interface ApprovalDecision {
   readonly seq: number;
@@ -289,6 +294,31 @@ export function pendingRequests(doc: ApprovalsDocument): readonly ApprovalReques
   return doc.requests
     .filter((entry) => entry.state === "pending")
     .sort((left, right) => left.seq - right.seq);
+}
+
+export interface ApprovedResolve {
+  readonly requestId: string;
+  readonly reason: string;
+}
+
+export function approvedResolves(doc: ApprovalsDocument): readonly ApprovedResolve[] {
+  const resolves: ApprovedResolve[] = [];
+  for (const request of doc.requests) {
+    if (request.tool !== "resolve_session" || request.state !== "approved") {
+      continue;
+    }
+    const args = request.args;
+    if (!("requestId" in args) || !("reason" in args)) {
+      continue;
+    }
+    if (typeof args.requestId !== "string" || typeof args.reason !== "string") {
+      continue;
+    }
+    resolves.push({ requestId: args.requestId, reason: args.reason });
+  }
+  return resolves.sort((left, right) =>
+    left.requestId < right.requestId ? -1 : left.requestId > right.requestId ? 1 : 0,
+  );
 }
 
 export function approvedMerge(

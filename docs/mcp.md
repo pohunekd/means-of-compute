@@ -43,7 +43,7 @@ as `null` client, never raw. The initialized flag flips only on an
 `initialize` response; `notifications/initialized` and every other
 notification produce no output. `tools/list` and `tools/call` before the
 initialized flag are `-32600 "server not
-initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results, submit_work, approve, pause_fleet`.
+initialized"`. `tools/list` answers in PR order `fleet_status, list_work, audit_results, submit_work, approve, pause_fleet, resolve_session`.
 Unknown methods are `-32601`, unknown tools are
 `-32602 "Unknown tool: <name>"`, batch arrays are `-32600 "batch not
 supported"`, unparsable lines are `-32700 "parse error"`. Every JSON-RPC
@@ -147,15 +147,20 @@ indices}`; on `store-full` it is `{limit}`; on the `index` codes it is
 (`maxItems`) keeps `null`. Item ids are synthetic slugs, never brief
 text. The call log carries only the summary, never the arguments.
 
-## `approve` and `pause_fleet`
+## `approve`, `pause_fleet` and `resolve_session`
 
-`approve` and `pause_fleet` (`[sensitive: records a request a human must
-confirm out of band; never executes]`) record a `pending` approval
-request through `recordRequest` and return `{requestId, state:"pending",
-outcome:"recorded"|"existing"}`. The `approve` description is
-`[sensitive: ...] Requests a human approval to merge one pull request at
-one head.` and `pause_fleet` is `[sensitive: ...] Requests a human pause
-or resume of new starts.` Every snapshot `inputSchema` is `type: object`
+`approve`, `pause_fleet` and `resolve_session` (`[sensitive: records a
+request a human must confirm out of band; never executes]`) record a
+`pending` approval request through `recordRequest` and return `{requestId,
+state:"pending", outcome:"recorded"|"existing"}`. The `approve` description
+is `[sensitive: ...] Requests a human approval to merge one pull request
+at one head.`, `pause_fleet` is `[sensitive: ...] Requests a human pause
+or resume of new starts.` and `resolve_session` is `[sensitive: ...]
+Requests a human resolution of one stuck dispatcher session.`
+`resolve_session` takes `{requestId, reason}` where `requestId` is a
+dispatcher session id (`<workItemId>:<round>`) and `reason` is non-empty;
+the tool records the request only and never calls the dispatcher. Every
+snapshot `inputSchema` is `type: object`
 with `additionalProperties: false`, `minLength: 1` on `reason` and no
 `maxLength`; `validate` is compiled from it with `new Ajv({ strict: true
 })` from `ajv/dist/2020` at startup. `run` loads the approvals config

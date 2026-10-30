@@ -24,6 +24,7 @@ export type LoopEventName =
   | "merge-hold-cleared"
   | "budget-refused"
   | "no-host"
+  | "exclusions-retried"
   | "intake-skip"
   | "intake-import"
   | "github-error"

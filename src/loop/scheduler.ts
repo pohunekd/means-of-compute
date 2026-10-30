@@ -346,7 +346,20 @@ async function claimOne(
   const li = stored ?? initialLoopItem();
   const choice = chooseModel(item, li, results, ctx.routing);
   const filtered = observations.filter((entry) => !li.excludedHosts.includes(entry.hostAlias));
-  const decision = placeObserved(item, filtered, carry.running, ctx.placementConfig);
+  let decision = placeObserved(item, filtered, carry.running, ctx.placementConfig);
+  if (decision.chosenHostAlias === null && li.excludedHosts.length > 0) {
+    // Every eligible host rejected a start: try them again. startRejections
+    // keeps counting, so the item parks at maxStartRejections instead of hanging.
+    const retry = placeObserved(item, observations, carry.running, ctx.placementConfig);
+    if (retry.chosenHostAlias !== null) {
+      ctx.log.log({
+        event: "exclusions-retried",
+        workItemId: item.id,
+        detail: li.excludedHosts.join(","),
+      });
+      decision = retry;
+    }
+  }
   if (decision.chosenHostAlias === null) {
     ctx.log.log({ event: "no-host", workItemId: item.id, detail: decision.reason });
     return li.excludedHosts.length > 0;

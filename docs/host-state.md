@@ -77,6 +77,14 @@ reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
 
+## Idle detection and agent runtime
+
+- On Linux the probe reads the logind `IdleHint` and `IdleSinceHint` of the active local graphical session. A compositor that never sets the hint (such as sway) makes the host report recent input forever, so it is never idle. Run an idle daemon that sets the hint, for example swayidle with `idlehint 60`. `secondsSinceInput` then counts from the moment the hint was set, so the host turns idle `idleMinutes` (`config/probe.json`) plus the `idlehint` timeout after the last input: 16 minutes with `idleMinutes: 15` and `idlehint 60`.
+- A local login without an active graphical session, such as a TTY-only login, reports activity unknown and is never idle. Remote (SSH) sessions are ignored: a host with only SSH sessions counts as logged out and can be reported idle.
+- The Pohunek daemon resolves agent programs (`pi`, and `node` for the `pi` shebang) on its own process `PATH`, like the `bun` the plugin needs (see "Host precondition"). That `PATH` is fixed when the Pohunek service is installed (the launchd job on macOS, the systemd user manager environment on Linux). Place the agent where that `PATH` already looks, or reinstall the service after installing the agent: editing `search_path` in the service config takes effect only at a version-changing service upgrade or a reinstall.
+- The daemon's version probe runs the agent with a minimal environment, so an agent wrapper script must use absolute paths instead of `$HOME`.
+- Check a host with `pohunek host inspect <host> --json`: the agent's runtime entry must show `available: true`, `supported: true` and a version.
+
 ## Adapter
 
 `src/dispatcher/adapter/host-state-port.ts` reads plugin output through the

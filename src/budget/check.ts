@@ -179,6 +179,7 @@ async function run(): Promise<number> {
           nvidiaRequestsToday: 0,
           unknownWorkItemIds: [],
           boundedWorkItemIds: [],
+          boundedTodayWorkItemIds: [],
         },
         effective,
         { route },

@@ -558,20 +558,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
     const spentTotalSource =
       `ledger records and pending entries, tokens × price; ` +
       `${allPrefix}${priceCite(allScope, pricing)}${cachedClause(allScope, pricing)}`;
-    const bounded = new Set(summary.boundedWorkItemIds);
-    const boundedToday = [
-      ...new Set(
-        scope.today
-          .filter(
-            (entry) =>
-              bounded.has(entry.workItemId) &&
-              entry.tokens.some(
-                (token) => isBoundedAuditToken(token) || (token.unmeasuredRequests ?? 0) > 0,
-              ),
-          )
-          .map((entry) => entry.workItemId),
-      ),
-    ].sort();
+    const boundedToday = summary.boundedTodayWorkItemIds;
     if (unknownToday.length > 0) {
       const ids = [...new Set(unknownToday.map((entry) => entry.workItemId))].sort();
       figures.push({

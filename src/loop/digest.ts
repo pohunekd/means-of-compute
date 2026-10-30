@@ -59,6 +59,7 @@ function formatSpend(summary: {
   spentTotalNanoTimes1M: bigint;
   unknownWorkItemIds: readonly string[];
   boundedWorkItemIds: readonly string[];
+  boundedTodayWorkItemIds: readonly string[];
 }): {
   readonly day: string;
   readonly total: string;
@@ -67,13 +68,17 @@ function formatSpend(summary: {
     const text = `no data (spend unknown: ${String(summary.unknownWorkItemIds.length)} items)`;
     return { day: text, total: text };
   }
-  const suffix =
+  const daySuffix =
+    summary.boundedTodayWorkItemIds.length > 0
+      ? ` (upper bound for unmeasured calls of ${String(summary.boundedTodayWorkItemIds.length)} items)`
+      : "";
+  const totalSuffix =
     summary.boundedWorkItemIds.length > 0
       ? ` (upper bound for unmeasured calls of ${String(summary.boundedWorkItemIds.length)} items)`
       : "";
   return {
-    day: `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))}${suffix}`,
-    total: `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))}${suffix}`,
+    day: `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))}${daySuffix}`,
+    total: `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))}${totalSuffix}`,
   };
 }
 

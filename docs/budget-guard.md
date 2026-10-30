@@ -64,6 +64,7 @@ coordinator's daily digest channel.
 - At or above a USD cap, all new sessions are refused. NVIDIA daily requests
   at or above the limit refuse only sessions whose route starts at NVIDIA
   Build (reason names it).
+- The bound mark belongs to the day that holds the bounded entries: a day line carries it only for bounded entries finished that day, while the total line carries it for every bounded entry.
 - Decision output: `{ admit, reason, spentTodayUsd, spentTotalUsd,
 nvidiaRequestsToday }`.
 

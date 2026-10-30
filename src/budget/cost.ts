@@ -44,6 +44,8 @@ export interface SpendSummary {
   readonly nvidiaRequestsToday: number;
   readonly unknownWorkItemIds: readonly string[];
   readonly boundedWorkItemIds: readonly string[];
+  /** Sorted ids of bounded items with at least one bounded entry finished today. */
+  readonly boundedTodayWorkItemIds: readonly string[];
 }
 
 export class SpendUnknownError extends Error {
@@ -148,6 +150,7 @@ export function summarizeSpend(
   let nvidiaRequestsToday = 0;
   const unknownWorkItemIds: string[] = [];
   const boundedWorkItemIds: string[] = [];
+  const boundedTodayWorkItemIds: string[] = [];
   for (const record of records) {
     // Request counts are data, not cost: they are tallied before pricing
     // so a spend-unknown record still reports its NVIDIA requests. A null
@@ -171,8 +174,18 @@ export function summarizeSpend(
       costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing, bounds, () => {
         seen.bounded = true;
       });
-      if (seen.bounded && !boundedWorkItemIds.includes(record.workItemId)) {
-        boundedWorkItemIds.push(record.workItemId);
+      if (seen.bounded) {
+        if (!boundedWorkItemIds.includes(record.workItemId)) {
+          boundedWorkItemIds.push(record.workItemId);
+        }
+        // One record finishes on one day, so a bounded record finished
+        // today is a bounded entry in the today window.
+        if (
+          utcDayOfEntry(record) === today &&
+          !boundedTodayWorkItemIds.includes(record.workItemId)
+        ) {
+          boundedTodayWorkItemIds.push(record.workItemId);
+        }
       }
     } catch (error: unknown) {
       if (error instanceof SpendUnknownError) {
@@ -196,6 +209,7 @@ export function summarizeSpend(
     nvidiaRequestsToday,
     unknownWorkItemIds,
     boundedWorkItemIds,
+    boundedTodayWorkItemIds: boundedTodayWorkItemIds.sort(),
   };
 }
 

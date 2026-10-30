@@ -68,7 +68,23 @@ test("metered entry with unmeasuredRequests counts each call at the meter bound"
   );
   expect(summary.unknownWorkItemIds).toEqual([]);
   expect(summary.boundedWorkItemIds).toEqual(["gh-demo-1"]);
+  expect(summary.boundedTodayWorkItemIds).toEqual(["gh-demo-1"]);
   expect(summary.spentTotalNanoUsd).toBe(1690948800n);
+  const earlier = summarizeSpend(
+    [
+      {
+        workItemId: "gh-demo-9",
+        finishedAt: "2026-10-26T10:00:00.000Z",
+        tokens: [meterToken],
+      },
+    ],
+    pricing(),
+    "nvidia-build",
+    NOW,
+    BOUND,
+  );
+  expect(earlier.boundedWorkItemIds).toEqual(["gh-demo-9"]);
+  expect(earlier.boundedTodayWorkItemIds).toEqual([]);
   const withNull = summarizeSpend(
     [
       entry("gh-demo-1", meterToken),

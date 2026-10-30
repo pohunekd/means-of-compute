@@ -61,6 +61,32 @@ function usage(workItemId: string, finishedAt: string, input: number, output: nu
   });
 }
 
+// A metered record with one billed call that reported no usage: it counts
+// at the configured per-call bound.
+function boundedUsage(workItemId: string, finishedAt: string): string {
+  return JSON.stringify({
+    schemaVersion: "v1",
+    workItemId,
+    finishedAt,
+    tokens: [
+      {
+        provider: "meta-api",
+        model: SPARK,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        requests: 2,
+        unmeasuredRequests: 1,
+        source: "meter-proxy",
+      },
+    ],
+    sessionSeconds: [{ hostAlias: "host-a", seconds: 5, source: "dispatcher-clock" }],
+    attempts: [{ model: SPARK, result: "success" }],
+    retries: 0,
+    humanInterventions: 0,
+    result: "success",
+  });
+}
+
 async function writeState(
   path: string,
   items: Record<string, LoopItem>,
@@ -155,7 +181,7 @@ test("a new day writes the previous day's digest once (O9)", async () => {
     const ledgerPath = join(dir, "ledger.jsonl");
     await Bun.write(
       ledgerPath,
-      `${usage("gh-demo-1", "2026-10-28T09:00:00.000Z", 1_000_000, 500_000)}\n${usage("gh-demo-9", "2026-10-27T09:00:00.000Z", 1_000_000, 0)}\n`,
+      `${usage("gh-demo-1", "2026-10-28T09:00:00.000Z", 1_000_000, 500_000)}\n${boundedUsage("gh-demo-9", "2026-10-27T09:00:00.000Z")}\n`,
     );
     const events: string[] = [];
     const log: LoopLog = {
@@ -198,7 +224,7 @@ test("a new day writes the previous day's digest once (O9)", async () => {
       "## Spend",
       "",
       "- Day: $0.2000",
-      "- Total: $0.3000",
+      "- Total: $1.9908 (upper bound for unmeasured calls of 1 items)",
       "",
     ].join("\n");
 

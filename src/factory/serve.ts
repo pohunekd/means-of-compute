@@ -1,9 +1,10 @@
-// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>].
+// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>].
 // Startup parses the flags, pins the clock when asked, loads every config,
 // binds the loopback listener and serves until SIGINT or SIGTERM. Any
 // startup failure prints "factory: <message>" and exits 2; signals exit 0.
 import { loadAuditorConfig } from "../auditor/config.js";
 import { loadDispatcherConfig } from "../dispatcher/config.js";
+import { loadLoopConfig } from "../loop/config.js";
 import { loadBudgetConfig } from "../budget/config.js";
 import { loadPricingForIds } from "../budget/pricing.js";
 import {
@@ -23,13 +24,16 @@ function parseServeArgs(argv: readonly string[]): {
   ledger: string | null;
   verdicts: string | null;
   registry: string | null;
+  results: string | null;
 } {
   let ledger: string | null = null;
   let verdicts: string | null = null;
   let registry: string | null = null;
+  let results: string | null = null;
   let seenLedger = false;
   let seenVerdicts = false;
   let seenRegistry = false;
+  let seenResults = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] as string;
     if (arg === "--ledger") {
@@ -74,17 +78,36 @@ function parseServeArgs(argv: readonly string[]): {
         throw new Error("--registry needs a value");
       }
       registry = value;
+    } else if (arg === "--results") {
+      if (seenResults) {
+        throw new Error("--results given twice");
+      }
+      seenResults = true;
+      const value = argv[index + 1];
+      index += 1;
+      if (value === undefined || value === "") {
+        throw new Error("--results needs a value");
+      }
+      if (value.startsWith("--")) {
+        throw new Error("--results needs a value");
+      }
+      results = value;
     } else if (arg.startsWith("--")) {
       throw new Error(`unknown flag ${arg}`);
     } else {
       throw new Error(`unexpected argument ${arg}`);
     }
   }
-  return { ledger, verdicts, registry };
+  return { ledger, verdicts, registry, results };
 }
 
 async function serve(): Promise<number> {
-  let flags: { ledger: string | null; verdicts: string | null; registry: string | null };
+  let flags: {
+    ledger: string | null;
+    verdicts: string | null;
+    registry: string | null;
+    results: string | null;
+  };
   try {
     flags = parseServeArgs(Bun.argv.slice(2));
   } catch (error: unknown) {
@@ -127,12 +150,14 @@ async function serve(): Promise<number> {
   let ledgerPath: string;
   let verdictDir: string;
   let registryPath: string;
+  let resultsPath: string;
   let fixed: {
     budget: Awaited<ReturnType<typeof loadBudgetConfig>>;
     route: readonly string[];
     baselines: DashboardConfig["baselines"];
     workRowLimit: number;
     logPath: string;
+    resultsPath: string;
   };
   try {
     const budget = await loadBudgetConfig();
@@ -146,12 +171,15 @@ async function serve(): Promise<number> {
     ledgerPath = flags.ledger ?? (await loadLedgerConfig()).ledgerPath;
     verdictDir = flags.verdicts ?? (await loadAuditorConfig()).verdictDir;
     registryPath = flags.registry ?? (await loadDispatcherConfig()).registryPath;
+    resultsPath =
+      flags.results ?? (await loadLoopConfig("config/loop.json", "production")).resultsPath;
     fixed = {
       budget,
       route,
       baselines: config.baselines,
       workRowLimit: config.workRowLimit,
       logPath: config.logPath,
+      resultsPath,
     };
   } catch (error: unknown) {
     process.stderr.write(`factory: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -163,7 +191,7 @@ async function serve(): Promise<number> {
       config,
       listen,
       fixed,
-      sources: { ledgerPath, verdictDir, hostState: null, registryPath },
+      sources: { ledgerPath, verdictDir, hostState: null, registryPath, resultsPath },
       now: pinned === null ? () => new Date() : () => pinned,
       log,
     });

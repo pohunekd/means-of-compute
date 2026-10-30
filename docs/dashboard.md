@@ -16,17 +16,19 @@ dashboard in this issue.
 ## Run
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>]
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>]
 MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
 ```
 
 - `--ledger` defaults to the `ledgerPath` of `config/ledger.json`.
 - `--verdicts` defaults to the `verdictDir` of `config/auditor.json`.
 - `--registry` defaults to the `registryPath` of `config/dispatcher.json`.
+- `--results` defaults to the `resultsPath` of `config/loop.json`.
 - Each flag is optional and allowed at most once; the value is the next
   argument and must exist and not start with `--`. A repeat, an unknown
   flag, a positional argument or a missing value exits 2.
 - `MOC_DASHBOARD_NOW` pins the clock for tests; unset means the real clock.
+- `--results` defaults to the `resultsPath` of `config/loop.json`.
 - Startup prints `factory: dashboard time pinned by MOC_DASHBOARD_NOW: <iso>`
   on stderr when pinned, then
   `factory: dashboard listening (dashboard) port <port>` on stdout. The
@@ -80,7 +82,7 @@ baselines.<key>`.
 
 ## Panels
 
-Fleet, Work, Usage, Savings, Autonomy, in that order. Token counts and
+Fleet, Work, Usage, Savings, Autonomy, Models, in that order. Token counts and
 integers group digits (`1,200,000`); times are ISO UTC. A ledger failure
 makes every ledger-derived cell `error(<ledger code>)`; the page shows the
 code only, never the message. Figures listed "in order" render in that
@@ -222,6 +224,26 @@ Table `Success rate per model`: columns `model, attempts, successes, rate`
 with `(s/a).toFixed(4)`. Source:
 `ledger records attempts[] (attempt-level, docs/ledger.md)`.
 
+### Models (closed loop rounds only)
+
+One table, caption `Models`, columns
+`model, rounds, successes, failures, excluded, success rate`.
+Source: `loop results <resultsPath> (one line per closed round, read through readResults)`
+where `<resultsPath>` is the `resultsPath` of `config/loop.json`.
+
+Per model: `rounds` counts every result line for the model, `successes`
+counts lines with `routingResult === "success"`, `failures` counts lines
+with `routingResult === "failure"`, and `excluded` counts lines with
+`routingResult === "excluded"`. The success rate covers non-excluded
+rounds only (`successes / (successes + failures)`, `(s/(s+f)).toFixed(4)`)
+and is `n/a` when there are none. Rows sort by `rounds` descending, then
+model id ascending.
+
+A middle line that `readResults` rejects is a data error shown on the
+table note as `error (results-invalid)`; a torn last line is ignored as
+`readResults` ignores it. An absent results file renders an explicit empty
+state (`no closed rounds yet`), never invented numbers.
+
 ## Money arithmetic
 
 Every money value is a `bigint` in scaled units; token costs (per 1M) and
@@ -265,6 +287,9 @@ Never a partial sum.
 | registry absent with parent present                                                          | empty contents                                   | `running` `0`                                                            |
 | registry invalid or a bad `requestId`                                                        | `error registry-invalid`, logged                 | `error (registry-invalid)`, logged, registry cells                       |
 | registry unreadable                                                                          | `error registry-unreadable`, logged              | `error (registry-unreadable)`                                            |
+| loop results absent with parent present                                                      | empty contents                                   | panel `Models` shows `no closed rounds yet`                              |
+| loop results invalid middle line                                                             | `error results-invalid`, logged                  | panel `Models` note shows `error (results-invalid)`                      |
+| loop results unreadable (missing parent, not a file, cannot read)                            | `error results-unreadable`, logged               | panel `Models` note shows `error (results-unreadable)`                   |
 | work items                                                                                   | `null`                                           | `no data (no work item source (#15, #17))`                               |
 | Host header not allowed or missing                                                           | 421                                              | none                                                                     |
 | method not `GET`                                                                             | 405                                              | none                                                                     |

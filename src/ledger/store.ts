@@ -78,6 +78,7 @@ function foldTokens(
       inputs: (number | null)[];
       outputs: (number | null)[];
       requests: number[];
+      unmeasured: number;
     }
   >();
   const collect = (token: PendingTokenUsage): void => {
@@ -94,6 +95,7 @@ function foldTokens(
         inputs: [],
         outputs: [],
         requests: [],
+        unmeasured: 0,
       };
       groups.set(key, group);
       order.push(key);
@@ -101,6 +103,7 @@ function foldTokens(
     group.inputs.push(token.inputTokens);
     group.outputs.push(token.outputTokens);
     group.requests.push(token.requests);
+    group.unmeasured += token.unmeasuredRequests ?? 0;
   };
   if (existing !== null) {
     for (const token of existing) {
@@ -121,13 +124,20 @@ function foldTokens(
     for (const value of group.requests) {
       requests += value;
     }
+    const inputTokens = nullSum(group.inputs);
+    const outputTokens = nullSum(group.outputs);
     return {
       provider: group.provider,
       model: group.model,
-      inputTokens: nullSum(group.inputs),
-      outputTokens: nullSum(group.outputs),
+      inputTokens,
+      outputTokens,
       requests,
       source: group.source,
+      // A null count from an older entry makes the whole group unknown again;
+      // the unmeasured count is only meaningful next to known sums.
+      ...(group.unmeasured > 0 && inputTokens !== null && outputTokens !== null
+        ? { unmeasuredRequests: group.unmeasured }
+        : {}),
     };
   });
 }

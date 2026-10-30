@@ -13,7 +13,14 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
   const groupOrder: string[] = [];
   const groups = new Map<
     string,
-    { provider: string; model: string; inputs: (number | null)[]; outputs: (number | null)[] }
+    {
+      provider: string;
+      model: string;
+      input: number;
+      output: number;
+      measured: number;
+      unmeasured: number;
+    }
   >();
   for (const callId of index.startOrder) {
     const start = index.starts.get(callId);
@@ -22,26 +29,31 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
     }
     const key = JSON.stringify([start.providerId, start.model]);
     const end = index.ends.get(callId);
-    let inputs: (number | null)[];
-    let outputs: (number | null)[];
-    if (end === undefined) {
-      // A crash after send leaves a start without an end: billed, unknown.
-      inputs = [null];
-      outputs = [null];
-    } else if (!end.billed) {
+    if (end !== undefined && !end.billed) {
       continue;
-    } else {
-      inputs = [end.inputTokens];
-      outputs = [end.outputTokens];
     }
     let group = groups.get(key);
     if (group === undefined) {
-      group = { provider: start.providerId, model: start.model, inputs: [], outputs: [] };
+      group = {
+        provider: start.providerId,
+        model: start.model,
+        input: 0,
+        output: 0,
+        measured: 0,
+        unmeasured: 0,
+      };
       groups.set(key, group);
       groupOrder.push(key);
     }
-    group.inputs.push(...inputs);
-    group.outputs.push(...outputs);
+    // A billed call without both counts (a timeout, a body without usage, or a
+    // start without an end after a crash) is counted, not summed.
+    if (end === undefined || end.inputTokens === null || end.outputTokens === null) {
+      group.unmeasured += 1;
+    } else {
+      group.input += end.inputTokens;
+      group.output += end.outputTokens;
+      group.measured += 1;
+    }
   }
   if (groupOrder.length === 0) {
     return {
@@ -62,28 +74,20 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
       const group = groups.get(key) as {
         provider: string;
         model: string;
-        inputs: (number | null)[];
-        outputs: (number | null)[];
+        input: number;
+        output: number;
+        measured: number;
+        unmeasured: number;
       };
       return {
         provider: group.provider,
         model: group.model,
-        inputTokens: nullSum(group.inputs),
-        outputTokens: nullSum(group.outputs),
-        requests: group.inputs.length,
+        inputTokens: group.input,
+        outputTokens: group.output,
+        requests: group.measured + group.unmeasured,
         source: METER_SOURCE,
+        ...(group.unmeasured > 0 ? { unmeasuredRequests: group.unmeasured } : {}),
       };
     }),
   };
-}
-
-function nullSum(values: readonly (number | null)[]): number | null {
-  let sum = 0;
-  for (const value of values) {
-    if (value === null) {
-      return null;
-    }
-    sum += value;
-  }
-  return sum;
 }

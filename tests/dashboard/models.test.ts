@@ -14,6 +14,9 @@ import {
 } from "../../src/dashboard/inputs.js";
 import { buildDashboard, modelRowsOf, modelSuccessRate } from "../../src/dashboard/model.js";
 import type { BudgetConfig } from "../../src/budget/config.js";
+import { spendBoundsOf } from "../../src/budget/config.js";
+import { summarizeSpend } from "../../src/budget/cost.js";
+import { spendEntriesOf } from "../../src/ledger/read.js";
 import type { Baselines } from "../../src/dashboard/config.js";
 
 function line(overrides: Partial<ResultLine> & { key: string }): ResultLine {
@@ -52,6 +55,7 @@ function fixed(): FixedInputs {
     nvidiaDailyRequestLimit: 100,
     nvidiaProviderId: "nvidia-build",
     unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
+    unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
   };
   const baselines = {
     frontierTokens: null,
@@ -207,27 +211,97 @@ test("models panel shows an explicit empty state for an absent file", async () =
   const dir = mkdtempSync(join(tmpdir(), "models-panel-"));
   try {
     await mkdir(join(dir, "verdicts"), { recursive: true });
+    const record = {
+      schemaVersion: "v1",
+      workItemId: "w1-demo",
+      finishedAt: "2026-10-28T10:00:00.000Z",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+      attempts: [{ model: "muse-spark-1.3-contributor", result: "success" }],
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          inputTokens: 1000,
+          outputTokens: 100,
+          requests: 3,
+          unmeasuredRequests: 1,
+          source: "meter-proxy",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "host-a", seconds: 60, source: "dispatcher-clock" }],
+    };
+    await writeFile(join(dir, "ledger.jsonl"), `${JSON.stringify(record)}\n`);
     const log = logged();
+    const budget = fixed().budget;
+    const summary = summarizeSpend(
+      spendEntriesOf({
+        records: [record],
+        pending: [],
+      } as unknown as import("../../src/ledger/types.js").LedgerContents),
+      new Map([
+        ["meta-api", { inputNanoPer1M: 100_000_000n, outputNanoPer1M: 200_000_000n }],
+        ["nvidia-build", { inputNanoPer1M: 0n, outputNanoPer1M: 0n }],
+      ]),
+      budget.nvidiaProviderId,
+      new Date("2026-10-28T12:00:00.000Z"),
+      spendBoundsOf(budget),
+    );
+    expect(summary.boundedWorkItemIds).toEqual(["w1-demo"]);
+    expect(summary.unknownWorkItemIds).toEqual([]);
     const inputs = await gatherInputs(
       sources(dir),
-      fixed(),
+      { ...fixed(), route: ["meta-api"] },
       new Date("2026-10-28T12:00:00.000Z"),
       (entry) => {
         log.entries.push({ input: entry.input, code: entry.code, message: entry.message });
       },
     );
-    expect(inputs.results.ok).toBe(true);
+    if (!inputs.pricing.ok) {
+      throw new Error("expected pricing to read");
+    }
     const model = buildDashboard(inputs);
-    const panel = model.panels.find((candidate) => candidate.id === "models");
+    const panel = model.panels.find((candidate) => candidate.id === "usage");
     if (panel === undefined) {
-      throw new Error("expected a models panel");
+      throw new Error("expected a usage panel");
     }
-    const table = panel.tables[0];
-    if (table === undefined) {
-      throw new Error("expected a models table");
+    const today = panel.figures.find((figure) => figure.label === "Spent today (UTC 2026-10-28)");
+    if (today === undefined || today.cell.kind !== "text") {
+      throw new Error("expected a spent-today text cell");
     }
-    expect(table.rows).toEqual([]);
-    expect(table.note).toBe("no closed rounds yet");
+    expect(today.cell.text.endsWith("unmeasured calls of w1-demo)")).toBe(true);
+    const emptyDir = mkdtempSync(join(tmpdir(), "models-panel-"));
+    try {
+      await mkdir(join(emptyDir, "verdicts"), { recursive: true });
+      const emptyLog = logged();
+      const emptyInputs = await gatherInputs(
+        sources(emptyDir),
+        fixed(),
+        new Date("2026-10-28T12:00:00.000Z"),
+        (entry) => {
+          emptyLog.entries.push({
+            input: entry.input,
+            code: entry.code,
+            message: entry.message,
+          });
+        },
+      );
+      expect(emptyInputs.results.ok).toBe(true);
+      const emptyModel = buildDashboard(emptyInputs);
+      const modelsPanel = emptyModel.panels.find((candidate) => candidate.id === "models");
+      if (modelsPanel === undefined) {
+        throw new Error("expected a models panel");
+      }
+      const emptyTable = modelsPanel.tables[0];
+      if (emptyTable === undefined) {
+        throw new Error("expected a models table");
+      }
+      expect(emptyTable.rows).toEqual([]);
+      expect(emptyTable.note).toBe("no closed rounds yet");
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

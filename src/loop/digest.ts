@@ -5,7 +5,7 @@
 import { link, open, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { utcCalendarDay, summarizeSpend, type UnmeasuredAuditBound } from "../budget/cost.js";
+import { utcCalendarDay, summarizeSpend, type SpendBounds } from "../budget/cost.js";
 import { loadPricingForIds } from "../budget/pricing.js";
 import { formatUsd, guardScaled } from "../dashboard/money.js";
 import { readLedger, spendEntriesOf } from "../ledger/read.js";
@@ -24,7 +24,7 @@ export interface DigestContext {
   readonly digestDir: string;
   readonly providersDir: string;
   readonly nvidiaProviderId: string;
-  readonly unmeasuredAuditCall: UnmeasuredAuditBound;
+  readonly spendBounds: SpendBounds;
   readonly log: LoopLog;
   readonly now: () => Date;
 }
@@ -69,7 +69,7 @@ function formatSpend(summary: {
   }
   const suffix =
     summary.boundedWorkItemIds.length > 0
-      ? ` (upper bound for ${String(summary.boundedWorkItemIds.length)} unmeasured audit calls)`
+      ? ` (upper bound for unmeasured calls of ${String(summary.boundedWorkItemIds.length)} items)`
       : "";
   return {
     day: `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))}${suffix}`,
@@ -237,7 +237,7 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
     pricing,
     ctx.nvidiaProviderId,
     new Date(`${day}T23:59:59.999Z`),
-    ctx.unmeasuredAuditCall,
+    ctx.spendBounds,
   );
   const spend = formatSpend(summary);
   return renderDigest({

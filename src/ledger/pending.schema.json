@@ -28,7 +28,16 @@
           "inputTokens": { "type": ["integer", "null"], "minimum": 0 },
           "outputTokens": { "type": ["integer", "null"], "minimum": 0 },
           "requests": { "type": ["integer", "null"], "minimum": 0 },
-          "source": { "type": "string", "minLength": 1 }
+          "source": { "type": "string", "minLength": 1 },
+          "unmeasuredRequests": { "type": "integer", "minimum": 1 }
+        },
+        "dependentSchemas": {
+          "unmeasuredRequests": {
+            "properties": {
+              "inputTokens": { "type": "integer" },
+              "outputTokens": { "type": "integer" }
+            }
+          }
         }
       }
     },

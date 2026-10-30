@@ -4,14 +4,22 @@
 // null token counts on a priced provider is "no data": it is reported in
 // unknownWorkItemIds and refuses the session instead of silently counting
 // zero, except an unmeasured audit call, which counts at the configured
-// bound (isBoundedAuditToken).
+// bound (isBoundedAuditToken). A known-count entry with unmeasuredRequests
+// adds the configured meterCall bound per unmeasured call (bounded, not unknown).
 import { AUDITOR_USAGE_SOURCE, type SpendEntry } from "../ledger/types.js";
 import type { NanoPricing } from "./pricing.js";
 
-/** Per-call token ceiling for an audit call that may be billed but reported no usage. */
-export interface UnmeasuredAuditBound {
+/** Per-call token ceiling for a call that may be billed but reported no usage. */
+export interface UnmeasuredCallBound {
   readonly inputTokens: number;
   readonly outputTokens: number;
+}
+
+export interface SpendBounds {
+  /** Audit call that may be billed but reported no usage (auditor-usage, null counts). */
+  readonly auditCall: UnmeasuredCallBound;
+  /** Metered call that was billed but reported no usage (unmeasuredRequests). */
+  readonly meterCall: UnmeasuredCallBound;
 }
 
 // An audit call that timed out or returned an unreadable 200 may be billed with
@@ -68,16 +76,16 @@ function utcDayOfEntry(entry: SpendEntry): string {
 export function costOfRecord(
   record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
-  bound: UnmeasuredAuditBound,
+  bounds: SpendBounds,
 ): bigint {
-  return costOfRecordNanoTimes1M(record, pricing, bound) / TOKENS_PER_1M;
+  return costOfRecordNanoTimes1M(record, pricing, bounds) / TOKENS_PER_1M;
 }
 
 /** Undivided record cost: tokens * priceNanoPer1M, for scope accumulation. */
 function costOfRecordNanoTimes1M(
   record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
-  bound: UnmeasuredAuditBound,
+  bounds: SpendBounds,
   onBounded?: () => void,
 ): bigint {
   let costNanoTimes1M = 0n;
@@ -98,20 +106,31 @@ function costOfRecordNanoTimes1M(
       const requests = BigInt(entry.requests as number);
       const input =
         entry.inputTokens === null
-          ? BigInt(bound.inputTokens) * requests
+          ? BigInt(bounds.auditCall.inputTokens) * requests
           : BigInt(entry.inputTokens);
       const output =
         entry.outputTokens === null
-          ? BigInt(bound.outputTokens) * requests
+          ? BigInt(bounds.auditCall.outputTokens) * requests
           : BigInt(entry.outputTokens);
       costNanoTimes1M +=
         input * providerPricing.inputNanoPer1M + output * providerPricing.outputNanoPer1M;
       onBounded?.();
       continue;
     }
-    costNanoTimes1M +=
+    let cost =
       BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
       BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M;
+    const unmeasured = entry.unmeasuredRequests ?? 0;
+    if (unmeasured > 0) {
+      // Each billed call without usage counts at the per-call ceiling; its
+      // input side is the meter's enforced request cap.
+      cost +=
+        BigInt(unmeasured) *
+        (BigInt(bounds.meterCall.inputTokens) * providerPricing.inputNanoPer1M +
+          BigInt(bounds.meterCall.outputTokens) * providerPricing.outputNanoPer1M);
+      onBounded?.();
+    }
+    costNanoTimes1M += cost;
   }
   return costNanoTimes1M;
 }
@@ -121,7 +140,7 @@ export function summarizeSpend(
   pricing: ReadonlyMap<string, NanoPricing>,
   nvidiaProviderId: string,
   now: Date,
-  auditBound: UnmeasuredAuditBound,
+  bounds: SpendBounds,
 ): SpendSummary {
   const today = utcCalendarDay(now);
   let spentTodayNanoTimes1M = 0n;
@@ -149,7 +168,7 @@ export function summarizeSpend(
     let costNanoTimes1M: bigint;
     try {
       const seen: { bounded: boolean } = { bounded: false };
-      costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing, auditBound, () => {
+      costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing, bounds, () => {
         seen.bounded = true;
       });
       if (seen.bounded && !boundedWorkItemIds.includes(record.workItemId)) {

@@ -4,8 +4,8 @@ import { loadApprovalsConfig, type ApprovalsConfig } from "../approvals/config.j
 import { createApprovalsView, type ApprovalsView } from "./approvals-view.js";
 import { loadAuditorConfig, type AuditorConfig } from "../auditor/config.js";
 import type { AuditDeps } from "../auditor/audit-types.js";
-import { loadBudgetConfig } from "../budget/config.js";
-import type { UnmeasuredAuditBound } from "../budget/cost.js";
+import { loadBudgetConfig, spendBoundsOf } from "../budget/config.js";
+import type { SpendBounds } from "../budget/cost.js";
 import { loadBudgetGateConfig } from "../budget/gate.js";
 import { loadDispatcherConfig, type DispatcherConfig } from "../dispatcher/config.js";
 import { FileLockError, withFileLock } from "../fs/lock.js";
@@ -43,10 +43,14 @@ export interface LoopConfigs {
   readonly approvals: ApprovalsConfig;
   readonly meter: MeterConfig;
   readonly nvidiaProviderId: string;
-  readonly unmeasuredAuditCall: UnmeasuredAuditBound;
+  readonly spendBounds: SpendBounds;
 }
 
-export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<LoopConfigs> {
+export async function loadLoopConfigs(
+  path: string,
+  mode: LoopMode,
+  budgetConfigPath?: string,
+): Promise<LoopConfigs> {
   let loop: LoopConfig;
   try {
     loop = await loadLoopConfig(path, mode);
@@ -65,8 +69,13 @@ export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<Loo
         loadPlacementConfig(loop.placementConfigPath),
         loadApprovalsConfig(loop.approvalsConfigPath),
         loadMeterConfig(loop.meterConfigPath),
-        loadBudgetConfig(),
+        loadBudgetConfig(budgetConfigPath),
       ]);
+    if (budget.unmeasuredMeterCall.inputTokens < meter.maxRequestBytes) {
+      throw new LoopStartupError(
+        `config: budget unmeasuredMeterCall.inputTokens (${String(budget.unmeasuredMeterCall.inputTokens)}) is below meter maxRequestBytes (${String(meter.maxRequestBytes)})`,
+      );
+    }
     return {
       loop,
       work,
@@ -79,7 +88,7 @@ export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<Loo
       approvals,
       meter,
       nvidiaProviderId: budget.nvidiaProviderId,
-      unmeasuredAuditCall: budget.unmeasuredAuditCall,
+      spendBounds: spendBoundsOf(budget),
     };
   } catch (error: unknown) {
     throw new LoopStartupError(loopMessage(path, error), { cause: error });
@@ -184,7 +193,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     digestDir: configs.loop.digest.dir,
     providersDir: ports.providersDir,
     nvidiaProviderId: configs.nvidiaProviderId,
-    unmeasuredAuditCall: configs.unmeasuredAuditCall,
+    spendBounds: configs.spendBounds,
     dispatcher: ports.dispatcher,
     dispatcherConfig: configs.dispatcher,
     sessionTimeoutMs: configs.loop.sessionTimeoutMs,

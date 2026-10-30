@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendPending, finalizeUsage } from "../../src/ledger/store.js";
+import { appendPending, finalizeUsage, recordCompletion } from "../../src/ledger/store.js";
 import type { PendingUsage } from "../../src/ledger/types.js";
 
 function sessionEntry(overrides: Partial<PendingUsage> = {}): PendingUsage {
@@ -105,6 +105,104 @@ test("blocked then done gives one record line with summed tokens", async () => {
     expect(record.attempts).toEqual([
       { model: "meta/muse-glimmer-30b", result: "success" },
       { model: "muse-spark-1.3-contributor", result: "failure" },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unmeasured counts fold and an older null count drops the field", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-unmeasured-"));
+  const ledgerPath = join(dir, "ledger.jsonl");
+  try {
+    const measured = (
+      entryId: string,
+      input: number,
+      output: number,
+      requests: number,
+      unmeasured: number,
+      at: string,
+    ): PendingUsage => ({
+      entryId,
+      kind: "session",
+      workItemId: "w1-demo",
+      finishedAt: at,
+      startModel: "meta/muse-glimmer-30b",
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          inputTokens: input,
+          outputTokens: output,
+          requests,
+          unmeasuredRequests: unmeasured,
+          source: "meter-proxy",
+        },
+      ],
+      session: { hostAlias: "desktop", seconds: 60, source: "dispatcher-clock", result: "success" },
+    });
+    await recordCompletion(
+      ledgerPath,
+      [
+        measured("e1", 300, 30, 3, 1, "2026-10-26T10:40:00.000Z"),
+        measured("e2", 50, 5, 2, 1, "2026-10-26T11:40:00.000Z"),
+      ],
+      { workItemId: "w1-demo", result: "success", retries: 0, humanInterventions: 0 },
+    );
+    const folded = JSON.parse(
+      (await Bun.file(ledgerPath).text()).trim().split("\n")[0] as string,
+    ) as {
+      tokens: unknown[];
+    };
+    expect(folded.tokens).toEqual([
+      {
+        provider: "meta-api",
+        model: "muse-spark-1.3-contributor",
+        inputTokens: 350,
+        outputTokens: 35,
+        requests: 5,
+        unmeasuredRequests: 2,
+        source: "meter-proxy",
+      },
+    ]);
+    await appendPending(ledgerPath, {
+      entryId: "e3",
+      kind: "session",
+      workItemId: "w1-demo",
+      finishedAt: "2026-10-26T12:40:00.000Z",
+      startModel: "meta/muse-glimmer-30b",
+      tokens: [
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          inputTokens: null,
+          outputTokens: null,
+          requests: 1,
+          source: "meter-proxy",
+        },
+      ],
+      session: { hostAlias: "desktop", seconds: 60, source: "dispatcher-clock", result: "success" },
+    });
+    await finalizeUsage(ledgerPath, {
+      workItemId: "w1-demo",
+      result: "success",
+      retries: 0,
+      humanInterventions: 0,
+    });
+    const refolded = JSON.parse(
+      (await Bun.file(ledgerPath).text()).trim().split("\n")[0] as string,
+    ) as {
+      tokens: unknown[];
+    };
+    expect(refolded.tokens).toEqual([
+      {
+        provider: "meta-api",
+        model: "muse-spark-1.3-contributor",
+        inputTokens: null,
+        outputTokens: null,
+        requests: 6,
+        source: "meter-proxy",
+      },
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

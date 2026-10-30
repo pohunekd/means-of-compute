@@ -5,5 +5,12 @@
   "totalCapUsd": 140,
   "nvidiaDailyRequestLimit": 1000,
   "nvidiaProviderId": "nvidia-build",
-  "unmeasuredAuditCall": { "inputTokens": 262144, "outputTokens": 65536 }
+  "unmeasuredAuditCall": {
+    "inputTokens": 262144,
+    "outputTokens": 65536
+  },
+  "unmeasuredMeterCall": {
+    "inputTokens": 16777216,
+    "outputTokens": 65536
+  }
 }

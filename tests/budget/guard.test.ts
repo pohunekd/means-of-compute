@@ -8,7 +8,10 @@ import type { NanoPricing } from "../../src/budget/pricing.js";
 import type { SpendEntry } from "../../src/ledger/types.js";
 import { AUDITOR_USAGE_SOURCE } from "../../src/ledger/types.js";
 
-const BOUND = { inputTokens: 262144, outputTokens: 65536 };
+const BOUND = {
+  auditCall: { inputTokens: 262144, outputTokens: 65536 },
+  meterCall: { inputTokens: 16777216, outputTokens: 65536 },
+};
 const NOW = new Date("2026-10-28T12:00:00.000Z");
 
 function pricing(): ReadonlyMap<string, NanoPricing> {
@@ -45,6 +48,46 @@ const SESSION_TOKEN_4: SpendEntry["tokens"][number] = {
   ...SESSION_TOKEN,
   requests: 4,
 };
+
+test("metered entry with unmeasuredRequests counts each call at the meter bound", () => {
+  const meterToken: SpendEntry["tokens"][number] = {
+    provider: "meta-api",
+    model: "muse-spark-1.3-contributor",
+    inputTokens: 1000,
+    outputTokens: 100,
+    requests: 3,
+    unmeasuredRequests: 1,
+    source: "meter-proxy",
+  };
+  const summary = summarizeSpend(
+    [entry("gh-demo-1", meterToken)],
+    pricing(),
+    "nvidia-build",
+    NOW,
+    BOUND,
+  );
+  expect(summary.unknownWorkItemIds).toEqual([]);
+  expect(summary.boundedWorkItemIds).toEqual(["gh-demo-1"]);
+  expect(summary.spentTotalNanoUsd).toBe(1690948800n);
+  const withNull = summarizeSpend(
+    [
+      entry("gh-demo-1", meterToken),
+      entry("gh-demo-2", {
+        provider: "meta-api",
+        model: "muse-spark-1.3-contributor",
+        inputTokens: null,
+        outputTokens: null,
+        requests: 1,
+        source: "meter-proxy",
+      }),
+    ],
+    pricing(),
+    "nvidia-build",
+    NOW,
+    BOUND,
+  );
+  expect(withNull.unknownWorkItemIds).toEqual(["gh-demo-2"]);
+});
 
 test("A1 bounded audit spend counts at the bound, session stays unknown", () => {
   expect(isBoundedAuditToken(AUDIT_TOKEN)).toBe(true);

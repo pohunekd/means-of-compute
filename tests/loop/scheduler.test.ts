@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import type { HostCapacity } from "../../contracts/v1/types.js";
 import type { LoopLog } from "../../src/loop/log.js";
+import { PortRejectedError } from "../../src/dispatcher/port.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
@@ -694,6 +695,49 @@ test("R2-8b starting item from an earlier tick holds its host slot", async () =>
       await untilItem(harness.ctx.statePath, "gh-demo-1", (li) => li?.phase !== "starting");
       await settleSoon(first, harness.control);
       await settleSoon(second, harness.control);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// B1: one routed host sits in excludedHosts while the item already
+// counts two startRejections. The next tick claims the same host again
+// through the exclusion retry and logs exclusions-retried. The port
+// rejects that start, and the rejection parks the item as operator
+// start-rejected through the existing start.ts path.
+test("B1 a claim retries the excluded host and parks at maxStartRejections", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir, { hosts: ["host-a"] });
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          excludedHosts: ["host-a"],
+          startRejections: 2,
+        },
+      });
+      await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0", "gh-demo-1"));
+      const ctx: SchedulerContext = {
+        ...harness.ctx,
+        dispatcher: {
+          ...harness.ctx.dispatcher,
+          start: () =>
+            Promise.reject(new PortRejectedError("host-unsupported", "host host-a rejects starts")),
+        },
+      };
+      const scheduler = createScheduler(ctx);
+      const report = await scheduler.tick();
+      await scheduler.settled();
+      expect(report.claimed).toEqual(["gh-demo-1"]);
+      const retry = harness.events.find((line) => line.startsWith("exclusions-retried:"));
+      expect(retry).toBe("exclusions-retried::host-a::::");
+      const parked = (await readLoopState(ctx.statePath)).items["gh-demo-1"] as unknown as LoopItem;
+      expect(parked.park).toMatchObject({ kind: "operator", code: "start-rejected" });
+      expect(parked.startRejections).toBe(3);
+      expect(parked.excludedHosts).toContain("host-a");
     } finally {
       restoreEnv();
     }

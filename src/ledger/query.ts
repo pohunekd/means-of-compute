@@ -12,6 +12,7 @@ export interface ProviderRow {
   readonly outputTokens: number | null;
   readonly requests: number;
   readonly sources: readonly string[];
+  readonly unmeasuredRequests?: number;
 }
 
 export interface HostRow {
@@ -62,6 +63,7 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
       outputs: (number | null)[];
       requests: number;
       sources: Set<string>;
+      unmeasured: number;
     }
   >();
   for (const record of records) {
@@ -76,6 +78,7 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
           outputs: [],
           requests: 0,
           sources: new Set<string>(),
+          unmeasured: 0,
         };
         groups.set(key, group);
         order.push(key);
@@ -84,6 +87,7 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
       group.outputs.push(token.outputTokens);
       group.requests += token.requests;
       group.sources.add(token.source);
+      group.unmeasured += token.unmeasuredRequests ?? 0;
     }
   }
   const rows = order.map((key) => {
@@ -91,13 +95,18 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
     if (group === undefined) {
       throw new Error(`ledger query: missing provider group ${key}`);
     }
+    const inputTokens = nullSum(group.inputs);
+    const outputTokens = nullSum(group.outputs);
     return {
       provider: group.provider,
       model: group.model,
-      inputTokens: nullSum(group.inputs),
-      outputTokens: nullSum(group.outputs),
+      inputTokens,
+      outputTokens,
       requests: group.requests,
       sources: orderStrings(group.sources),
+      ...(group.unmeasured > 0 && inputTokens !== null && outputTokens !== null
+        ? { unmeasuredRequests: group.unmeasured }
+        : {}),
     };
   });
   rows.sort((a, b) =>

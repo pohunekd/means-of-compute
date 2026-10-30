@@ -13,6 +13,7 @@ export type PendingKind = "session" | "audit";
 // requests is null only when the usage source reported nothing at all.
 export interface PendingTokenUsage extends Omit<TokenUsage, "requests"> {
   readonly requests: number | null;
+  readonly unmeasuredRequests?: number;
 }
 
 export interface PendingSession {
@@ -53,6 +54,7 @@ export interface SpendTokens {
   readonly outputTokens: number | null;
   readonly requests: number | null;
   readonly source: string;
+  readonly unmeasuredRequests?: number;
 }
 
 export interface SpendEntry {

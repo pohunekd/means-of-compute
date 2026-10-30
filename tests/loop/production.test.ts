@@ -65,6 +65,16 @@ async function writeConfigs(dir: string, factoryLogin: string): Promise<string> 
   });
 }
 
+async function loadLoopConfigsWithBudget(
+  dir: string,
+  budget: Record<string, unknown>,
+  path: string,
+): Promise<unknown> {
+  const budgetPath = join(dir, "low-budget.json");
+  await Bun.write(budgetPath, `${JSON.stringify(budget, null, 2)}\n`);
+  return loadLoopConfigs(path, "production", budgetPath);
+}
+
 async function writeConfigsWithGrace(
   dir: string,
   factoryLogin: string,
@@ -183,6 +193,25 @@ test("production startup checks GitHub first and stops cleanly (P3, L47)", async
     );
     expect(tight).toBe(
       "shutdownGraceMs 600000 must exceed the largest audit provider timeoutMs 600000 (meta-wonder)",
+    );
+    const lowBudget = JSON.parse(readFileSync("config/budget.json", "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const meter = readJson(join(dir, "meter.json"));
+    const outcome = await loadLoopConfigsWithBudget(
+      dir,
+      {
+        ...lowBudget,
+        unmeasuredMeterCall: { inputTokens: 1024, outputTokens: 65536 },
+      },
+      path,
+    ).then(
+      () => "loaded",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(outcome).toContain(
+      `config: budget unmeasuredMeterCall.inputTokens (1024) is below meter maxRequestBytes (${String(meter["maxRequestBytes"] as number)})`,
     );
     for (const owned of ["verdicts", "digest", "trial", "gh-config"]) {
       expect(existsSync(join(dir, owned))).toBe(true);

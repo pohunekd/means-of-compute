@@ -177,6 +177,17 @@ function isValidPortToken(token: TokenUsage): boolean {
   if (!Number.isInteger(token.requests) || token.requests < 0) {
     return false;
   }
+  if (token.unmeasuredRequests !== undefined) {
+    if (
+      !Number.isSafeInteger(token.unmeasuredRequests) ||
+      token.unmeasuredRequests < 1 ||
+      token.unmeasuredRequests > token.requests ||
+      token.inputTokens === null ||
+      token.outputTokens === null
+    ) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -217,6 +228,9 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): Pendi
             outputTokens: token.outputTokens,
             requests: token.requests,
             source: token.source,
+            ...(token.unmeasuredRequests !== undefined
+              ? { unmeasuredRequests: token.unmeasuredRequests }
+              : {}),
           }))
         : [
             {

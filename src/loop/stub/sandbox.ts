@@ -108,6 +108,7 @@ interface BudgetCopy {
   readonly nvidiaDailyRequestLimit: number;
   readonly nvidiaProviderId: string;
   readonly unmeasuredAuditCall: { readonly inputTokens: number; readonly outputTokens: number };
+  readonly unmeasuredMeterCall: { readonly inputTokens: number; readonly outputTokens: number };
 }
 
 interface LedgerCopy {

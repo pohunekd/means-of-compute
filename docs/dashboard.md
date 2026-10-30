@@ -178,12 +178,12 @@ pricing failure. With no entries in scope the price part is prefixed with
 `config/providers/<id>.json input $<in> per 1M, output $<out> per 1M`,
 joined with `"; "`, plus `; upper bound: cached-input pricing of <ids> not
 applied` when a provider prices cached input (there is no cached count to
-apply it to). When the scope holds bounded unmeasured audit entries, the spent-today and spent-total cells read `<usd> (includes the upper bound for unmeasured audit calls of <sorted ids>)`.
+apply it to). When the scope holds bounded unmeasured entries, the spent-today and spent-total cells read `<usd> (includes the upper bound for unmeasured calls of <sorted ids>)`.
 
 `Tokens by provider (finished tasks)`: columns
 `provider, model, input tokens, output tokens, requests, sources`, from the
 ledger query, `sources` joined by `", "`. Source: `ledger records tokens[]`.
-Note: `<n> pending entries are not in this table; they count in spend above.`
+Note: `<n> pending entries are not in this table; they count in spend above.` A provider row with unmeasured calls shows `<requests> (<n> without usage)`.
 `Session hours by host (finished tasks)`: columns `host, hours, sources`,
 plus a `total` row with `Σ seconds / 3600` to 2 decimals. Source:
 `ledger records sessionSeconds[]`.

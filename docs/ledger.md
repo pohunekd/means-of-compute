@@ -67,6 +67,8 @@ A pending entry carries one session or audit report before finalize:
   only carry `auditor-usage` tokens.
 - `finishedAt` is exactly `Date.prototype.toISOString()` form.
 
+A token entry may carry `unmeasuredRequests` (at least 1): that many of its `requests` were billed but reported no usage, and `inputTokens` and `outputTokens` are the sums of the other calls, never null. The fold adds the counts; a null count from an older entry makes the group unknown again and drops the field. Entries without the field mean what they always meant.
+
 ## Reader rules
 
 Reading rejects the file with exit 2, naming the label and path, and the line where one applies: a

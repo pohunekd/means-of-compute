@@ -134,6 +134,11 @@ export function spendEntriesOf(contents: LedgerContents): readonly SpendEntry[] 
       outputTokens: entry.outputTokens,
       requests: entry.requests,
       source: entry.source,
+      ...(entry.unmeasuredRequests !== undefined &&
+      entry.inputTokens !== null &&
+      entry.outputTokens !== null
+        ? { unmeasuredRequests: entry.unmeasuredRequests }
+        : {}),
     })),
   }));
   for (const entry of contents.pending) {
@@ -147,6 +152,11 @@ export function spendEntriesOf(contents: LedgerContents): readonly SpendEntry[] 
         outputTokens: token.outputTokens,
         requests: token.requests,
         source: token.source,
+        ...(token.unmeasuredRequests !== undefined &&
+        token.inputTokens !== null &&
+        token.outputTokens !== null
+          ? { unmeasuredRequests: token.unmeasuredRequests }
+          : {}),
       })),
     });
   }

@@ -107,6 +107,9 @@ export interface TokenUsage {
   readonly outputTokens: number | null;
   readonly requests: number;
   readonly source: string;
+  // Billed calls that reported no usage; when present, inputTokens and
+  // outputTokens are the sums of the other calls and are never null.
+  readonly unmeasuredRequests?: number;
 }
 
 export interface SessionTime {

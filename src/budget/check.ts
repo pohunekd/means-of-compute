@@ -7,7 +7,7 @@
 // flags are a test override that injects totals into the same decision
 // function; the override never writes escalation state or the escalation
 // log, it only prints `would escalate: <event key>` on stderr.
-import { loadBudgetConfig } from "./config.js";
+import { loadBudgetConfig, spendBoundsOf } from "./config.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { TOKENS_PER_1M } from "./cost.js";
 import { loadLedgerConfig, readLedger, spendEntriesOf } from "../ledger/read.js";
@@ -198,7 +198,7 @@ async function run(): Promise<number> {
         pricing,
         config.nvidiaProviderId,
         clock.now,
-        config.unmeasuredAuditCall,
+        spendBoundsOf(config),
       );
       decision = decideAdmission(ledgerSummary, config, { route });
     }
@@ -209,7 +209,7 @@ async function run(): Promise<number> {
   if (decision.admit) {
     const bounded =
       ledgerSummary !== null && ledgerSummary.boundedWorkItemIds.length > 0
-        ? `, bounded audit calls ${String(ledgerSummary.boundedWorkItemIds.length)}`
+        ? `, bounded items ${String(ledgerSummary.boundedWorkItemIds.length)}`
         : "";
     console.log(
       `admitted: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)}${bounded})`,
@@ -225,7 +225,7 @@ async function run(): Promise<number> {
     process.stderr.write(`would escalate: ${eventKeyString(kind, clock.now)}\n`);
     const boundedRefused =
       ledgerSummary !== null && ledgerSummary.boundedWorkItemIds.length > 0
-        ? `, bounded audit calls ${String(ledgerSummary.boundedWorkItemIds.length)}`
+        ? `, bounded items ${String(ledgerSummary.boundedWorkItemIds.length)}`
         : "";
     console.log(
       `refused: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)}${boundedRefused})`,

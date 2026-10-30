@@ -56,6 +56,20 @@ export function isPendingUsage(value: unknown): value is PendingUsage {
   if (sourcePredicateError(entry) !== null) {
     return false;
   }
+  for (const token of entry.tokens) {
+    if (token.unmeasuredRequests !== undefined) {
+      if (
+        !Number.isSafeInteger(token.unmeasuredRequests) ||
+        token.unmeasuredRequests < 1 ||
+        token.requests === null ||
+        token.unmeasuredRequests > token.requests ||
+        token.inputTokens === null ||
+        token.outputTokens === null
+      ) {
+        return false;
+      }
+    }
+  }
   if (Number.isNaN(Date.parse(entry.finishedAt))) {
     return false;
   }

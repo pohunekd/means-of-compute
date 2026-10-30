@@ -5,6 +5,7 @@
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { recount } from "../auditor/verdict.js";
 import { isBoundedAuditToken, isPriced, summarizeSpend, utcCalendarDay } from "../budget/cost.js";
+import { spendBoundsOf } from "../budget/config.js";
 import { decideAdmission } from "../budget/decision.js";
 import type { NanoPricing } from "../budget/pricing.js";
 import { queryLedger } from "../ledger/query.js";
@@ -537,7 +538,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       pricing,
       inputs.budget.nvidiaProviderId,
       inputs.now,
-      inputs.budget.unmeasuredAuditCall,
+      spendBoundsOf(inputs.budget),
     );
     const todayIds = [
       ...new Set(scope.today.flatMap((entry) => entry.tokens.map((token) => token.provider))),
@@ -575,7 +576,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: `Spent today (UTC ${day})`,
         cell: textCell(
-          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured audit calls of ${ids.join(", ")})`,
+          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured calls of ${ids.join(", ")})`,
         ),
         source: spentTodaySource,
       });
@@ -605,7 +606,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: "Spent total",
         cell: textCell(
-          `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))} (includes the upper bound for unmeasured audit calls of ${ids.join(", ")})`,
+          `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))} (includes the upper bound for unmeasured calls of ${ids.join(", ")})`,
         ),
         source: spentTotalSource,
       });
@@ -669,7 +670,11 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         textCell(row.model),
         input,
         output,
-        textCell(groupDigits(row.requests)),
+        textCell(
+          row.unmeasuredRequests !== undefined
+            ? `${groupDigits(row.requests)} (${String(row.unmeasuredRequests)} without usage)`
+            : groupDigits(row.requests),
+        ),
         textCell(row.sources.join(", ")),
       ];
     });

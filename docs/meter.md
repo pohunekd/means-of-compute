@@ -241,7 +241,7 @@ and model, in first-appearance order, with null-propagating token sums and
 `source: "meter-proxy"`. One billed call without usage makes that
 session's counts `null`, and the budget guard refuses `spend unknown` for
 a priced provider — the fail-safe, never a zero. A session with no billed
-call gets a measured zero (`requests: 0`, counts `0`).
+call gets a measured zero (`requests: 0`, counts `0`). A billed call that reports no usage (a timeout, a body without usage, or a start without an end) does not null its group: it adds one to `unmeasuredRequests`, and the known counts of the other calls are kept.
 
 ## Grant lifecycle
 

@@ -9,7 +9,7 @@ import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
 import { BudgetGateError } from "../budget/gate.js";
 import { InputPathError } from "../fs/input.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
-import type { LoopRepoConfig } from "./config.js";
+import type { LoopCheckExcerptConfig, LoopRepoConfig } from "./config.js";
 import { readRegistry } from "../dispatcher/registry.js";
 import { fetchRefs, GitError, type GitDeps, remoteBranchSha, revParse } from "./git.js";
 import {
@@ -20,7 +20,7 @@ import {
   workItemMarker,
   verdictCheck,
 } from "./merge-rule.js";
-import { GitHubError, utf8Prefix, type CheckRun } from "./github.js";
+import { GitHubError, utf8Prefix, type CheckAnnotation, type CheckRun } from "./github.js";
 import type { BriefPrevious } from "./brief.js";
 import { parkOperator, parkStall } from "./park.js";
 import { reconcile } from "./project.js";
@@ -33,6 +33,7 @@ export interface ReviewContext extends StartContext {
   readonly repos: readonly LoopRepoConfig[];
   readonly git: GitDeps;
   readonly requiredChecks: readonly string[];
+  readonly checkExcerpt: LoopCheckExcerptConfig;
   readonly ciTimeoutMs: number;
   readonly auditRetries: number;
   readonly auditor: Pick<AuditDeps, "config" | "budget" | "call">;
@@ -73,6 +74,53 @@ export function failingChecksOf(
   return failing;
 }
 
+// The runner adds this line to every failed job; it says nothing the
+// check name does not.
+const GENERIC_FAILURE = /^Process completed with exit code \d+\.$/;
+// CSI colour sequences and the other C0 controls except newline and tab.
+// eslint-disable-next-line no-control-regex
+const ANSI_CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+
+export interface FailingAnnotations {
+  readonly check: string;
+  readonly annotations: readonly CheckAnnotation[];
+}
+
+// The failure annotations of the failing checks as brief text, runner
+// prefixes removed, cut to maxBytes. Null when there is none.
+export function checkExcerptOf(
+  failing: readonly FailingAnnotations[],
+  config: LoopCheckExcerptConfig,
+): string | null {
+  const blocks: string[] = [];
+  for (const entry of failing) {
+    for (const annotation of entry.annotations) {
+      if (annotation.level !== "failure" || GENERIC_FAILURE.test(annotation.message.trim())) {
+        continue;
+      }
+      let text = `[${entry.check}] ${annotation.path}:${String(annotation.startLine)}`;
+      if (annotation.title !== null && annotation.title !== "") {
+        text += ` ${annotation.title}`;
+      }
+      text += `\n${annotation.message}`;
+      for (const prefix of config.stripPrefixes) {
+        text = text.split(prefix).join("");
+      }
+      blocks.push(text.replace(ANSI_CSI, "").replace(CONTROL, "").trimEnd());
+    }
+  }
+  if (blocks.length === 0) {
+    return null;
+  }
+  const joined = blocks.join("\n");
+  if (Buffer.byteLength(joined, "utf8") <= config.maxBytes) {
+    return joined;
+  }
+  return `${utf8Prefix(joined, config.maxBytes)}\n(excerpt truncated)`;
+}
+
 export function previousRoundOf(
   li: LoopItem,
   verdicts: readonly AuditVerdict[],
@@ -101,9 +149,20 @@ export function previousRoundOf(
       audited = { headSha: auditedHead, verdict };
     }
   }
+  const head = li.pull?.headSha ?? null;
+  let red: RoundRecord | null = null;
+  for (const record of li.rounds) {
+    if (record.outcome === "red-ci" && record.headSha !== null && record.headSha === head) {
+      red = record;
+    }
+  }
   return {
     outcome: last.outcome,
-    failingChecks: [...last.failingChecks],
+    failingChecks: red === null ? [] : [...red.failingChecks],
+    checkExcerpt:
+      red === null || red.headSha === null || red.checkExcerpt === undefined
+        ? null
+        : { headSha: red.headSha, text: red.checkExcerpt },
     findings:
       audited === null ? null : { headSha: audited.headSha, list: audited.verdict.findings },
   };
@@ -217,6 +276,7 @@ export interface ReviewClose {
   readonly failingChecks: readonly string[];
   readonly verdict: RoundRecord["verdict"];
   readonly baseRace: boolean;
+  readonly checkExcerpt?: string | null;
   readonly finalize?: { readonly humanMerge: boolean };
 }
 
@@ -243,6 +303,9 @@ export async function closeReviewRound(
     failingChecks: [...input.failingChecks],
     verdict: input.verdict,
     baseRace: input.baseRace,
+    ...(input.checkExcerpt === undefined || input.checkExcerpt === null
+      ? {}
+      : { checkExcerpt: input.checkExcerpt }),
     ...(input.finalize === undefined ? {} : { finalize: input.finalize }),
   };
   const decision = await closeRound(ctx, item, close);
@@ -403,17 +466,44 @@ export async function ciStep(ctx: ReviewContext, item: WorkItem): Promise<Review
     return "auditing";
   }
   if (status === "red") {
+    const failing = failingChecksOf(runs, ctx.requiredChecks);
+    const annotationsStep = await githubStep(ctx, item, async () => {
+      const out: FailingAnnotations[] = [];
+      for (const name of failing) {
+        let latest: CheckRun | null = null;
+        for (const run of runs) {
+          if (run.name === name && (latest === null || run.id > latest.id)) {
+            latest = run;
+          }
+        }
+        if (latest !== null) {
+          out.push({
+            check: name,
+            annotations: await ctx.github.checkAnnotations(item.repo, latest.id),
+          });
+        }
+      }
+      return out;
+    });
+    if (!annotationsStep.ok) {
+      return "pending";
+    }
+    const checkExcerpt = checkExcerptOf(annotationsStep.value, ctx.checkExcerpt);
     ctx.log.log({
       event: "ci",
       workItemId: item.id,
       round: li.round,
       sha: pull.headSha,
       code: "red",
+      ...(checkExcerpt === null
+        ? {}
+        : { detail: `excerpt ${String(Buffer.byteLength(checkExcerpt, "utf8"))} bytes` }),
     });
     return closeReviewRound(ctx, item, {
       outcome: "red-ci",
       headSha: pull.headSha,
-      failingChecks: failingChecksOf(runs, ctx.requiredChecks),
+      failingChecks: failing,
+      checkExcerpt,
       verdict: null,
       baseRace: false,
     });

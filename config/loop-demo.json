@@ -47,6 +47,7 @@
     "mergeRetries": 3,
     "trustedAssociations": ["OWNER", "MEMBER", "COLLABORATOR"],
     "requiredChecks": ["gates"],
+    "checkExcerpt": { "maxBytes": 4000, "stripPrefixes": [] },
     "mergeMethod": "merge",
     "intake": {
       "enabled": false,

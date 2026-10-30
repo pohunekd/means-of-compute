@@ -22,6 +22,7 @@ export interface RoundClose {
   readonly failingChecks: readonly string[];
   readonly verdict: RoundRecord["verdict"];
   readonly baseRace: boolean;
+  readonly checkExcerpt?: string;
   readonly finalize?: { readonly humanMerge: boolean };
 }
 
@@ -59,6 +60,7 @@ export async function closeRound(
       newlyMet: [...newlyMetOf(item, li.rounds, close.outcome)],
       at: ctx.now().toISOString(),
       baseRace: close.baseRace,
+      ...(close.checkExcerpt === undefined ? {} : { checkExcerpt: close.checkExcerpt }),
     };
     const rounds = [...li.rounds, record];
     const excludedHosts =

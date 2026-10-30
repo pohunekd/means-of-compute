@@ -287,6 +287,7 @@ async function makeHarness(
     repos: [{ repo: REPO, checkoutDir, idPrefix: "gh-" }],
     git: gitDeps,
     requiredChecks: ["gates"],
+    checkExcerpt: { maxBytes: 4000, stripPrefixes: [] },
     ciTimeoutMs: 600_000,
     auditRetries: 1,
     auditor: {

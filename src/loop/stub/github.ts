@@ -6,6 +6,7 @@ import { GitError, isAncestor, revParse, type GitDeps } from "../git.js";
 import {
   GitHubError,
   utf8Prefix,
+  type CheckAnnotation,
   type CheckRun,
   type CommentFirstLine,
   type GitHubPort,
@@ -25,6 +26,7 @@ export interface StubGitHubOptions {
   readonly git: GitDeps;
   readonly scratchDir: string;
   readonly ci: (sha: string) => StubCi;
+  readonly annotations?: (checkRunId: number) => readonly CheckAnnotation[];
 }
 
 export interface StubGitHubSnapshot {
@@ -312,6 +314,15 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     }
     checkId += 1;
     return [{ id: checkId, name: "gates", status: "completed", conclusion: outcome }];
+  }
+
+  async function checkAnnotations(
+    repo: string,
+    checkRunId: number,
+  ): Promise<readonly CheckAnnotation[]> {
+    requireRepo("checkAnnotations", repo);
+    await Promise.resolve();
+    return options.annotations?.(checkRunId) ?? [];
   }
 
   async function commentFirstLines(
@@ -642,6 +653,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
   return {
     viewerLogin,
     checkRuns,
+    checkAnnotations,
     commentFirstLines,
     postComment,
     pullsForBranch,

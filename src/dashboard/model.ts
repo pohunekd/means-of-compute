@@ -1102,8 +1102,12 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
 }
 
 function buildModelsPanel(inputs: DashboardInputs): Panel {
-  const source = `loop results ${inputs.resultsPath} (one line per closed round, read through readResults)`;
+  const source = "loop results (resultsPath of config/loop.json, read through readResults)";
+  const columns = ["model", "rounds", "successes", "failures", "excluded", "success rate"];
   if (!inputs.results.ok) {
+    // A failed input renders the way other panels render failures: one
+    // row of error cells, never an empty table with a grey note.
+    const failure = failureCell(inputs.results.failure);
     return {
       id: "models",
       title: "Models",
@@ -1111,13 +1115,10 @@ function buildModelsPanel(inputs: DashboardInputs): Panel {
       tables: [
         {
           caption: "Models",
-          columns: ["model", "rounds", "successes", "failures", "excluded", "success rate"],
-          rows: [],
+          columns,
+          rows: [[failure, failure, failure, failure, failure, failure]],
           source,
-          note:
-            inputs.results.failure.kind === "error"
-              ? `error (${inputs.results.failure.code})`
-              : `no data (${inputs.results.failure.reason})`,
+          note: null,
         },
       ],
     };
@@ -1131,7 +1132,7 @@ function buildModelsPanel(inputs: DashboardInputs): Panel {
       tables: [
         {
           caption: "Models",
-          columns: ["model", "rounds", "successes", "failures", "excluded", "success rate"],
+          columns,
           rows: [],
           source,
           note: "no closed rounds yet",
@@ -1157,7 +1158,7 @@ function buildModelsPanel(inputs: DashboardInputs): Panel {
     tables: [
       {
         caption: "Models",
-        columns: ["model", "rounds", "successes", "failures", "excluded", "success rate"],
+        columns,
         rows,
         source,
         note: null,

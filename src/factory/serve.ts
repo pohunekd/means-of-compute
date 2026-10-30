@@ -4,7 +4,7 @@
 // startup failure prints "factory: <message>" and exits 2; signals exit 0.
 import { loadAuditorConfig } from "../auditor/config.js";
 import { loadDispatcherConfig } from "../dispatcher/config.js";
-import { loadLoopConfig } from "../loop/config.js";
+import { DEFAULT_LOOP_CONFIG_PATH, loadLoopConfig } from "../loop/config.js";
 import { loadBudgetConfig } from "../budget/config.js";
 import { loadPricingForIds } from "../budget/pricing.js";
 import {
@@ -150,15 +150,14 @@ async function serve(): Promise<number> {
   let ledgerPath: string;
   let verdictDir: string;
   let registryPath: string;
-  let resultsPath: string;
   let fixed: {
     budget: Awaited<ReturnType<typeof loadBudgetConfig>>;
     route: readonly string[];
     baselines: DashboardConfig["baselines"];
     workRowLimit: number;
     logPath: string;
-    resultsPath: string;
   };
+  let resultsPath: string;
   try {
     const budget = await loadBudgetConfig();
     const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
@@ -172,14 +171,13 @@ async function serve(): Promise<number> {
     verdictDir = flags.verdicts ?? (await loadAuditorConfig()).verdictDir;
     registryPath = flags.registry ?? (await loadDispatcherConfig()).registryPath;
     resultsPath =
-      flags.results ?? (await loadLoopConfig("config/loop.json", "production")).resultsPath;
+      flags.results ?? (await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production")).resultsPath;
     fixed = {
       budget,
       route,
       baselines: config.baselines,
       workRowLimit: config.workRowLimit,
       logPath: config.logPath,
-      resultsPath,
     };
   } catch (error: unknown) {
     process.stderr.write(`factory: ${error instanceof Error ? error.message : String(error)}\n`);

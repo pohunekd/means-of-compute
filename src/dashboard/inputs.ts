@@ -3,6 +3,7 @@
 // code; the message goes to the log. A thrown value that is not an Error is
 // rethrown and becomes a 500.
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
+import { InputPathError } from "../fs/input.js";
 import { readResults, LoopResultsDataError } from "../loop/results.js";
 import type { ResultLine } from "../loop/results.js";
 import type { BudgetConfig } from "../budget/config.js";
@@ -44,7 +45,6 @@ export interface DashboardInputs {
   readonly baselines: Baselines;
   readonly workRowLimit: number;
   readonly logPath: string;
-  readonly resultsPath: string;
   readonly ledger: Sourced<LedgerContents>;
   readonly pricing: Sourced<ReadonlyMap<string, NanoPricing>>;
   readonly verdicts: ReadonlyMap<string, Sourced<readonly AuditVerdict[]>>;
@@ -68,7 +68,6 @@ export interface FixedInputs {
   readonly baselines: Baselines;
   readonly workRowLimit: number;
   readonly logPath: string;
-  readonly resultsPath: string;
 }
 
 function errorFailure(code: InputErrorCode): InputFailure {
@@ -175,8 +174,13 @@ async function readResultsInput(
     if (!(error instanceof Error)) {
       throw error;
     }
+    // readResults wraps path failures (stat, read, not a file) in a
+    // LoopResultsDataError whose cause is an InputPathError; only a bad
+    // middle line is a data error.
     const code: InputErrorCode =
-      error instanceof LoopResultsDataError ? "results-invalid" : "results-unreadable";
+      error instanceof LoopResultsDataError && !(error.cause instanceof InputPathError)
+        ? "results-invalid"
+        : "results-unreadable";
     log("results", code, error.message);
     return { ok: false, failure: errorFailure(code) };
   }
@@ -252,7 +256,6 @@ export async function gatherInputs(
     baselines: fixed.baselines,
     workRowLimit: fixed.workRowLimit,
     logPath: fixed.logPath,
-    resultsPath: fixed.resultsPath,
     ledger,
     pricing,
     hosts,

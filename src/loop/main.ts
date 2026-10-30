@@ -1,5 +1,6 @@
 // Loop entry point: parses the CLI args and runs the production or stub run.
 import { resolve } from "node:path";
+import { DEFAULT_LOOP_CONFIG_PATH } from "./config.js";
 import { LoopStartupError, createStopSignal, loadLoopConfigs, toStartupError } from "./compose.js";
 import { runProduction, type ProductionOpeners } from "./production.js";
 import { runStub } from "./stub/compose.js";
@@ -51,7 +52,7 @@ export function parseLoopArgs(argv: readonly string[]): LoopArgs {
     throw new LoopStartupError(USAGE);
   }
   if (config === null) {
-    config = stub ? "config/loop-demo.json" : "config/loop.json";
+    config = stub ? "config/loop-demo.json" : DEFAULT_LOOP_CONFIG_PATH;
   }
   return { config, stub, queue };
 }

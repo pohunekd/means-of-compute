@@ -28,7 +28,6 @@ MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
   argument and must exist and not start with `--`. A repeat, an unknown
   flag, a positional argument or a missing value exits 2.
 - `MOC_DASHBOARD_NOW` pins the clock for tests; unset means the real clock.
-- `--results` defaults to the `resultsPath` of `config/loop.json`.
 - Startup prints `factory: dashboard time pinned by MOC_DASHBOARD_NOW: <iso>`
   on stderr when pinned, then
   `factory: dashboard listening (dashboard) port <port>` on stdout. The
@@ -228,8 +227,7 @@ with `(s/a).toFixed(4)`. Source:
 
 One table, caption `Models`, columns
 `model, rounds, successes, failures, excluded, success rate`.
-Source: `loop results <resultsPath> (one line per closed round, read through readResults)`
-where `<resultsPath>` is the `resultsPath` of `config/loop.json`.
+Source: `loop results (resultsPath of config/loop.json, read through readResults)`.
 
 Per model: `rounds` counts every result line for the model, `successes`
 counts lines with `routingResult === "success"`, `failures` counts lines
@@ -239,10 +237,12 @@ rounds only (`successes / (successes + failures)`, `(s/(s+f)).toFixed(4)`)
 and is `n/a` when there are none. Rows sort by `rounds` descending, then
 model id ascending.
 
-A middle line that `readResults` rejects is a data error shown on the
-table note as `error (results-invalid)`; a torn last line is ignored as
-`readResults` ignores it. An absent results file renders an explicit empty
-state (`no closed rounds yet`), never invented numbers.
+A middle line that `readResults` rejects is a data error shown as one row
+of `error (results-invalid)` cells; a torn last line is ignored as
+`readResults` ignores it. An unreadable results path (missing parent,
+not a file, cannot read) shows one row of `error (results-unreadable)`
+cells. An absent results file renders an explicit empty state
+(`no closed rounds yet`), never invented numbers.
 
 ## Money arithmetic
 
@@ -288,8 +288,8 @@ Never a partial sum.
 | registry invalid or a bad `requestId`                                                        | `error registry-invalid`, logged                 | `error (registry-invalid)`, logged, registry cells                       |
 | registry unreadable                                                                          | `error registry-unreadable`, logged              | `error (registry-unreadable)`                                            |
 | loop results absent with parent present                                                      | empty contents                                   | panel `Models` shows `no closed rounds yet`                              |
-| loop results invalid middle line                                                             | `error results-invalid`, logged                  | panel `Models` note shows `error (results-invalid)`                      |
-| loop results unreadable (missing parent, not a file, cannot read)                            | `error results-unreadable`, logged               | panel `Models` note shows `error (results-unreadable)`                   |
+| loop results middle line invalid                                                             | `error results-invalid`, logged                  | panel `Models` shows one row of `error (results-invalid)` cells          |
+| loop results path missing parent, not a file, or unreadable                                  | `error results-unreadable`, logged               | panel `Models` shows one row of `error (results-unreadable)` cells       |
 | work items                                                                                   | `null`                                           | `no data (no work item source (#15, #17))`                               |
 | Host header not allowed or missing                                                           | 421                                              | none                                                                     |
 | method not `GET`                                                                             | 405                                              | none                                                                     |

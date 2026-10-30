@@ -82,6 +82,7 @@ const TOOL_ORDER: readonly string[] = [
   "submit_work",
   "approve",
   "pause_fleet",
+  "resolve_session",
 ];
 
 const REFUSED_CODES: ReadonlySet<string> = new Set([

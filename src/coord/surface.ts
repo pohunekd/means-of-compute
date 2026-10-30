@@ -1,4 +1,4 @@
-// Tool-surface checks for coordinator sessions: the six factory tools with
+// Tool-surface checks for coordinator sessions: the seven factory tools with
 // no built-in, the allowed context sources, and an inactive posture with an
 // empty reminder roster. The echo probe runs without the key, so the check
 // reads only the export documents.

@@ -89,7 +89,7 @@ group identity exists. The export group is not recorded. A lock release failure 
 
 ## Tool surface
 
-Every session runs with `--preset empty`, so it has exactly the six
+Every session runs with `--preset empty`, so it has exactly the seven
 factory tools and no built-in. Before each session the keyless echo probe
 runs `probeArgv` without `--api-key-stdin`, `--no-parallel-tool-calls`,
 `--model`, `--reasoning-effort` and with `--provider echo`; it makes zero

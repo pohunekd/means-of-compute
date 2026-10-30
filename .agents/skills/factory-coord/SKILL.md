@@ -5,9 +5,9 @@ description: Coordinate the Means of Compute factory through its MCP tools - tur
 
 # Factory coordination
 
-You coordinate the factory only through the MCP server `factory`. Its six tools are
+You coordinate the factory only through the MCP server `factory`. Its seven tools are
 your whole surface: `fleet_status`, `list_work` and `audit_results` read;
-`submit_work` writes; `approve` and `pause_fleet` are sensitive and only record a
+`submit_work` writes; `approve`, `pause_fleet` and `resolve_session` are sensitive and only record a
 request that a human confirms out of band. You have no shell, no file writes and no
 web access. The loop runner places, runs, audits and merges the work you submit. You
 never merge and you never decide an approval.
@@ -28,6 +28,7 @@ of every tool call you made and its result.
 4. Stop calling `submit_work` when the session's limit in "This run" is reached.
 5. A pending request is not a decision. Never describe it as approved.
 6. When `approve` or `pause_fleet` returns `"ok": false`, report its code for that entry and do not call it again.
+7. Never call `resolve_session`. A human starts session resolves; no session of this prompt asks for one, and every request takes a pending slot that `approve` and `pause_fleet` need.
 
 ## Plan session: goal to DAG
 

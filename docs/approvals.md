@@ -11,10 +11,12 @@ with the `approvals` CLI. No MCP method decides, and no code under
   `maxReasonChars`. Every key is required and no other key is allowed.
 - `src/approvals/requests.schema.json`: validates the requests file. The
   `approve` args are `workItemId`, `pullNumber`, `headSha` and `reason`; the
-  `pause_fleet` args are `action` (`pause` or `resume`) and `reason`. `reason`
-  has no `maxLength` in the file; `maxReasonChars` limits new requests only.
+  `pause_fleet` args are `action` (`pause` or `resume`) and `reason`; the
+  `resolve_session` args are `requestId` (`<workItemId>:<round>`) and `reason`.
+  `reason` has no `maxLength` in the file; `maxReasonChars` limits new requests only.
 - `src/approvals/store.ts`: request types, `checkApprovals`, `readApprovals`,
-  `recordRequest`, `fleetPause`, `pendingRequests`, `approvedMerge`.
+  `recordRequest`, `fleetPause`, `pendingRequests`, `approvedMerge`,
+  `approvedResolves`.
 - `src/approvals/decide.ts`: `decideRequest` moves one pending request to
   `approved` or `rejected` under the requests lock.
 - `src/approvals/cli.ts`: `list` and `decide`; `runApprovalsCli` takes
@@ -63,6 +65,17 @@ and intake continues.
 `approvedMerge(doc, workItemId, pullNumber, headSha)` returns the `approve`
 request whose state is `approved` and whose `args` match all three, else
 `null`. An approval of an older head can never merge a newer one.
+
+## Session resolves (P7 input)
+
+`approvedResolves(doc)` returns every `resolve_session` request with `state
+=== "approved"` as `{requestId, reason}` in `requestId` order. The loop's
+`ApprovalsView` exposes it as `approvedResolves()`; nothing in the loop
+acts on these entries yet. The list is not a queue: the same session id
+can appear more than once, entries are sorted as strings, and a consumer
+keeps its own consumed key (as the loop does with `resolvedApprovals`).
+P7 wiring (the loop's own later step) reads
+this list and calls `dispatch:resolve` for each approved session.
 
 ## Out-of-band confirmation (A7)
 

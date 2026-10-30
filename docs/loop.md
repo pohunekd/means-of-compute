@@ -79,7 +79,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 `src/loop/log.ts` appends one JSON line per event through one chain and latches `failed()` on the first failed write.
 `src/loop/project.ts` projects every store field from the loop item and `reconcile` rewrites a differing item, reports `busy` on a held lock, and throws the rule (a) text on an unknown id. Rounds with outcome start-rejected or lost never count toward modelRouting.attempts.
 `src/loop/rounds.ts` appends the round record, then the result line, logs `round-closed`, and returns the stall decision; `appendMissingResults` backfills missing lines. A close with `finalize` moves the item to `finalizing` with a success finalize in the same write.
-`src/loop/approvals-view.ts` re-reads the requests file on every call and reports the pause state and the merge triple match.
+`src/loop/approvals-view.ts` re-reads the requests file on every call and reports the pause state, the merge triple match and the approved session resolves (`approvedResolves`).
 
 ## Driver start (PR 5c)
 

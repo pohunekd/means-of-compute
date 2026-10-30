@@ -10,7 +10,8 @@
       "mcp__factory__audit_results",
       "mcp__factory__submit_work",
       "mcp__factory__approve",
-      "mcp__factory__pause_fleet"
+      "mcp__factory__pause_fleet",
+      "mcp__factory__resolve_session"
     ],
     "contextSources": [
       "capability_policy",

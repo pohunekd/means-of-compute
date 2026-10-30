@@ -369,6 +369,7 @@ async function runExport(): Promise<void> {
         "mcp__factory__submit_work",
         "mcp__factory__approve",
         "mcp__factory__pause_fleet",
+        "mcp__factory__resolve_session",
       ];
   const sources: readonly string[] = matches
     ? surface.contextSources

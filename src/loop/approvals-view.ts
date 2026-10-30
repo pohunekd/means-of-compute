@@ -2,11 +2,12 @@
 // the driver. Every call re-reads the file; a missing file reads as
 // empty. ApprovalsDataError propagates and the scheduler treats it as
 // fatal.
-import { approvedMerge, fleetPause, readApprovals } from "../approvals/store.js";
+import { approvedMerge, approvedResolves, fleetPause, readApprovals } from "../approvals/store.js";
 
 export interface ApprovalsView {
   fleetPaused(): Promise<boolean>;
   approvedMerge(workItemId: string, pull: number, headSha: string): Promise<boolean>;
+  approvedResolves(): Promise<readonly { readonly requestId: string; readonly reason: string }[]>;
 }
 
 export function createApprovalsView(requestsPath: string): ApprovalsView {
@@ -18,6 +19,12 @@ export function createApprovalsView(requestsPath: string): ApprovalsView {
     async approvedMerge(workItemId: string, pull: number, headSha: string): Promise<boolean> {
       const doc = await readApprovals(requestsPath);
       return approvedMerge(doc, workItemId, pull, headSha) !== null;
+    },
+    async approvedResolves(): Promise<
+      readonly { readonly requestId: string; readonly reason: string }[]
+    > {
+      const doc = await readApprovals(requestsPath);
+      return approvedResolves(doc);
     },
   };
 }

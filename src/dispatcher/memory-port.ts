@@ -2,6 +2,7 @@ import type {
   CancelReason,
   DiffResult,
   DispatcherPort,
+  RetireOutcome,
   PortState,
   PortUsage,
   ReleaseRef,
@@ -118,6 +119,14 @@ export function createMemoryPort(): MemoryPortControl {
         return existing.handle;
       }
       throw new PortRejectedError("request-conflict", `conflicting start for ${request.requestId}`);
+    }
+    for (const other of sessions.values()) {
+      if (other.handle.hostAlias === request.hostAlias && other.handle.branch === request.branch) {
+        throw new PortRejectedError(
+          "worktree-branch-in-use",
+          `branch ${request.branch} is checked out by ${other.handle.sessionId}`,
+        );
+      }
     }
     let baseCommit: string | null;
     if (request.resume) {
@@ -269,7 +278,23 @@ export function createMemoryPort(): MemoryPortControl {
     return Promise.resolve().then(() => releaseNow(ref));
   }
 
-  const port: DispatcherPort = { start, wait, diff, cancel, release, close };
+  function retire(ref: SessionRef): Promise<RetireOutcome> {
+    return Promise.resolve().then(() => {
+      checkReachable(ref.hostAlias);
+      const session = sessions.get(ref.sessionId);
+      if (session === undefined || session.handle.hostAlias !== ref.hostAlias) {
+        return "absent";
+      }
+      if (terminalOf(session) === null) {
+        throw new PortRejectedError("session-live");
+      }
+      sessions.delete(ref.sessionId);
+      sessionByRequest.delete(session.request.requestId);
+      return "removed";
+    });
+  }
+
+  const port: DispatcherPort = { start, wait, diff, cancel, release, retire, close };
 
   function pushCommit(branch: string, sha: string): void {
     // A push originates from a session worktree, so both the origin history

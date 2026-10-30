@@ -15,6 +15,7 @@ import {
   type DiffResult,
   type ReleaseRef,
   type ReleaseResult,
+  type RetireOutcome,
   type SessionHandle,
   type SessionRef,
   type StartRequest,
@@ -29,6 +30,7 @@ import {
   MOC_METADATA,
   acceptanceFailure,
   hostPreflightFailure,
+  isLiveSessionState,
   isSessionNotFound,
   lookupDecision,
   portErrorOf,
@@ -676,6 +678,48 @@ async function diffSession(
   }
 }
 
+// Removes a finished session so its worktree no longer holds the branch:
+// session.remove_accepting_unconfirmed deletes the pohunek-owned worktree and keeps the branch.
+// session_not_found is "absent". Other refusals map like every other call.
+// The factory retires only terminal, ledgered sessions, and a same-user process
+// with an unreadable environment would otherwise block every removal; such
+// candidates are not signalled.
+async function retireSession(port: PortInternals, ref: SessionRef): Promise<RetireOutcome> {
+  if (port.closed) {
+    throw new PohunekAdapterError("closed");
+  }
+  const client = await clientFor(port, ref.hostAlias);
+  let info: SessionInfo;
+  try {
+    info = await client.call("session.inspect", ref.sessionId);
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return "absent";
+    }
+    throw await mappedError(port, ref.hostAlias, error);
+  }
+  if (isLiveSessionState(info.state)) {
+    // A session the dispatcher closed as lost (watch unreachable) can still run on the host.
+    throw new PortRejectedError("session-live");
+  }
+  try {
+    await client.call("session.remove_accepting_unconfirmed", ref.sessionId);
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return "absent";
+    }
+    throw await mappedError(port, ref.hostAlias, error);
+  }
+  port.terminals.delete(terminalKey(ref.hostAlias, ref.sessionId));
+  port.log({
+    level: "info",
+    event: "adapter-retire",
+    hostAlias: ref.hostAlias,
+    sessionId: ref.sessionId,
+  });
+  return "removed";
+}
+
 // Operator release: stop every session on the host that is either the
 // known id or bound to the request, then unbind each stopped bound one.
 // The binding filter decides with daemon order; the known id comes first.
@@ -766,6 +810,7 @@ export function createPohunekPort(
     diff: (ref: SessionRef, base: string) => diffSession(port, ref, base),
     cancel: (ref: SessionRef, reason: CancelReason) => cancelSession(port, ref, reason),
     release: (ref: ReleaseRef): Promise<ReleaseResult> => releaseSessions(port, ref),
+    retire: (ref: SessionRef) => retireSession(port, ref),
     close: () => closePort(port),
   };
 }

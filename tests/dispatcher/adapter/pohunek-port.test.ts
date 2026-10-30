@@ -16,7 +16,7 @@ import {
   type AdapterLogEvent,
 } from "../../../src/dispatcher/adapter/pohunek-port.js";
 import type { PohunekAdapterConfig } from "../../../src/dispatcher/adapter/config.js";
-import type { StartRequest } from "../../../src/dispatcher/port.js";
+import { PortRejectedError, type StartRequest } from "../../../src/dispatcher/port.js";
 
 const CONFIG: PohunekAdapterConfig = {
   agentProfile: "moc-worker",
@@ -116,6 +116,35 @@ function finishedTurn(id: string, cursor = "cursor-1"): SessionWaitTurnResult {
     progress: [{ session_id: id, state: "running", output_advanced: true }],
   };
 }
+
+test("retire removes a finished session through session.remove_accepting_unconfirmed", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(
+      { sessionId: handle.sessionId, hostAlias: "laptop-a" },
+      1000,
+      null,
+    );
+    expect(result.state).toBe("finished");
+    const live = await port.start(request({ requestId: "req-live" }));
+    const liveRetire = await port.retire({ sessionId: live.sessionId, hostAlias: "laptop-a" }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(liveRetire).toBeInstanceOf(PortRejectedError);
+    expect((liveRetire as PortRejectedError).code).toBe("session-live");
+    expect(fake.sessions("laptop-a").some((info) => info.id === live.sessionId)).toBe(true);
+    const first = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
+    expect(first).toBe("removed");
+    expect(methodNames(fake, "laptop-a")).toContain("session.remove_accepting_unconfirmed");
+    const second = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
+    expect(second).toBe("absent");
+  } finally {
+    await teardown(fake, port);
+  }
+});
 
 test("wait stores a finished terminal with set_metadata then stop (W5, W6)", async () => {
   const { fake, port } = setup();

@@ -10,7 +10,7 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
-import type { DispatcherPort, StartRequest } from "../../src/dispatcher/port.js";
+import type { DispatcherPort, SessionRef, StartRequest } from "../../src/dispatcher/port.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import type { WorkItem } from "../../contracts/v1/types.js";
@@ -432,10 +432,11 @@ test("watchSession publishes a finished session and closes a lost host (U10)", a
 
 // U16: a live orphan that no loop item names survives an unreachable T2.
 // The orphan entry holds a :0 control-port handle from a real
-// `control.port.start`, while the retry with the same intent starts
-// normally; the orphan keeps terminal null and no cancel reason, and the
-// sleep ran once. The PR body states the failing assertion.
-test("an unreachable retry over a live orphan starts the same intent (U16)", async () => {
+// `control.port.start`, while the retry with the same intent is rejected
+// worktree-branch-in-use: the live orphan holds the branch on the host.
+// The orphan keeps terminal null and no cancel reason, and the sleep ran
+// once. The PR body states the failing assertion.
+test("an unreachable retry over a live orphan keeps the orphan and rejects (U16)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
@@ -480,6 +481,7 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     });
     await appendPending(ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0"));
     let starts = 0;
+    const retiredFor: string[] = [];
     const flaky: DispatcherPort = {
       ...control.port,
       start(request: StartRequest) {
@@ -488,6 +490,10 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
           return Promise.reject(new PortUnreachableError("host host-a unreachable"));
         }
         return control.port.start(request);
+      },
+      retire(ref: SessionRef) {
+        retiredFor.push(ref.sessionId);
+        return control.port.retire(ref);
       },
     };
     const dispatcher = createDispatcher({
@@ -514,18 +520,20 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     const claimed = await readItem(ctx.statePath);
     expect(claimed.start?.requestId).toBe("gh-demo-1:1");
     const step = await driveStart(ctx, item());
-    expect(step).toBe("running");
+    expect(step).toBe("idle");
     const li = await readItem(ctx.statePath);
-    expect(li.phase).toBe("running");
-    expect(li.requestId).toBe("gh-demo-1:1");
+    expect(li.phase).toBe("idle");
+    expect(li.rounds).toHaveLength(1);
+    expect(li.rounds[0]).toMatchObject({ outcome: "start-rejected", requestId: null });
+    expect(li.excludedHosts).toEqual(["host-a"]);
+    expect(li.startRejections).toBe(1);
     const entries = await readRegistry(registryPath);
-    const started = entries.find((entry) => entry.requestId === "gh-demo-1:1");
-    expect(started?.terminal).toBeNull();
-    expect(started?.sessionId).not.toBeNull();
+    expect(entries.some((entry) => entry.requestId === "gh-demo-1:1")).toBe(false);
     const orphan = entries.find((entry) => entry.requestId === "gh-demo-1:0");
     expect(orphan?.terminal).toBeNull();
     expect(orphan?.cancelReason).toBeNull();
     expect(orphan?.sessionId).toBe("mem-1");
+    expect(retiredFor).not.toContain("mem-1");
     expect(sleeps).toEqual([5_000]);
   });
 });

@@ -235,7 +235,7 @@ export function waitDecision(
     typeof outcomeDetail === "string" &&
     isStoredTerminalDetail(outcomeDetail)
   ) {
-    const live = info.state === "starting" || info.state === "running";
+    const live = isLiveSessionState(info.state);
     return { kind: "terminal", state: outcome, detail: outcomeDetail, mark: false, stop: live };
   }
   if (info.state === "done" && info.exit_code === 0) {
@@ -336,12 +336,17 @@ function kebabCode(code: string): string {
   return "daemon-error";
 }
 
+export function isLiveSessionState(state: SessionInfo["state"]): boolean {
+  return state === "starting" || state === "running";
+}
+
 const UNREACHABLE_KINDS: ReadonlySet<string> = new Set([
   "daemonUnreachable",
   "hostUnreachable",
   "remoteDaemonUnavailable",
   "requestTimeout",
   "sessionStopOutcomeUnknown",
+  "sessionRemoveOutcomeUnknown",
   "io",
   "framing",
 ]);

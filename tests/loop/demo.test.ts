@@ -61,7 +61,11 @@ test(
       );
       expect(findings).toHaveLength(1);
       const records = ledgerRecords();
-      expect(records.map((record) => [record.workItemId, record.result])).toEqual([
+      expect(
+        records
+          .toSorted((a, b) => a.workItemId.localeCompare(b.workItemId))
+          .map((record) => [record.workItemId, record.result]),
+      ).toEqual([
         ["demo-a", "success"],
         ["demo-b", "success"],
         ["demo-c", "success"],

@@ -14,7 +14,7 @@
   "hostStateConfigPath": "config/host-state.json",
   "tickMs": 5000,
   "maxActiveItems": 4,
-  "shutdownGraceMs": 30000,
+  "shutdownGraceMs": 660000,
   "sessionTimeoutMs": 5400000,
   "unreachableRetryMs": 30000,
   "budgetBackoffMs": 600000,

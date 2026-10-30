@@ -47,7 +47,7 @@ coordinator's daily digest channel.
   read 2026-10-28) and the unmetered NVIDIA Build (0) come from those
   descriptors, never from literals in code.
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
-  `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
+  `nvidiaDailyRequestLimit`, `nvidiaProviderId`, `unmeasuredAuditCall`). Every field is required; a
   missing or unreadable file exits 2. Caps are validated JSON numbers
   converted by the same rule (no float on the decision path); the CLI
   `--spend`/`--day-cap`/`--total-cap` flag strings go through the same
@@ -60,7 +60,7 @@ coordinator's daily digest channel.
 
 - Day = UTC calendar day of `finishedAt`.
 - Null token counts on a priced provider are "no data", never 0 USD silently:
-  the guard refuses with reason `spend unknown`.
+  the guard refuses with reason `spend unknown`. An audit call that may be billed but reported no usage (a timeout or an unreadable 200; `source: auditor-usage`, null token counts, known `requests`) is not unknown: it counts at `config/budget.json` `unmeasuredAuditCall` per request, an upper bound because the audit prompt is capped by `maxDiffBytes`. `budget:check` then ends its line with `bounded audit calls <n>`, and the dashboard and the digest mark the spend as including that bound. Every other null-token entry on a priced provider still refuses as `spend unknown`.
 - At or above a USD cap, all new sessions are refused. NVIDIA daily requests
   at or above the limit refuse only sessions whose route starts at NVIDIA
   Build (reason names it).

@@ -543,6 +543,7 @@ async function runInside(
           digestDir,
           providersDir: sandboxProvidersDir,
           nvidiaProviderId: configs.nvidiaProviderId,
+          unmeasuredAuditCall: configs.unmeasuredAuditCall,
           log,
           now: () => new Date(),
         },

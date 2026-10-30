@@ -178,7 +178,7 @@ pricing failure. With no entries in scope the price part is prefixed with
 `config/providers/<id>.json input $<in> per 1M, output $<out> per 1M`,
 joined with `"; "`, plus `; upper bound: cached-input pricing of <ids> not
 applied` when a provider prices cached input (there is no cached count to
-apply it to).
+apply it to). When the scope holds bounded unmeasured audit entries, the spent-today and spent-total cells read `<usd> (includes the upper bound for unmeasured audit calls of <sorted ids>)`.
 
 `Tokens by provider (finished tasks)`: columns
 `provider, model, input tokens, output tokens, requests, sources`, from the

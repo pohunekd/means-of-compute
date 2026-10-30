@@ -18,6 +18,7 @@ import {
 } from "./review.js";
 import { runDigest } from "./digest.js";
 import type { PlacementConfig } from "../placement/config.js";
+import type { UnmeasuredAuditBound } from "../budget/cost.js";
 import { placeObserved } from "../placement/observed.js";
 import type { LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
 import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
@@ -68,6 +69,7 @@ export interface SchedulerContext extends MergeContext {
   readonly digestDir: string;
   readonly providersDir: string;
   readonly nvidiaProviderId: string;
+  readonly unmeasuredAuditCall: UnmeasuredAuditBound;
 }
 
 export interface TickReport {

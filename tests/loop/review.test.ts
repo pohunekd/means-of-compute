@@ -19,7 +19,7 @@ import type { LoopItem } from "../../src/loop/types.js";
 import { applyTestEnv } from "../auditor/test-env.js";
 import { renderComment } from "../../src/auditor/verdict.js";
 import { readVerdicts } from "../../src/auditor/store.js";
-import { callProviderOnce } from "../../src/providers/router.js";
+import { callProviderOnce, ProviderCallError } from "../../src/providers/router.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { loadAuditorConfig } from "../../src/auditor/config.js";
 import { createStubGitHub } from "../../src/loop/stub/github.js";
@@ -551,6 +551,59 @@ function auditingItem(head: string, overrides: Partial<LoopItem> = {}): LoopItem
     ...overrides,
   };
 }
+
+test("A2 audit timeout logs audit-model-error with the message detail", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir);
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.sandbox.seed, ["checkout", "moc/gh-demo-1"]);
+      await Bun.write(join(harness.sandbox.seed, "b.txt"), "more\n");
+      await git(harness.sandbox.seed, ["add", "b.txt"]);
+      await git(harness.sandbox.seed, ["commit", "-m", "second"]);
+      await git(harness.sandbox.seed, ["push", "origin", "moc/gh-demo-1"]);
+      const moved = (await git(harness.sandbox.seed, ["rev-parse", "moc/gh-demo-1"])).trim();
+      expect(moved).not.toBe(head);
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await harness.ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedSessionLedger(harness.ctx.ledgerPath);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(harness.ctx.storePath, item());
+      await writeLoopState(harness.ctx.statePath, auditingItem(moved));
+      await mkdir(join(dir, "verdicts"), { recursive: true });
+      const error = new ProviderCallError(
+        "Provider meta-api timed out",
+        504,
+        true,
+        null,
+        "timeout",
+      );
+      const auditorConfig = await loadAuditorConfig();
+      const step = await auditStep(
+        {
+          ...harness.ctx,
+          auditor: {
+            ...harness.ctx.auditor,
+            config: {
+              ...auditorConfig,
+              verdictDir: join(dir, "verdicts"),
+              maxDiffBytes: 1_000_000,
+            },
+            call: () => Promise.reject(error),
+          },
+        },
+        item(),
+      );
+      expect(step).toBe("pending");
+      const coded = harness.events.filter((line) => line.includes("audit-model-error"));
+      expect(coded).toHaveLength(1);
+      expect(coded[0]).toContain(":model call failed: Provider meta-api timed out:");
+    } finally {
+      await harness.sandbox.cleanup();
+    }
+  });
+});
 
 test("RT22 adopts only an own pull whose body starts with the item marker", () => {
   const row: PullRow = {

@@ -4,7 +4,7 @@
 // "no data" while an unreadable input shows an error code only.
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { recount } from "../auditor/verdict.js";
-import { isPriced, summarizeSpend, utcCalendarDay } from "../budget/cost.js";
+import { isBoundedAuditToken, isPriced, summarizeSpend, utcCalendarDay } from "../budget/cost.js";
 import { decideAdmission } from "../budget/decision.js";
 import type { NanoPricing } from "../budget/pricing.js";
 import { queryLedger } from "../ledger/query.js";
@@ -144,6 +144,9 @@ function cachedClause(ids: readonly string[], pricing: ReadonlyMap<string, NanoP
 
 function moneyUnknown(entry: SpendEntry, pricing: ReadonlyMap<string, NanoPricing>): boolean {
   return entry.tokens.some((token) => {
+    if (isBoundedAuditToken(token)) {
+      return false;
+    }
     const providerPricing = pricing.get(token.provider);
     return (
       providerPricing !== undefined &&
@@ -529,7 +532,13 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
     );
   } else if (scope !== null) {
     const pricing = inputs.pricing.value;
-    const summary = summarizeSpend(scope.all, pricing, inputs.budget.nvidiaProviderId, inputs.now);
+    const summary = summarizeSpend(
+      scope.all,
+      pricing,
+      inputs.budget.nvidiaProviderId,
+      inputs.now,
+      inputs.budget.unmeasuredAuditCall,
+    );
     const todayIds = [
       ...new Set(scope.today.flatMap((entry) => entry.tokens.map((token) => token.provider))),
     ];
@@ -555,6 +564,21 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         cell: noDataCell(`spend unknown for ${ids.join(", ")}`),
         source: spentTodaySource,
       });
+    } else if (summary.boundedWorkItemIds.length > 0) {
+      const ids = [
+        ...new Set(
+          scope.today
+            .filter((entry) => entry.tokens.some((token) => isBoundedAuditToken(token)))
+            .map((entry) => entry.workItemId),
+        ),
+      ].sort();
+      figures.push({
+        label: `Spent today (UTC ${day})`,
+        cell: textCell(
+          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured audit calls of ${ids.join(", ")})`,
+        ),
+        source: spentTodaySource,
+      });
     } else {
       figures.push({
         label: `Spent today (UTC ${day})`,
@@ -574,6 +598,15 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: "Spent total",
         cell: noDataCell(`spend unknown for ${ids.join(", ")}`),
+        source: spentTotalSource,
+      });
+    } else if (summary.boundedWorkItemIds.length > 0) {
+      const ids = [...summary.boundedWorkItemIds].sort();
+      figures.push({
+        label: "Spent total",
+        cell: textCell(
+          `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))} (includes the upper bound for unmeasured audit calls of ${ids.join(", ")})`,
+        ),
         source: spentTotalSource,
       });
     } else {

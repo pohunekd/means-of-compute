@@ -679,7 +679,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     hostStateConfigPath,
     tickMs: requiredInteger(record, path, "", "tickMs", 50, 600000),
     maxActiveItems: requiredInteger(record, path, "", "maxActiveItems", 1, 64),
-    shutdownGraceMs: requiredInteger(record, path, "", "shutdownGraceMs", 0, 600000),
+    shutdownGraceMs: requiredInteger(record, path, "", "shutdownGraceMs", 0, 900000),
     sessionTimeoutMs: requiredInteger(record, path, "", "sessionTimeoutMs", 60000, 86400000),
     unreachableRetryMs: requiredInteger(record, path, "", "unreachableRetryMs", 0, 600000),
     budgetBackoffMs: requiredInteger(record, path, "", "budgetBackoffMs", 1000, 86400000),

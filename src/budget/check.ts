@@ -16,7 +16,7 @@ import type { BudgetDecision } from "./decision.js";
 import { decideAdmission } from "./decision.js";
 import { capKindOfReason, eventKeyString, maybeEscalate } from "./escalation.js";
 import { loadPricingForIds } from "./pricing.js";
-import { summarizeSpend } from "./cost.js";
+import { summarizeSpend, type SpendSummary } from "./cost.js";
 import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 
 interface CliArgs {
@@ -134,6 +134,7 @@ async function run(): Promise<number> {
     return 2;
   }
   let decision: BudgetDecision;
+  let ledgerSummary: SpendSummary | null = null;
   // On the ledger path the escalation below uses the configured state and
   // log; the override path returns earlier and never writes escalation data.
   let ledgerStatePath: string | undefined;
@@ -177,6 +178,7 @@ async function run(): Promise<number> {
           spentTotalNanoTimes1M: overrideNano * TOKENS_PER_1M,
           nvidiaRequestsToday: 0,
           unknownWorkItemIds: [],
+          boundedWorkItemIds: [],
         },
         effective,
         { route },
@@ -191,16 +193,26 @@ async function run(): Promise<number> {
         config.nvidiaProviderId,
         ...ledgerIds,
       ]);
-      const summary = summarizeSpend(entries, pricing, config.nvidiaProviderId, clock.now);
-      decision = decideAdmission(summary, config, { route });
+      ledgerSummary = summarizeSpend(
+        entries,
+        pricing,
+        config.nvidiaProviderId,
+        clock.now,
+        config.unmeasuredAuditCall,
+      );
+      decision = decideAdmission(ledgerSummary, config, { route });
     }
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;
   }
   if (decision.admit) {
+    const bounded =
+      ledgerSummary !== null && ledgerSummary.boundedWorkItemIds.length > 0
+        ? `, bounded audit calls ${String(ledgerSummary.boundedWorkItemIds.length)}`
+        : "";
     console.log(
-      `admitted: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)})`,
+      `admitted: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)}${bounded})`,
     );
     return 0;
   }
@@ -211,8 +223,12 @@ async function run(): Promise<number> {
       return 2;
     }
     process.stderr.write(`would escalate: ${eventKeyString(kind, clock.now)}\n`);
+    const boundedRefused =
+      ledgerSummary !== null && ledgerSummary.boundedWorkItemIds.length > 0
+        ? `, bounded audit calls ${String(ledgerSummary.boundedWorkItemIds.length)}`
+        : "";
     console.log(
-      `refused: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)})`,
+      `refused: ${decision.reason} (today $${decision.spentTodayUsd.toFixed(2)}, total $${decision.spentTotalUsd.toFixed(2)}, nvidia requests today ${String(decision.nvidiaRequestsToday)}${boundedRefused})`,
     );
     return 3;
   }

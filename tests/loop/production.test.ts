@@ -14,6 +14,7 @@ import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
 import { createMemoryHostStatePort } from "../../src/hoststate/memory-port.js";
 import { LoopStartupError, loadLoopConfigs, type StopSignal } from "../../src/loop/compose.js";
 import { runProduction, type ProductionOpeners } from "../../src/loop/production.js";
+import { applyTestEnv } from "../auditor/test-env.js";
 import { createStubGitHub } from "../../src/loop/stub/github.js";
 
 function readJson(path: string): Record<string, unknown> {
@@ -62,6 +63,19 @@ async function writeConfigs(dir: string, factoryLogin: string): Promise<string> 
     trialMerge: { ...(loop["trialMerge"] as Record<string, unknown>), scratchDir: at("trial") },
     digest: { dir: at("digest"), onExit: false },
   });
+}
+
+async function writeConfigsWithGrace(
+  dir: string,
+  factoryLogin: string,
+  shutdownGraceMs: number,
+): Promise<string> {
+  const loop = readJson(join(dir, "loop.json"));
+  await Bun.write(
+    join(dir, "loop.json"),
+    `${JSON.stringify({ ...loop, shutdownGraceMs }, null, 2)}\n`,
+  );
+  return join(dir, "loop.json");
 }
 
 function openers(dir: string, env: Record<string, string>, login: string): ProductionOpeners {
@@ -116,6 +130,7 @@ function stopAfterRunning(lines: string[]): { stop: StopSignal; out: (line: stri
 
 test("production startup checks GitHub first and stops cleanly (P3, L47)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "loop-production-"));
+  const restoreEnv = applyTestEnv();
   try {
     await Bun.write(join(dir, "meter-hosts.json"), "{}\n");
     const path = await writeConfigs(dir, "moc-factory");
@@ -153,6 +168,22 @@ test("production startup checks GitHub first and stops cleanly (P3, L47)", async
       rc: 0,
       lines: ["loop: running (0 active)"],
     });
+    const tight = await runProduction({
+      configs: await loadLoopConfigs(
+        await writeConfigsWithGrace(dir, "moc-factory", 600000),
+        "production",
+      ),
+      openers: openers(dir, withToken, "moc-factory"),
+      stop: stopAfterRunning([]).stop,
+      out: () => undefined,
+      warn: () => undefined,
+    }).then(
+      () => "started",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(tight).toBe(
+      "shutdownGraceMs 600000 must exceed the largest audit provider timeoutMs 600000 (meta-wonder)",
+    );
     for (const owned of ["verdicts", "digest", "trial", "gh-config"]) {
       expect(existsSync(join(dir, owned))).toBe(true);
     }
@@ -163,6 +194,7 @@ test("production startup checks GitHub first and stops cleanly (P3, L47)", async
     expect(events[0]).toBe("factory-start");
     expect(events.at(-1)).toBe("factory-stop");
   } finally {
+    restoreEnv();
     rmSync(dir, { recursive: true, force: true });
   }
 });

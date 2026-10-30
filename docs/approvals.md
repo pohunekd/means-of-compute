@@ -71,7 +71,10 @@ request whose state is `approved` and whose `args` match all three, else
 `approvedResolves(doc)` returns every `resolve_session` request with `state
 === "approved"` as `{requestId, reason}` in `requestId` order. The loop's
 `ApprovalsView` exposes it as `approvedResolves()`; nothing in the loop
-acts on these entries yet. P7 wiring (the loop's own later step) reads
+acts on these entries yet. The list is not a queue: the same session id
+can appear more than once, entries are sorted as strings, and a consumer
+keeps its own consumed key (as the loop does with `resolvedApprovals`).
+P7 wiring (the loop's own later step) reads
 this list and calls `dispatch:resolve` for each approved session.
 
 ## Out-of-band confirmation (A7)

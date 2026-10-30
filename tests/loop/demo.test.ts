@@ -63,8 +63,8 @@ test(
       const records = ledgerRecords();
       expect(
         records
-          .toSorted((a, b) => a.workItemId.localeCompare(b.workItemId))
-          .map((record) => [record.workItemId, record.result]),
+          .map((record) => [record.workItemId, record.result] as [string, string])
+          .sort((a, b) => a[0].localeCompare(b[0])),
       ).toEqual([
         ["demo-a", "success"],
         ["demo-b", "success"],

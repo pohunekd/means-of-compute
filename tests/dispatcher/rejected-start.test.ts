@@ -1,4 +1,7 @@
-// Rejected-start tests (#56): a rejection with a meter grant becomes a
+// Retire-before-start tests (#151): a start retires the item's earlier
+// finished, ledgered sessions on the same host before opening the new one;
+// a live session holding the branch rejects the next start instead and is
+// kept. Rejected-start tests (#56): a rejection with a meter grant becomes a
 // terminal failed attempt on its own requestId, so the retry derives n + 1;
 // a rejection with no grant keeps the removal; a crash between the settle
 // and the registry write replays through lost.
@@ -91,6 +94,98 @@ function rejectOn(hostAlias: string, code: string) {
     },
   });
 }
+
+test("a start retires the earlier finished session, a live branch holder rejects", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dispatch-retire-"));
+  try {
+    const ledgerPath = join(dir, "ledger.jsonl");
+    const registryPath = join(dir, "registry.json");
+    const control = createMemoryPort();
+    const events: Array<Record<string, unknown>> = [];
+    const dispatcher = createDispatcher({
+      port: control.port,
+      budget: GATE,
+      ledgerPath,
+      config: configOf(registryPath),
+      now: () => new Date("2026-10-27T10:00:00.000Z"),
+      sleep: () => Promise.resolve(),
+      log: (event) => {
+        events.push(event as unknown as Record<string, unknown>);
+      },
+      settleUsage: () => Promise.resolve(null),
+    });
+    const first = await dispatcher.start(
+      item("w151-retire") as never,
+      decision("w151-retire", "host-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (first.kind !== "started") {
+      throw new Error(`expected the first start, got ${first.kind}`);
+    }
+    control.complete(first.handle.sessionId, {
+      state: "finished",
+      usage: null,
+      detail: "exited 0",
+    });
+    await dispatcher.watch(first.request.requestId);
+    const retry = await dispatcher.start(
+      { ...(item("w151-retire") as object), branch: "moc/w151-retire" } as never,
+      decision("w151-retire", "host-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (retry.kind !== "started") {
+      throw new Error(`expected the retry to start, got ${retry.kind}`);
+    }
+    expect(retry.request.requestId).toBe("w151-retire:1");
+    expect(
+      events.some(
+        (event) =>
+          event["event"] === "retired" &&
+          event["requestId"] === "w151-retire:0" &&
+          event["detail"] === "removed",
+      ),
+    ).toBe(true);
+    expect(control.sessions().some((s) => s.handle.sessionId === first.handle.sessionId)).toBe(
+      false,
+    );
+    control.complete(retry.handle.sessionId, { state: "finished", usage: null, detail: "x" });
+    await dispatcher.watch(retry.request.requestId);
+    const other = await dispatcher.start(
+      { ...(item("fresh-item") as object), branch: "moc/fresh-item" } as never,
+      decision("fresh-item", "host-a") as never,
+      MODEL,
+      "Do the work.",
+    );
+    if (other.kind !== "started") {
+      throw new Error(`expected the other item to start, got ${other.kind}`);
+    }
+    let error: unknown;
+    try {
+      await control.port.start({
+        requestId: "fresh-item:9",
+        workItemId: "fresh-item",
+        repo: "example/demo",
+        hostAlias: "host-a",
+        branch: "moc/fresh-item",
+        baseRef: "origin/moc/fresh-item",
+        resume: true,
+        model: MODEL,
+        brief: "Do the work.",
+      });
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect((error as PortRejectedError).code).toBe("worktree-branch-in-use");
+    expect(control.sessions().some((s) => s.handle.sessionId === other.handle.sessionId)).toBe(
+      true,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("a rejection with a grant ledgers a failure and the retry starts on n + 1", async () => {
   await withMeter(

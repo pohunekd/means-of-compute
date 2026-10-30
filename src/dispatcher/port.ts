@@ -74,12 +74,17 @@ export interface ReleaseRef {
 export interface ReleaseResult {
   readonly sessionIds: readonly string[];
 }
+export type RetireOutcome = "removed" | "absent";
+
 export interface DispatcherPort {
   start(request: StartRequest): Promise<SessionHandle>;
   wait(ref: SessionRef, timeoutMs: number, cursor: string | null): Promise<WaitResult>;
   diff(ref: SessionRef, base: string): Promise<DiffResult>;
   cancel(ref: SessionRef, reason: CancelReason): Promise<WaitResult>;
   release(ref: ReleaseRef): Promise<ReleaseResult>;
+  /** Removes a terminal session and its worktree on the host; the branch stays.
+      A session the host no longer knows is "absent". Never called for a live session. */
+  retire(ref: SessionRef): Promise<RetireOutcome>;
   close(): Promise<void>;
 }
 

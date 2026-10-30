@@ -100,7 +100,8 @@ async function applyPatch(
 }
 
 export function createStubWorker(deps: StubWorkerDeps): StubWorker {
-  const handled = new Map<string, number>();
+  const handled = new Set<string>();
+  const roundsByItem = new Map<string, number>();
   async function step(): Promise<readonly string[]> {
     const done: string[] = [];
     const sessions = deps.control.sessions();
@@ -121,12 +122,10 @@ export function createStubWorker(deps: StubWorkerDeps): StubWorker {
         });
         done.push(session.handle.sessionId);
       };
-      const handledRounds = [...handled.entries()].filter(([id]) => {
-        const other = sessions.find((candidate) => candidate.handle.sessionId === id);
-        return other !== undefined && workItemIdOf(other.handle.requestId) === workItemId;
-      }).length;
+      const handledRounds = roundsByItem.get(workItemId) ?? 0;
+      roundsByItem.set(workItemId, handledRounds + 1);
+      handled.add(session.handle.sessionId);
       const patchPath = deps.patchFor(workItemId, handledRounds);
-      handled.set(session.handle.sessionId, handledRounds);
       if (patchPath === null) {
         deps.control.complete(session.handle.sessionId, {
           state: "failed",

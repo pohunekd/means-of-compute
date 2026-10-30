@@ -117,6 +117,27 @@ function finishedTurn(id: string, cursor = "cursor-1"): SessionWaitTurnResult {
   };
 }
 
+test("retire removes a finished session through session.remove_accepting_unconfirmed", async () => {
+  const { fake, port } = setup();
+  try {
+    const handle = await port.start(request());
+    fake.queueWaitTurn("laptop-a", finishedTurn(handle.sessionId));
+    const result = await port.wait(
+      { sessionId: handle.sessionId, hostAlias: "laptop-a" },
+      1000,
+      null,
+    );
+    expect(result.state).toBe("finished");
+    const first = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
+    expect(first).toBe("removed");
+    expect(methodNames(fake, "laptop-a")).toContain("session.remove_accepting_unconfirmed");
+    const second = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
+    expect(second).toBe("absent");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("wait stores a finished terminal with set_metadata then stop (W5, W6)", async () => {
   const { fake, port } = setup();
   try {

@@ -432,10 +432,11 @@ test("watchSession publishes a finished session and closes a lost host (U10)", a
 
 // U16: a live orphan that no loop item names survives an unreachable T2.
 // The orphan entry holds a :0 control-port handle from a real
-// `control.port.start`, while the retry with the same intent starts
-// normally; the orphan keeps terminal null and no cancel reason, and the
-// sleep ran once. The PR body states the failing assertion.
-test("an unreachable retry over a live orphan starts the same intent (U16)", async () => {
+// `control.port.start`, while the retry with the same intent is rejected
+// worktree-branch-in-use: the live orphan holds the branch on the host.
+// The orphan keeps terminal null and no cancel reason, and the sleep ran
+// once. The PR body states the failing assertion.
+test("an unreachable retry over a live orphan keeps the orphan and rejects (U16)", async () => {
   await withTempDir(async (dir) => {
     const ledgerPath = join(dir, "ledger.jsonl");
     const registryPath = join(dir, "registry.json");
@@ -514,14 +515,15 @@ test("an unreachable retry over a live orphan starts the same intent (U16)", asy
     const claimed = await readItem(ctx.statePath);
     expect(claimed.start?.requestId).toBe("gh-demo-1:1");
     const step = await driveStart(ctx, item());
-    expect(step).toBe("running");
+    expect(step).toBe("idle");
     const li = await readItem(ctx.statePath);
-    expect(li.phase).toBe("running");
-    expect(li.requestId).toBe("gh-demo-1:1");
+    expect(li.phase).toBe("idle");
+    expect(li.rounds).toHaveLength(1);
+    expect(li.rounds[0]).toMatchObject({ outcome: "start-rejected", requestId: null });
+    expect(li.excludedHosts).toEqual(["host-a"]);
+    expect(li.startRejections).toBe(1);
     const entries = await readRegistry(registryPath);
-    const started = entries.find((entry) => entry.requestId === "gh-demo-1:1");
-    expect(started?.terminal).toBeNull();
-    expect(started?.sessionId).not.toBeNull();
+    expect(entries.some((entry) => entry.requestId === "gh-demo-1:1")).toBe(false);
     const orphan = entries.find((entry) => entry.requestId === "gh-demo-1:0");
     expect(orphan?.terminal).toBeNull();
     expect(orphan?.cancelReason).toBeNull();

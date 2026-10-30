@@ -46,13 +46,40 @@ test(
         .split("\n")
         .filter((line) => line.includes('"event":"merged"'));
       expect(merged).toHaveLength(3);
+      const loopLines = readFileSync("logs/loop-demo/loop.jsonl", "utf8").split("\n");
+      const findings = loopLines.filter(
+        (line) =>
+          line.includes('"event":"round-closed"') &&
+          line.includes('"workItemId":"demo-a"') &&
+          line.includes('"code":"findings"'),
+      );
+      expect(findings).toHaveLength(1);
       const records = ledgerRecords();
       expect(records.map((record) => [record.workItemId, record.result])).toEqual([
         ["demo-a", "success"],
         ["demo-b", "success"],
         ["demo-c", "success"],
       ]);
-      for (const record of records) {
+      const demoA = records.find((record) => record.workItemId === "demo-a");
+      expect(demoA?.tokens).toEqual([
+        {
+          provider: "nvidia-build",
+          model: "meta/muse-glimmer-30b",
+          inputTokens: 2400,
+          outputTokens: 160,
+          requests: 2,
+          source: "meter-proxy",
+        },
+        {
+          provider: "meta-api",
+          model: "muse-spark-1.3-contributor",
+          inputTokens: 600,
+          outputTokens: 16,
+          requests: 2,
+          source: "auditor-usage",
+        },
+      ]);
+      for (const record of records.filter((entry) => entry.workItemId !== "demo-a")) {
         expect(record.tokens).toEqual([
           {
             provider: "nvidia-build",

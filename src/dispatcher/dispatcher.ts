@@ -835,6 +835,32 @@ export function createDispatcher(deps: DispatcherDeps): {
         if (!admission.admit) {
           return { kind: "refused", reason: admission.reason };
         }
+        // A host keeps a finished session's worktree, which holds the branch:
+        // remove the item's earlier ledgered sessions on this host first.
+        for (const earlier of existing) {
+          if (
+            earlier.workItemId !== request.workItemId ||
+            earlier.requestId === request.requestId ||
+            earlier.hostAlias !== request.hostAlias ||
+            earlier.sessionId === null ||
+            earlier.terminal === null ||
+            !earlier.terminal.ledgerAppended
+          ) {
+            continue;
+          }
+          const outcome = await deps.port.retire({
+            sessionId: earlier.sessionId,
+            hostAlias: earlier.hostAlias,
+          });
+          deps.log({
+            level: "info",
+            event: "retired",
+            requestId: earlier.requestId,
+            workItemId: earlier.workItemId,
+            sessionId: earlier.sessionId,
+            detail: outcome,
+          });
+        }
         const t = deps.now().toISOString();
         const provisional: RegistryEntry = {
           requestId: request.requestId,

@@ -86,7 +86,10 @@
     }
   ],
   "scripts": {
-    "demo-a": ["tests/fixtures/loop/patches/demo-a.patch"],
+    "demo-a": [
+      "tests/fixtures/loop/patches/demo-a.patch",
+      "tests/fixtures/loop/patches/demo-a-fix.patch"
+    ],
     "demo-b": ["tests/fixtures/loop/patches/demo-b.patch"],
     "demo-c": ["tests/fixtures/loop/patches/demo-c.patch"]
   }

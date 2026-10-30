@@ -7,6 +7,7 @@ import type {
   DispatcherPort,
   ReleaseRef,
   ReleaseResult,
+  RetireOutcome,
   SessionHandle,
   SessionRef,
   StartRequest,
@@ -100,9 +101,13 @@ export function createMeteredPort(
     await inner.close();
   }
 
-  function release(ref: ReleaseRef): Promise<ReleaseResult> {
+  async function release(ref: ReleaseRef): Promise<ReleaseResult> {
     return inner.release(ref);
   }
 
-  return { start, wait, diff, cancel, release, close };
+  async function retire(ref: SessionRef): Promise<RetireOutcome> {
+    return inner.retire(ref);
+  }
+
+  return { start, wait, diff, cancel, release, retire, close };
 }

@@ -378,6 +378,19 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
         state.sessions.set(target, updated);
         return okLine(request.id, { session: updated });
       }
+      case "session.remove_accepting_unconfirmed": {
+        const target = String(request.params);
+        if (!state.sessions.has(target)) {
+          return errLine(request.id, "session_not_found");
+        }
+        state.sessions.delete(target);
+        return okLine(request.id, {
+          removed: true,
+          stopped: false,
+          worktrees_removed: 1,
+          worktrees_failed: 0,
+        });
+      }
       case "session.stop": {
         const info = state.sessions.get(String(request.params));
         if (info === undefined) {

@@ -123,7 +123,7 @@ exits 2 with `ledger: <message>`. Exits follow the budget guard: 0 ok,
 
 ## Resolved entries
 
-`resolve` writes no correcting line. An unmeasured audit entry needs no correction: the guard bounds it at read time (`docs/budget-guard.md`). A provisional entry resolved to `lost`
+`resolve` writes no correcting line. A provisional entry resolved to `lost`
 gets its first and only pending line, exactly like a `watch`-reported loss.
 An entry that already has a terminal gets nothing new: `resolve` only
 completes the dispatcher's own line through the usual replay, and a second
@@ -134,7 +134,7 @@ second attempt and double the spend. The spend of a `lost` entry is final:
 the meter closed the grant before the first registry write, so the joined
 usage on the line is the complete billed usage. A session that finished on
 the host after it was ledgered `lost` keeps attempt `lost`; its pushed
-commits stay on the branch for the next attempt to pick up.
+commits stay on the branch for the next attempt to pick up. An unmeasured audit entry needs no correction: the guard bounds it at read time (`docs/budget-guard.md`).
 
 ## Module layout
 

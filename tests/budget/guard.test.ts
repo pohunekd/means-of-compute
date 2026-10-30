@@ -41,6 +41,11 @@ const SESSION_TOKEN: SpendEntry["tokens"][number] = {
   source: "meter-proxy",
 };
 
+const SESSION_TOKEN_4: SpendEntry["tokens"][number] = {
+  ...SESSION_TOKEN,
+  requests: 4,
+};
+
 test("A1 bounded audit spend counts at the bound, session stays unknown", () => {
   expect(isBoundedAuditToken(AUDIT_TOKEN)).toBe(true);
   expect(isBoundedAuditToken(SESSION_TOKEN)).toBe(false);
@@ -63,4 +68,19 @@ test("A1 bounded audit spend counts at the bound, session stays unknown", () => 
   );
   expect(both.unknownWorkItemIds).toEqual(["gh-demo-2"]);
   expect(both.boundedWorkItemIds).toEqual(["gh-demo-1"]);
+  const mixed = summarizeSpend(
+    [
+      {
+        workItemId: "gh-demo-3",
+        finishedAt: "2026-10-28T10:00:00.000Z",
+        tokens: [AUDIT_TOKEN, SESSION_TOKEN_4],
+      },
+    ],
+    pricing(),
+    "nvidia-build",
+    NOW,
+    BOUND,
+  );
+  expect(mixed.unknownWorkItemIds).toEqual(["gh-demo-3"]);
+  expect(mixed.boundedWorkItemIds).toEqual([]);
 });

@@ -47,7 +47,7 @@ coordinator's daily digest channel.
   read 2026-10-28) and the unmetered NVIDIA Build (0) come from those
   descriptors, never from literals in code.
 - Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
-  `nvidiaDailyRequestLimit`, `nvidiaProviderId`). Every field is required; a
+  `nvidiaDailyRequestLimit`, `nvidiaProviderId`, `unmeasuredAuditCall`). Every field is required; a
   missing or unreadable file exits 2. Caps are validated JSON numbers
   converted by the same rule (no float on the decision path); the CLI
   `--spend`/`--day-cap`/`--total-cap` flag strings go through the same

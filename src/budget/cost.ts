@@ -148,11 +148,13 @@ export function summarizeSpend(
     }
     let costNanoTimes1M: bigint;
     try {
+      const seen: { bounded: boolean } = { bounded: false };
       costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing, auditBound, () => {
-        if (!boundedWorkItemIds.includes(record.workItemId)) {
-          boundedWorkItemIds.push(record.workItemId);
-        }
+        seen.bounded = true;
       });
+      if (seen.bounded && !boundedWorkItemIds.includes(record.workItemId)) {
+        boundedWorkItemIds.push(record.workItemId);
+      }
     } catch (error: unknown) {
       if (error instanceof SpendUnknownError) {
         if (!unknownWorkItemIds.includes(record.workItemId)) {

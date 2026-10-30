@@ -565,7 +565,13 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         source: spentTodaySource,
       });
     } else if (summary.boundedWorkItemIds.length > 0) {
-      const ids = [...summary.boundedWorkItemIds].sort();
+      const ids = [
+        ...new Set(
+          scope.today
+            .filter((entry) => entry.tokens.some((token) => isBoundedAuditToken(token)))
+            .map((entry) => entry.workItemId),
+        ),
+      ].sort();
       figures.push({
         label: `Spent today (UTC ${day})`,
         cell: textCell(

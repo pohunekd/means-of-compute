@@ -26,6 +26,7 @@ import {
   type StopSignal,
 } from "./compose.js";
 import type { LoopGithubConfig } from "./config.js";
+import type { AuditorConfig } from "../auditor/config.js";
 import { GitHubError, type GhEnv, type GitHubPort } from "./github.js";
 import { openLoopLog } from "./log.js";
 import { createScheduler, recoverAtStartup } from "./scheduler.js";
@@ -37,6 +38,7 @@ import { createMeteredPort } from "../meter/metered-port.js";
 import { startMeter } from "../meter/meter.js";
 import { systemTimers } from "../meter/timers.js";
 import { systemUsageLogIo } from "../meter/usage-log.js";
+import { loadProviderDescriptor } from "../providers/config.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import type { MeterEnv } from "../meter/config.js";
 import type { MeterConfig } from "../meter/config.js";
@@ -121,6 +123,25 @@ async function checkGitHub(
   return port;
 }
 
+async function checkAuditSettlesInGrace(
+  shutdownGraceMs: number,
+  auditor: AuditorConfig,
+): Promise<void> {
+  const entries = [...auditor.auditors, auditor.mergeAuditor];
+  let largest = { timeoutMs: 0, providerId: "" };
+  for (const entry of entries) {
+    const descriptor = await loadProviderDescriptor(entry.providerId);
+    if (descriptor.timeoutMs > largest.timeoutMs) {
+      largest = { timeoutMs: descriptor.timeoutMs, providerId: descriptor.id };
+    }
+  }
+  if (shutdownGraceMs <= largest.timeoutMs) {
+    throw new LoopStartupError(
+      `shutdownGraceMs ${String(shutdownGraceMs)} must exceed the largest audit provider timeoutMs ${String(largest.timeoutMs)} (${largest.providerId})`,
+    );
+  }
+}
+
 export async function runProduction(deps: ProductionRunDeps): Promise<0 | 1> {
   const { configs, openers } = deps;
   const loop = configs.loop;
@@ -140,6 +161,7 @@ export async function runProduction(deps: ProductionRunDeps): Promise<0 | 1> {
     throw toStartupError(error);
   }
   const github = await checkGitHub(loop.github, openers.env, openers.openGitHub);
+  await checkAuditSettlesInGrace(loop.shutdownGraceMs, configs.auditor);
   const registryPath = resolve(configs.dispatcher.registryPath);
   const statePath = resolve(loop.statePath);
   const storePath = resolve(configs.work.storePath);

@@ -263,7 +263,7 @@ export async function closeReviewRound(
 function pullBodyOf(item: WorkItem): string {
   const lines = [workItemMarker(item.id)];
   if (item.issue !== null) {
-    lines.push(`Refs #${String(item.issue)}`);
+    lines.push(`Closes #${String(item.issue)}`);
   }
   lines.push("", "Definition of done:");
   for (const entry of item.dod) {

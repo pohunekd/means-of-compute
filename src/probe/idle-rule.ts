@@ -26,6 +26,7 @@ export function deriveIdle(
   powerUnknown = false,
   powerCause = "",
   loggedOut = false,
+  unattendedWindow: string | null = null,
 ): { idle: boolean; reason: string } {
   if (userActivityUnknown) {
     return { idle: false, reason: `user activity unknown: ${userActivityCause || "unavailable"}` };
@@ -55,5 +56,11 @@ export function deriveIdle(
     return { idle: false, reason: `user input ${String(secondsSinceInput)} seconds ago` };
   }
   const mins = Math.round(secondsSinceInput / 60);
+  if (unattendedWindow !== null) {
+    return {
+      idle: true,
+      reason: `unattended window ${unattendedWindow}: no input on the local session for ${String(mins)} minutes, on AC power`,
+    };
+  }
   return { idle: true, reason: `no user input for ${String(mins)} minutes, on AC power` };
 }

@@ -1,0 +1,24 @@
+#!/bin/sh
+# loginctl double for the tty-only case: one local user session, type tty,
+# idle since 2026-10-27T00:00:00Z.
+case "$*" in
+  "list-sessions --no-legend")
+    echo "3 1000 user tty"
+    ;;
+  "show-session 3 -p Class -p Remote")
+    echo "Class=user"
+    echo "Remote=no"
+    ;;
+  "show-session 3 -p Active -p Type -p Seat")
+    echo "Active=yes"
+    echo "Type=tty"
+    echo "Seat=seat0"
+    ;;
+  "show-session 3 -p IdleHint -p IdleSinceHint")
+    echo "IdleHint=yes"
+    echo "IdleSinceHint=1793059200000000"
+    ;;
+  *)
+    exit 2
+    ;;
+esac

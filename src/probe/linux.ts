@@ -172,6 +172,14 @@ export function linuxCpu(): { cores: number; load1m: number } {
   return { cores, load1m };
 }
 
+export class NoGraphicalSessionError extends Error {
+  readonly sessionIds: readonly string[];
+  constructor(sessionIds: readonly string[]) {
+    super("logged in without an active graphical session");
+    this.name = "NoGraphicalSessionError";
+    this.sessionIds = sessionIds;
+  }
+}
 export async function showSessionProps(
   id: string,
   names: readonly string[],
@@ -188,6 +196,30 @@ export async function showSessionProps(
     if (eq > 0) props.set(line.slice(0, eq), line.slice(eq + 1));
   }
   return props;
+}
+
+export async function sessionsIdleSecs(
+  sessionIds: readonly string[],
+  nowMs: number,
+): Promise<number> {
+  // Any graphical session with recent input means the user is active; only
+  // when all of them are idle does the most recent idle timestamp decide.
+  let minSecs: number | null = null;
+  for (const id of sessionIds) {
+    const props = await showSessionProps(id, ["IdleHint", "IdleSinceHint"]);
+    const hint = props.get("IdleHint");
+    if (hint === "no") return 0;
+    if (hint !== "yes") throw new Error(`loginctl session ${id} has no IdleHint`);
+    const sinceRaw = props.get("IdleSinceHint");
+    const idleSinceUs = sinceRaw === undefined || sinceRaw === "" ? NaN : Number(sinceRaw);
+    if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) {
+      throw new Error(`loginctl session ${id} has no numeric IdleSinceHint`);
+    }
+    const secs = Math.max(0, Math.floor((nowMs - idleSinceUs / 1000) / 1000));
+    minSecs = minSecs === null ? secs : Math.min(minSecs, secs);
+  }
+  if (minSecs === null) throw new Error("IdleSinceHint missing");
+  return minSecs;
 }
 
 export async function linuxSecondsSinceInput(nowMs: number): Promise<number> {
@@ -237,26 +269,8 @@ export async function linuxSecondsSinceInput(nowMs: number): Promise<number> {
       graphicalSessionIds.push(id);
     }
   }
-  if (graphicalSessionIds.length === 0)
-    throw new Error("logged in without an active graphical session");
-  // Any graphical session with recent input means the user is active; only
-  // when all of them are idle does the most recent idle timestamp decide.
-  let minSecs: number | null = null;
-  for (const id of graphicalSessionIds) {
-    const props = await showSessionProps(id, ["IdleHint", "IdleSinceHint"]);
-    const hint = props.get("IdleHint");
-    if (hint === "no") return 0;
-    if (hint !== "yes") throw new Error(`loginctl session ${id} has no IdleHint`);
-    const sinceRaw = props.get("IdleSinceHint");
-    const idleSinceUs = sinceRaw === undefined || sinceRaw === "" ? NaN : Number(sinceRaw);
-    if (!Number.isFinite(idleSinceUs) || idleSinceUs <= 0) {
-      throw new Error(`loginctl session ${id} has no numeric IdleSinceHint`);
-    }
-    const secs = Math.max(0, Math.floor((nowMs - idleSinceUs / 1000) / 1000));
-    minSecs = minSecs === null ? secs : Math.min(minSecs, secs);
-  }
-  if (minSecs === null) throw new Error("IdleSinceHint missing");
-  return minSecs;
+  if (graphicalSessionIds.length === 0) throw new NoGraphicalSessionError(loggedInIds);
+  return sessionsIdleSecs(graphicalSessionIds, nowMs);
 }
 
 export async function linuxManagerIdleSecs(nowMs: number): Promise<number> {

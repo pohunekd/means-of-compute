@@ -621,3 +621,30 @@ test("RT22 adopts only an own pull whose body starts with the item marker", () =
   const own = { ...row, bodyFirstLine: marker };
   expect(pullDecision([own], FACTORY_LOGIN, marker)).toEqual({ kind: "adopt", pull: own });
 });
+
+test("RT1b PR body for intake item uses Closes", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir);
+    try {
+      await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      await git(harness.ctx.repos[0]?.checkoutDir ?? dir, ["fetch", "origin"]);
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      const intakeItem = item({ issue: 123 });
+      await writeStore(harness.ctx.storePath, intakeItem);
+      await writeLoopState(harness.ctx.statePath, publishingItem());
+      const step = await publishStep(harness.ctx, intakeItem);
+      expect(step).toBe("ci");
+      const createdPull = (
+        harness.ctx.github as unknown as {
+          snapshot(): { pulls: { head: string; body: string }[] };
+        }
+      )
+        .snapshot()
+        .pulls.at(0);
+      expect(createdPull?.body).toContain("Closes #123");
+      expect(createdPull?.body).not.toContain("Refs #123");
+    } finally {
+      await harness.sandbox.cleanup();
+    }
+  });
+});

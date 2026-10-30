@@ -30,7 +30,8 @@
     "fmt": "prettier --write .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**"
+    "test": "bun test --pass-with-no-tests --path-ignore-patterns=quarantine/**",
+    "work:summary": "bun run scripts/work-summary.ts"
   },
   "dependencies": {
     "@pohunek/sdk": "https://github.com/zajca/pohunek/releases/download/v0.38.1/pohunek-ts-sdk-0.38.1.tgz",

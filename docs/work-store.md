@@ -90,3 +90,14 @@ required, no extra key is allowed.
 `config/factory-specs.json` (`loadFactorySpecs`): a non-empty JSON array of
 `FactorySpec` entries with unique `repo`. The loop runner reads `mergeMode`
 from it.
+
+## CLI
+
+`work:summary` prints a JSON summary of the work store.
+
+```
+bun run work:summary                # uses config/work.json storePath
+bun run work:summary --store path   # explicit store file
+```
+
+Outputs one line `JSON.stringify(summarizeStore(store))` to stdout and exits 0. Unknown argument, repeated or valueless `--store`, or a store error prints `work:summary: <message>` to stderr and exits 2.

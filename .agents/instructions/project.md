@@ -18,7 +18,7 @@ cost on rented cloud capacity.
 | Component                  | Responsibility                                                                                                                                                |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Contracts (`contracts-v1`) | JSON Schema and TypeScript types: `WorkItem`, `HostCapacity`, `PlacementDecision`, `UsageRecord`, `FactorySpec`                                               |
-| MCP server                 | the coordinator's interface: `submit_work`, `fleet_status`, `list_work`, `approve`, `audit_results`, `pause_fleet`                                            |
+| MCP server                 | the coordinator's interface: `submit_work`, `fleet_status`, `list_work`, `approve`, `audit_results`, `pause_fleet`, `resolve_session`                         |
 | Coordinator                | Muse Code on Muse Spark; turns a goal into a DAG of work items through the MCP server                                                                         |
 | Loop runner                | picks next ready issue, places work, runs sessions, audits results, merges by rule, applies stall/retry policy, files follow-ups, produces daily digest (#17) |
 | Host probe                 | reports a host's idle state, power, CPU, memory, GPU, local models, and policy window                                                                         |

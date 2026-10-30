@@ -16,7 +16,7 @@ README. At runtime every model call goes to a Meta model: the provider schema al
    run, audit, merge by rule, stall/retry, follow-ups, daily digest (#17). A goal reaches the
    **coordinator** (Muse Code on Muse Spark), which calls the
    **MCP server**: `submit_work` with a DAG of `WorkItem`s, kept in the
-   work store; `approve` and `pause_fleet` record pending requests a
+   work store; `approve`, `pause_fleet`, and `resolve_session` record pending requests a
    human confirms out of band through the `approvals` CLI, and
    `fleet_status` reports the resulting `fleet` field; see
    [mcp.md](mcp.md) and [approvals.md](approvals.md). The coordinator's playbook, goal format and prompt are in [coordinator.md](coordinator.md).

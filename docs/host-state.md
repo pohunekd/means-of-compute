@@ -67,10 +67,10 @@ Every fleet host carries its alias in `/etc/means-of-compute/host.json`:
 
 The fleet-wide path lives in the package as `config/plugin.json`; the host file
 itself stays outside the package, outside `HOME`, and outside the
-digest-pinned inputs. Writing it needs `sudo` once on every host, like the alias.
+digest-pinned inputs. Writing it needs `sudo` once on every host.
 
 The host file may carry an optional `unattended` window `{ "start": "HH:MM", "end": "HH:MM" }`
-in host local time, where equal values mean the whole day. It is Linux only:
+in host local time, where equal values mean the whole day. Writing it needs `sudo`, like the alias. It is Linux only:
 inside a host's unattended window a local login without an active graphical
 session is judged by its logind idle hint instead of reporting activity
 unknown. A bad value fails the plugin run (`plugin-failed`).

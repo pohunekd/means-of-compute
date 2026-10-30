@@ -22,6 +22,7 @@ import {
 } from "./money.js";
 import type { Baselines } from "./config.js";
 import type { DashboardInputs, InputErrorCode, InputFailure } from "./inputs.js";
+import type { ResultLine } from "../loop/results.js";
 import { sessionsOf } from "../dispatcher/registry.js";
 import { latestOpenSession, latestSession, openSessionCount } from "./sessions.js";
 import type { HostObservation } from "../hoststate/collector.js";
@@ -47,9 +48,9 @@ export interface Table {
   readonly note: string | null;
 }
 
-export type PanelId = "fleet" | "work" | "usage" | "savings" | "autonomy";
+export type PanelId = "fleet" | "work" | "usage" | "savings" | "autonomy" | "models";
 
-export type PanelTitle = "Fleet" | "Work" | "Usage" | "Savings" | "Autonomy";
+export type PanelTitle = "Fleet" | "Work" | "Usage" | "Savings" | "Autonomy" | "Models";
 
 export interface Panel {
   readonly id: PanelId;
@@ -975,6 +976,65 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
   return { id: "savings", title: "Savings", figures, tables: [] };
 }
 
+// Per-model success over loop result records. Rows sort by rounds
+// descending, then model id ascending. The success rate covers
+// non-excluded rounds only and is "n/a" when there are none.
+export interface ModelRow {
+  readonly model: string;
+  readonly rounds: number;
+  readonly successes: number;
+  readonly failures: number;
+  readonly excluded: number;
+}
+
+export interface ModelRowCounts {
+  rounds: number;
+  successes: number;
+  failures: number;
+  excluded: number;
+}
+
+export function modelRowsOf(lines: readonly ResultLine[]): readonly ModelRow[] {
+  const counts = new Map<string, ModelRowCounts>();
+  for (const line of lines) {
+    const row = counts.get(line.model) ?? { rounds: 0, successes: 0, failures: 0, excluded: 0 };
+    row.rounds += 1;
+    if (line.routingResult === "success") {
+      row.successes += 1;
+    } else if (line.routingResult === "failure") {
+      row.failures += 1;
+    } else {
+      row.excluded += 1;
+    }
+    counts.set(line.model, row);
+  }
+  return [...counts]
+    .map(([model, row]): ModelRow => ({
+      model,
+      rounds: row.rounds,
+      successes: row.successes,
+      failures: row.failures,
+      excluded: row.excluded,
+    }))
+    .sort((a, b) =>
+      b.rounds === a.rounds
+        ? a.model < b.model
+          ? -1
+          : a.model > b.model
+            ? 1
+            : 0
+        : b.rounds - a.rounds,
+    );
+}
+
+export function modelSuccessRate(row: ModelRow): string | null {
+  const decided = row.successes + row.failures;
+  if (decided === 0) {
+    return null;
+  }
+  return (row.successes / decided).toFixed(4);
+}
+
 function buildAutonomyPanel(inputs: DashboardInputs): Panel {
   const parked: Figure =
     inputs.workItems === null
@@ -1041,6 +1101,72 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
   };
 }
 
+function buildModelsPanel(inputs: DashboardInputs): Panel {
+  const source = "loop results (resultsPath of config/loop.json, read through readResults)";
+  const columns = ["model", "rounds", "successes", "failures", "excluded", "success rate"];
+  if (!inputs.results.ok) {
+    // A failed input renders the way other panels render failures: one
+    // row of error cells, never an empty table with a grey note.
+    const failure = failureCell(inputs.results.failure);
+    return {
+      id: "models",
+      title: "Models",
+      figures: [],
+      tables: [
+        {
+          caption: "Models",
+          columns,
+          rows: [[failure, failure, failure, failure, failure, failure]],
+          source,
+          note: null,
+        },
+      ],
+    };
+  }
+  const lines = inputs.results.value;
+  if (lines.length === 0) {
+    return {
+      id: "models",
+      title: "Models",
+      figures: [],
+      tables: [
+        {
+          caption: "Models",
+          columns,
+          rows: [],
+          source,
+          note: "no closed rounds yet",
+        },
+      ],
+    };
+  }
+  const rows = modelRowsOf(lines).map((row): readonly Cell[] => {
+    const rate = modelSuccessRate(row);
+    return [
+      textCell(row.model),
+      textCell(groupDigits(row.rounds)),
+      textCell(groupDigits(row.successes)),
+      textCell(groupDigits(row.failures)),
+      textCell(groupDigits(row.excluded)),
+      rate === null ? textCell("n/a") : textCell(rate),
+    ];
+  });
+  return {
+    id: "models",
+    title: "Models",
+    figures: [],
+    tables: [
+      {
+        caption: "Models",
+        columns,
+        rows,
+        source,
+        note: null,
+      },
+    ],
+  };
+}
+
 export function buildDashboard(inputs: DashboardInputs): DashboardModel {
   const day = utcCalendarDay(inputs.now);
   const { shown, total } = workRows(inputs);
@@ -1054,6 +1180,7 @@ export function buildDashboard(inputs: DashboardInputs): DashboardModel {
       buildUsagePanel(inputs, day),
       buildSavingsPanel(inputs),
       buildAutonomyPanel(inputs),
+      buildModelsPanel(inputs),
     ],
   };
 }

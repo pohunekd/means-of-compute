@@ -11,6 +11,8 @@ import { loadFactorySpecs } from "../work/specs.js";
 
 export type LoopMode = "production" | "stub";
 
+export const DEFAULT_LOOP_CONFIG_PATH = "config/loop.json";
+
 export class LoopConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

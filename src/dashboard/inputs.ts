@@ -3,6 +3,9 @@
 // code; the message goes to the log. A thrown value that is not an Error is
 // rethrown and becomes a 500.
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
+import { InputPathError } from "../fs/input.js";
+import { readResults, LoopResultsDataError } from "../loop/results.js";
+import type { ResultLine } from "../loop/results.js";
 import type { BudgetConfig } from "../budget/config.js";
 import { loadPricingForIds, type NanoPricing } from "../budget/pricing.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
@@ -24,7 +27,9 @@ export type InputErrorCode =
   | "verdicts-unreadable"
   | "fleet-round-failed"
   | "registry-invalid"
-  | "registry-unreadable";
+  | "registry-unreadable"
+  | "results-invalid"
+  | "results-unreadable";
 
 export type InputFailure =
   | { readonly kind: "no-data"; readonly reason: string }
@@ -46,6 +51,7 @@ export interface DashboardInputs {
   readonly hosts: Sourced<readonly HostObservation[]>;
   readonly workItems: readonly WorkItem[] | null;
   readonly registry: Sourced<readonly RegistryEntry[]>;
+  readonly results: Sourced<readonly ResultLine[]>;
 }
 
 export interface DashboardSources {
@@ -53,6 +59,7 @@ export interface DashboardSources {
   readonly verdictDir: string;
   readonly hostState: HostStateCollector | null;
   readonly registryPath: string;
+  readonly resultsPath: string;
 }
 
 export interface FixedInputs {
@@ -157,6 +164,28 @@ async function readRegistryInput(
   return { ok: true, value: entries };
 }
 
+async function readResultsInput(
+  resultsPath: string,
+  log: (input: string, code: InputErrorCode, message: string) => void,
+): Promise<Sourced<readonly ResultLine[]>> {
+  try {
+    return { ok: true, value: await readResults(resultsPath) };
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    // readResults wraps path failures (stat, read, not a file) in a
+    // LoopResultsDataError whose cause is an InputPathError; only a bad
+    // middle line is a data error.
+    const code: InputErrorCode =
+      error instanceof LoopResultsDataError && !(error.cause instanceof InputPathError)
+        ? "results-invalid"
+        : "results-unreadable";
+    log("results", code, error.message);
+    return { ok: false, failure: errorFailure(code) };
+  }
+}
+
 async function readVerdictsForShown(
   verdictDir: string,
   shown: readonly string[],
@@ -213,10 +242,11 @@ export async function gatherInputs(
   const emit = (input: string, code: InputErrorCode, message: string): void => {
     log({ input, code, message });
   };
-  const [ledger, hosts, registry] = await Promise.all([
+  const [ledger, hosts, registry, results] = await Promise.all([
     readLedgerInput(sources.ledgerPath, emit),
     readHostsInput(sources.hostState, emit),
     readRegistryInput(sources.registryPath, emit),
+    readResultsInput(sources.resultsPath, emit),
   ]);
   const pricing = await readPricingInput(ledger, fixed.route, fixed.budget.nvidiaProviderId, emit);
   const partial: Omit<DashboardInputs, "verdicts"> = {
@@ -231,6 +261,7 @@ export async function gatherInputs(
     hosts,
     workItems: null,
     registry,
+    results,
   };
   const { shown } = workRows(partial);
   const verdicts = await readVerdictsForShown(sources.verdictDir, shown, emit);

@@ -558,6 +558,20 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
     const spentTotalSource =
       `ledger records and pending entries, tokens × price; ` +
       `${allPrefix}${priceCite(allScope, pricing)}${cachedClause(allScope, pricing)}`;
+    const bounded = new Set(summary.boundedWorkItemIds);
+    const boundedToday = [
+      ...new Set(
+        scope.today
+          .filter(
+            (entry) =>
+              bounded.has(entry.workItemId) &&
+              entry.tokens.some(
+                (token) => isBoundedAuditToken(token) || (token.unmeasuredRequests ?? 0) > 0,
+              ),
+          )
+          .map((entry) => entry.workItemId),
+      ),
+    ].sort();
     if (unknownToday.length > 0) {
       const ids = [...new Set(unknownToday.map((entry) => entry.workItemId))].sort();
       figures.push({
@@ -565,18 +579,11 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         cell: noDataCell(`spend unknown for ${ids.join(", ")}`),
         source: spentTodaySource,
       });
-    } else if (summary.boundedWorkItemIds.length > 0) {
-      const ids = [
-        ...new Set(
-          scope.today
-            .filter((entry) => entry.tokens.some((token) => isBoundedAuditToken(token)))
-            .map((entry) => entry.workItemId),
-        ),
-      ].sort();
+    } else if (boundedToday.length > 0) {
       figures.push({
         label: `Spent today (UTC ${day})`,
         cell: textCell(
-          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured calls of ${ids.join(", ")})`,
+          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured calls of ${boundedToday.join(", ")})`,
         ),
         source: spentTodaySource,
       });

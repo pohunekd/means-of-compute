@@ -25,6 +25,9 @@ export function pendingReason(value: unknown): string {
   if (predicate !== null) {
     return predicate;
   }
+  if (unmeasuredRequestsInvalid(value as PendingUsage)) {
+    return "unmeasuredRequests requires known counts and must be at most requests";
+  }
   const entry = value as { finishedAt?: unknown };
   if (typeof entry.finishedAt !== "string" || Number.isNaN(Date.parse(entry.finishedAt))) {
     return `finishedAt is not a valid date: ${JSON.stringify(entry.finishedAt)}`;
@@ -33,6 +36,24 @@ export function pendingReason(value: unknown): string {
     return `finishedAt is not canonical: ${JSON.stringify(entry.finishedAt)}`;
   }
   return "invalid pending entry";
+}
+
+function unmeasuredRequestsInvalid(entry: PendingUsage): boolean {
+  for (const token of entry.tokens) {
+    if (token.unmeasuredRequests !== undefined) {
+      if (
+        !Number.isSafeInteger(token.unmeasuredRequests) ||
+        token.unmeasuredRequests < 1 ||
+        token.requests === null ||
+        token.unmeasuredRequests > token.requests ||
+        token.inputTokens === null ||
+        token.outputTokens === null
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function sourcePredicateError(value: PendingUsage): string | null {
@@ -56,19 +77,8 @@ export function isPendingUsage(value: unknown): value is PendingUsage {
   if (sourcePredicateError(entry) !== null) {
     return false;
   }
-  for (const token of entry.tokens) {
-    if (token.unmeasuredRequests !== undefined) {
-      if (
-        !Number.isSafeInteger(token.unmeasuredRequests) ||
-        token.unmeasuredRequests < 1 ||
-        token.requests === null ||
-        token.unmeasuredRequests > token.requests ||
-        token.inputTokens === null ||
-        token.outputTokens === null
-      ) {
-        return false;
-      }
-    }
+  if (unmeasuredRequestsInvalid(entry)) {
+    return false;
   }
   if (Number.isNaN(Date.parse(entry.finishedAt))) {
     return false;

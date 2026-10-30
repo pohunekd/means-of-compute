@@ -328,6 +328,7 @@ async function makeHarness(
     digestDir: join(dir, "digest"),
     providersDir: "config/providers",
     nvidiaProviderId: "nvidia-build",
+    unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
   };
   return {
     ctx,

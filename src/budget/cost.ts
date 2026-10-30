@@ -3,9 +3,27 @@
 // integers against the cap. A float appears only for display. A record with
 // null token counts on a priced provider is "no data": it is reported in
 // unknownWorkItemIds and refuses the session instead of silently counting
-// zero.
-import type { SpendEntry } from "../ledger/types.js";
+// zero, except an unmeasured audit call, which counts at the configured
+// bound (isBoundedAuditToken).
+import { AUDITOR_USAGE_SOURCE, type SpendEntry } from "../ledger/types.js";
 import type { NanoPricing } from "./pricing.js";
+
+/** Per-call token ceiling for an audit call that may be billed but reported no usage. */
+export interface UnmeasuredAuditBound {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+// An audit call that timed out or returned an unreadable 200 may be billed with
+// no usage reported. Its prompt is capped by the auditor's maxDiffBytes, so its
+// spend is bounded: it counts at the configured per-call ceiling, not as unknown.
+export function isBoundedAuditToken(token: SpendEntry["tokens"][number]): boolean {
+  return (
+    token.source === AUDITOR_USAGE_SOURCE &&
+    (token.inputTokens === null || token.outputTokens === null) &&
+    token.requests !== null
+  );
+}
 
 export interface SpendSummary {
   readonly spentTodayNanoUsd: bigint;
@@ -17,6 +35,7 @@ export interface SpendSummary {
   readonly spentTotalNanoTimes1M: bigint;
   readonly nvidiaRequestsToday: number;
   readonly unknownWorkItemIds: readonly string[];
+  readonly boundedWorkItemIds: readonly string[];
 }
 
 export class SpendUnknownError extends Error {
@@ -49,14 +68,17 @@ function utcDayOfEntry(entry: SpendEntry): string {
 export function costOfRecord(
   record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
+  bound: UnmeasuredAuditBound,
 ): bigint {
-  return costOfRecordNanoTimes1M(record, pricing) / TOKENS_PER_1M;
+  return costOfRecordNanoTimes1M(record, pricing, bound) / TOKENS_PER_1M;
 }
 
 /** Undivided record cost: tokens * priceNanoPer1M, for scope accumulation. */
 function costOfRecordNanoTimes1M(
   record: SpendEntry,
   pricing: ReadonlyMap<string, NanoPricing>,
+  bound: UnmeasuredAuditBound,
+  onBounded?: () => void,
 ): bigint {
   let costNanoTimes1M = 0n;
   for (const entry of record.tokens) {
@@ -70,7 +92,22 @@ function costOfRecordNanoTimes1M(
       continue;
     }
     if (entry.inputTokens === null || entry.outputTokens === null) {
-      throw new SpendUnknownError(record.workItemId);
+      if (!isBoundedAuditToken(entry)) {
+        throw new SpendUnknownError(record.workItemId);
+      }
+      const requests = BigInt(entry.requests as number);
+      const input =
+        entry.inputTokens === null
+          ? BigInt(bound.inputTokens) * requests
+          : BigInt(entry.inputTokens);
+      const output =
+        entry.outputTokens === null
+          ? BigInt(bound.outputTokens) * requests
+          : BigInt(entry.outputTokens);
+      costNanoTimes1M +=
+        input * providerPricing.inputNanoPer1M + output * providerPricing.outputNanoPer1M;
+      onBounded?.();
+      continue;
     }
     costNanoTimes1M +=
       BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
@@ -84,12 +121,14 @@ export function summarizeSpend(
   pricing: ReadonlyMap<string, NanoPricing>,
   nvidiaProviderId: string,
   now: Date,
+  auditBound: UnmeasuredAuditBound,
 ): SpendSummary {
   const today = utcCalendarDay(now);
   let spentTodayNanoTimes1M = 0n;
   let spentTotalNanoTimes1M = 0n;
   let nvidiaRequestsToday = 0;
   const unknownWorkItemIds: string[] = [];
+  const boundedWorkItemIds: string[] = [];
   for (const record of records) {
     // Request counts are data, not cost: they are tallied before pricing
     // so a spend-unknown record still reports its NVIDIA requests. A null
@@ -109,7 +148,11 @@ export function summarizeSpend(
     }
     let costNanoTimes1M: bigint;
     try {
-      costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing);
+      costNanoTimes1M = costOfRecordNanoTimes1M(record, pricing, auditBound, () => {
+        if (!boundedWorkItemIds.includes(record.workItemId)) {
+          boundedWorkItemIds.push(record.workItemId);
+        }
+      });
     } catch (error: unknown) {
       if (error instanceof SpendUnknownError) {
         if (!unknownWorkItemIds.includes(record.workItemId)) {
@@ -131,6 +174,7 @@ export function summarizeSpend(
     spentTotalNanoTimes1M,
     nvidiaRequestsToday,
     unknownWorkItemIds,
+    boundedWorkItemIds,
   };
 }
 

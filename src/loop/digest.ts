@@ -5,7 +5,7 @@
 import { link, open, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { utcCalendarDay, summarizeSpend } from "../budget/cost.js";
+import { utcCalendarDay, summarizeSpend, type UnmeasuredAuditBound } from "../budget/cost.js";
 import { loadPricingForIds } from "../budget/pricing.js";
 import { formatUsd, guardScaled } from "../dashboard/money.js";
 import { readLedger, spendEntriesOf } from "../ledger/read.js";
@@ -24,6 +24,7 @@ export interface DigestContext {
   readonly digestDir: string;
   readonly providersDir: string;
   readonly nvidiaProviderId: string;
+  readonly unmeasuredAuditCall: UnmeasuredAuditBound;
   readonly log: LoopLog;
   readonly now: () => Date;
 }
@@ -57,6 +58,7 @@ function formatSpend(summary: {
   spentTodayNanoTimes1M: bigint;
   spentTotalNanoTimes1M: bigint;
   unknownWorkItemIds: readonly string[];
+  boundedWorkItemIds: readonly string[];
 }): {
   readonly day: string;
   readonly total: string;
@@ -65,9 +67,13 @@ function formatSpend(summary: {
     const text = `no data (spend unknown: ${String(summary.unknownWorkItemIds.length)} items)`;
     return { day: text, total: text };
   }
+  const suffix =
+    summary.boundedWorkItemIds.length > 0
+      ? ` (upper bound for ${String(summary.boundedWorkItemIds.length)} unmeasured audit calls)`
+      : "";
   return {
-    day: formatUsd(guardScaled(summary.spentTodayNanoTimes1M)),
-    total: formatUsd(guardScaled(summary.spentTotalNanoTimes1M)),
+    day: `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))}${suffix}`,
+    total: `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))}${suffix}`,
   };
 }
 
@@ -231,6 +237,7 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
     pricing,
     ctx.nvidiaProviderId,
     new Date(`${day}T23:59:59.999Z`),
+    ctx.unmeasuredAuditCall,
   );
   const spend = formatSpend(summary);
   return renderDigest({

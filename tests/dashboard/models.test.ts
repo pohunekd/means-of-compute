@@ -51,6 +51,7 @@ function fixed(): FixedInputs {
     totalCapNanoUsd: 10_000_000_000n,
     nvidiaDailyRequestLimit: 100,
     nvidiaProviderId: "nvidia-build",
+    unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
   };
   const baselines = {
     frontierTokens: null,

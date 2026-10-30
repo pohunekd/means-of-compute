@@ -578,6 +578,7 @@ async function auditErrorStep(
       round: li.round,
       sha: h,
       code: "audit-model-error",
+      detail: utf8Prefix(error.message, 300),
     });
     return "pending";
   }

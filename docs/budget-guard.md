@@ -60,7 +60,7 @@ coordinator's daily digest channel.
 
 - Day = UTC calendar day of `finishedAt`.
 - Null token counts on a priced provider are "no data", never 0 USD silently:
-  the guard refuses with reason `spend unknown`.
+  the guard refuses with reason `spend unknown`. An audit call that may be billed but reported no usage (a timeout or an unreadable 200; `source: auditor-usage`, null token counts, known `requests`) is not unknown: it counts at `config/budget.json` `unmeasuredAuditCall` per request, an upper bound because the audit prompt is capped by `maxDiffBytes`. `budget:check` then ends its line with `bounded audit calls <n>`, and the dashboard and the digest mark the spend as including that bound. Every other null-token entry on a priced provider still refuses as `spend unknown`.
 - At or above a USD cap, all new sessions are refused. NVIDIA daily requests
   at or above the limit refuse only sessions whose route starts at NVIDIA
   Build (reason names it).

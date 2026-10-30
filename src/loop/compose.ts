@@ -5,6 +5,7 @@ import { createApprovalsView, type ApprovalsView } from "./approvals-view.js";
 import { loadAuditorConfig, type AuditorConfig } from "../auditor/config.js";
 import type { AuditDeps } from "../auditor/audit-types.js";
 import { loadBudgetConfig } from "../budget/config.js";
+import type { UnmeasuredAuditBound } from "../budget/cost.js";
 import { loadBudgetGateConfig } from "../budget/gate.js";
 import { loadDispatcherConfig, type DispatcherConfig } from "../dispatcher/config.js";
 import { FileLockError, withFileLock } from "../fs/lock.js";
@@ -15,7 +16,8 @@ import { loadPlacementConfig, type PlacementConfig } from "../placement/config.j
 import type { GitHubPort } from "./github.js";
 import type { GitDeps } from "./git.js";
 import type { HostStateCollector } from "../hoststate/collector.js";
-import type { Scheduler, SchedulerContext } from "./scheduler.js";
+import type { Scheduler } from "./scheduler.js";
+import type { SchedulerContext } from "./scheduler.js";
 import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { loadLoopConfig, type LoopConfig, type LoopMode } from "./config.js";
@@ -41,6 +43,7 @@ export interface LoopConfigs {
   readonly approvals: ApprovalsConfig;
   readonly meter: MeterConfig;
   readonly nvidiaProviderId: string;
+  readonly unmeasuredAuditCall: UnmeasuredAuditBound;
 }
 
 export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<LoopConfigs> {
@@ -76,6 +79,7 @@ export async function loadLoopConfigs(path: string, mode: LoopMode): Promise<Loo
       approvals,
       meter,
       nvidiaProviderId: budget.nvidiaProviderId,
+      unmeasuredAuditCall: budget.unmeasuredAuditCall,
     };
   } catch (error: unknown) {
     throw new LoopStartupError(loopMessage(path, error), { cause: error });
@@ -180,6 +184,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     digestDir: configs.loop.digest.dir,
     providersDir: ports.providersDir,
     nvidiaProviderId: configs.nvidiaProviderId,
+    unmeasuredAuditCall: configs.unmeasuredAuditCall,
     dispatcher: ports.dispatcher,
     dispatcherConfig: configs.dispatcher,
     sessionTimeoutMs: configs.loop.sessionTimeoutMs,

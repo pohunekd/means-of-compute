@@ -123,7 +123,7 @@ exits 2 with `ledger: <message>`. Exits follow the budget guard: 0 ok,
 
 ## Resolved entries
 
-`resolve` writes no correcting line. A provisional entry resolved to `lost`
+`resolve` writes no correcting line. An unmeasured audit entry needs no correction: the guard bounds it at read time (`docs/budget-guard.md`). A provisional entry resolved to `lost`
 gets its first and only pending line, exactly like a `watch`-reported loss.
 An entry that already has a terminal gets nothing new: `resolve` only
 completes the dispatcher's own line through the usual replay, and a second

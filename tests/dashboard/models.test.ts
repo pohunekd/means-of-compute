@@ -207,8 +207,8 @@ test("models panel counts outcomes per model and sorts by rounds", async () => {
   }
 });
 
-test("spent today names the bounded meter item finished today", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spent-today-"));
+test("models panel shows an explicit empty state for an absent file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "models-panel-"));
   try {
     await mkdir(join(dir, "verdicts"), { recursive: true });
     const record = {
@@ -233,7 +233,6 @@ test("spent today names the bounded meter item finished today", async () => {
       sessionSeconds: [{ hostAlias: "host-a", seconds: 60, source: "dispatcher-clock" }],
     };
     await writeFile(join(dir, "ledger.jsonl"), `${JSON.stringify(record)}\n`);
-    await writeFile(join(dir, "results.jsonl"), "");
     const log = logged();
     const budget = fixed().budget;
     const summary = summarizeSpend(
@@ -263,45 +262,46 @@ test("spent today names the bounded meter item finished today", async () => {
       throw new Error("expected pricing to read");
     }
     const model = buildDashboard(inputs);
-    const usage = model.panels.find((candidate) => candidate.id === "usage");
-    if (usage === undefined) {
+    const panel = model.panels.find((candidate) => candidate.id === "usage");
+    if (panel === undefined) {
       throw new Error("expected a usage panel");
     }
-    const today = usage.figures.find((figure) => figure.label === "Spent today (UTC 2026-10-28)");
+    const today = panel.figures.find((figure) => figure.label === "Spent today (UTC 2026-10-28)");
     if (today === undefined || today.cell.kind !== "text") {
       throw new Error("expected a spent-today text cell");
     }
     expect(today.cell.text.endsWith("unmeasured calls of w1-demo)")).toBe(true);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("models panel shows an explicit empty state for an absent file", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "models-panel-"));
-  try {
-    await mkdir(join(dir, "verdicts"), { recursive: true });
-    const log = logged();
-    const inputs = await gatherInputs(
-      sources(dir),
-      fixed(),
-      new Date("2026-10-28T12:00:00.000Z"),
-      (entry) => {
-        log.entries.push({ input: entry.input, code: entry.code, message: entry.message });
-      },
-    );
-    expect(inputs.results.ok).toBe(true);
-    const model = buildDashboard(inputs);
-    const panel = model.panels.find((candidate) => candidate.id === "models");
-    if (panel === undefined) {
-      throw new Error("expected a models panel");
+    const emptyDir = mkdtempSync(join(tmpdir(), "models-panel-"));
+    try {
+      await mkdir(join(emptyDir, "verdicts"), { recursive: true });
+      const emptyLog = logged();
+      const emptyInputs = await gatherInputs(
+        sources(emptyDir),
+        fixed(),
+        new Date("2026-10-28T12:00:00.000Z"),
+        (entry) => {
+          emptyLog.entries.push({
+            input: entry.input,
+            code: entry.code,
+            message: entry.message,
+          });
+        },
+      );
+      expect(emptyInputs.results.ok).toBe(true);
+      const emptyModel = buildDashboard(emptyInputs);
+      const modelsPanel = emptyModel.panels.find((candidate) => candidate.id === "models");
+      if (modelsPanel === undefined) {
+        throw new Error("expected a models panel");
+      }
+      const emptyTable = modelsPanel.tables[0];
+      if (emptyTable === undefined) {
+        throw new Error("expected a models table");
+      }
+      expect(emptyTable.rows).toEqual([]);
+      expect(emptyTable.note).toBe("no closed rounds yet");
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
     }
-    const table = panel.tables[0];
-    if (table === undefined) {
-      throw new Error("expected a models table");
-    }
-    expect(table.rows).toEqual([]);
-    expect(table.note).toBe("no closed rounds yet");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

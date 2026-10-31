@@ -234,8 +234,43 @@ async function stopAndUnbind(
   return "stopped";
 }
 
-// Void path V (3.5): stop first, then unbind, so a session is never unbound
-// while it may still run. Every path throws.
+// A voided session is removed so its worktree no longer holds the branch for
+// the retry; the branch itself stays. A refused or unreachable removal is
+// logged and leaves the session stopped and unbound: the void keeps its code.
+async function removeVoided(
+  port: PortInternals,
+  client: Client,
+  alias: string,
+  sessionId: string,
+  requestId: string,
+): Promise<void> {
+  try {
+    await client.call("session.remove_accepting_unconfirmed", sessionId);
+  } catch (error) {
+    if (isSessionNotFound(error)) {
+      return;
+    }
+    const mapped = portErrorOf(error, alias);
+    if (mapped === null) {
+      throw error;
+    }
+    if (mapped instanceof PortUnreachableError) {
+      await dropConnection(port, alias);
+    }
+    port.log({
+      level: "error",
+      event: "adapter-void-remove-failed",
+      hostAlias: alias,
+      requestId,
+      sessionId,
+      code: mapped instanceof PortRejectedError ? mapped.code : "unreachable",
+    });
+  }
+}
+
+// Void path V (3.5): stop first, then unbind, then remove, so a session is never
+// unbound while it may still run and never keeps the branch for the retry.
+// Every path throws.
 async function voidSession(
   port: PortInternals,
   client: Client,
@@ -244,7 +279,10 @@ async function voidSession(
   req: StartRequest,
   code: string,
 ): Promise<never> {
-  await stopAndUnbind(port, client, alias, session.id, req.requestId, code, true);
+  const stopped = await stopAndUnbind(port, client, alias, session.id, req.requestId, code, true);
+  if (stopped === "stopped") {
+    await removeVoided(port, client, alias, session.id, req.requestId);
+  }
   port.log({
     level: "error",
     event: "adapter-start-void",

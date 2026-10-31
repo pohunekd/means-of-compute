@@ -293,7 +293,7 @@ async function makeHarness(
       config: {
         verdictDir,
         maxDiffBytes: 1_000_000,
-        auditors: [],
+        auditors: [{ providerId: PROVIDER, model: "test-auditor" }],
         mergeAuditor: { providerId: PROVIDER, model: PREFERRED },
         maxFindings: 50,
         maxFieldChars: 2000,
@@ -741,6 +741,62 @@ test("B1 a claim retries the excluded host and parks at maxStartRejections", asy
       expect(parked.park).toMatchObject({ kind: "operator", code: "start-rejected" });
       expect(parked.startRejections).toBe(3);
       expect(parked.excludedHosts).toContain("host-a");
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// Rule A (160a): both routine models authored the item, so no auditor
+// stays eligible. The claim parks operator no-eligible-auditor before
+// any session starts: no registry entry, a parked log line, no claim.
+test("rule A parks the claim when no auditor stays eligible (160a)", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      const sparkEntry = grantUsage("gh-demo-1:gh-demo-1:0", "gh-demo-1");
+      await appendPending(harness.ctx.ledgerPath, sparkEntry);
+      await appendPending(harness.ctx.ledgerPath, {
+        ...grantUsage("gh-demo-1:gh-demo-1:1", "gh-demo-1"),
+        startModel: AUDITOR,
+        tokens: [
+          {
+            provider: "nvidia-build",
+            model: AUDITOR,
+            inputTokens: 0,
+            outputTokens: 0,
+            requests: 0,
+            source: "meter",
+          },
+        ],
+      });
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {});
+      const ctx: SchedulerContext = {
+        ...harness.ctx,
+        auditor: {
+          ...harness.ctx.auditor,
+          config: {
+            ...harness.ctx.auditor.config,
+            auditors: [
+              { providerId: PROVIDER, model: PREFERRED },
+              { providerId: "nvidia-build", model: AUDITOR },
+            ],
+          },
+        },
+      };
+      const scheduler = createScheduler(ctx);
+      const report = await scheduler.tick();
+      await scheduler.settled();
+      expect(report.claimed).toEqual([]);
+      const li = (await readLoopState(ctx.statePath)).items["gh-demo-1"] as unknown as LoopItem;
+      expect(li.park).toMatchObject({ kind: "operator", code: "no-eligible-auditor" });
+      expect(harness.control.sessions()).toEqual([]);
+      expect(harness.events.find((line) => line.startsWith("parked:"))).toBe(
+        "parked:no-eligible-auditor:::::",
+      );
+      expect(harness.events.some((line) => line.startsWith("claim:"))).toBe(false);
     } finally {
       restoreEnv();
     }

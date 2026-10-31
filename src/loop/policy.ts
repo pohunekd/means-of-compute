@@ -1,6 +1,8 @@
 // Pure stall and model-routing policy for the loop runner. No I/O and no
 // clock: every limit arrives through the arguments from LoopConfig.
 import type { WorkItem } from "../../contracts/v1/types.js";
+import type { AuditorEntry } from "../auditor/config.js";
+import { eligibleAuditor } from "../auditor/select.js";
 import type { LoopRoutingConfig, LoopStallConfig } from "./config.js";
 import type { ResultLine } from "./results.js";
 import type { LoopItem, RoundOutcome, RoundRecord, RoutingResult } from "./types.js";
@@ -202,6 +204,32 @@ export function chooseModel(
     fallbackUsed: false,
     steered: null,
   };
+}
+
+// Rule A: a round runs only on a model that, added to the item's authors,
+// still leaves a configured auditor, so no model ever audits its own work.
+// A routed choice that would not is replaced by the preferred model when
+// that one keeps an auditor; null means neither does.
+export function auditableChoice(
+  item: WorkItem,
+  choice: ModelChoice,
+  authors: readonly string[],
+  auditors: readonly AuditorEntry[],
+  routing: LoopRoutingConfig,
+): ModelChoice | null {
+  if (eligibleAuditor(auditors, [...authors, choice.model]) !== null) {
+    return choice;
+  }
+  const preferred = item.modelRouting.preferredModel;
+  if (choice.model !== preferred && eligibleAuditor(auditors, [...authors, preferred]) !== null) {
+    return {
+      model: preferred,
+      providerId: providerOf(routing, preferred),
+      fallbackUsed: false,
+      steered: null,
+    };
+  }
+  return null;
 }
 
 // Rounds on the preferred model plus the started one when it matches.

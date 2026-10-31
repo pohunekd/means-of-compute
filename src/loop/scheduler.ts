@@ -22,7 +22,8 @@ import type { SpendBounds } from "../budget/cost.js";
 import { placeObserved } from "../placement/observed.js";
 import type { LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
 import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
-import { chooseModel } from "./policy.js";
+import { authorModelsOf, readLedger } from "../ledger/read.js";
+import { auditableChoice, chooseModel } from "./policy.js";
 import { briefBranchOf, buildBrief } from "./brief.js";
 import { reconcile } from "./project.js";
 import { readResults, type ResultLine } from "./results.js";
@@ -343,10 +344,40 @@ async function claimOne(
   observations: readonly HostObservation[],
   isSettled: () => boolean,
 ): Promise<boolean> {
+  async function ensureLoopItem(ctx: SchedulerContext, id: string): Promise<void> {
+    await updateLoopState(ctx.statePath, (current) => {
+      if (current.items[id] !== undefined) {
+        return Promise.resolve({ next: null, value: undefined });
+      }
+      return Promise.resolve({
+        next: { ...current, items: { ...current.items, [id]: { ...initialLoopItem() } } },
+        value: undefined,
+      });
+    });
+  }
   const state = await readLoopState(ctx.statePath);
   const stored = state.items[item.id] as unknown as LoopItem | undefined;
   const li = stored ?? initialLoopItem();
-  const choice = chooseModel(item, li, results, ctx.routing);
+  const routed = chooseModel(item, li, results, ctx.routing);
+  const authors = authorModelsOf(await readLedger("Loop ledger", ctx.ledgerPath), item.id);
+  const choice = auditableChoice(item, routed, authors, ctx.auditor.config.auditors, ctx.routing);
+  if (choice === null) {
+    // Every routed model already authored the item or would leave no
+    // auditor: park before a session spends anything.
+    if (stored === undefined) {
+      await ensureLoopItem(ctx, item.id);
+    }
+    await parkOperator(ctx, item, "no-eligible-auditor");
+    return true;
+  }
+  if (choice.model !== routed.model) {
+    ctx.log.log({
+      event: "fallback-refused",
+      workItemId: item.id,
+      code: routed.model,
+      detail: "no eligible auditor",
+    });
+  }
   const filtered = observations.filter((entry) => !li.excludedHosts.includes(entry.hostAlias));
   let decision = placeObserved(item, filtered, carry.running, ctx.placementConfig);
   if (decision.chosenHostAlias === null && li.excludedHosts.length > 0) {
@@ -380,15 +411,7 @@ async function claimOne(
   );
   if (brief.kind === "too-large") {
     if (stored === undefined) {
-      await updateLoopState(ctx.statePath, (current) => {
-        if (current.items[item.id] !== undefined) {
-          return Promise.resolve({ next: null, value: undefined });
-        }
-        return Promise.resolve({
-          next: { ...current, items: { ...current.items, [item.id]: { ...initialLoopItem() } } },
-          value: undefined,
-        });
-      });
+      await ensureLoopItem(ctx, item.id);
     }
     await parkOperator(ctx, item, "brief-too-large");
     return true;

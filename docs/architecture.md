@@ -5,7 +5,7 @@ adds the fleet layer: what to run, where, under which budget, and whether the re
 is accepted.
 
 Models: Muse Glimmer 30B (open weights, NVIDIA Build) is the main coder; Muse
-Spark is fallback, planner and auditor. Every Muse Spark call uses
+Spark is fallback, planner and auditor. As a coder fallback, Spark takes only whole items steered to it before their first round, because a model never audits its own work (loop rule A). Every Muse Spark call uses
 `muse-spark-1.3-contributor`; Muse Code runs with
 `--model muse-spark-1.3-contributor --contributor-mode on`. Built by itself: see
 README. At runtime every model call goes to a Meta model: the provider schema allows only the ids in `config/providers/schema.json`.

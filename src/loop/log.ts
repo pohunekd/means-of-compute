@@ -36,7 +36,8 @@ export type LoopEventName =
   | "digest-written"
   | "unparked"
   | "audit-error"
-  | "drift-cancel-unreachable";
+  | "drift-cancel-unreachable"
+  | "fallback-refused";
 
 export interface LoopLogEvent {
   readonly event: LoopEventName;

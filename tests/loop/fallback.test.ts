@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import type { LoopRoutingConfig } from "../../src/loop/config.js";
-import { chooseModel } from "../../src/loop/policy.js";
+import { auditableChoice, chooseModel } from "../../src/loop/policy.js";
 import type { RoundRecord } from "../../src/loop/types.js";
 
 const PREFERRED = "meta/muse-glimmer-30b";
@@ -53,4 +53,42 @@ test("two failures on the preferred model switch to the fallback (L9, O5)", () =
     fallbackUsed: true,
     steered: null,
   });
+});
+
+test("rule A holds the fallback when the preferred model already authored (160a)", () => {
+  const auditors = [
+    { providerId: "nvidia-build", model: PREFERRED },
+    { providerId: "meta-api", model: FALLBACK },
+  ];
+  const failures = { [PREFERRED]: 2 };
+  const loopItem = { failures, rounds: [] as RoundRecord[] };
+  const routed = chooseModel(itemWith(), loopItem, [], ROUTING);
+  expect(routed.model).toBe(FALLBACK);
+  expect(auditableChoice(itemWith(), routed, [PREFERRED], auditors, ROUTING)).toEqual({
+    model: PREFERRED,
+    providerId: "nvidia-build",
+    fallbackUsed: false,
+    steered: null,
+  });
+  const steered = {
+    model: FALLBACK,
+    providerId: "meta-api",
+    fallbackUsed: true,
+    steered: null,
+  };
+  expect(auditableChoice(itemWith(), steered, [], auditors, ROUTING)).toBe(steered);
+  expect(
+    auditableChoice(
+      itemWith({ fallbackUsed: true }),
+      chooseModel(
+        itemWith({ fallbackUsed: true }),
+        { failures: {}, rounds: [] as RoundRecord[] },
+        [],
+        ROUTING,
+      ),
+      [PREFERRED, FALLBACK],
+      auditors,
+      ROUTING,
+    ),
+  ).toBeNull();
 });

@@ -25,18 +25,25 @@ export function selectMergeAuditor(
   return mergeAuditor;
 }
 
+// The first configured auditor whose model did not author the item, or null.
+export function eligibleAuditor(
+  auditors: readonly AuditorEntry[],
+  authors: readonly string[],
+): AuditorEntry | null {
+  const authored = new Set(authors);
+  return auditors.find((entry) => !authored.has(entry.model)) ?? null;
+}
+
 export function selectAuditor(
   auditors: readonly AuditorEntry[],
   authors: readonly string[],
   workItemId: string,
 ): AuditorEntry {
-  const authored = new Set(authors);
-  for (const entry of auditors) {
-    if (!authored.has(entry.model)) {
-      return entry;
-    }
+  const entry = eligibleAuditor(auditors, authors);
+  if (entry === null) {
+    throw new NoEligibleAuditorError(
+      `no eligible auditor: every configured auditor model authored ${workItemId}`,
+    );
   }
-  throw new NoEligibleAuditorError(
-    `no eligible auditor: every configured auditor model authored ${workItemId}`,
-  );
+  return entry;
 }

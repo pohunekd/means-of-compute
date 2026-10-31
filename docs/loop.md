@@ -55,6 +55,7 @@ This slice adds the pure policy the later driver calls:
   DoD signal (merged rounds meet every DoD id, minus earlier rounds), the
   stall decision (three stagnant rounds park, then retry, then block), and
   model choice (rule F: used fallback, failure count, result steering).
+- Rule A (`auditableChoice`): a round starts only on a model that, added to the item's ledger authors (`authorModelsOf`), still leaves an eligible configured auditor. Otherwise it runs on the preferred model when that one does, and logs `fallback-refused`. If neither does, the item parks `operator: no-eligible-auditor` before any session starts. With Spark and Glimmer as the only routine auditors, the failure-count fallback therefore never fires after the preferred model has run on the item: a failing item stays on its model and the stall rule parks, retries and blocks it. Steering at start still moves a whole item to the fallback model.
 - `src/loop/results.ts` reads and appends `logs/loop-results.jsonl`: a torn
   tail is ignored on read and repaired on append, duplicate keys keep the
   first line, and rules R-a (key equals `<workItemId>:<round>`) and R-b
@@ -116,7 +117,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 
 - A tick appends missing result lines, reports orphan sessions once and escalates them, clears the merge hold when the base contains the merge and its checks are green, reconciles each item fresh with no call in flight, and launches one step call per item by phase: start, watch, publish, CI (at most every `ciPollMs`), audit and merge in one call, merge, finalize, or the park step. No new call or claim starts after `stop()` or a latched failure, even mid-tick.
 - A running item also gets the session timeout check. No step call starts for an item while its timeout check is in flight. A failed call stops the scheduler: the next tick rejects with that error, and `settled()` rejects with it once every non-watch call has settled.
-- Unless the fleet is paused, it claims ready items in store order up to `maxActiveItems`, outside their backoff window, with the model rule, placement over the collected hosts minus the item's excluded hosts and counting `starting` items from earlier ticks and the same tick, and the brief; a brief over `maxBriefBytes` parks the item as operator `brief-too-large`.
+- Unless the fleet is paused, it claims ready items in store order up to `maxActiveItems`, outside their backoff window, with the model rule and rule A, placement over the collected hosts minus the item's excluded hosts and counting `starting` items from earlier ticks and the same tick, and the brief; a brief over `maxBriefBytes` parks the item as operator `brief-too-large`.
 - At startup, a `running` or `review` store item without a loop item, or with an idle one, stops the factory with `loop state missing for <ids>`.
 
 ## Intake (PR 6b)

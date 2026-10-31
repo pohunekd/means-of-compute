@@ -2,7 +2,7 @@
 
 All model traffic from fleet sessions flows through the metering proxy
 (`src/meter/`). The proxy holds the provider keys: the session receives
-its caller token through session metadata, and the token is valid only
+its caller token through a secret session env slot, and the token is valid only
 while its grant is open, and the proxy records
 per-session
 token usage into an append-only log. `createMeteredPort`, the `meter:usage` CLI and the host token helper exist.

@@ -180,7 +180,8 @@ test("a metered call forwards the canary key and logs none of it", async () => {
         join(RUN_DIR, "meter-events.jsonl"),
         `${fixture.events.map((event) => JSON.stringify(event)).join("\n")}\n`,
       );
-      expect(loopback.requests()[0]?.headers["authorization"]).toBe(`Bearer ${CANARY.meta}`);
+      const auth = loopback.requests()[0]?.headers["authorization"];
+      expect(auth === `Bearer ${CANARY.meta}`).toBe(true);
       await scanRunDir();
     },
     { keys: { meta: CANARY.meta, nvidia: CANARY.nvidia } },
@@ -208,7 +209,8 @@ test("secret-bearing error paths redact the value", async () => {
     }
     expect(ghThrown).toBeInstanceOf(GitHubError);
     const ghDetail = (ghThrown as GitHubError).detail ?? "";
-    expect(ghDetail).toContain("[redacted]");
+    expect(ghDetail.includes("[redacted]")).toBe(true);
+    expect(ghDetail.includes(CANARY.github)).toBe(false);
     appendFileSync(
       ERRORS_LOG,
       `${JSON.stringify({ name: "GitHubError", message: (ghThrown as Error).message, detail: ghDetail })}\n`,
@@ -245,7 +247,8 @@ test("secret-bearing error paths redact the value", async () => {
     }
     expect(routerThrown).toBeInstanceOf(ProviderCallError);
     expect((routerThrown as ProviderCallError).status).toBe(401);
-    expect(loopback.requests()[0]?.headers["authorization"]).toBe(`Bearer ${CANARY.meta}`);
+    const forwarded = loopback.requests()[0]?.headers["authorization"];
+    expect(forwarded === `Bearer ${CANARY.meta}`).toBe(true);
     appendFileSync(
       ERRORS_LOG,
       `${JSON.stringify({ name: "ProviderCallError", message: (routerThrown as Error).message, detail: (routerThrown as ProviderCallError).kind })}\n`,

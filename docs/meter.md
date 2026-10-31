@@ -113,8 +113,6 @@ session metadata, never through a config file.
 
 ### Caller token
 
-`tests/security/canary.test.ts` drives a metered call and the gh and router error paths with synthetic canary keys, checks that each key was used, and scans its run dir `logs/canary-run/` for every canary and token shape.
-
 The token is per session and derived, never stored:
 
 ```
@@ -126,6 +124,10 @@ only in the factory process; hosts never hold it. The token is
 deterministic, so replaying a start delivers the same token. Minting is
 `meter.tokenFor(requestId)`; validity always follows the grant state, never
 the token alone; revocation is the `grant-close` record.
+
+`tests/security/canary.test.ts` proves the meta provider key and the
+GitHub token are each used and then found in no file of the run dir
+`logs/canary-run/`.
 
 ## Config keys
 

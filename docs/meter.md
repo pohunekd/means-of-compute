@@ -125,6 +125,10 @@ deterministic, so replaying a start delivers the same token. Minting is
 `meter.tokenFor(requestId)`; validity always follows the grant state, never
 the token alone; revocation is the `grant-close` record.
 
+`tests/security/canary.test.ts` proves the meta provider key and the
+GitHub token are each used and then found in no file of the run dir
+`logs/canary-run/`.
+
 ## Config keys
 
 `config/meter.json` holds every key below. Every key is required, no extra

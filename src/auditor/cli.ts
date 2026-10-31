@@ -22,9 +22,16 @@ import { AuditPostError, auditExitCode, runAudit } from "./audit.js";
 import type { AuditInput } from "./audit-types.js";
 import { loadAuditorConfig } from "./config.js";
 import { createReadOnlyGit, GitReadError } from "./git.js";
-import { definedEnv } from "../mcp/client.js";
 import { readVerdicts } from "./store.js";
 import { renderComment } from "./verdict.js";
+
+function requiredCliEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === "") {
+    throw new Error(`audit: ${name} is not set`);
+  }
+  return value;
+}
 
 const AUDITOR_CONFIG_PATH = "config/auditor.json";
 const BUDGET_CONFIG_PATH = "config/budget-gate.json";
@@ -368,7 +375,7 @@ async function run(): Promise<number> {
         command: budgetConfig.command,
         timeoutMs: budgetConfig.timeoutMs,
         cwd: process.cwd(),
-        env: definedEnv(process.env),
+        env: { PATH: requiredCliEnv("PATH"), HOME: requiredCliEnv("HOME") },
       }),
       call: callProviderOnce,
       ledgerPath,

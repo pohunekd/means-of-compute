@@ -40,6 +40,7 @@ export interface MeterOverrides {
   hosts?: Record<string, string[]>;
   now?: () => Date;
   upstreamBaseUrl?: string;
+  keys?: { readonly meta: string; readonly nvidia: string };
 }
 
 export async function withMeter(
@@ -78,8 +79,8 @@ export async function withMeter(
     const loopback = await startLoopback(recordingsPath);
     try {
       resetProvidersCache();
-      process.env.META_API_KEY = "test-meta-key";
-      process.env.NVIDIA_API_KEY = "test-nvidia-key";
+      process.env.META_API_KEY = overrides.keys?.meta ?? "test-meta-key";
+      process.env.NVIDIA_API_KEY = overrides.keys?.nvidia ?? "test-nvidia-key";
       process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
       const upstream = overrides.upstreamBaseUrl ?? `http://127.0.0.1:${String(loopback.port)}`;
       process.env.PROVIDER_META_API_BASE_URL = upstream;

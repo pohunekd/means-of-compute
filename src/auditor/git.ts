@@ -52,6 +52,22 @@ function isAllowedSubcommand(value: string): boolean {
   return (ALLOWED_GIT_SUBCOMMANDS as readonly string[]).includes(value);
 }
 
+// Read-only git needs no credential: the child gets PATH and fixed git
+// switches only, never the factory's provider keys or tokens.
+function gitEnv(): Record<string, string> {
+  const path = process.env["PATH"];
+  if (path === undefined || path === "") {
+    throw new GitReadError("git: PATH is not set", 2);
+  }
+  return {
+    PATH: path,
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  };
+}
+
 export async function execGit(
   repoDir: string,
   subcommand: string,
@@ -69,7 +85,7 @@ export async function execGit(
     }
   }
   const proc = Bun.spawn(["git", "--no-pager", "-C", repoDir, subcommand, ...args], {
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+    env: gitEnv(),
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",

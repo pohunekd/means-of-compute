@@ -1,7 +1,8 @@
 // MCP runtime boundary (A9): preloaded by every MCP server launcher
 // (src/mcp/launch.ts). A Bun plugin refuses to load the approvals
 // decide module or CLI, matched by file identity, however the specifier is
-// built; the global marker tells serve.ts and decide.ts that it runs.
+// built in the server's realm (a ShadowRealm load is refused by decide.ts);
+// the global marker tells serve.ts and decide.ts that it runs.
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BOUNDARY_MARKER } from "./boundary-marker.js";

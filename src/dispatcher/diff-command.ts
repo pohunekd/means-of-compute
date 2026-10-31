@@ -81,3 +81,16 @@ export async function runDiffCommand(
     await port.close();
   }
 }
+
+// A reader that closes the pipe early (`| head`) makes the stdout stream
+// emit EPIPE after write() has returned. That is the reader leaving, not a
+// failure: it is ignored and the exit code stays as the command set it.
+// Any other stream error is rethrown, so it still ends the process.
+export function ignoreReaderClosed(stream: NodeJS.EventEmitter): void {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") {
+      return;
+    }
+    throw error;
+  });
+}

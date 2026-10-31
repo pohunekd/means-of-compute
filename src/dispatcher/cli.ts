@@ -25,7 +25,7 @@ import { PROVIDERS_DIR } from "../providers/paths.js";
 import { loadDispatcherConfig } from "./config.js";
 import { loadPohunekAdapterConfig } from "./adapter/config.js";
 import { openPohunekPort, type AdapterLogEvent } from "./adapter/pohunek-port.js";
-import { runDiffCommand } from "./diff-command.js";
+import { ignoreReaderClosed, runDiffCommand } from "./diff-command.js";
 import { runThenClose } from "./run-then-close.js";
 import { runResolveCommand } from "./resolve-command.js";
 import { createDispatcher, type ResolveOutcome } from "./dispatcher.js";
@@ -198,6 +198,7 @@ async function runDryRun(): Promise<number> {
 
 async function runDiff(dargs: readonly string[]): Promise<number> {
   try {
+    ignoreReaderClosed(process.stdout);
     const config = await loadPohunekAdapterConfig();
     // Every adapter event appends one JSON line to the diff log; the log
     // never reaches stdout or stderr.

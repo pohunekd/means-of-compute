@@ -13,6 +13,9 @@ on the `DispatcherPort` interface, never on the adapter.
   budget gate, derives the `StartRequest`, and opens the session through the
   port under the item lock. The request and the session handle persist in the
   registry file named by `registryPath` (`config/dispatcher.json` `registryPath`).
+
+Handle validation checks the returned session handle and rejects with `invalid-handle` when they fail. The checks include `worktree-unique`: the handle's worktree on its host must not be the worktree of a live (non-terminal) registry entry of another request. The check reads the registry again after the port call.
+
 - `watch` (`src/dispatcher/dispatcher.ts` `watch`) polls `port.wait` with
   `waitTimeoutMs` (`config/dispatcher.json` `waitTimeoutMs`) and persists every
   non-terminal observation. When the port reports a terminal result the

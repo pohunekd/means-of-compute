@@ -200,3 +200,29 @@ test("X7 approvals view exposes an approved resolve and ignores a pending one (#
     { requestId: "demo-review:0", reason: "Resolve the stuck session." },
   ]);
 });
+
+test("pending approvals are not consumed", async () => {
+  const { env, lines } = await setupEnv("mcp-pending-");
+  await callTool(env, lines, "approve", {
+    workItemId: "demo-review",
+    pullNumber: 7,
+    headSha: HEAD_SHA,
+    reason: "Ship the demo change.",
+  });
+  await callTool(env, lines, "pause_fleet", {
+    action: "pause",
+    reason: "Hold new starts.",
+  });
+  const view = createApprovalsView(env.requestsPath);
+  expect(await view.approvedMerge("demo-review", 7, HEAD_SHA)).toBe(false);
+  expect(await view.fleetPaused()).toBe(false);
+  const decided = await decideRequest(env.requestsPath, {
+    requestId: "req-000001",
+    decision: "approved",
+    author: "owner",
+    now: fixedNow(),
+  });
+  expect(decided.kind).toBe("decided");
+  expect(await view.approvedMerge("demo-review", 7, HEAD_SHA)).toBe(true);
+  expect(await view.fleetPaused()).toBe(false);
+});

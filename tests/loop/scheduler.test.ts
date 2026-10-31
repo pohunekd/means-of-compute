@@ -317,6 +317,7 @@ async function makeHarness(
     maxActiveItems: overrides.maxActiveItems ?? 4,
     maxBriefBytes: overrides.maxBriefBytes ?? 65536,
     hostCooldown: { rejections: 3, windowMs: 600_000, cooldownMs: 900_000 },
+    retireRetryMs: 60_000,
     ciPollMs: overrides.ciPollMs ?? 30_000,
     intake: {
       enabled: false,
@@ -857,6 +858,103 @@ test("rule A parks the claim when no auditor stays eligible (160a)", async () =>
         "parked:no-eligible-auditor:::::",
       );
       expect(harness.events.some((line) => line.startsWith("claim:"))).toBe(false);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// Retire sweep: a settled, ledgered entry no loop item names belongs to a
+// closed round, so one tick removes its session from the host.
+test("a tick retires the session of a closed round", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      const handle = await harness.control.port.start({
+        requestId: "gh-demo-1:0",
+        workItemId: "gh-demo-1",
+        repo: REPO,
+        hostAlias: "host-a",
+        branch: "moc/gh-demo-1",
+        baseRef: "origin/main",
+        resume: false,
+        model: { providerId: PROVIDER, model: PREFERRED },
+        brief: "Do the work.",
+      });
+      expect(handle.sessionId).toBe("mem-1");
+      harness.control.complete("mem-1", { state: "finished", usage: null, detail: "ok" });
+      await seedFinishedRegistry(harness.registryPath);
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "final",
+          finalize: { result: "success", done: true },
+        },
+      });
+      const scheduler = createScheduler(harness.ctx);
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.control.sessions()).toEqual([]);
+      expect(harness.events.some((line) => line.startsWith("retire-failed:"))).toBe(false);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// Retire sweep: an unreachable host refuses the retire, so the sweep logs
+// retire-failed and leaves the item; once retireRetryMs passes the next
+// tick removes the session.
+test("an unreachable retire is logged, retried after retireRetryMs, and leaves the item", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      const handle = await harness.control.port.start({
+        requestId: "gh-demo-1:0",
+        workItemId: "gh-demo-1",
+        repo: REPO,
+        hostAlias: "host-a",
+        branch: "moc/gh-demo-1",
+        baseRef: "origin/main",
+        resume: false,
+        model: { providerId: PROVIDER, model: PREFERRED },
+        brief: "Do the work.",
+      });
+      expect(handle.sessionId).toBe("mem-1");
+      harness.control.complete("mem-1", { state: "finished", usage: null, detail: "ok" });
+      await seedFinishedRegistry(harness.registryPath);
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "final",
+          finalize: { result: "success", done: true },
+        },
+      });
+      harness.control.setUnreachable("host-a", true);
+      const scheduler = createScheduler(harness.ctx);
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.control.sessions()).toHaveLength(1);
+      const failures = harness.events.filter((line) => line.startsWith("retire-failed:"));
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toBe("retire-failed:unreachable::::gh-demo-1:0:host-a");
+      const parked = (await readLoopState(harness.ctx.statePath)).items[
+        "gh-demo-1"
+      ] as unknown as LoopItem;
+      expect(parked.phase).toBe("final");
+      harness.control.setUnreachable("host-a", false);
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.control.sessions()).toHaveLength(1);
+      expect(harness.events.filter((line) => line.startsWith("retire-failed:"))).toHaveLength(1);
+      harness.nowValue.current = new Date(harness.nowValue.current.getTime() + 60_000);
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.control.sessions()).toEqual([]);
     } finally {
       restoreEnv();
     }

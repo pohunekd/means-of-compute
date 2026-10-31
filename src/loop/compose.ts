@@ -22,7 +22,7 @@ import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
 import { loadLoopConfig, type LoopConfig, type LoopMode } from "./config.js";
 import type { LoopLog } from "./log.js";
-import type { StartDispatcher } from "./start.js";
+import type { SchedulerDispatcher } from "./retire.js";
 
 export class LoopStartupError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -153,7 +153,7 @@ export async function closeAll(
 
 export interface LoopPorts {
   readonly github: GitHubPort;
-  readonly dispatcher: StartDispatcher;
+  readonly dispatcher: SchedulerDispatcher;
   readonly collector: HostStateCollector;
   readonly auditBudget: AuditDeps["budget"];
   readonly auditCall: AuditDeps["call"];
@@ -187,6 +187,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     maxActiveItems: configs.loop.maxActiveItems,
     maxBriefBytes: configs.loop.maxBriefBytes,
     hostCooldown: configs.loop.hostCooldown,
+    retireRetryMs: configs.loop.retireRetryMs,
     ciPollMs: configs.loop.github.ciPollMs,
     intake: configs.loop.github.intake,
     trustedAssociations: configs.loop.github.trustedAssociations,

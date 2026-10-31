@@ -20,6 +20,7 @@ import type {
   DispatcherPort,
   ModelSelection,
   PortUsage,
+  RetireOutcome,
   SessionHandle,
   SessionRef,
   StartRequest,
@@ -525,9 +526,10 @@ export function createDispatcher(deps: DispatcherDeps): {
   diff(requestId: string): Promise<DiffResult>;
   cancel(requestId: string, reason: CancelReason): Promise<FinishOutcome>;
   resolve(requestId: string): Promise<ResolveOutcome>;
+  retire(requestId: string): Promise<RetireOutcome | "skipped">;
 } {
   // Port wait/cancel/diff and sleep always run outside a hold; port start
-  // is the only port call made under the lock. The hold uses the
+  // and port retire are the only port calls made under the lock. The hold uses the
   // module-level itemLocks map above, so two dispatcher instances on the
   // same registry serialize on the same chain.
 
@@ -1319,6 +1321,31 @@ export function createDispatcher(deps: DispatcherDeps): {
     });
   }
 
+  // Removes the session of a closed round from its host; the branch stays.
+  // Only a settled, ledgered entry is retired, under the item lock so it
+  // never races the retire-before-start loop of the same item.
+  async function retire(requestId: string): Promise<RetireOutcome | "skipped"> {
+    return withItemLock(itemKeyFor(requestId), async () => {
+      const entry = await loadEntry(requestId);
+      if (entry.sessionId === null || entry.terminal === null || !entry.terminal.ledgerAppended) {
+        return "skipped";
+      }
+      const outcome = await deps.port.retire({
+        sessionId: entry.sessionId,
+        hostAlias: entry.hostAlias,
+      });
+      deps.log({
+        level: "info",
+        event: "retired",
+        requestId: entry.requestId,
+        workItemId: entry.workItemId,
+        sessionId: entry.sessionId,
+        detail: outcome,
+      });
+      return outcome;
+    });
+  }
+
   function logResolveRefused(entry: RegistryEntry, error: unknown): void {
     let detail: string;
     if (error instanceof PortUnreachableError) {
@@ -1338,7 +1365,7 @@ export function createDispatcher(deps: DispatcherDeps): {
     });
   }
 
-  return { start, watch, diff, cancel, resolve: resolveRequest };
+  return { start, watch, diff, cancel, resolve: resolveRequest, retire };
 }
 
 export { PortRejectedError, PortUnreachableError };

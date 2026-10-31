@@ -304,3 +304,13 @@ Hosts appear by alias only, never by hostname or address. The page carries
 no sentinel text, address fragment, or fixed `host-` prefix. Registry
 paths, session ids, cursors, details and repo are never shown. The verdict
 list shows counts per head SHA, never finding texts.
+
+## Benchmark numbers (demo:numbers)
+
+Run `bun run demo:numbers --ledger <run-ledger>` to print a markdown table of benchmark figures from ledger records plus config prices.
+
+The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems null, then reads figures by panel id and label (`figureOf`).
+
+`Local token share` is a new figure computed over record `tokens[]` (input plus output, auditor-usage included). Locality is from `config/demo-numbers.json` with `localProviderIds` and `cloudProviderIds`. Checks in order: null token counts → `no data (token counts not reported for <ids>)`; unmeasured requests → `no data (requests without usage for <ids>)`; zero total → `no data (no tokens in ledger records)`; else `<ratio> local (<local> of <total> tokens)` with ratio to 4 decimals and counts via `groupDigits`.
+
+Classification config `config/demo-numbers.json` must contain exactly `localProviderIds` and `cloudProviderIds`, each an array of unique provider ids with descriptors, disjoint. Current content: local `["local"]`; cloud `["meta-api", "meta-wonder", "nvidia-build"]`. `buildNumbers` fails fast if a provider in records or pending entries is not classified.

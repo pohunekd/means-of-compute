@@ -27,6 +27,7 @@
     "approvals:decide": "bun run src/approvals/cli.ts decide",
     "plugin:build": "bun run scripts/host-state-build.ts",
     "plugin:digest": "bun run scripts/host-state-digest.ts",
+    "demo:numbers": "bun run src/demo/cli.ts",
     "fmt": "prettier --write .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

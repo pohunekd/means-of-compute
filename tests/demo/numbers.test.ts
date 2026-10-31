@@ -185,6 +185,17 @@ Ledger: /tmp/ledger.jsonl (records: 2, unfinalized entries: 1)
 | muse-spark-1.3-contributor | 2 | 0 | 0.0000 |
 `;
   expect(output).toBe(expected);
+
+  const outputWithSources = renderNumbers(numbers, true);
+  expect(outputWithSources).toContain("local: w1-alpha; cloud: w1-alpha, w2-beta");
+  expect(outputWithSources).toContain("config/demo-numbers.json");
+  expect(outputWithSources).toContain(
+    "config/providers/meta-api.json input $1 per 1M, output $2 per 1M",
+  );
+  expect(outputWithSources).toContain("rows: w1-alpha, w2-beta");
+  expect(outputWithSources).toContain("rows: p1");
+  expect(outputWithSources).toContain("w2-beta (1)");
+  expect(outputWithSources).toContain("config: none (count, no price)");
 });
 
 test("demo numbers reports null token counts", () => {

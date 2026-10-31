@@ -232,7 +232,7 @@ error it is `null`, because the call-end line already carries `code`.
      in `onLoad`, any load whose file has the device and inode of
      `src/approvals/decide.ts` or `src/approvals/cli.ts`, with
      `mcp boundary: refused <file>`. That covers every specifier however it
-     is built: `import()`, `require` through `createRequire`, a
+     is built in the server's own realm: `import()`, `require` through `createRequire`, a
      function-constructor body, query and hash suffixes, symlinks and hard
      links.
    - It locks `Bun.plugin.clearAll` and defines a non-writable,
@@ -240,7 +240,7 @@ error it is `null`, because the call-end line already carries `code`.
    - `decide.ts` refuses to evaluate when the marker is present, when
      `Bun.main` is the server entry, or off the main thread
      (`approvals: decide.ts refuses to load in the MCP server process`).
-     That covers workers, preloads that run before the boundary, and copies
+     That covers workers, a `ShadowRealm` (Bun reports it off the main thread, and its loads skip the plugin), preloads that run before the boundary, and copies
      under `node_modules/` with any name.
    - The boundary captures the intrinsics it calls when it is preloaded,
      builds file identities without global calls, and puts its marker on the

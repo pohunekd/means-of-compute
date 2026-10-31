@@ -424,6 +424,22 @@ function collectHandleFailures(
       detail: `sessionId "${handle.sessionId}" is already registered`,
     });
   }
+  // Two live sessions on one host never share a worktree; Pohunek and git
+  // refuse it too, this keeps the registry from recording it.
+  const holder = entries.find(
+    (entry) =>
+      entry.terminal === null &&
+      entry.worktree !== null &&
+      entry.hostAlias === handle.hostAlias &&
+      entry.worktree === handle.worktree &&
+      entry.requestId !== request.requestId,
+  );
+  if (holder !== undefined) {
+    failures.push({
+      check: "worktree-unique",
+      detail: `worktree is held by live request ${holder.requestId}`,
+    });
+  }
   return failures;
 }
 
@@ -973,7 +989,13 @@ export function createDispatcher(deps: DispatcherDeps): {
         }
         throw error;
       }
-      checkHandleLogged(handle, request, existing, deps.log, request.workItemId);
+      checkHandleLogged(
+        handle,
+        request,
+        await readRegistry(deps.config.registryPath),
+        deps.log,
+        request.workItemId,
+      );
       // startedAt stays the provisional insert time: the port call does
       // not move the session clock.
       const settled: RegistryEntry = {

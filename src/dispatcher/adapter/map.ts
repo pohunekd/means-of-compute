@@ -157,11 +157,11 @@ export function acceptanceFailure(req: StartRequest, r: SessionNewResult): strin
     return "prompt-not-acknowledged";
   }
   const kinds = new Set((r.warnings ?? []).map((warning) => warning.kind));
-  if (kinds.has("base_branch_fallback")) {
-    return "base-branch-fallback";
-  }
   if (kinds.has("fetch")) {
     return "fetch-failed";
+  }
+  if (kinds.has("base_branch_fallback")) {
+    return "base-branch-fallback";
   }
   if (req.resume) {
     if (r.worktree_source === undefined || r.worktree_source.commit.length === 0) {

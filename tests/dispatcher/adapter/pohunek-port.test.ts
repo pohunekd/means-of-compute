@@ -150,7 +150,7 @@ test("a voided start removes its session so the branch is free for the retry", a
   const { fake, log, port } = setup();
   try {
     fake.onNew("laptop-a", () => ({
-      warnings: [{ kind: "base_branch_fallback", message: "fell back to the default base branch" }],
+      warnings: [{ kind: "fetch", message: "fetch of origin failed" }],
     }));
     let error: unknown;
     try {
@@ -159,7 +159,7 @@ test("a voided start removes its session so the branch is free for the retry", a
       error = caught;
     }
     expect(error).toBeInstanceOf(PortRejectedError);
-    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    expect((error as PortRejectedError).code).toBe("fetch-failed");
     const methods = methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."));
     expect(methods).toEqual([
       "session.list",
@@ -179,7 +179,7 @@ test("a refused void removal is logged and the void keeps its code", async () =>
   const { fake, log, port } = setup();
   try {
     fake.onNew("laptop-a", () => ({
-      warnings: [{ kind: "base_branch_fallback", message: "fell back to the default base branch" }],
+      warnings: [{ kind: "fetch", message: "fetch of origin failed" }],
     }));
     fake.failNext("laptop-a", "session.remove_accepting_unconfirmed", {
       errCode: "fake_unscripted",
@@ -192,13 +192,77 @@ test("a refused void removal is logged and the void keeps its code", async () =>
       error = caught;
     }
     expect(error).toBeInstanceOf(PortRejectedError);
-    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    expect((error as PortRejectedError).code).toBe("fetch-failed");
     const sessions = fake.sessions("laptop-a");
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
     const failed = log.find((entry) => entry.event === "adapter-void-remove-failed");
     expect(failed).toBeDefined();
     expect(failed?.hostAlias).toBe("laptop-a");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a fresh start that reuses a branch with no work beyond the base is accepted", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({
+      warnings: [{ kind: "base_branch_fallback", message: "branch already exists" }],
+    }));
+    const handle = await port.start(request());
+    expect(handle.sessionId).toBe("fake-1");
+    expect(handle.branch).toBe("moc/item-1");
+    const methods = methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."));
+    expect(methods).toEqual([
+      "session.list",
+      "session.new",
+      "session.diff",
+      "session.set_metadata",
+    ]);
+    const diffCall = fake.calls("laptop-a").find((call) => call.method === "session.diff");
+    expect((diffCall?.params as { base: string }).base).toBe("origin/main");
+    expect(fake.sessions("laptop-a")[0]?.metadata?.[MOC_METADATA.start]).toBe("accepted");
+    const warning = log.find(
+      (entry) => entry.event === "adapter-start-warning" && entry.detail === "base_branch_fallback",
+    );
+    expect(warning).toBeDefined();
+    expect(eventsOf(log)).toContain("adapter-start-accepted");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a fresh start that reuses a branch with work beyond the base is voided", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({
+      warnings: [{ kind: "base_branch_fallback", message: "branch already exists" }],
+    }));
+    fake.setDiff("laptop-a", "fake-1", {
+      diff: "diff --git a/x b/x\n",
+      base: "origin/main",
+      truncated: false,
+    });
+    let error: unknown;
+    try {
+      await port.start(request());
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    const methods = methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."));
+    expect(methods).toEqual([
+      "session.list",
+      "session.new",
+      "session.diff",
+      "session.stop",
+      "session.set_metadata",
+      "session.remove_accepting_unconfirmed",
+    ]);
+    expect(fake.sessions("laptop-a")).toHaveLength(0);
+    expect(eventsOf(log)).toContain("adapter-start-void");
   } finally {
     await teardown(fake, port);
   }

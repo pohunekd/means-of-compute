@@ -58,13 +58,13 @@ Handle validation checks the returned session handle and rejects with `invalid-h
 `DispatcherPort` (`src/dispatcher/port.ts` `DispatcherPort`) is the only seam to the
 session daemon: `start`, `wait`, `diff`, `cancel`, `release`, `retire`, `close`, with
 `PortUnreachableError` for transport failures and `PortRejectedError` (with
-a kebab-case `code`) for daemon refusals. A voided start stops the session, clears its `moc.*` binding, then removes it with `session.remove_accepting_unconfirmed` so the branch is free for the retry; a failed removal logs `adapter-void-remove-failed` and leaves the session stopped and unbound. Two implementations exist:
+a kebab-case `code`) for daemon refusals. Two implementations exist:
 
 - The memory port (`src/dispatcher/memory-port.ts` `createMemoryPort`) keeps sessions
   in-process. Tests use it; it never touches the network.
 - The Pohunek adapter (`src/dispatcher/adapter/pohunek-port.ts` `createPohunekPort`) drives
   real daemons through the SDK behind `openPohunekPort`
-  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`; `start` writes the token into `moc.meterToken`; a `null` port refuses `start` with `no-meter`; a voided start clears the key. It is the only code that
+  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`; `start` writes the token into `moc.meterToken`; a `null` port refuses `start` with `no-meter`; a voided start clears the key. A voided start stops the session, clears its `moc.*` binding, then removes it with `session.remove_accepting_unconfirmed` so the branch is free for the retry; a failed removal logs `adapter-void-remove-failed` and leaves the session stopped and unbound. Removal keeps the branch, so a later fresh start of the item on that host checks the existing branch out and, once the base has moved, the daemon reports `base_branch_fallback`; the adapter keeps that start only when `session.diff` against the request's `baseRef` is empty and not truncated, and the session then works from the branch's older head. A non-empty, truncated or failed diff (`adapter-reuse-diff-failed`), a resume start, or a `fetch` warning voids the start (`base-branch-fallback` or `fetch-failed`). It is the only code that
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
 

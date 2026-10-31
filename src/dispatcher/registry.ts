@@ -40,6 +40,9 @@ interface RegistryEntryBase {
   readonly cancelReason: CancelReason | null;
   readonly terminal: RegistryTerminal | null;
   readonly resolvedAt: string | null;
+  // Set once dispatcher.retire removed the session or found it absent; the
+  // retire sweep skips a marked entry. Optional so older registries validate.
+  readonly retiredAt?: string;
   readonly revision: number;
 }
 

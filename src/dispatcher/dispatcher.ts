@@ -528,10 +528,10 @@ export function createDispatcher(deps: DispatcherDeps): {
   resolve(requestId: string): Promise<ResolveOutcome>;
   retire(requestId: string): Promise<RetireOutcome | "skipped">;
 } {
-  // Port wait/cancel/diff and sleep always run outside a hold; port start
-  // and port retire are the only port calls made under the lock. The hold uses the
-  // module-level itemLocks map above, so two dispatcher instances on the
-  // same registry serialize on the same chain.
+  // Port wait/cancel/diff and sleep always run outside a hold; port start,
+  // retire and release (in resolve) are the only port calls made under the
+  // lock. The hold uses the module-level itemLocks map above, so two
+  // dispatcher instances on the same registry serialize on the same chain.
 
   async function withItemLock<T>(key: string, op: () => Promise<T>): Promise<T> {
     const previous = itemLocks.get(key) ?? Promise.resolve();
@@ -1321,13 +1321,19 @@ export function createDispatcher(deps: DispatcherDeps): {
     });
   }
 
-  // Removes the session of a closed round from its host; the branch stays.
-  // Only a settled, ledgered entry is retired, under the item lock so it
-  // never races the retire-before-start loop of the same item.
+  // Removes the session of a closed round from its host and marks the entry
+  // retiredAt; the branch stays. Only a settled, ledgered, unmarked entry is
+  // retired, under the item lock so it never races the retire-before-start
+  // loop of the same item.
   async function retire(requestId: string): Promise<RetireOutcome | "skipped"> {
     return withItemLock(itemKeyFor(requestId), async () => {
       const entry = await loadEntry(requestId);
-      if (entry.sessionId === null || entry.terminal === null || !entry.terminal.ledgerAppended) {
+      if (
+        entry.sessionId === null ||
+        entry.terminal === null ||
+        !entry.terminal.ledgerAppended ||
+        entry.retiredAt !== undefined
+      ) {
         return "skipped";
       }
       const outcome = await deps.port.retire({
@@ -1342,6 +1348,12 @@ export function createDispatcher(deps: DispatcherDeps): {
         sessionId: entry.sessionId,
         detail: outcome,
       });
+      const marked: RegistryEntry = {
+        ...entry,
+        retiredAt: deps.now().toISOString(),
+        revision: entry.revision + 1,
+      };
+      await replaceRegistryEntry(deps.config.registryPath, marked);
       return outcome;
     });
   }

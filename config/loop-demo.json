@@ -19,6 +19,11 @@
   "unreachableRetryMs": 100,
   "budgetBackoffMs": 1000,
   "maxStartRejections": 3,
+  "hostCooldown": {
+    "rejections": 3,
+    "windowMs": 600000,
+    "cooldownMs": 900000
+  },
   "maxBriefBytes": 65536,
   "stall": {
     "maxStagnantRounds": 3,

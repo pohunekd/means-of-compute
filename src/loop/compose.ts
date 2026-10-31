@@ -186,6 +186,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     routing: configs.loop.routing,
     maxActiveItems: configs.loop.maxActiveItems,
     maxBriefBytes: configs.loop.maxBriefBytes,
+    hostCooldown: configs.loop.hostCooldown,
     ciPollMs: configs.loop.github.ciPollMs,
     intake: configs.loop.github.intake,
     trustedAssociations: configs.loop.github.trustedAssociations,

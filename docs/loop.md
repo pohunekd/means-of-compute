@@ -68,7 +68,7 @@ This slice adds the pure policy the later driver calls:
 `src/loop/github.ts` exposes `GitHubPort` with `createGhPort`: every gh
 call goes through one runner with a fixed env, a bounded wait, and
 body files under the config dir, and `mergePull` pins the merge with
-`--match-head-commit`. `src/loop/merge-rule.ts` holds the pure checks
+`--match-head-commit`, and `checkAnnotations(repo, checkRunId)` reads a check run's annotations. `src/loop/merge-rule.ts` holds the pure checks
 `ciStatus`, `pullDecision`, `factoryMarkers`, `verdictCheck`,
 `markerMatches`, `m1`, `mergeStep`, and `baseCheck`. They encode repo
 rules 1, 2, and 4: green checks, valid audit verdicts with matching
@@ -100,7 +100,7 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - `auditStep` waits out `backoffUntil`, fetches the branch and the base, and returns to `ci` when the fetched head moved. A stored verdict at the head is posted without a new audit. Otherwise it counts the attempt in `auditAttempts` before `runAudit`, and parks `audit-failed` once `1 + audit.retries` attempts at that head were used.
 - After `runAudit`: a budget refusal or a failing gate restores the count and sets the backoff; a model error retries, and the `audit-model-error` line carries `detail`, the error message cut to 300 bytes; an empty or oversized diff closes the round; a missing author or auditor parks the item; an `InputPathError` is fatal; any other error parks `audit-error`.
 - A valid verdict is posted once as the factory marker, and the item stays in `auditing` for the merge slice. A GitHub or git error keeps the phase and logs `github-error`.
-- A red close appends the round and reconciles the store to `queued`; the pull and the branch stay. `previousRoundOf` gives the next brief the last session round and the findings of the last audited head.
+- A red close appends the round and reconciles the store to `queued`; the pull and the branch stay. `previousRoundOf` gives the next brief the outcome of the last session round, the findings of the last audited head, and, while the PR head is still the head of a `red-ci` round, that round's failing check names and its check excerpt. A red close stores the excerpt on the round: the `failure` annotations of each failing check (`GitHubPort.checkAnnotations`), without the runner's generic exit-code line, with the `github.checkExcerpt.stripPrefixes` runner paths removed, cut to `github.checkExcerpt.maxBytes`. The log line records only its size.
 
 ## Driver merge (PR 5e)
 

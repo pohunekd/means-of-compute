@@ -44,6 +44,11 @@ export interface LoopIntakeConfig {
   readonly maxGoalChars: number;
 }
 
+export interface LoopCheckExcerptConfig {
+  readonly maxBytes: number;
+  readonly stripPrefixes: readonly string[];
+}
+
 export interface LoopGithubConfig {
   readonly tokenEnv: string;
   readonly configDir: string;
@@ -54,6 +59,7 @@ export interface LoopGithubConfig {
   readonly mergeRetries: number;
   readonly trustedAssociations: readonly string[];
   readonly requiredChecks: readonly string[];
+  readonly checkExcerpt: LoopCheckExcerptConfig;
   readonly mergeMethod: "merge";
   readonly intake: LoopIntakeConfig;
   readonly followupLabels: readonly string[];
@@ -379,6 +385,7 @@ function parseGithub(
       "mergeRetries",
       "trustedAssociations",
       "requiredChecks",
+      "checkExcerpt",
       "mergeMethod",
       "intake",
       "followupLabels",
@@ -406,6 +413,7 @@ function parseGithub(
   if (new Set(requiredChecks).size !== requiredChecks.length) {
     throw invalid(path, "github.requiredChecks");
   }
+  const checkExcerpt = parseCheckExcerpt(record["checkExcerpt"], path);
   if (record["mergeMethod"] !== "merge") {
     throw invalid(path, "github.mergeMethod");
   }
@@ -428,10 +436,24 @@ function parseGithub(
     mergeRetries: requiredInteger(record, path, "github", "mergeRetries", 0, 10),
     trustedAssociations,
     requiredChecks,
+    checkExcerpt,
     mergeMethod: "merge",
     intake,
     followupLabels,
     escalationLabel,
+  };
+}
+
+function parseCheckExcerpt(value: unknown, path: string): LoopCheckExcerptConfig {
+  const record = asRecord(value, path, "github.checkExcerpt");
+  checkKeys(record, ["maxBytes", "stripPrefixes"], path, "github.checkExcerpt");
+  const stripPrefixes = parseStringList(record, path, "github.checkExcerpt", "stripPrefixes", 0);
+  if (!stripPrefixes.every((entry) => entry.startsWith("/") && entry.endsWith("/"))) {
+    throw invalid(path, "github.checkExcerpt.stripPrefixes");
+  }
+  return {
+    maxBytes: requiredInteger(record, path, "github.checkExcerpt", "maxBytes", 256, 16384),
+    stripPrefixes,
   };
 }
 
@@ -663,6 +685,10 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
   }
   const github = parseGithub(record["github"], path, workModels);
   const repos = parseRepos(record["repos"], path, specRepos);
+  const maxBriefBytes = requiredInteger(record, path, "", "maxBriefBytes", 1024, 1048576);
+  if (github.checkExcerpt.maxBytes * 4 > maxBriefBytes) {
+    throw invalid(path, "github.checkExcerpt.maxBytes");
+  }
   const config: LoopConfig = {
     statePath: requiredString(record, path, "", "statePath"),
     logPath: requiredString(record, path, "", "logPath"),
@@ -684,7 +710,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     unreachableRetryMs: requiredInteger(record, path, "", "unreachableRetryMs", 0, 600000),
     budgetBackoffMs: requiredInteger(record, path, "", "budgetBackoffMs", 1000, 86400000),
     maxStartRejections: requiredInteger(record, path, "", "maxStartRejections", 1, 20),
-    maxBriefBytes: requiredInteger(record, path, "", "maxBriefBytes", 1024, 1048576),
+    maxBriefBytes,
     stall: parseStall(record["stall"], path),
     routing: await parseRouting(record["routing"], path),
     github,

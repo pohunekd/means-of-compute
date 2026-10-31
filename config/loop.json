@@ -47,6 +47,13 @@
     "mergeRetries": 3,
     "trustedAssociations": ["OWNER", "MEMBER", "COLLABORATOR"],
     "requiredChecks": ["gates", "macos-probe"],
+    "checkExcerpt": {
+      "maxBytes": 4000,
+      "stripPrefixes": [
+        "/home/runner/work/means-of-compute/means-of-compute/",
+        "/Users/runner/work/means-of-compute/means-of-compute/"
+      ]
+    },
     "mergeMethod": "merge",
     "intake": {
       "enabled": true,

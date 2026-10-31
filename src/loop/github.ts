@@ -33,6 +33,13 @@ export interface CheckRun {
   readonly status: string;
   readonly conclusion: string | null;
 }
+export interface CheckAnnotation {
+  readonly path: string;
+  readonly startLine: number;
+  readonly level: string;
+  readonly title: string | null;
+  readonly message: string;
+}
 export interface CommentFirstLine {
   readonly login: string;
   readonly first: string;
@@ -69,6 +76,7 @@ export interface IntakeIssue {
 export interface GitHubPort {
   viewerLogin(): Promise<string>;
   checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]>;
+  checkAnnotations(repo: string, checkRunId: number): Promise<readonly CheckAnnotation[]>;
   commentFirstLines(repo: string, number: number): Promise<readonly CommentFirstLine[]>;
   postComment(repo: string, number: number, body: string): Promise<void>;
   pullsForBranch(repo: string, branch: string): Promise<readonly PullRow[]>;
@@ -336,6 +344,21 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
       ".check_runs[] | {id, name, status, conclusion}",
     ]);
     return parseJsonLines(stdout, step).map((value) => toCheckRun(value, step));
+  }
+
+  async function checkAnnotations(
+    repo: string,
+    checkRunId: number,
+  ): Promise<readonly CheckAnnotation[]> {
+    const step = "checkAnnotations";
+    const { stdout } = await runGh(config, env, step, [
+      "api",
+      `repos/${repo}/check-runs/${String(checkRunId)}/annotations`,
+      "--paginate",
+      "--jq",
+      ".[] | {path, start_line, annotation_level, title, message}",
+    ]);
+    return parseJsonLines(stdout, step).map((value) => toCheckAnnotation(value, step));
   }
 
   async function commentFirstLines(
@@ -684,9 +707,27 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     return state;
   }
 
+  function toCheckAnnotation(value: unknown, step: string): CheckAnnotation {
+    const record = requireFields(
+      value,
+      ["path", "start_line", "annotation_level", "title", "message"],
+      step,
+      "check annotation",
+    );
+    const title = record["title"];
+    return {
+      path: asString(record["path"], step, "annotation path"),
+      startLine: asInteger(record["start_line"], step, "annotation line"),
+      level: asString(record["annotation_level"], step, "annotation level"),
+      title: title === null ? null : asString(title, step, "annotation title"),
+      message: asString(record["message"], step, "annotation message"),
+    };
+  }
+
   return {
     viewerLogin,
     checkRuns,
+    checkAnnotations,
     commentFirstLines,
     postComment,
     pullsForBranch,

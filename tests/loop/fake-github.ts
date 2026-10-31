@@ -2,6 +2,7 @@
 // once with a given GitHubError, and stores comments with a login.
 // Methods the park tests never call throw instead of succeeding.
 import type {
+  CheckAnnotation,
   CheckRun,
   CommentFirstLine,
   GitHubError,
@@ -76,6 +77,11 @@ export class FakeGitHub implements GitHubPort {
 
   checkRuns(repo: string, sha: string): Promise<readonly CheckRun[]> {
     this.calls.push({ method: "checkRuns", args: [repo, sha] });
+    return unused();
+  }
+
+  checkAnnotations(repo: string, checkRunId: number): Promise<readonly CheckAnnotation[]> {
+    this.calls.push({ method: "checkAnnotations", args: [repo, checkRunId] });
     return unused();
   }
 

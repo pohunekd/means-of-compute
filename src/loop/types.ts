@@ -38,6 +38,7 @@ export interface RoundRecord {
   readonly newlyMet: readonly string[];
   readonly at: string;
   readonly baseRace: boolean;
+  readonly checkExcerpt?: string;
 }
 
 export interface StartIntent {

@@ -225,7 +225,12 @@ async function seedFinishedSession(
 
 async function makeHarness(
   dir: string,
-  overrides: Partial<ReviewContext> = {},
+  overrides: Partial<ReviewContext> & {
+    ci?: (sha: string) => "success" | "failure" | "pending";
+    annotations?: (
+      checkRunId: number,
+    ) => readonly import("../../src/loop/github.js").CheckAnnotation[];
+  } = {},
 ): Promise<ReviewHarness> {
   const seen = logged();
   const registryPath = join(dir, "registry.json");
@@ -259,7 +264,8 @@ async function makeHarness(
       factoryLogin: FACTORY_LOGIN,
       git: gitDeps,
       scratchDir: sandbox.scratchDir,
-      ci: () => "success",
+      ci: overrides.ci ?? (() => "success"),
+      ...(overrides.annotations === undefined ? {} : { annotations: overrides.annotations }),
     }),
     factoryLogin: FACTORY_LOGIN,
     ledgerPath: join(dir, "ledger.jsonl"),
@@ -279,6 +285,7 @@ async function makeHarness(
     repos: [{ repo: REPO, checkoutDir, idPrefix: "gh-" }],
     git: gitDeps,
     requiredChecks: ["gates"],
+    checkExcerpt: { maxBytes: 4000, stripPrefixes: [] },
     ciTimeoutMs: 600_000,
     auditRetries: 1,
     auditor: {
@@ -387,6 +394,45 @@ test("RT7 green CI moves the item to auditing", async () => {
       const li = await readItem(harness.ctx.statePath);
       expect(li.phase).toBe("auditing");
       expect(harness.events.filter((line) => line.startsWith("ci:green:"))).toHaveLength(1);
+    } finally {
+      await harness.sandbox.cleanup();
+    }
+  });
+});
+
+test("red close stores the check excerpt and logs only its size", async () => {
+  await withTempDir(async (dir) => {
+    const harness = await makeHarness(dir, {
+      ci: () => "failure",
+      annotations: () => [
+        {
+          path: "tests/x.test.ts",
+          startLine: 3,
+          level: "failure",
+          title: "assertion",
+          message: "expected 1 to equal 2",
+        },
+      ],
+    });
+    try {
+      const head = await pushEmpty(harness.sandbox.seed, "moc/gh-demo-1");
+      const checkout = harness.ctx.repos[0]?.checkoutDir ?? dir;
+      await git(checkout, ["fetch", "origin"]);
+      await harness.ctx.github.createPull(REPO, "moc/gh-demo-1", "main", "t", "b");
+      await seedFinishedSession(harness.registryPath, "gh-demo-1");
+      await writeStore(harness.ctx.storePath, item());
+      await writeLoopState(harness.ctx.statePath, ciItem(head, NOW));
+      const step = await ciStep(harness.ctx, item());
+      expect(step).toBe("idle");
+      const li = await readItem(harness.ctx.statePath);
+      expect(li.rounds).toHaveLength(1);
+      expect(li.rounds[0]?.outcome).toBe("red-ci");
+      expect(li.rounds[0]?.checkExcerpt).toContain("expected 1 to equal 2");
+      const red = harness.events.filter((line) => line.startsWith("ci:red:"));
+      expect(red).toHaveLength(1);
+      expect(red[0] ?? "").toContain("excerpt");
+      expect(red[0] ?? "").toContain("bytes");
+      expect(red[0] ?? "").not.toContain("expected 1 to equal 2");
     } finally {
       await harness.sandbox.cleanup();
     }

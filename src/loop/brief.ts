@@ -8,9 +8,15 @@ export interface BriefFindings {
   readonly list: readonly AuditFinding[];
 }
 
+export interface BriefCheckExcerpt {
+  readonly headSha: string;
+  readonly text: string;
+}
+
 export interface BriefPrevious {
   readonly outcome: RoundOutcome;
   readonly failingChecks: readonly string[];
+  readonly checkExcerpt: BriefCheckExcerpt | null;
   readonly findings: BriefFindings | null;
 }
 
@@ -55,6 +61,12 @@ function previousLines(previous: BriefPrevious, kept: number, omitted: number): 
   const lines = ["", `Previous round: ${previous.outcome}.`];
   if (previous.failingChecks.length > 0) {
     lines.push(`Failing checks: ${previous.failingChecks.join(", ")}.`);
+  }
+  if (previous.checkExcerpt !== null) {
+    lines.push(
+      `CI failure annotations at ${previous.checkExcerpt.headSha.slice(0, 12)} (CI can fail where local gates pass):`,
+      ...previous.checkExcerpt.text.split("\n"),
+    );
   }
   if (previous.findings !== null && previous.findings.list.length > 0) {
     lines.push(`Audit findings at ${previous.findings.headSha.slice(0, 12)}:`);

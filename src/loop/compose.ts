@@ -204,6 +204,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     repos: configs.loop.repos,
     git,
     requiredChecks: configs.loop.github.requiredChecks,
+    checkExcerpt: configs.loop.github.checkExcerpt,
     ciTimeoutMs: configs.loop.github.ciTimeoutMs,
     auditRetries: configs.loop.audit.retries,
     auditor: {

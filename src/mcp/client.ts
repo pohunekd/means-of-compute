@@ -2,6 +2,7 @@
 // initialize, notifications/initialized and tools/call, then prints the
 // structuredContent as one compact JSON line.
 import { fileURLToPath } from "node:url";
+import { mcpServeArgs } from "./launch.js";
 
 export class ClientError extends Error {
   readonly code: number;
@@ -50,8 +51,14 @@ interface JsonRpcResponse {
 }
 
 export async function runClientCall(options: ClientOptions): Promise<unknown> {
-  const servePath = fileURLToPath(new URL("./serve.ts", import.meta.url));
-  const args = [servePath, "--caller", "mcp-call", "--config", options.configPath];
+  const checkoutDir = fileURLToPath(new URL("../../", import.meta.url));
+  const args = [
+    ...mcpServeArgs(checkoutDir),
+    "--caller",
+    "mcp-call",
+    "--config",
+    options.configPath,
+  ];
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([process.execPath, ...args], {

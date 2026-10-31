@@ -1,7 +1,10 @@
 # MCP server (core slice)
 
 One server process per coordinator run (`bun run mcp:serve --caller
-<name> [--config <path>]`). The transport is hand-written JSON-RPC 2.0 over
+<name> [--config <path>]`). Every launcher builds the bun command with
+`mcpServeArgs` (`src/mcp/launch.ts`): `--config=config/mcp-bunfig.toml
+--preload=src/mcp/boundary.ts src/mcp/serve.ts`, with absolute paths and
+the caller's working directory (A9 point 4). The transport is hand-written JSON-RPC 2.0 over
 stdio: stdin splits on `0x0A` (one `0x0D` stripped), empty lines are
 skipped, a line over `maxMessageBytes` answers `{"jsonrpc":"2.0","id":null,
 "error":{"code":-32600,"message":"message too large"}}` and the next line
@@ -13,7 +16,9 @@ after call-end 1).
 
 ## Lifecycle
 
-Startup: parse args (`--caller` exactly once, `--config` at most once,
+Startup: refuse to start (exit 2, `mcp: runtime boundary not installed;
+start the server with mcpServeArgs`) unless the runtime boundary marks the
+process, then parse args (`--caller` exactly once, `--config` at most once,
 default `config/mcp.json`), load the MCP config, require the caller in
 `callers`, load the work, auditor, dispatcher and approvals configs plus factory
 specs, `requireWritableTarget` for the call log, store and approval
@@ -200,7 +205,7 @@ error it is `null`, because the call-end line already carries `code`.
    Dependency and install inputs
    (`package.json`, `bun.lock`, patches, files under `node_modules/`)
    are outside X4 and covered by review and by the runtime boundary
-   in #94. A spec Bun cannot resolve fails with
+   (point 4). A spec Bun cannot resolve fails with
    `unresolved import "<spec>" in <file>`. A spec that resolves
    outside the repository fails X4 with
    `import "<spec>" in <file> leaves the repository`. A spec that
@@ -218,9 +223,29 @@ error it is `null`, because the call-end line already carries `code`.
    rule already rejects a non-literal dynamic `import()`. X4 matches
    names spelled in source. A name or code built at runtime, such as
    a computed property read with a built string or a function
-   constructor reached through `.constructor`, is outside X4; a
-   runtime boundary for `mcp:serve` is tracked in #94.
+   constructor reached through `.constructor`, is outside X4.
 3. No tool reads `/dev/tty`, and there is no MCP method that decides.
+4. Runtime boundary (#94). Every launcher starts the server with `mcpServeArgs`.
+   - `--config=config/mcp-bunfig.toml` replaces any `bunfig.toml` of the
+     working directory, so no checkout `preload` runs in the server.
+   - `--preload=src/mcp/boundary.ts` is the boundary. Its Bun plugin refuses,
+     in `onLoad`, any load whose file has the device and inode of
+     `src/approvals/decide.ts` or `src/approvals/cli.ts`, with
+     `mcp boundary: refused <file>`. That covers every specifier however it
+     is built: `import()`, `require` through `createRequire`, a
+     function-constructor body, query and hash suffixes, symlinks and hard
+     links.
+   - It locks `Bun.plugin.clearAll` and defines a non-writable,
+     non-configurable global marker. `serve.ts` exits 2 without the marker.
+   - `decide.ts` refuses to evaluate when the marker is present, when
+     `Bun.main` is the server entry, or off the main thread
+     (`approvals: decide.ts refuses to load in the MCP server process`).
+     That covers workers, preloads that run before the boundary, and copies
+     under `node_modules/` with any name.
+   - X4 stays the early static check.
+   - Not covered: code that rebuilds the decision logic from source text
+     without the check. Such code could equally write the requests file
+     itself, so review and audit own it, as for point 1.
 
 Residual gap, stated honestly. The requests file and the CLI belong to
 the same OS user. A coordinator, or a worker session on the same
@@ -228,11 +253,14 @@ machine, that has a shell could write the file or drive the CLI through
 a pty. The guarantee is therefore "no MCP call can do it", not "no
 process of this user can do it". The `/dev/tty` prompt stops
 non-interactive misuse only. This is open question Q1.
+Code that the process environment runs before the boundary (a `BUN_OPTIONS` preload)
+and that also overwrites `Bun.main` is the same gap.
 
 ## Client `mcp:call`
 
 `mcp:call <tool> [--file <path>] [--config <path>]` spawns
-`process.execPath` with `fileURLToPath(new URL("./serve.ts", import.meta.url))`,
+`process.execPath` with `mcpServeArgs(<checkout>)`, the checkout being the
+client's own,
 `--caller mcp-call` and the passed `--config` (default `config/mcp.json`), using
 stdin/stdout pipes and inherited stderr. It sends `initialize`
 (protocolVersion `"2025-11-25"`, clientInfo `{name:"mcp-call",version:<server>}`),

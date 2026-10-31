@@ -41,8 +41,8 @@ The provider and model stay pinned to `meta-api` and
 `apiKeyEnv` comes from the provider descriptor and its value is never
 read. `envPassthrough` excludes `HOME`, `XDG_*` and the key variable.
 `museArgv` builds the `exec` command from the plan or react phase.
-`factoryEntry` runs `src/mcp/serve.ts` under bun with the coordinator
-caller. `exportArgv` builds the redacted `export` command. `readCoordCalls`
+`factoryEntry` runs `src/mcp/serve.ts` under bun with `--cwd=<checkout>` and `mcpServeArgs`
+(the server's Bun config and the runtime boundary preload) and the coordinator caller. `exportArgv` builds the redacted `export` command. `readCoordCalls`
 returns null for an absent log, otherwise the coordinator call-ends.
 
 ## Sessions and the run report

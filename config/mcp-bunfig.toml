@@ -1,0 +1,4 @@
+# Bun runtime config of the MCP server process (docs/mcp.md, A9). Every
+# launcher passes it with --config, which replaces any bunfig.toml of the
+# working directory, so the only repository preload in the server is the
+# runtime boundary that the launcher names with --preload.

@@ -267,6 +267,12 @@ test("demo numbers reports null token counts", () => {
   const output = renderNumbers(numbers);
 
   // Check that share, actual cost, frontier baseline contain no data message
+  const localShareRow = numbers.figures.find((r) => r.label === "Local token share");
+  const actualCostRow = numbers.figures.find((r) => r.label === "Actual token cost");
+  const frontierRow = numbers.figures.find((r) => r.label === "Frontier-token baseline");
+  expect(localShareRow?.cells[0]).toContain("no data (token counts not reported for w2-beta)");
+  expect(actualCostRow?.cells[0]).toContain("no data (token counts not reported for w2-beta)");
+  expect(frontierRow?.cells[0]).toContain("no data (token counts not reported for w2-beta)");
   expect(output).toContain("no data (token counts not reported for w2-beta)");
 });
 

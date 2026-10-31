@@ -188,12 +188,7 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   const finishedTasksCell = figureOf(model, "autonomy", "Finished tasks");
   rows.push({ label: "Tasks completed", cells: [mdCell(cellText(finishedTasksCell))] });
 
-  let localShareCell = localShare(ledger.records, classes);
-  if (unmeasuredIds.size > 0) {
-    localShareCell = `no data (requests without usage for ${idList(unmeasuredIds)})`;
-  } else if (nullIdsAll.size > 0) {
-    localShareCell = `no data (token counts not reported for ${idList(nullIdsAll)})`;
-  }
+  const localShareCell = localShare(ledger.records, classes);
   rows.push({ label: "Local token share", cells: [mdCell(localShareCell)] });
 
   const actualCostCell = figureOf(model, "savings", "Actual token cost");

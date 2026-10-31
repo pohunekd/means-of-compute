@@ -396,9 +396,6 @@ async function reusedBranchIsEmpty(
     if (mapped === null) {
       throw error;
     }
-    if (mapped instanceof PortUnreachableError) {
-      await dropConnection(port, alias);
-    }
     port.log({
       level: "error",
       event: "adapter-reuse-diff-failed",

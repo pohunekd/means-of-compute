@@ -113,6 +113,8 @@ session metadata, never through a config file.
 
 ### Caller token
 
+`tests/security/canary.test.ts` drives a metered call and the gh and router error paths with synthetic canary keys, checks that each key was used, and scans its run dir `logs/canary-run/` for every canary and token shape.
+
 The token is per session and derived, never stored:
 
 ```

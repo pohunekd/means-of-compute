@@ -84,6 +84,28 @@ repository. Means of Compute uses it only as a dependency through `@pohunek/sdk`
 imports the SDK, and no Pohunek code, documentation or instruction text is copied
 into this repository.
 
+### Pohunek setup
+
+The stub demo needs none of this: it runs an in-memory port behind `DispatcherPort`.
+A production run needs:
+
+- The Pohunek release that matches the SDK pin,
+  [v0.38.1](https://github.com/zajca/pohunek/releases/tag/v0.38.1). It is public and also
+  holds the `pohunek-ts-sdk-0.38.1.tgz` tarball that `bun install` downloads.
+- A daemon from that release, installed and started on the factory machine and on every
+  fleet machine as Pohunek's own
+  [install guide](https://github.com/zajca/pohunek/blob/v0.38.1/docs/install.md) describes.
+- The connection settings in `config/pohunek-adapter.json`. The adapter talks to the
+  daemon on the factory machine over its local socket, and reaches each fleet machine's
+  Pohunek daemon through the route that the routes file named by `MOC_HOST_ROUTES_FILE`
+  maps to its display alias. The routes file names private routes, so keep it outside
+  the repository.
+- The Pohunek agent profile `moc-worker` (`agentProfile`) on every fleet machine. Each
+  session starts with that profile in the project `means-of-compute` (`project`), and the
+  start preflight refuses a machine whose daemon does not serve it. The profile setup is
+  in the "Host setup" section of [docs/meter.md](docs/meter.md), and the start checks in
+  the "Host precondition" section of [docs/dispatcher.md](docs/dispatcher.md).
+
 ## Self-hosted install
 
 Prerequisites:
@@ -148,7 +170,8 @@ section of [docs/loop.md](docs/loop.md), and [docs/meter.md](docs/meter.md) and
 [docs/dispatcher.md](docs/dispatcher.md). In short:
 
 - A Pohunek daemon 0.38.1 or later on every fleet machine, running the probe plugin
-  package built with `bun run plugin:build`.
+  package built with `bun run plugin:build --out logs/plugin`. The output directory must
+  be absent or empty, and `logs/` is gitignored.
 - `cp config/hosts.example.json config/hosts.json`, then map each hostname to a
   display alias. `config/hosts.json` is gitignored.
 - The GitHub CLI logged in as the account named in `github.factoryLogin`.

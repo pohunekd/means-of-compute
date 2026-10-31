@@ -16,6 +16,7 @@ import type { GitDeps } from "../../src/loop/git.js";
 import { createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
 import { readLoopState, updateLoopState } from "../../src/loop/state.js";
 import type { LoopItem } from "../../src/loop/types.js";
+import { readRegistry } from "../../src/dispatcher/registry.js";
 import { initialLoopItem } from "../../src/loop/start.js";
 import { updateWorkStore } from "../../src/work/store.js";
 import { appendPending } from "../../src/ledger/store.js";
@@ -794,6 +795,8 @@ test("rule A parks the claim when no auditor stays eligible (160a)", async () =>
       const li = (await readLoopState(ctx.statePath)).items["gh-demo-1"] as unknown as LoopItem;
       expect(li.park).toMatchObject({ kind: "operator", code: "no-eligible-auditor" });
       expect(harness.control.sessions()).toEqual([]);
+      const entries = await readRegistry(harness.registryPath);
+      expect(entries.some((e) => e.workItemId === "gh-demo-1")).toBe(false);
       expect(harness.events.find((line) => line.startsWith("parked:"))).toBe(
         "parked:no-eligible-auditor:::::",
       );

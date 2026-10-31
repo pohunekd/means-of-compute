@@ -68,7 +68,7 @@ This slice adds the pure policy the later driver calls:
 `src/loop/github.ts` exposes `GitHubPort` with `createGhPort`: every gh
 call goes through one runner with a fixed env, a bounded wait, and
 body files under the config dir, and `mergePull` pins the merge with
-`--match-head-commit`, and `checkAnnotations(repo, checkRunId)` reads a check run's annotations. `src/loop/merge-rule.ts` holds the pure checks
+`--match-head-commit`. `checkAnnotations(repo, checkRunId)` reads a check run's annotations. `src/loop/merge-rule.ts` holds the pure checks
 `ciStatus`, `pullDecision`, `factoryMarkers`, `verdictCheck`,
 `markerMatches`, `m1`, `mergeStep`, and `baseCheck`. They encode repo
 rules 1, 2, and 4: green checks, valid audit verdicts with matching

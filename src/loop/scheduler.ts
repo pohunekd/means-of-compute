@@ -344,17 +344,6 @@ async function claimOne(
   observations: readonly HostObservation[],
   isSettled: () => boolean,
 ): Promise<boolean> {
-  async function ensureLoopItem(ctx: SchedulerContext, id: string): Promise<void> {
-    await updateLoopState(ctx.statePath, (current) => {
-      if (current.items[id] !== undefined) {
-        return Promise.resolve({ next: null, value: undefined });
-      }
-      return Promise.resolve({
-        next: { ...current, items: { ...current.items, [id]: { ...initialLoopItem() } } },
-        value: undefined,
-      });
-    });
-  }
   const state = await readLoopState(ctx.statePath);
   const stored = state.items[item.id] as unknown as LoopItem | undefined;
   const li = stored ?? initialLoopItem();
@@ -435,6 +424,18 @@ async function claimOne(
   carry.launched.push(item.id);
   carry.running.push({ ...item, status: "running", assignedHostAlias: decision.chosenHostAlias });
   return true;
+}
+
+async function ensureLoopItem(ctx: SchedulerContext, id: string): Promise<void> {
+  await updateLoopState(ctx.statePath, (current) => {
+    if (current.items[id] !== undefined) {
+      return Promise.resolve({ next: null, value: undefined });
+    }
+    return Promise.resolve({
+      next: { ...current, items: { ...current.items, [id]: { ...initialLoopItem() } } },
+      value: undefined,
+    });
+  });
 }
 
 async function runClaims(

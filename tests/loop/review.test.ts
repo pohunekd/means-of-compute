@@ -22,11 +22,11 @@ import { readVerdicts } from "../../src/auditor/store.js";
 import { callProviderOnce, ProviderCallError } from "../../src/providers/router.js";
 import { startLoopback } from "../../src/providers/loopback.js";
 import { loadAuditorConfig } from "../../src/auditor/config.js";
-import { createStubGitHub } from "../../src/loop/stub/github.js";
+import { createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
 import type { GitDeps } from "../../src/loop/git.js";
 import { auditStep, ciStep, publishStep, type ReviewContext } from "../../src/loop/review.js";
 import { pullDecision, workItemMarker } from "../../src/loop/merge-rule.js";
-import type { PullRow } from "../../src/loop/github.js";
+import type { CheckAnnotation, PullRow } from "../../src/loop/github.js";
 
 const PREFERRED = "muse-spark-1.3-contributor";
 const PROVIDER = "meta-api";
@@ -226,10 +226,8 @@ async function seedFinishedSession(
 async function makeHarness(
   dir: string,
   overrides: Partial<ReviewContext> & {
-    ci?: (sha: string) => "success" | "failure" | "pending";
-    annotations?: (
-      checkRunId: number,
-    ) => readonly import("../../src/loop/github.js").CheckAnnotation[];
+    ci?: (sha: string) => StubCi;
+    annotations?: (checkRunId: number) => readonly CheckAnnotation[];
   } = {},
 ): Promise<ReviewHarness> {
   const seen = logged();
@@ -249,6 +247,7 @@ async function makeHarness(
   await mkdir(checkoutDir, { recursive: true });
   const sandbox = await makeSandbox(checkoutDir);
   const gitDeps: GitDeps = { PATH: GIT_ENV.PATH, timeoutMs: 30000 };
+  const { ci, annotations, ...rest } = overrides;
   const ctx: ReviewContext = {
     branchPrefix: "moc/",
     statePath: join(dir, "loop-state.json"),
@@ -264,8 +263,8 @@ async function makeHarness(
       factoryLogin: FACTORY_LOGIN,
       git: gitDeps,
       scratchDir: sandbox.scratchDir,
-      ci: overrides.ci ?? (() => "success"),
-      ...(overrides.annotations === undefined ? {} : { annotations: overrides.annotations }),
+      ci: ci ?? (() => "success"),
+      ...(annotations !== undefined ? { annotations } : {}),
     }),
     factoryLogin: FACTORY_LOGIN,
     ledgerPath: join(dir, "ledger.jsonl"),
@@ -300,7 +299,7 @@ async function makeHarness(
       budget: GATE,
       call: () => Promise.reject(new Error("no loopback wired")),
     },
-    ...overrides,
+    ...rest,
   };
   return { ctx, events: seen.events, sandbox, registryPath, control, dispatcher };
 }
@@ -427,12 +426,13 @@ test("red close stores the check excerpt and logs only its size", async () => {
       const li = await readItem(harness.ctx.statePath);
       expect(li.rounds).toHaveLength(1);
       expect(li.rounds[0]?.outcome).toBe("red-ci");
-      expect(li.rounds[0]?.checkExcerpt).toContain("expected 1 to equal 2");
+      const stored = li.rounds[0]?.checkExcerpt;
+      expect(stored).toContain("expected 1 to equal 2");
       const red = harness.events.filter((line) => line.startsWith("ci:red:"));
       expect(red).toHaveLength(1);
-      expect(red[0] ?? "").toContain("excerpt");
-      expect(red[0] ?? "").toContain("bytes");
-      expect(red[0] ?? "").not.toContain("expected 1 to equal 2");
+      const expectedDetail = `excerpt ${String(Buffer.byteLength(stored ?? "", "utf8"))} bytes`;
+      expect(red[0]).toBe(`ci:red:${expectedDetail}:${head}`);
+      expect(red[0]).not.toContain("expected 1 to equal 2");
     } finally {
       await harness.sandbox.cleanup();
     }

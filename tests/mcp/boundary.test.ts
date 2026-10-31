@@ -46,6 +46,7 @@ test("the started server refuses every F2/F3 loader form (BD1)", async () => {
     functionConstructor: REFUSED_DECIDE,
     clearAll: "mcp boundary: plugins are locked",
     worker: "approvals: decide.ts refuses to load in the MCP server process",
+    tamper: REFUSED_DECIDE,
   });
 });
 

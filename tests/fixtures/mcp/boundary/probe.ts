@@ -68,6 +68,30 @@ const forms: Record<string, () => Promise<unknown>> = {
       };
     });
   },
+  tamper: async () => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- the values under test
+    const mapGet = Map.prototype.get;
+
+    const getOwn = Object.getOwnPropertyDescriptor;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- the values under test
+    const replace = String.prototype.replace;
+    const main = Bun.main;
+    (Map.prototype as unknown as Record<string, unknown>)["get"] = () => undefined;
+    (Object as unknown as Record<string, unknown>)["getOwnPropertyDescriptor"] = () => undefined;
+    (String.prototype as unknown as Record<string, unknown>)["replace"] = function (this: string) {
+      return this;
+    };
+    Reflect.set(Bun, ["ma", "in"].join(""), "/y");
+    try {
+      // eslint-disable-next-line no-restricted-syntax -- the form under test
+      await import(decidePath);
+    } finally {
+      Map.prototype.get = mapGet;
+      Object.getOwnPropertyDescriptor = getOwn;
+      String.prototype.replace = replace;
+      Reflect.set(Bun, ["ma", "in"].join(""), main);
+    }
+  },
 };
 
 const write = process.stderr.write.bind(process.stderr);

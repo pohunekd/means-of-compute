@@ -223,7 +223,7 @@ error it is `null`, because the call-end line already carries `code`.
    rule already rejects a non-literal dynamic `import()`. X4 matches
    names spelled in source. A name or code built at runtime, such as
    a computed property read with a built string or a function
-   constructor reached through `.constructor`, is outside X4.
+   constructor reached through `.constructor`, is outside X4 and refused at runtime (point 4).
 3. No tool reads `/dev/tty`, and there is no MCP method that decides.
 4. Runtime boundary (#94). Every launcher starts the server with `mcpServeArgs`.
    - `--config=config/mcp-bunfig.toml` replaces any `bunfig.toml` of the
@@ -242,6 +242,10 @@ error it is `null`, because the call-end line already carries `code`.
      (`approvals: decide.ts refuses to load in the MCP server process`).
      That covers workers, preloads that run before the boundary, and copies
      under `node_modules/` with any name.
+   - The boundary captures the intrinsics it calls when it is preloaded,
+     and decide.ts reads the marker with the `in` operator, so code in the
+     server that reassigns JS intrinsics afterwards does not change either
+     check.
    - X4 stays the early static check.
    - Not covered: code that rebuilds the decision logic from source text
      without the check. Such code could equally write the requests file

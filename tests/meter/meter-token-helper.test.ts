@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const HELPER = new URL("../../scripts/host/meter-token.mjs", import.meta.url);
 
@@ -13,7 +14,7 @@ interface RunResult {
 
 function runHelper(env: NodeJS.ProcessEnv): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HELPER.pathname, "MOC_METER_TOKEN"], {
+    const child = spawn(process.execPath, [fileURLToPath(HELPER), "MOC_METER_TOKEN"], {
       stdio: ["ignore", "pipe", "pipe"],
       env,
     });
@@ -36,16 +37,13 @@ function runHelper(env: NodeJS.ProcessEnv): Promise<RunResult> {
   });
 }
 
-test("the helper prints the slot value (D4)", async () => {
+test("the helper prints the slot value and fails loudly without it (T4, D4)", async () => {
   const token = `moc1.cmVxLTE.${"A".repeat(43)}`;
   const result = await runHelper({ PATH: process.env["PATH"] ?? "", MOC_METER_TOKEN: token });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(token);
-});
-
-test("the helper fails loudly when the slot is absent (D4)", async () => {
-  const result = await runHelper({ PATH: process.env["PATH"] ?? "" });
-  expect(result.code).toBe(1);
-  expect(result.stdout).toBe("");
-  expect(result.stderr).toBe("meter-token: MOC_METER_TOKEN is not set\n");
+  const missing = await runHelper({ PATH: process.env["PATH"] ?? "" });
+  expect(missing.code).toBe(1);
+  expect(missing.stdout).toBe("");
+  expect(missing.stderr).toBe("meter-token: MOC_METER_TOKEN is not set\n");
 });

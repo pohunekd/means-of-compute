@@ -60,22 +60,6 @@ function cellText(cell: import("../dashboard/model.js").Cell): string {
   throw new Error(`demo:numbers: unexpected ${cell.kind} cell`);
 }
 
-function figureOf(
-  model: ReturnType<typeof buildDashboard>,
-  panelId: string,
-  label: string,
-): import("../dashboard/model.js").Cell {
-  const panel = model.panels.find((p) => p.id === panelId);
-  if (!panel) {
-    throw new Error(`demo:numbers: dashboard panel "${panelId}" missing`);
-  }
-  const figure = panel.figures.find((f) => f.label === label);
-  if (!figure) {
-    throw new Error(`demo:numbers: dashboard figure "${label}" missing in panel ${panelId}`);
-  }
-  return figure.cell;
-}
-
 function getFigure(
   model: ReturnType<typeof buildDashboard>,
   panelId: string,
@@ -313,14 +297,14 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   const interventionsWithNonZero: string[] = [];
   for (const r of records) {
     if (r.humanInterventions > 0) {
-      interventionsWithNonZero.push(`${r.workItemId} (${r.humanInterventions})`);
+      interventionsWithNonZero.push(`${r.workItemId} (${String(r.humanInterventions)})`);
     }
   }
   interventionsWithNonZero.sort();
   const interventionsCitation =
     interventionsWithNonZero.length === 0
-      ? `none nonzero of ${records.length} records`
-      : `${interventionsWithNonZero.join(", ")} of ${records.length} records`;
+      ? `none nonzero of ${String(records.length)} records`
+      : `${interventionsWithNonZero.join(", ")} of ${String(records.length)} records`;
   const interventionsSource = `${interventionsFigure.source}; rows: ${interventionsCitation}; config: none (count, no price)`;
   rows.push({
     label: "Human interventions",
@@ -332,14 +316,14 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   const retriesWithNonZero: string[] = [];
   for (const r of records) {
     if (r.retries > 0) {
-      retriesWithNonZero.push(`${r.workItemId} (${r.retries})`);
+      retriesWithNonZero.push(`${r.workItemId} (${String(r.retries)})`);
     }
   }
   retriesWithNonZero.sort();
   const retriesCitation =
     retriesWithNonZero.length === 0
-      ? `none nonzero of ${records.length} records`
-      : `${retriesWithNonZero.join(", ")} of ${records.length} records`;
+      ? `none nonzero of ${String(records.length)} records`
+      : `${retriesWithNonZero.join(", ")} of ${String(records.length)} records`;
   const retriesSource = `${retriesFigure.source}; rows: ${retriesCitation}; config: none (count, no price)`;
   rows.push({
     label: "Retries",

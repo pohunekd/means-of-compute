@@ -15,7 +15,7 @@ import type { DispatcherConfig } from "../../src/dispatcher/config.js";
 import type { GitDeps } from "../../src/loop/git.js";
 import { createStubGitHub, type StubCi } from "../../src/loop/stub/github.js";
 import { readLoopState, updateLoopState } from "../../src/loop/state.js";
-import type { LoopItem } from "../../src/loop/types.js";
+import type { LoopItem, RoundRecord } from "../../src/loop/types.js";
 import { readRegistry } from "../../src/dispatcher/registry.js";
 import { initialLoopItem } from "../../src/loop/start.js";
 import { updateWorkStore } from "../../src/work/store.js";
@@ -316,6 +316,7 @@ async function makeHarness(
     routing: ROUTING,
     maxActiveItems: overrides.maxActiveItems ?? 4,
     maxBriefBytes: overrides.maxBriefBytes ?? 65536,
+    hostCooldown: { rejections: 3, windowMs: 600_000, cooldownMs: 900_000 },
     ciPollMs: overrides.ciPollMs ?? 30_000,
     intake: {
       enabled: false,
@@ -743,6 +744,61 @@ test("B1 a claim retries the excluded host and parks at maxStartRejections", asy
       expect(parked.park).toMatchObject({ kind: "operator", code: "start-rejected" });
       expect(parked.startRejections).toBe(3);
       expect(parked.excludedHosts).toContain("host-a");
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// Row 2: a cooled host is skipped for every item, also by the exclusions retry.
+test("a cooled host is skipped for every item, also by the exclusions retry", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir, { hosts: ["host-a"] });
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1"), item("gh-demo-2")]);
+      const rejected = (n: number, at: string): RoundRecord => ({
+        round: n,
+        retry: 0,
+        requestId: null,
+        model: PREFERRED,
+        providerId: PROVIDER,
+        hostAlias: "host-a",
+        attempt: "failure",
+        outcome: "start-rejected",
+        headSha: null,
+        failingChecks: [],
+        verdict: null,
+        newlyMet: [],
+        at,
+        baseRace: false,
+      });
+      const end = Date.parse(NOW) - 30_000 + 900_000;
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "final",
+          finalize: { result: "success", done: true },
+          rounds: [
+            rejected(0, new Date(Date.parse(NOW) - 120_000).toISOString()),
+            rejected(1, new Date(Date.parse(NOW) - 60_000).toISOString()),
+            rejected(2, new Date(Date.parse(NOW) - 30_000).toISOString()),
+          ],
+        },
+        "gh-demo-2": { ...initialLoopItem(), excludedHosts: ["host-a"] },
+      });
+      const scheduler = createScheduler(harness.ctx);
+      const first = await scheduler.tick();
+      await scheduler.settled();
+      const second = await scheduler.tick();
+      await scheduler.settled();
+      expect(first.claimed).toEqual([]);
+      expect(second.claimed).toEqual([]);
+      const cooldowns = harness.events.filter((line) => line.startsWith("host-cooldown:"));
+      expect(cooldowns).toHaveLength(1);
+      expect(cooldowns[0]).toBe(`host-cooldown::${new Date(end).toISOString()}::::host-a`);
+      expect(harness.events.some((line) => line.startsWith("exclusions-retried:"))).toBe(false);
+      expect(harness.events.some((line) => line.startsWith("no-host:"))).toBe(true);
     } finally {
       restoreEnv();
     }

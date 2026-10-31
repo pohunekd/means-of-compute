@@ -20,7 +20,8 @@ import { runDigest } from "./digest.js";
 import type { PlacementConfig } from "../placement/config.js";
 import type { SpendBounds } from "../budget/cost.js";
 import { placeObserved } from "../placement/observed.js";
-import type { LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
+import { cooledHosts } from "./host-cooldown.js";
+import type { LoopHostCooldownConfig, LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
 import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
 import { auditableChoice, chooseModel } from "./policy.js";
@@ -63,6 +64,7 @@ export interface SchedulerContext extends MergeContext {
   readonly routing: LoopRoutingConfig;
   readonly maxActiveItems: number;
   readonly maxBriefBytes: number;
+  readonly hostCooldown: LoopHostCooldownConfig;
   readonly ciPollMs: number;
   readonly intake: LoopIntakeConfig;
   readonly trustedAssociations: readonly string[];
@@ -91,6 +93,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const seenOrphans = new Set<string>();
   const ciDue = new Map<string, number>();
   const intake = createIntakeState();
+  const cooldownsLogged = new Set<string>();
   let stopped = false;
   let failure: unknown = null;
 
@@ -180,6 +183,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         seenOrphans,
         ciDue,
         intake,
+        cooldownsLogged,
       ),
     stop: () => {
       stopped = true;
@@ -444,11 +448,28 @@ async function runClaims(
   launchStep: (id: string, run: () => Promise<unknown>) => boolean,
   carry: ClaimCarry,
   isSettled: () => boolean,
+  cooldownsLogged: Set<string>,
 ): Promise<void> {
   const store = await readWorkStore(ctx.storePath);
   const state = await readLoopState(ctx.statePath);
   const results = await readResults(ctx.resultsPath);
-  const observations = await ctx.collector.collect();
+  // A cooled host is removed before placement, so neither the placement nor
+  // the exclusions-retried fallback in claimOne can choose it.
+  const cooled = cooledHosts(
+    Object.values(state.items).map((value) => value as unknown as LoopItem),
+    ctx.hostCooldown,
+    ctx.now().getTime(),
+  );
+  for (const [hostAlias, until] of cooled) {
+    const key = `${hostAlias}|${String(until)}`;
+    if (!cooldownsLogged.has(key)) {
+      cooldownsLogged.add(key);
+      ctx.log.log({ event: "host-cooldown", hostAlias, detail: new Date(until).toISOString() });
+    }
+  }
+  const observations = (await ctx.collector.collect()).filter(
+    (entry) => !cooled.has(entry.hostAlias),
+  );
   const candidates = readyItems(store).filter((item) => {
     if (steps.has(item.id)) {
       return false;
@@ -550,6 +571,7 @@ async function tickOnce(
   seenOrphans: Set<string>,
   ciDue: Map<string, number>,
   intake: IntakeState,
+  cooldownsLogged: Set<string>,
 ): Promise<TickReport> {
   if (isStopped()) {
     return { claimed: [], launched: [] };
@@ -631,6 +653,7 @@ async function tickOnce(
       (id, run) => launchStep(id, run),
       carry,
       () => isStopped() || getFailure() !== null,
+      cooldownsLogged,
     );
   }
   return { claimed: carry.claimed, launched: [...launched, ...carry.launched] };

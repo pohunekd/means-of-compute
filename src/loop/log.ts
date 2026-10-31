@@ -25,6 +25,7 @@ export type LoopEventName =
   | "budget-refused"
   | "no-host"
   | "exclusions-retried"
+  | "host-cooldown"
   | "intake-skip"
   | "intake-import"
   | "github-error"

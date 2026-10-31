@@ -25,6 +25,12 @@ export interface LoopStallConfig {
   readonly maxRetries: number;
 }
 
+export interface LoopHostCooldownConfig {
+  readonly rejections: number;
+  readonly windowMs: number;
+  readonly cooldownMs: number;
+}
+
 export interface LoopRoutingConfig {
   readonly models: Readonly<Record<string, string>>;
   readonly fallback: Readonly<Record<string, string>>;
@@ -106,6 +112,7 @@ export interface LoopConfig {
   readonly unreachableRetryMs: number;
   readonly budgetBackoffMs: number;
   readonly maxStartRejections: number;
+  readonly hostCooldown: LoopHostCooldownConfig;
   readonly maxBriefBytes: number;
   readonly stall: LoopStallConfig;
   readonly routing: LoopRoutingConfig;
@@ -257,6 +264,21 @@ function parseStall(value: unknown, path: string): LoopStallConfig {
   return {
     maxStagnantRounds: requiredInteger(record, path, "stall", "maxStagnantRounds", 1, 10),
     maxRetries: requiredInteger(record, path, "stall", "maxRetries", 0, 10),
+  };
+}
+
+function parseHostCooldown(value: unknown, path: string): LoopHostCooldownConfig {
+  const record = asRecord(value, path, "hostCooldown");
+  checkKeys(record, ["rejections", "windowMs", "cooldownMs"], path, "hostCooldown");
+  const windowMs = requiredInteger(record, path, "hostCooldown", "windowMs", 1000, 86400000);
+  const cooldownMs = requiredInteger(record, path, "hostCooldown", "cooldownMs", 1000, 86400000);
+  if (cooldownMs < windowMs) {
+    throw invalid(path, "hostCooldown.cooldownMs");
+  }
+  return {
+    rejections: requiredInteger(record, path, "hostCooldown", "rejections", 1, 20),
+    windowMs,
+    cooldownMs,
   };
 }
 
@@ -603,6 +625,7 @@ const TOP_LEVEL_KEYS = [
   "unreachableRetryMs",
   "budgetBackoffMs",
   "maxStartRejections",
+  "hostCooldown",
   "maxBriefBytes",
   "stall",
   "routing",
@@ -710,6 +733,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     unreachableRetryMs: requiredInteger(record, path, "", "unreachableRetryMs", 0, 600000),
     budgetBackoffMs: requiredInteger(record, path, "", "budgetBackoffMs", 1000, 86400000),
     maxStartRejections: requiredInteger(record, path, "", "maxStartRejections", 1, 20),
+    hostCooldown: parseHostCooldown(record["hostCooldown"], path),
     maxBriefBytes,
     stall: parseStall(record["stall"], path),
     routing: await parseRouting(record["routing"], path),

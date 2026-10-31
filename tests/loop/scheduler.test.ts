@@ -898,6 +898,15 @@ test("a tick retires the session of a closed round", async () => {
       await scheduler.settled();
       expect(harness.control.sessions()).toEqual([]);
       expect(harness.events.some((line) => line.startsWith("retire-failed:"))).toBe(false);
+      const marked = (await readRegistry(harness.registryPath)).find(
+        (entry) => entry.requestId === "gh-demo-1:0",
+      );
+      expect(marked?.retiredAt).toBe(harness.nowValue.current.toISOString());
+      harness.control.setUnreachable("host-a", true);
+      const restarted = createScheduler(harness.ctx);
+      await restarted.tick();
+      await restarted.settled();
+      expect(harness.events.some((line) => line.startsWith("retire-failed:"))).toBe(false);
     } finally {
       restoreEnv();
     }
@@ -955,6 +964,44 @@ test("an unreachable retire is logged, retried after retireRetryMs, and leaves t
       await scheduler.tick();
       await scheduler.settled();
       expect(harness.control.sessions()).toEqual([]);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// Retire sweep: an error the adapter does not map is logged with its name and
+// retried like a refusal; it never stops the scheduler.
+test("an unmapped retire error logs retire-failed and the scheduler keeps ticking", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      await seedFinishedRegistry(harness.registryPath);
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await writeLoopState(harness.ctx.statePath, {
+        "gh-demo-1": {
+          ...initialLoopItem(),
+          phase: "final",
+          finalize: { result: "success", done: true },
+        },
+      });
+      const scheduler = createScheduler({
+        ...harness.ctx,
+        dispatcher: {
+          ...harness.ctx.dispatcher,
+          retire: () => Promise.reject(new TypeError("command unsupported")),
+        },
+      });
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.events.filter((line) => line.startsWith("retire-failed:"))).toEqual([
+        "retire-failed:TypeError::::gh-demo-1:0:host-a",
+      ]);
+      harness.nowValue.current = new Date(harness.nowValue.current.getTime() + 60_000);
+      await scheduler.tick();
+      await scheduler.settled();
+      expect(harness.events.filter((line) => line.startsWith("retire-failed:"))).toHaveLength(2);
     } finally {
       restoreEnv();
     }

@@ -101,12 +101,13 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   let sweep: Promise<void> | null = null;
 
   // One retire sweep in flight at a time, off the tick's path; settled()
-  // waits for it so shutdown never closes the port under a retire.
+  // waits for it so shutdown never closes the port under a retire. Only a
+  // registry or loop state error rejects the sweep and stops the scheduler.
   function launchSweep(): void {
     if (settled() || sweep !== null) {
       return;
     }
-    const running = retireClosedSessions(ctx, retireMemory);
+    const running = retireClosedSessions(ctx, retireMemory, settled);
     sweep = running;
     running.then(
       () => {

@@ -1,12 +1,15 @@
 // Session cleanup: a settled, ledgered registry entry that no loop item names
 // any more belongs to a closed round, so its session and worktree are removed
-// from the host. A failed retire is logged and retried after retireRetryMs; it
-// never changes an item. Retired entries are remembered in memory only, so the
-// first sweep after a restart asks the host once per old entry.
-import type { createDispatcher } from "../dispatcher/dispatcher.js";
+// from the host and the entry is marked retiredAt, which later sweeps skip.
+// An operator-parked item keeps its sessions until unpark so the operator can
+// inspect them. A failed port call is logged and retried after retireRetryMs
+// and never changes an item; only a registry or loop state error rejects the
+// sweep. The sweep returns between entries once the scheduler stops.
+import { DispatchPreconditionError, type createDispatcher } from "../dispatcher/dispatcher.js";
 import type { DispatcherConfig } from "../dispatcher/config.js";
 import { PortRejectedError, PortUnreachableError } from "../dispatcher/port.js";
-import { readRegistry } from "../dispatcher/registry.js";
+import { RegistryDataError, readRegistry } from "../dispatcher/registry.js";
+import { InputPathError } from "../fs/input.js";
 import type { LoopLog } from "./log.js";
 import type { StartDispatcher } from "./start.js";
 import { readLoopState } from "./state.js";
@@ -33,14 +36,28 @@ export function createRetireMemory(): RetireMemory {
   return { done: new Set(), retryAt: new Map() };
 }
 
+// The log code of a failed retire: the port's refusal code, "unreachable",
+// or the error's name for an error the adapter does not map.
+function retireFailureCode(error: unknown): string {
+  if (error instanceof PortRejectedError) {
+    return error.code;
+  }
+  if (error instanceof PortUnreachableError) {
+    return "unreachable";
+  }
+  return error instanceof Error ? error.name : "unknown";
+}
+
 export async function retireClosedSessions(
   ctx: RetireContext,
   memory: RetireMemory,
+  isStopped: () => boolean,
 ): Promise<void> {
   const entries = await readRegistry(ctx.dispatcherConfig.registryPath);
   const state = await readLoopState(ctx.statePath);
   const named = new Set<string>();
-  for (const value of Object.values(state.items)) {
+  const operatorParked = new Set<string>();
+  for (const [workItemId, value] of Object.entries(state.items)) {
     const li = value as unknown as LoopItem;
     if (li.requestId !== null) {
       named.add(li.requestId);
@@ -48,13 +65,21 @@ export async function retireClosedSessions(
     if (li.start !== null) {
       named.add(li.start.requestId);
     }
+    if (li.park !== null && li.park.kind === "operator") {
+      operatorParked.add(workItemId);
+    }
   }
   for (const entry of entries) {
+    if (isStopped()) {
+      return;
+    }
     if (
       entry.sessionId === null ||
       entry.terminal === null ||
       !entry.terminal.ledgerAppended ||
+      entry.retiredAt !== undefined ||
       named.has(entry.requestId) ||
+      operatorParked.has(entry.workItemId) ||
       memory.done.has(entry.requestId)
     ) {
       continue;
@@ -68,7 +93,11 @@ export async function retireClosedSessions(
       memory.done.add(entry.requestId);
       memory.retryAt.delete(entry.requestId);
     } catch (error: unknown) {
-      if (!(error instanceof PortRejectedError) && !(error instanceof PortUnreachableError)) {
+      if (
+        error instanceof RegistryDataError ||
+        error instanceof InputPathError ||
+        error instanceof DispatchPreconditionError
+      ) {
         throw error;
       }
       memory.retryAt.set(entry.requestId, ctx.now().getTime() + ctx.retireRetryMs);
@@ -77,7 +106,7 @@ export async function retireClosedSessions(
         workItemId: entry.workItemId,
         requestId: entry.requestId,
         hostAlias: entry.hostAlias,
-        code: error instanceof PortRejectedError ? error.code : "unreachable",
+        code: retireFailureCode(error),
       });
     }
   }

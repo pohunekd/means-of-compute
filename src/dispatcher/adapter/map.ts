@@ -19,7 +19,6 @@ export const MOC_METADATA = {
   baseCommit: "moc.baseCommit",
   voidCode: "moc.voidCode",
   voidedRequestId: "moc.voidedRequestId",
-  meterToken: "moc.meterToken",
   outcome: "moc.outcome",
   outcomeDetail: "moc.outcomeDetail",
 } as const;
@@ -67,11 +66,13 @@ export function sessionNewParams(
     branch: req.branch,
     input: req.brief,
     input_ack_timeout_ms: cfg.inputAckTimeoutMs,
+    // The daemon hands the slot to the agent process and never persists,
+    // lists or logs it, so the token stays out of session metadata.
+    secret_env: { [cfg.meterTokenEnv]: meterToken },
     metadata: {
       [MOC_METADATA.requestId]: req.requestId,
       [MOC_METADATA.requestDigest]: digest,
       [MOC_METADATA.start]: "pending",
-      [MOC_METADATA.meterToken]: meterToken,
     },
   };
   if (req.resume) {
@@ -88,6 +89,7 @@ type PreflightName =
   | "session_wait_turn_supported"
   | "session_new_branch_source_supported"
   | "session_new_input_ack_supported"
+  | "session_new_secret_env_supported"
   | "supported_agents"
   | "agent_runtime";
 
@@ -109,6 +111,9 @@ export function hostPreflightFailure(
   }
   if (!caps.session_new_input_ack_supported) {
     return "session_new_input_ack_supported";
+  }
+  if (!caps.session_new_secret_env_supported) {
+    return "session_new_secret_env_supported";
   }
   if (!caps.supported_agents.includes(cfg.agentProfile)) {
     return "supported_agents";
@@ -352,6 +357,8 @@ const UNREACHABLE_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 const REJECTED_KINDS: ReadonlySet<string> = new Set([
+  "sessionNewSecretEnvUnsupported",
+  "sessionNewSecretEnvRelayRefused",
   "protocol",
   "remoteProtocol",
   "versionMismatch",

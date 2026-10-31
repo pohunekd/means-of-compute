@@ -1,0 +1,1 @@
+{ "localProviderIds": ["local"], "cloudProviderIds": ["meta-api", "meta-wonder", "nvidia-build"] }

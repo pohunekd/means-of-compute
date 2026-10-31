@@ -27,6 +27,7 @@ export interface NumbersInputs {
 export interface NumbersRow {
   readonly label: string;
   readonly cells: readonly string[];
+  readonly source: string;
 }
 
 export interface BenchmarkNumbers {
@@ -73,6 +74,22 @@ function figureOf(
     throw new Error(`demo:numbers: dashboard figure "${label}" missing in panel ${panelId}`);
   }
   return figure.cell;
+}
+
+function getFigure(
+  model: ReturnType<typeof buildDashboard>,
+  panelId: string,
+  label: string,
+): import("../dashboard/model.js").Figure {
+  const panel = model.panels.find((p) => p.id === panelId);
+  if (!panel) {
+    throw new Error(`demo:numbers: dashboard panel "${panelId}" missing`);
+  }
+  const figure = panel.figures.find((f) => f.label === label);
+  if (!figure) {
+    throw new Error(`demo:numbers: dashboard figure "${label}" missing in panel ${panelId}`);
+  }
+  return figure;
 }
 
 function localShare(records: readonly UsageRecord[], classes: ProviderClasses): string {
@@ -138,7 +155,6 @@ function nullTokenIdsFor(
   }
   return ids;
 }
-
 export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   const { ledgerPath, ledger, pricing, dashboard, budget, route, classes, now } = inputs;
 
@@ -179,25 +195,70 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
 
   const model = buildDashboard(dashboardInputs);
 
-  const unmeasuredIds = unmeasuredRequestsFor(ledger.records);
-  const nullIdsAll = nullTokenIdsFor(ledger.records, false);
-  const nullIdsPriced = nullTokenIdsFor(ledger.records, true, pricing);
+  const records = ledger.records;
+  const pending = ledger.pending;
+
+  const unmeasuredIds = unmeasuredRequestsFor(records);
+  const nullIdsAll = nullTokenIdsFor(records, false);
+  const nullIdsPriced = nullTokenIdsFor(records, true, pricing);
+
+  const recordIds = records.map((r) => r.workItemId);
+  const successIds = records.filter((r) => r.result === "success").map((r) => r.workItemId);
+  const blockedIds = records.filter((r) => r.result === "blocked").map((r) => r.workItemId);
+
+  const localIds: string[] = [];
+  const cloudIds: string[] = [];
+  for (const r of records) {
+    let hasLocal = false;
+    let hasCloud = false;
+    for (const t of r.tokens) {
+      if (classes.local.has(t.provider)) hasLocal = true;
+      if (classes.cloud.has(t.provider)) hasCloud = true;
+    }
+    if (hasLocal) localIds.push(r.workItemId);
+    if (hasCloud) cloudIds.push(r.workItemId);
+  }
+
+  const modelToIds = new Map<string, Set<string>>();
+  for (const r of records) {
+    for (const attempt of r.attempts) {
+      let set = modelToIds.get(attempt.model);
+      if (!set) {
+        set = new Set();
+        modelToIds.set(attempt.model, set);
+      }
+      set.add(r.workItemId);
+    }
+  }
 
   const rows: NumbersRow[] = [];
 
-  const finishedTasksCell = figureOf(model, "autonomy", "Finished tasks");
-  rows.push({ label: "Tasks completed", cells: [mdCell(cellText(finishedTasksCell))] });
+  const finishedTasksFigure = getFigure(model, "autonomy", "Finished tasks");
+  const tasksSource = `${finishedTasksFigure.source}; rows: success: ${idList(successIds)}; blocked: ${idList(blockedIds)}; config: none (count, no price)`;
+  rows.push({
+    label: "Tasks completed",
+    cells: [mdCell(cellText(finishedTasksFigure.cell))],
+    source: tasksSource,
+  });
 
-  const localShareCell = localShare(ledger.records, classes);
-  rows.push({ label: "Local token share", cells: [mdCell(localShareCell)] });
+  const localShareCell = localShare(records, classes);
+  const localProviderIds = [...classes.local].sort();
+  const cloudProviderIds = [...classes.cloud].sort();
+  const localShareBase = `ledger records tokens[] input plus output, auditor tokens included; config/demo-numbers.json localProviderIds [${localProviderIds.join(", ")}], cloudProviderIds [${cloudProviderIds.join(", ")}]`;
+  const localShareSource = `${localShareBase}; rows: local: ${idList(localIds)}; cloud: ${idList(cloudIds)}`;
+  rows.push({
+    label: "Local token share",
+    cells: [mdCell(localShareCell)],
+    source: localShareSource,
+  });
 
-  const actualCostCell = figureOf(model, "savings", "Actual token cost");
-  let actualCostText = cellText(actualCostCell);
-  if (actualCostCell.kind === "text" && nullIdsPriced.size > 0) {
+  const actualCostFigure = getFigure(model, "savings", "Actual token cost");
+  let actualCostText = cellText(actualCostFigure.cell);
+  if (actualCostFigure.cell.kind === "text" && nullIdsPriced.size > 0) {
     actualCostText = `no data (token counts not reported for ${idList(nullIdsPriced)})`;
-  } else if (actualCostCell.kind !== "no-data" && unmeasuredIds.size > 0) {
+  } else if (actualCostFigure.cell.kind !== "no-data" && unmeasuredIds.size > 0) {
     const unmeasuredPriced = new Set<string>();
-    for (const r of ledger.records) {
+    for (const r of records) {
       for (const t of r.tokens) {
         if (t.unmeasuredRequests !== undefined) {
           const entry = pricing.get(t.provider);
@@ -211,32 +272,90 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
       actualCostText = `no data (requests without usage for ${idList(unmeasuredPriced)})`;
     }
   }
-  rows.push({ label: "Actual token cost", cells: [mdCell(actualCostText)] });
+  const actualCostSource = `${actualCostFigure.source}; rows: ${idList(recordIds)}`;
+  rows.push({
+    label: "Actual token cost",
+    cells: [mdCell(actualCostText)],
+    source: actualCostSource,
+  });
 
-  const frontierCell = figureOf(model, "savings", "Frontier-token baseline");
-  let frontierText = cellText(frontierCell);
-  if (frontierCell.kind === "text" && nullIdsAll.size > 0) {
+  const frontierFigure = getFigure(model, "savings", "Frontier-token baseline");
+  let frontierText = cellText(frontierFigure.cell);
+  if (frontierFigure.cell.kind === "text" && nullIdsAll.size > 0) {
     frontierText = `no data (token counts not reported for ${idList(nullIdsAll)})`;
-  } else if (frontierCell.kind !== "no-data" && unmeasuredIds.size > 0) {
+  } else if (frontierFigure.cell.kind !== "no-data" && unmeasuredIds.size > 0) {
     frontierText = `no data (requests without usage for ${idList(unmeasuredIds)})`;
   }
-  rows.push({ label: "Frontier-token baseline", cells: [mdCell(frontierText)] });
+  const frontierSource = `${frontierFigure.source}; rows: ${idList(recordIds)}`;
+  rows.push({
+    label: "Frontier-token baseline",
+    cells: [mdCell(frontierText)],
+    source: frontierSource,
+  });
 
-  const cloudCell = figureOf(model, "savings", "Cloud sandbox baseline");
-  rows.push({ label: "Cloud sandbox baseline", cells: [mdCell(cellText(cloudCell))] });
+  const cloudFigure = getFigure(model, "savings", "Cloud sandbox baseline");
+  const cloudSource = `${cloudFigure.source}; rows: ${idList(recordIds)}`;
+  rows.push({
+    label: "Cloud sandbox baseline",
+    cells: [mdCell(cellText(cloudFigure.cell))],
+    source: cloudSource,
+  });
 
-  const ownedCell = figureOf(model, "savings", "Owned compute cost");
-  rows.push({ label: "Owned compute cost", cells: [mdCell(cellText(ownedCell))] });
+  const ownedFigure = getFigure(model, "savings", "Owned compute cost");
+  const ownedSource = `${ownedFigure.source}; rows: ${idList(recordIds)}`;
+  rows.push({
+    label: "Owned compute cost",
+    cells: [mdCell(cellText(ownedFigure.cell))],
+    source: ownedSource,
+  });
 
-  const interventionsCell = figureOf(model, "autonomy", "Human interventions");
-  rows.push({ label: "Human interventions", cells: [mdCell(cellText(interventionsCell))] });
+  const interventionsFigure = getFigure(model, "autonomy", "Human interventions");
+  const interventionsWithNonZero: string[] = [];
+  for (const r of records) {
+    if (r.humanInterventions > 0) {
+      interventionsWithNonZero.push(`${r.workItemId} (${r.humanInterventions})`);
+    }
+  }
+  interventionsWithNonZero.sort();
+  const interventionsCitation =
+    interventionsWithNonZero.length === 0
+      ? `none nonzero of ${records.length} records`
+      : `${interventionsWithNonZero.join(", ")} of ${records.length} records`;
+  const interventionsSource = `${interventionsFigure.source}; rows: ${interventionsCitation}; config: none (count, no price)`;
+  rows.push({
+    label: "Human interventions",
+    cells: [mdCell(cellText(interventionsFigure.cell))],
+    source: interventionsSource,
+  });
 
-  const retriesCell = figureOf(model, "autonomy", "Retries");
-  rows.push({ label: "Retries", cells: [mdCell(cellText(retriesCell))] });
+  const retriesFigure = getFigure(model, "autonomy", "Retries");
+  const retriesWithNonZero: string[] = [];
+  for (const r of records) {
+    if (r.retries > 0) {
+      retriesWithNonZero.push(`${r.workItemId} (${r.retries})`);
+    }
+  }
+  retriesWithNonZero.sort();
+  const retriesCitation =
+    retriesWithNonZero.length === 0
+      ? `none nonzero of ${records.length} records`
+      : `${retriesWithNonZero.join(", ")} of ${records.length} records`;
+  const retriesSource = `${retriesFigure.source}; rows: ${retriesCitation}; config: none (count, no price)`;
+  rows.push({
+    label: "Retries",
+    cells: [mdCell(cellText(retriesFigure.cell))],
+    source: retriesSource,
+  });
 
-  const pendingCount = ledger.pending.length;
+  const pendingIds = pending.map((p) => p.entryId);
+  const pendingSource = `ledger pending entries; rows: ${idList(pendingIds)}; config: none (count, no price)`;
+  const pendingCount = pending.length;
   const unfinalizedText = pendingCount === 0 ? "0" : `${String(pendingCount)} (in no figure above)`;
-  rows.push({ label: "Unfinalized entries", cells: [mdCell(unfinalizedText)] });
+  rows.push({
+    label: "Unfinalized entries",
+    cells: [mdCell(unfinalizedText)],
+    source: pendingSource,
+  });
 
   const autonomyPanel = model.panels.find((p) => p.id === "autonomy");
   if (!autonomyPanel) {
@@ -247,25 +366,32 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
     throw new Error("demo:numbers: Success rate per model table missing");
   }
   const modelRows: NumbersRow[] = [];
+  const tableSource = successTable.source;
   for (const rowCells of successTable.rows) {
     const cells = rowCells.map(cellText);
     const modelId = cells[0] ?? "";
     const attempts = cells[1] ?? "";
     const successes = cells[2] ?? "";
     const rate = cells[3] ?? "";
-    modelRows.push({ label: modelId, cells: [mdCell(attempts), mdCell(successes), mdCell(rate)] });
+    const ids = modelToIds.get(modelId);
+    const citation = idList(ids ?? []);
+    const source = `${tableSource}; rows: ${citation}; config: none (count, no price)`;
+    modelRows.push({
+      label: modelId,
+      cells: [mdCell(attempts), mdCell(successes), mdCell(rate)],
+      source,
+    });
   }
 
   return {
     ledgerPath,
-    records: ledger.records.length,
-    pending: ledger.pending.length,
+    records: records.length,
+    pending: pending.length,
     figures: rows,
     models: modelRows,
   };
 }
-
-export function renderNumbers(numbers: BenchmarkNumbers): string {
+export function renderNumbers(numbers: BenchmarkNumbers, withSources = false): string {
   const lines: string[] = [];
   lines.push("# Benchmark numbers");
   lines.push("");
@@ -273,26 +399,51 @@ export function renderNumbers(numbers: BenchmarkNumbers): string {
     `Ledger: ${numbers.ledgerPath} (records: ${String(numbers.records)}, unfinalized entries: ${String(numbers.pending)})`,
   );
   lines.push("");
-  lines.push("| figure | value |");
-  lines.push("| --- | --- |");
-  for (const row of numbers.figures) {
-    const value = row.cells[0] ?? "";
-    lines.push(`| ${mdCell(row.label)} | ${value} |`);
+  if (withSources) {
+    lines.push("| figure | value | sources |");
+    lines.push("| --- | --- | --- |");
+    for (const row of numbers.figures) {
+      const value = row.cells[0] ?? "";
+      lines.push(`| ${mdCell(row.label)} | ${value} | ${mdCell(row.source)} |`);
+    }
+  } else {
+    lines.push("| figure | value |");
+    lines.push("| --- | --- |");
+    for (const row of numbers.figures) {
+      const value = row.cells[0] ?? "";
+      lines.push(`| ${mdCell(row.label)} | ${value} |`);
+    }
   }
   lines.push("");
   lines.push("## Success rate per model");
   lines.push("");
-  lines.push("| model | attempts | successes | rate |");
-  lines.push("| --- | --- | --- | --- |");
-  if (numbers.models.length === 0) {
-    lines.push("| no data (no attempts) |  |  |  |");
+  if (withSources) {
+    lines.push("| model | attempts | successes | rate | sources |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    if (numbers.models.length === 0) {
+      lines.push("| no data (no attempts) |  |  |  |  |");
+    } else {
+      for (const row of numbers.models) {
+        const model = mdCell(row.label);
+        const attempts = row.cells[0] ?? "";
+        const successes = row.cells[1] ?? "";
+        const rate = row.cells[2] ?? "";
+        lines.push(`| ${model} | ${attempts} | ${successes} | ${rate} | ${mdCell(row.source)} |`);
+      }
+    }
   } else {
-    for (const row of numbers.models) {
-      const model = mdCell(row.label);
-      const attempts = row.cells[0] ?? "";
-      const successes = row.cells[1] ?? "";
-      const rate = row.cells[2] ?? "";
-      lines.push(`| ${model} | ${attempts} | ${successes} | ${rate} |`);
+    lines.push("| model | attempts | successes | rate |");
+    lines.push("| --- | --- | --- | --- |");
+    if (numbers.models.length === 0) {
+      lines.push("| no data (no attempts) |  |  |  |");
+    } else {
+      for (const row of numbers.models) {
+        const model = mdCell(row.label);
+        const attempts = row.cells[0] ?? "";
+        const successes = row.cells[1] ?? "";
+        const rate = row.cells[2] ?? "";
+        lines.push(`| ${model} | ${attempts} | ${successes} | ${rate} |`);
+      }
     }
   }
   lines.push("");

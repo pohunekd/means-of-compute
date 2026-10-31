@@ -22,6 +22,7 @@ function exitError(message: string, code = 2): never {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let ledgerPath: string | undefined;
+  let withSources = false;
   const seen = new Set<string>();
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -36,6 +37,12 @@ async function main(): Promise<void> {
       }
       ledgerPath = next;
       i++;
+    } else if (arg === "--sources") {
+      if (seen.has("sources")) {
+        exitError("unknown or repeated flag");
+      }
+      seen.add("sources");
+      withSources = true;
     } else {
       exitError("unknown or repeated flag");
     }
@@ -81,7 +88,7 @@ async function main(): Promise<void> {
       now: new Date(),
     });
 
-    const output = renderNumbers(numbers);
+    const output = renderNumbers(numbers, withSources);
     process.stdout.write(output);
     process.exit(0);
   } catch (error: unknown) {

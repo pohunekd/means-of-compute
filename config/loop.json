@@ -24,6 +24,7 @@
     "windowMs": 600000,
     "cooldownMs": 900000
   },
+  "retireRetryMs": 600000,
   "maxBriefBytes": 65536,
   "stall": {
     "maxStagnantRounds": 3,

@@ -26,6 +26,7 @@ export type LoopEventName =
   | "no-host"
   | "exclusions-retried"
   | "host-cooldown"
+  | "retire-failed"
   | "intake-skip"
   | "intake-import"
   | "github-error"

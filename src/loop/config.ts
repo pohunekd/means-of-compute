@@ -113,6 +113,7 @@ export interface LoopConfig {
   readonly budgetBackoffMs: number;
   readonly maxStartRejections: number;
   readonly hostCooldown: LoopHostCooldownConfig;
+  readonly retireRetryMs: number;
   readonly maxBriefBytes: number;
   readonly stall: LoopStallConfig;
   readonly routing: LoopRoutingConfig;
@@ -267,6 +268,8 @@ function parseStall(value: unknown, path: string): LoopStallConfig {
   };
 }
 
+// cooldownMs below windowMs would let rejections from before a cooldown
+// start a new one on the first rejection after it.
 function parseHostCooldown(value: unknown, path: string): LoopHostCooldownConfig {
   const record = asRecord(value, path, "hostCooldown");
   checkKeys(record, ["rejections", "windowMs", "cooldownMs"], path, "hostCooldown");
@@ -626,6 +629,7 @@ const TOP_LEVEL_KEYS = [
   "budgetBackoffMs",
   "maxStartRejections",
   "hostCooldown",
+  "retireRetryMs",
   "maxBriefBytes",
   "stall",
   "routing",
@@ -734,6 +738,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     budgetBackoffMs: requiredInteger(record, path, "", "budgetBackoffMs", 1000, 86400000),
     maxStartRejections: requiredInteger(record, path, "", "maxStartRejections", 1, 20),
     hostCooldown: parseHostCooldown(record["hostCooldown"], path),
+    retireRetryMs: requiredInteger(record, path, "", "retireRetryMs", 1000, 86400000),
     maxBriefBytes,
     stall: parseStall(record["stall"], path),
     routing: await parseRouting(record["routing"], path),

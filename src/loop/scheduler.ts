@@ -21,6 +21,7 @@ import type { PlacementConfig } from "../placement/config.js";
 import type { SpendBounds } from "../budget/cost.js";
 import { placeObserved } from "../placement/observed.js";
 import { cooledHosts } from "./host-cooldown.js";
+import { createRetireMemory, retireClosedSessions, type SchedulerDispatcher } from "./retire.js";
 import type { LoopHostCooldownConfig, LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
 import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
@@ -65,6 +66,8 @@ export interface SchedulerContext extends MergeContext {
   readonly maxActiveItems: number;
   readonly maxBriefBytes: number;
   readonly hostCooldown: LoopHostCooldownConfig;
+  readonly dispatcher: SchedulerDispatcher;
+  readonly retireRetryMs: number;
   readonly ciPollMs: number;
   readonly intake: LoopIntakeConfig;
   readonly trustedAssociations: readonly string[];
@@ -94,6 +97,27 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const ciDue = new Map<string, number>();
   const intake = createIntakeState();
   const cooldownsLogged = new Set<string>();
+  const retireMemory = createRetireMemory();
+  let sweep: Promise<void> | null = null;
+
+  // One retire sweep in flight at a time, off the tick's path; settled()
+  // waits for it so shutdown never closes the port under a retire.
+  function launchSweep(): void {
+    if (settled() || sweep !== null) {
+      return;
+    }
+    const running = retireClosedSessions(ctx, retireMemory);
+    sweep = running;
+    running.then(
+      () => {
+        sweep = null;
+      },
+      (error: unknown) => {
+        fail(error);
+        sweep = null;
+      },
+    );
+  }
   let stopped = false;
   let failure: unknown = null;
 
@@ -158,6 +182,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
       const pending = [
         ...[...launches.values()].filter((entry) => !entry.watch).map((entry) => entry.promise),
         ...timeouts.values(),
+        ...(sweep === null ? [] : [sweep]),
       ];
       if (pending.length === 0) {
         if (failure !== null) {
@@ -184,6 +209,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         ciDue,
         intake,
         cooldownsLogged,
+        launchSweep,
       ),
     stop: () => {
       stopped = true;
@@ -572,6 +598,7 @@ async function tickOnce(
   ciDue: Map<string, number>,
   intake: IntakeState,
   cooldownsLogged: Set<string>,
+  launchSweep: () => void,
 ): Promise<TickReport> {
   if (isStopped()) {
     return { claimed: [], launched: [] };
@@ -624,6 +651,7 @@ async function tickOnce(
   if (!isStopped() && getFailure() === null) {
     await runIntake(ctx, intake);
     await runDigest(ctx);
+    launchSweep();
   }
   const carry: ClaimCarry = { active: 0, running: [], claimed: [], launched: [] };
   const counted = await readWorkStore(ctx.storePath);

@@ -2,7 +2,7 @@
 
 ## Gates
 
-`bun run gates` runs format, lint, typecheck, contracts, providers, plugin-digest, and test, each as its own process,
+`bun run gates` runs format, lint, typecheck, contracts, providers, plugin-digest, docs-links, and test, each as its own process,
 and prints one `gate <name> rc=<n>` line per gate. Output appears only for a failing
 gate. CI runs the same command on every pull request and on `main`.
 

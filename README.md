@@ -122,8 +122,8 @@ bun install --frozen-lockfile
 bun run gates
 ```
 
-`bun run gates` prints one line per gate. Success is seven lines with `rc=0`:
-`format`, `lint`, `typecheck`, `contracts`, `providers`, `plugin-digest` and
+`bun run gates` prints one line per gate. Success is eight lines with `rc=0`:
+`format`, `lint`, `typecheck`, `contracts`, `providers`, `plugin-digest`, `docs-links` and
 `test`.
 
 ### Stub demo

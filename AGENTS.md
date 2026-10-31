@@ -44,6 +44,6 @@ call uses `muse-spark-1.3-contributor`; Muse Code runs with
 
 ```sh
 bun install          # dependencies
-bun run gates        # format, lint, typecheck, contracts, providers, plugin-digest, test; prints one rc per gate
+bun run gates        # format, lint, typecheck, contracts, providers, plugin-digest, docs-links, test; prints one rc per gate
 bun run fmt          # apply formatting
 ```

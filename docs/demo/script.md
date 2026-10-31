@@ -32,8 +32,8 @@ bun install --frozen-lockfile
 bun run gates
 ```
 
-expected: seven lines `gate <name> rc=0` for `format`, `lint`, `typecheck`,
-`contracts`, `providers`, `plugin-digest` and `test`.
+expected: eight lines `gate <name> rc=0` for `format`, `lint`, `typecheck`,
+`contracts`, `providers`, `plugin-digest`, `docs-links` and `test`.
 
 ## Steps
 

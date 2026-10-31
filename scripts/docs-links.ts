@@ -1,4 +1,6 @@
-import { readFileSync, existsSync, readdirSync, statSync } from "fs";
+// docs:links: every relative Markdown link in README.md, AGENTS.md, SUBMISSION.md
+// and every *.md under .agents/ and docs/ (any depth) must resolve to an existing path.
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { join, dirname, relative, resolve } from "path";
 
 interface BrokenLink {
@@ -32,29 +34,37 @@ function isUrlScheme(target: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target);
 }
 
+const TOP_LEVEL_FILES = ["README.md", "AGENTS.md", "SUBMISSION.md"];
+const DOC_DIRS = [".agents", "docs"];
+
+// Symlinks are not followed: a Dirent for a symlink is neither a file nor a directory.
+function markdownUnder(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...markdownUnder(full));
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
 export function checkRoot(root: string): BrokenLink[] {
   const broken: BrokenLink[] = [];
 
   const files: string[] = [];
-  const readme = join(root, "README.md");
-  const agents = join(root, "AGENTS.md");
-  if (existsSync(readme)) files.push(readme);
-  if (existsSync(agents)) files.push(agents);
-
-  const docsDir = join(root, "docs");
-  if (existsSync(docsDir)) {
-    const entries = readdirSync(docsDir);
-    for (const entry of entries) {
-      const full = join(docsDir, entry);
-      try {
-        if (statSync(full).isFile() && entry.endsWith(".md")) {
-          files.push(full);
-        }
-      } catch {
-        // ignore entries that cannot be statted
-      }
-    }
+  for (const name of TOP_LEVEL_FILES) {
+    const full = join(root, name);
+    if (existsSync(full)) files.push(full);
   }
+  for (const name of DOC_DIRS) {
+    const dir = join(root, name);
+    if (existsSync(dir)) files.push(...markdownUnder(dir));
+  }
+  const relOf = (path: string): string => relative(root, path);
+  files.sort((a, b) => (relOf(a) < relOf(b) ? -1 : relOf(a) > relOf(b) ? 1 : 0));
 
   const linkRegex = /\[([^\]]*)\]\(([^)]+)\)/g;
 

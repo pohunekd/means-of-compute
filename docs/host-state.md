@@ -75,13 +75,12 @@ inside a host's unattended window a local login without an active graphical
 session is judged by its logind idle hint instead of reporting activity
 unknown. A bad value fails the plugin run (`plugin-failed`).
 
-The launch `PATH` the daemon gives the plugin must provide `bun`, because the
-bundle starts with `#!/usr/bin/env bun`.
-
-The plugin
-reads this file for a live run (never the hostname, never
+The plugin reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
+
+The launch `PATH` the daemon gives the plugin must provide `bun`, because the
+bundle starts with `#!/usr/bin/env bun`.
 
 ## Idle detection and agent runtime
 
@@ -132,6 +131,8 @@ records it as an excluded candidate. No failure yields a `reported` host.
 | host or daemon unreachable, overlay down                                                                                                   | `host-unreachable`                                |
 | daemon older than the extension point, without `command.run`                                                                               | `daemon-unsupported (command_unsupported)`        |
 | protocol version mismatch or translation failure                                                                                           | `daemon-rejected` with code                       |
+| ClientError kind `json`                                                                                                                    | `daemon-rejected (json_error)`                    |
+| protocol or remoteProtocol error with a code not otherwise listed                                                                          | `daemon-rejected (<code>)`                        |
 | package not installed, no version selected, or no such command                                                                             | `plugin-missing (<code>)`                         |
 | package disabled                                                                                                                           | `plugin-disabled`                                 |
 | concurrency limit                                                                                                                          | `plugin-busy`                                     |

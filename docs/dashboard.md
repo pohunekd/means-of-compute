@@ -229,7 +229,9 @@ One table, caption `Models`, columns
 `model, rounds, successes, failures, excluded, success rate`.
 Source: `loop results (resultsPath of config/loop.json, read through readResults)`.
 
-Per model: `rounds` counts every result line for the model, `successes`
+Per model, over the lines `readResults` returns (a repeated `key` keeps
+only its first line, `src/loop/results.ts` `readResults`, see
+[loop.md](loop.md)): `rounds` counts the lines for the model, `successes`
 counts lines with `routingResult === "success"`, `failures` counts lines
 with `routingResult === "failure"`, and `excluded` counts lines with
 `routingResult === "excluded"`. The success rate covers non-excluded

@@ -146,6 +146,64 @@ test("retire removes a finished session through session.remove_accepting_unconfi
   }
 });
 
+test("a voided start removes its session so the branch is free for the retry", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({
+      warnings: [{ kind: "base_branch_fallback", message: "fell back to the default base branch" }],
+    }));
+    let error: unknown;
+    try {
+      await port.start(request());
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    const methods = methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."));
+    expect(methods).toEqual([
+      "session.list",
+      "session.new",
+      "session.stop",
+      "session.set_metadata",
+      "session.remove_accepting_unconfirmed",
+    ]);
+    expect(fake.sessions("laptop-a")).toHaveLength(0);
+    expect(eventsOf(log)).toContain("adapter-start-void");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a refused void removal is logged and the void keeps its code", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({
+      warnings: [{ kind: "base_branch_fallback", message: "fell back to the default base branch" }],
+    }));
+    fake.failNext("laptop-a", "session.remove_accepting_unconfirmed", {
+      errCode: "fake_unscripted",
+      apply: false,
+    });
+    let error: unknown;
+    try {
+      await port.start(request());
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    const sessions = fake.sessions("laptop-a");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.metadata?.[MOC_METADATA.start]).toBe("void");
+    const failed = log.find((entry) => entry.event === "adapter-void-remove-failed");
+    expect(failed).toBeDefined();
+    expect(failed?.hostAlias).toBe("laptop-a");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
 test("wait stores a finished terminal with set_metadata then stop (W5, W6)", async () => {
   const { fake, port } = setup();
   try {

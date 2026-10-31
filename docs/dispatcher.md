@@ -58,7 +58,7 @@ Handle validation checks the returned session handle and rejects with `invalid-h
 `DispatcherPort` (`src/dispatcher/port.ts` `DispatcherPort`) is the only seam to the
 session daemon: `start`, `wait`, `diff`, `cancel`, `release`, `retire`, `close`, with
 `PortUnreachableError` for transport failures and `PortRejectedError` (with
-a kebab-case `code`) for daemon refusals. Two implementations exist:
+a kebab-case `code`) for daemon refusals. A voided start stops the session, clears its `moc.*` binding, then removes it with `session.remove_accepting_unconfirmed` so the branch is free for the retry; a failed removal logs `adapter-void-remove-failed` and leaves the session stopped and unbound. Two implementations exist:
 
 - The memory port (`src/dispatcher/memory-port.ts` `createMemoryPort`) keeps sessions
   in-process. Tests use it; it never touches the network.

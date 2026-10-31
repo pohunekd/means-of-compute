@@ -243,9 +243,9 @@ error it is `null`, because the call-end line already carries `code`.
      That covers workers, preloads that run before the boundary, and copies
      under `node_modules/` with any name.
    - The boundary captures the intrinsics it calls when it is preloaded,
-     and decide.ts reads the marker with the `in` operator, so code in the
-     server that reassigns JS intrinsics afterwards does not change either
-     check.
+     builds file identities without global calls, and puts its marker on the
+     `Bun` object, read with the `in` operator, so code in the server that
+     reassigns JS globals or intrinsics afterwards changes neither check.
    - X4 stays the early static check.
    - Not covered: code that rebuilds the decision logic from source text
      without the check. Such code could equally write the requests file

@@ -75,21 +75,28 @@ const forms: Record<string, () => Promise<unknown>> = {
     const getOwn = Object.getOwnPropertyDescriptor;
     // eslint-disable-next-line @typescript-eslint/unbound-method -- the values under test
     const replace = String.prototype.replace;
+    const stringProto = String.prototype;
     const main = Bun.main;
+    const realString = String;
+    const realGlobal = globalThis;
     (Map.prototype as unknown as Record<string, unknown>)["get"] = () => undefined;
     (Object as unknown as Record<string, unknown>)["getOwnPropertyDescriptor"] = () => undefined;
     (String.prototype as unknown as Record<string, unknown>)["replace"] = function (this: string) {
       return this;
     };
+    (realGlobal as unknown as Record<string, unknown>)["String"] = () => "x";
     Reflect.set(Bun, ["ma", "in"].join(""), "/y");
+    Reflect.set(realGlobal, ["global", "This"].join(""), {});
     try {
       // eslint-disable-next-line no-restricted-syntax -- the form under test
       await import(decidePath);
     } finally {
       Map.prototype.get = mapGet;
       Object.getOwnPropertyDescriptor = getOwn;
-      String.prototype.replace = replace;
+      (stringProto as unknown as Record<string, unknown>)["replace"] = replace;
+      (realGlobal as unknown as Record<string, unknown>)["String"] = realString;
       Reflect.set(Bun, ["ma", "in"].join(""), main);
+      Reflect.set(realGlobal, ["global", "This"].join(""), realGlobal);
     }
   },
 };

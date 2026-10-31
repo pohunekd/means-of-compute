@@ -45,7 +45,8 @@ function stripSuffix(path: string): string {
 function identityOf(path: string): string | null {
   try {
     const info = statAt(path);
-    return `${String(info.dev)}:${String(info.ino)}`;
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions -- primitive ToString has no hook (A9)
+    return `${info.dev}:${info.ino}`;
   } catch {
     return null;
   }
@@ -91,7 +92,7 @@ Object.defineProperty(Bun.plugin, "clearAll", {
   configurable: false,
 });
 
-Object.defineProperty(globalThis, BOUNDARY_MARKER, {
+Object.defineProperty(Bun, BOUNDARY_MARKER, {
   value: true,
   writable: false,
   configurable: false,

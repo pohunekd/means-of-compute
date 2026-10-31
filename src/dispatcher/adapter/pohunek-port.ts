@@ -377,6 +377,37 @@ function logStartWarnings(
   }
 }
 
+// A fresh start that reports base_branch_fallback checked out a branch that
+// already existed on the host. session.diff is relative to the merge base, so
+// an empty, untruncated diff means the branch carries no work beyond the base
+// and the start can keep it. A diff error counts as work: the start voids.
+async function reusedBranchIsEmpty(
+  port: PortInternals,
+  client: Client,
+  alias: string,
+  req: StartRequest,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    const result = await client.call("session.diff", { session_id: sessionId, base: req.baseRef });
+    return result.diff === "" && !result.truncated;
+  } catch (error) {
+    const mapped = portErrorOf(error, alias);
+    if (mapped === null) {
+      throw error;
+    }
+    port.log({
+      level: "error",
+      event: "adapter-reuse-diff-failed",
+      hostAlias: alias,
+      requestId: req.requestId,
+      sessionId,
+      code: mapped instanceof PortRejectedError ? mapped.code : "unreachable",
+    });
+    return false;
+  }
+}
+
 async function startSession(port: PortInternals, req: StartRequest): Promise<SessionHandle> {
   if (port.closed) {
     throw new PohunekAdapterError("closed");
@@ -417,7 +448,14 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
     }
     throw error;
   }
-  const failure = acceptanceFailure(req, created);
+  let failure = acceptanceFailure(req, created);
+  if (
+    failure === "base-branch-fallback" &&
+    !req.resume &&
+    (await reusedBranchIsEmpty(port, client, alias, req, created.id))
+  ) {
+    failure = null;
+  }
   if (failure !== null) {
     await voidSession(port, client, alias, created, req, failure);
   }

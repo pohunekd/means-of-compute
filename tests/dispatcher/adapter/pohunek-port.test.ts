@@ -29,6 +29,7 @@ const CONFIG: PohunekAdapterConfig = {
   diffLogPath: "logs/dispatch-diff.jsonl",
   resolveLogPath: "logs/dispatch-resolve.jsonl",
   hostRoutesFileEnv: "MOC_HOST_ROUTES_FILE",
+  meterTokenEnv: "MOC_METER_TOKEN",
 };
 
 const METER_TOKEN = (rid: string): string => "moc1." + rid + ".T";
@@ -141,6 +142,67 @@ test("retire removes a finished session through session.remove_accepting_unconfi
     expect(methodNames(fake, "laptop-a")).toContain("session.remove_accepting_unconfirmed");
     const second = await port.retire({ sessionId: handle.sessionId, hostAlias: "laptop-a" });
     expect(second).toBe("absent");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("start sends the token in the secret env slot (D1)", async () => {
+  const { fake, log, port } = setup();
+  try {
+    await port.start(request());
+    const news = fake.calls("laptop-a").filter((call) => call.method === "session.new");
+    expect(news).toHaveLength(1);
+    const params = news[0]?.params as { secret_env?: unknown; metadata?: unknown };
+    expect(params.secret_env).toEqual({ MOC_METER_TOKEN: METER_TOKEN("req-1") });
+    const metadata = params.metadata as Record<string, string>;
+    for (const value of Object.values(metadata)) {
+      expect(value).not.toBe(METER_TOKEN("req-1"));
+    }
+    expect(JSON.stringify(fake.sessions("laptop-a"))).not.toContain(METER_TOKEN("req-1"));
+    expect(JSON.stringify(log)).not.toContain(METER_TOKEN("req-1"));
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("start without the secret env capability refuses host-unsupported (D2)", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.setCapabilities("laptop-a", { session_new_secret_env_supported: false });
+    const outcome = await port.start(request()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(outcome).toBeInstanceOf(PortRejectedError);
+    expect((outcome as PortRejectedError).code).toBe("host-unsupported");
+    expect(methodNames(fake, "laptop-a")).not.toContain("session.new");
+    expect(
+      log.some(
+        (entry) =>
+          entry.event === "adapter-host-unsupported" &&
+          entry.detail === "session_new_secret_env_supported",
+      ),
+    ).toBe(true);
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("secret_env_missing on a continued item rejects without resume or fork (D3)", async () => {
+  const { fake, port } = setup();
+  try {
+    fake.failNext("laptop-a", "session.new", { errCode: "secret_env_missing", apply: false });
+    const outcome = await port.start(request({ resume: true, baseRef: "origin/moc/item-1" })).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(outcome).toBeInstanceOf(PortRejectedError);
+    expect((outcome as PortRejectedError).code).toBe("secret-env-missing");
+    const methods = methodNames(fake, "laptop-a");
+    expect(methods.filter((method) => method === "session.new")).toHaveLength(1);
+    expect(methods).not.toContain("session.resume");
+    expect(methods).not.toContain("session.fork");
   } finally {
     await teardown(fake, port);
   }

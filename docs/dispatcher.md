@@ -64,7 +64,7 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
   in-process. Tests use it; it never touches the network.
 - The Pohunek adapter (`src/dispatcher/adapter/pohunek-port.ts` `createPohunekPort`) drives
   real daemons through the SDK behind `openPohunekPort`
-  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`; `start` writes the token into `moc.meterToken`; a `null` port refuses `start` with `no-meter`; a voided start clears the key. It is the only code that
+  (`src/dispatcher/adapter/pohunek-port.ts` `openPohunekPort`). The port takes a `meterToken` function, or `null`. `start` puts the token into the `session.new` secret env slot named by `meterTokenEnv`, never into metadata, and a `null` port refuses `start` with `no-meter`. The adapter never calls the daemon's `session.resume` or `session.fork`: the daemon keeps no copy of a secret slot value, so such a session cannot be resumed or forked. A continued item (`StartRequest.resume`) is a new `session.new` on the remote branch with a fresh token. A daemon `secret_env_missing` refusal is `PortRejectedError("secret-env-missing")`. An SDK refusal of the slot is `session-new-secret-env-unsupported` or `session-new-secret-env-relay-refused`. It is the only code that
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
 
@@ -102,6 +102,7 @@ key (`src/dispatcher/adapter/config.ts` `loadPohunekAdapterConfig`):
   per dispatcher, adapter and meter event (`logs/dispatch-resolve.jsonl`).
 - `hostRoutesFileEnv`: the env variable naming the host routes file
   (`MOC_HOST_ROUTES_FILE`).
+- `meterTokenEnv`: the secret env slot the agent profile declares for the meter token (`MOC_METER_TOKEN`), matching `^[A-Z][A-Z0-9_]*$`.
 
 The routes file maps each host alias to its route. It holds at least one
 alias; each alias matches `^[a-z][a-z0-9-]{0,31}$` and each route is a
@@ -198,4 +199,4 @@ start preflight before a session is created there: the daemon reports the
 required capabilities and serves the configured agent profile
 (`src/dispatcher/adapter/pohunek-port.ts` `startPreflight`). A failing host is refused
 with `host-unsupported` and nothing is created
-(`src/dispatcher/adapter/pohunek-port.ts` `startPreflight`).
+(`src/dispatcher/adapter/pohunek-port.ts` `startPreflight`). The required capabilities include `session_new_secret_env_supported`. A host without it logs `adapter-host-unsupported` with that detail. The agent profile declares the `meterTokenEnv` slot (`docs/meter.md` Host setup).

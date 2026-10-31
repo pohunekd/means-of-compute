@@ -15,6 +15,7 @@ export interface PohunekAdapterConfig {
   readonly diffLogPath: string;
   readonly resolveLogPath: string;
   readonly hostRoutesFileEnv: string;
+  readonly meterTokenEnv: string;
 }
 
 const POHUNEK_ADAPTER_CONFIG_PATH = "config/pohunek-adapter.json";
@@ -30,6 +31,7 @@ const ALLOWED_KEYS = new Set([
   "diffLogPath",
   "resolveLogPath",
   "hostRoutesFileEnv",
+  "meterTokenEnv",
 ]);
 
 const ENV_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
@@ -88,6 +90,10 @@ function checkPohunekAdapterConfig(value: unknown): string | null {
   if (!isNonEmptyString(envName) || !ENV_NAME_PATTERN.test(envName)) {
     return '"hostRoutesFileEnv" must match ^[A-Z][A-Z0-9_]*$';
   }
+  const tokenEnv = record["meterTokenEnv"];
+  if (!isNonEmptyString(tokenEnv) || !ENV_NAME_PATTERN.test(tokenEnv)) {
+    return '"meterTokenEnv" must match ^[A-Z][A-Z0-9_]*$';
+  }
   return null;
 }
 
@@ -121,6 +127,7 @@ export async function loadPohunekAdapterConfig(
     diffLogPath: record["diffLogPath"] as string,
     resolveLogPath: record["resolveLogPath"] as string,
     hostRoutesFileEnv: record["hostRoutesFileEnv"] as string,
+    meterTokenEnv: record["meterTokenEnv"] as string,
   };
 }
 

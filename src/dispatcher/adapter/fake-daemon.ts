@@ -104,6 +104,7 @@ function defaultCaps(profile: string): HostCapabilities {
     session_wait_turn_supported: true,
     session_new_branch_source_supported: true,
     session_new_input_ack_supported: true,
+    session_new_secret_env_supported: true,
   };
 }
 
@@ -495,6 +496,7 @@ export function createFakeDaemon(aliases: readonly string[], profile: string): F
 
   function transportFor(alias: string): Transport {
     return {
+      relayed: false,
       control(): Promise<ControlChannel> {
         const state = stateOf(alias);
         if (state.unreachable) {

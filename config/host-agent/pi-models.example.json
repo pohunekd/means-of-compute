@@ -3,7 +3,7 @@
     "moc-meter": {
       "baseUrl": "http://198.51.100.10:8787/v1",
       "api": "openai-completions",
-      "apiKey": "!node \"$HOME/.config/means-of-compute/pi-agent/meter-token.mjs\"",
+      "apiKey": "!node \"$HOME/.config/means-of-compute/pi-agent/meter-token.mjs\" MOC_METER_TOKEN",
       "models": [{ "id": "moc-session" }]
     }
   }

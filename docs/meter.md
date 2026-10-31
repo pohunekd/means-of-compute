@@ -292,27 +292,31 @@ The provisional lost path runs only when `port.start` is unreachable; there `set
 
 ## Host setup
 
-The factory's agent profile is a pi profile with `--provider moc-meter --model moc-session`. Its env holds:
+The factory's agent profile is a pi profile with `--provider moc-meter --model moc-session`. It declares one secret env slot, `MOC_METER_TOKEN` (`secret_env = ["MOC_METER_TOKEN"]`), which is the `meterTokenEnv` value of `config/pohunek-adapter.json`. Its env holds:
 
 - `PI_CODING_AGENT_DIR` set to a host-local dir (for example `~/.config/means-of-compute/pi-agent/`);
-- `MOC_METER_TOKEN_TIMEOUT_MS`;
 - no provider key variable.
 
-That dir holds `models.json`, shaped as `config/host-agent/pi-models.example.json`, with the real proxy URL, and a copy of `scripts/host/meter-token.mjs`. The URL and the dir are host-local and never committed.
+That dir holds `models.json`, shaped as `config/host-agent/pi-models.example.json`, with the real proxy URL, and a copy of `scripts/host/meter-token.mjs`. The `apiKey` command passes the slot name to the helper. The URL and the dir are host-local and never committed.
 
-`node` and `pohunek` must be on `PATH`.
+`node` must be on `PATH`.
 
-The adapter puts the token into `session.new` metadata `moc.meterToken`. The helper reads it with `pohunek session inspect <own id> --json` and prints it, and pi sends it as `Authorization: Bearer`.
-
-Metadata is readable by every client of that daemon. Source binding (A5) and the grant lifetime (A3) bound that exposure. A voided start clears the key.
+The adapter puts the token into the `session.new` secret env slot. The daemon hands it to the agent process env and never persists, lists or logs it, and it is not in session metadata. The helper prints the slot's value, and pi sends it as `Authorization: Bearer`. The agent process and its children can read the variable. Source binding (A5) and the grant lifetime (A3) bound that exposure.
 
 The helper's stderr lines, each with exit 1 and empty stdout:
 
-- `meter-token: POHUNEK_SESSION_ID is not set` or `meter-token: POHUNEK_SESSION_ID is invalid`;
-- `meter-token: MOC_METER_TOKEN_TIMEOUT_MS is not set` or `meter-token: MOC_METER_TOKEN_TIMEOUT_MS is invalid`;
-- `meter-token: pohunek failed to start`, `meter-token: pohunek timed out`, `meter-token: pohunek exited <code>`, or `meter-token: pohunek <signal>`;
-- `meter-token: inspect output is not JSON`;
-- `meter-token: no meter token in session metadata`;
+- `meter-token: no slot name argument` or `meter-token: slot name is invalid`;
+- `meter-token: <NAME> is not set`;
 - `meter-token: meter token is malformed`.
 
 The host precondition is checked per host in W3.1.
+
+### Host rollout
+
+The slot and the code switch together. A host that declares the slot refuses a start that does not fill it (`secret_env_missing`), and a host without the capability refuses a start that does (`host-unsupported`). For each host, for example `laptop-a` and `desktop-b`:
+
+1. Stop the loop and wait until no factory session runs on the host.
+2. Run a Pohunek daemon that reports `session_new_secret_env_supported`.
+3. In the `moc-worker` profile, add `secret_env = ["MOC_METER_TOKEN"]` and remove `MOC_METER_TOKEN_TIMEOUT_MS` from its env.
+4. Copy `scripts/host/meter-token.mjs` into the host-local pi dir, and append ` MOC_METER_TOKEN` to the `apiKey` command in its `models.json`.
+5. Start the loop on a factory checkout that has this change. The first start on the host logs `adapter-start-accepted`, and pi's calls reach the meter. A host still unprepared logs `adapter-host-unsupported` with detail `session_new_secret_env_supported`, and the loop excludes it.

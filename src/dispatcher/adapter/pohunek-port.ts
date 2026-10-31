@@ -190,7 +190,7 @@ async function clientFor(port: PortInternals, alias: string): Promise<Client> {
 
 // Stop then unbind one session: V1 stops the session; a missing session
 // returns "absent" at once and V2 never runs. V2 clears the binding with
-// the five void keys (a missing session counts as unbound). Any other
+// the four void keys (a missing session counts as unbound). Any other
 // error goes through `voidError`: an unreachable error drops the connection
 // and becomes `PortUnreachableError`; any other error becomes
 // void-incomplete. Returns "stopped" or "absent"; callers
@@ -223,7 +223,6 @@ async function stopAndUnbind(
         [MOC_METADATA.start]: "void",
         [MOC_METADATA.voidCode]: code,
         [MOC_METADATA.voidedRequestId]: requestId,
-        [MOC_METADATA.meterToken]: null,
       },
     });
   } catch (error) {

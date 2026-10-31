@@ -8,5 +8,6 @@
   "cancelWaitTimeoutMs": 30000,
   "diffLogPath": "logs/dispatch-diff.jsonl",
   "resolveLogPath": "logs/dispatch-resolve.jsonl",
-  "hostRoutesFileEnv": "MOC_HOST_ROUTES_FILE"
+  "hostRoutesFileEnv": "MOC_HOST_ROUTES_FILE",
+  "meterTokenEnv": "MOC_METER_TOKEN"
 }

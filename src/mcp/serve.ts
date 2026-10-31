@@ -1,5 +1,7 @@
 // MCP server entry point: stdio transport, arg parsing, startup gates,
-// and shutdown. Startup (design section 1 steps 1-8): parse args, load the
+// and shutdown. Startup refuses to run unless the runtime boundary
+// (boundary.ts, preloaded by mcpServeArgs) marks the process.
+// Startup (design section 1 steps 1-8): parse args, load the
 // MCP config, check the caller, load the work and dispatcher configs plus
 // factory specs, require writable targets and the verdict dir, open the
 // call log and append server-start. Shutdown: stdin EOF appends
@@ -19,6 +21,7 @@ import { loadDispatcherConfig } from "../dispatcher/config.js";
 import { loadAuditorConfig } from "../auditor/config.js";
 import { requireInputDir } from "../fs/input.js";
 import { requireWritableTarget } from "../fs/write.js";
+import { boundaryActive } from "./boundary-marker.js";
 
 function parseArgs(args: readonly string[]): { caller: string; configPath: string } {
   let caller: string | null = null;
@@ -354,11 +357,16 @@ async function serve(caller: string, configPath: string): Promise<number> {
 
 const args = Bun.argv.slice(2);
 let parsed: { caller: string; configPath: string } | null = null;
-try {
-  parsed = parseArgs(args);
-} catch (error: unknown) {
-  process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
+if (!boundaryActive()) {
+  process.stderr.write("mcp: runtime boundary not installed; start the server with mcpServeArgs\n");
   process.exitCode = 2;
+} else {
+  try {
+    parsed = parseArgs(args);
+  } catch (error: unknown) {
+    process.stderr.write(`mcp: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
 }
 if (process.exitCode === undefined && parsed !== null) {
   process.exitCode = await serve(parsed.caller, parsed.configPath);

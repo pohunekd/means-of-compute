@@ -20,7 +20,7 @@
     "dispatch:resolve": "bun run src/dispatcher/cli.ts resolve",
     "meter:usage": "bun run src/meter/cli.ts usage",
     "place": "bun run src/placement/cli.ts",
-    "mcp:serve": "bun run src/mcp/serve.ts",
+    "mcp:serve": "bun --config=config/mcp-bunfig.toml --preload=./src/mcp/boundary.ts src/mcp/serve.ts",
     "mcp:call": "bun run src/mcp/call.ts",
     "loop": "bun run src/loop/main.ts",
     "approvals:list": "bun run src/approvals/cli.ts list",

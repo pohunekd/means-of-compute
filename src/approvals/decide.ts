@@ -13,6 +13,15 @@ import {
   type ApprovalsDocument,
 } from "./store.js";
 import { InputPathError } from "../fs/input.js";
+import { boundaryActive } from "../mcp/boundary-marker.js";
+import { MCP_SERVE_ENTRY } from "../mcp/launch.js";
+
+// A9 runtime boundary: this module never evaluates in an MCP server
+// process, whether the boundary marks it or its entry is the server entry,
+// nor in a worker, however it was reached (docs/mcp.md).
+if (boundaryActive() || Bun.main.endsWith(`/${MCP_SERVE_ENTRY}`) || !Bun.isMainThread) {
+  throw new Error("approvals: decide.ts refuses to load in the MCP server process");
+}
 
 export type DecideOutcome =
   | { readonly kind: "decided" | "unchanged"; readonly request: ApprovalRequest }

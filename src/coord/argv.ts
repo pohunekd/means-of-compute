@@ -2,6 +2,7 @@
 // the coordinator caller; the exec and export commands carry the pinned
 // flags. All three functions are pure.
 import { join } from "node:path";
+import { mcpServeArgs } from "../mcp/launch.js";
 import { COORDINATOR_CALLER } from "./calls.js";
 import type { CoordConfig } from "./config.js";
 
@@ -24,7 +25,7 @@ export function factoryEntry(session: MuseSession): FactoryEntry {
     command: session.bunPath,
     args: [
       `--cwd=${session.checkoutDir}`,
-      "src/mcp/serve.ts",
+      ...mcpServeArgs(session.checkoutDir),
       "--caller",
       COORDINATOR_CALLER,
       "--config",

@@ -12,7 +12,6 @@ export interface ProviderRow {
   readonly outputTokens: number;
   readonly requests: number;
   readonly sources: readonly string[];
-  readonly unmeasuredRequests?: number;
 }
 
 export interface ProviderCoverage {
@@ -49,7 +48,7 @@ function idsHave(ids: readonly string[], what: string): string {
   return `${ids.join(", ")} ${ids.length === 1 ? "has" : "have"} ${what}`;
 }
 
-function providerCoverageOf(records: readonly UsageRecord[]): {
+export function providerCoverageOf(records: readonly UsageRecord[]): {
   readonly measured: readonly UsageRecord[];
   readonly coverage: ProviderCoverage;
 } {
@@ -117,7 +116,6 @@ function queryByProvider(records: readonly UsageRecord[]): {
       outputs: number[];
       requests: number;
       sources: Set<string>;
-      unmeasured: number;
     }
   >();
   for (const record of measured) {
@@ -132,7 +130,6 @@ function queryByProvider(records: readonly UsageRecord[]): {
           outputs: [],
           requests: 0,
           sources: new Set<string>(),
-          unmeasured: 0,
         };
         groups.set(key, group);
         order.push(key);
@@ -142,7 +139,6 @@ function queryByProvider(records: readonly UsageRecord[]): {
       group.outputs.push(token.outputTokens as number);
       group.requests += token.requests;
       group.sources.add(token.source);
-      group.unmeasured += token.unmeasuredRequests ?? 0;
     }
   }
   const rows = order.map((key) => {
@@ -159,7 +155,6 @@ function queryByProvider(records: readonly UsageRecord[]): {
       outputTokens,
       requests: group.requests,
       sources: orderStrings(group.sources),
-      ...(group.unmeasured > 0 ? { unmeasuredRequests: group.unmeasured } : {}),
     };
   });
   rows.sort((a, b) =>

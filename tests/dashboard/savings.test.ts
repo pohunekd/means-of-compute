@@ -149,3 +149,209 @@ test("token savings cover the measured records and every qualifier is a note", a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("tokens by provider table covers measured records over w1-demo and w2-demo", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tokens-provider-"));
+  try {
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    const lines = [
+      record("w1-demo", { inputTokens: 100_000, outputTokens: 10_000 }, 3600),
+      record("w2-demo", { inputTokens: null, outputTokens: null }, 1800),
+    ];
+    await writeFile(
+      join(dir, "ledger.jsonl"),
+      lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+    );
+    const inputs = await gatherInputs(
+      {
+        ledgerPath: join(dir, "ledger.jsonl"),
+        verdictDir: join(dir, "verdicts"),
+        hostState: null,
+        registryPath: join(dir, "registry.json"),
+        resultsPath: join(dir, "results.jsonl"),
+        workStorePath: join(dir, "work-items.json"),
+      },
+      {
+        budget: {
+          statePath: "logs/budget-state.json",
+          escalationLogPath: "logs/budget-escalation.jsonl",
+          dayCapNanoUsd: 1_000_000_000n,
+          totalCapNanoUsd: 10_000_000_000n,
+          nvidiaDailyRequestLimit: 100,
+          nvidiaProviderId: "nvidia-build",
+          unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
+          unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+        },
+        route: ["meta-api"],
+        baselines: {
+          frontierTokens: {
+            label: "frontier",
+            inputNanoPer1M: 4_000_000_000n,
+            outputNanoPer1M: 20_000_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+          cloudSandboxHour: {
+            label: "cloud",
+            nanoPerHour: 360_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+          ownedHostHour: {
+            label: "owned",
+            nanoPerHour: 45_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+        },
+        workRowLimit: 50,
+        logPath: join("logs", "dashboard.jsonl"),
+      },
+      NOW,
+      () => {
+        throw new Error("expected no input error");
+      },
+    );
+    const model = buildDashboard(inputs);
+    const usagePanel = model.panels.find((panel) => panel.id === "usage");
+    if (usagePanel === undefined) {
+      throw new Error("expected usage panel");
+    }
+    const table = usagePanel.tables.find(
+      (candidate) => candidate.caption === "Tokens by provider (finished tasks)",
+    );
+    if (table === undefined) {
+      throw new Error("expected tokens by provider table");
+    }
+    const expectedNote =
+      "over 1 of 2 records; w2-demo has no token counts; 0 pending entries are not in this table; they count in spend above.";
+    expect(table.note).toBe(expectedNote);
+    expect(table.source).toBe("ledger records tokens[] with full token counts");
+    // Rows sorted by provider then model: meta-api before nvidia-build.
+    expect(table.rows).toEqual([
+      [
+        { kind: "text", text: "meta-api" },
+        { kind: "text", text: "muse-spark-1.3-contributor" },
+        { kind: "text", text: "100,000" },
+        { kind: "text", text: "10,000" },
+        { kind: "text", text: "2" },
+        { kind: "text", text: "auditor-usage" },
+      ],
+      [
+        { kind: "text", text: "nvidia-build" },
+        { kind: "text", text: "meta/muse-glimmer-30b" },
+        { kind: "text", text: "1,000,000" },
+        { kind: "text", text: "100,000" },
+        { kind: "text", text: "10" },
+        { kind: "text", text: "meter-proxy" },
+      ],
+    ]);
+    // Summed row inputs/outputs equal the Savings source totals.
+    const summedInput = table.rows.reduce((sum, row) => {
+      const cell = row[2];
+      if (cell === undefined || cell.kind !== "text") {
+        throw new Error("expected text cell");
+      }
+      return sum + Number(cell.text.replaceAll(",", ""));
+    }, 0);
+    const summedOutput = table.rows.reduce((sum, row) => {
+      const cell = row[3];
+      if (cell === undefined || cell.kind !== "text") {
+        throw new Error("expected text cell");
+      }
+      return sum + Number(cell.text.replaceAll(",", ""));
+    }, 0);
+    expect(summedInput).toBe(1_100_000);
+    expect(summedOutput).toBe(110_000);
+    const frontierFigure = model.panels
+      .find((panel) => panel.id === "savings")
+      ?.figures.find((candidate) => candidate.label === "Frontier-token baseline");
+    if (frontierFigure === undefined) {
+      throw new Error("expected frontier figure");
+    }
+    expect(frontierFigure.source).toStartWith(
+      "ledger records with full token counts (input 1,100,000, output 110,000); ",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tokens by provider table empty when only w2-demo has no token counts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tokens-provider-empty-"));
+  try {
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    const lines = [record("w2-demo", { inputTokens: null, outputTokens: null }, 1800)];
+    await writeFile(
+      join(dir, "ledger.jsonl"),
+      lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+    );
+    const inputs = await gatherInputs(
+      {
+        ledgerPath: join(dir, "ledger.jsonl"),
+        verdictDir: join(dir, "verdicts"),
+        hostState: null,
+        registryPath: join(dir, "registry.json"),
+        resultsPath: join(dir, "results.jsonl"),
+        workStorePath: join(dir, "work-items.json"),
+      },
+      {
+        budget: {
+          statePath: "logs/budget-state.json",
+          escalationLogPath: "logs/budget-escalation.jsonl",
+          dayCapNanoUsd: 1_000_000_000n,
+          totalCapNanoUsd: 10_000_000_000n,
+          nvidiaDailyRequestLimit: 100,
+          nvidiaProviderId: "nvidia-build",
+          unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
+          unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+        },
+        route: ["meta-api"],
+        baselines: {
+          frontierTokens: {
+            label: "frontier",
+            inputNanoPer1M: 4_000_000_000n,
+            outputNanoPer1M: 20_000_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+          cloudSandboxHour: {
+            label: "cloud",
+            nanoPerHour: 360_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+          ownedHostHour: {
+            label: "owned",
+            nanoPerHour: 45_000_000n,
+            source: "test",
+            asOf: "2026-10-28",
+          },
+        },
+        workRowLimit: 50,
+        logPath: join("logs", "dashboard.jsonl"),
+      },
+      NOW,
+      () => {
+        throw new Error("expected no input error");
+      },
+    );
+    const model = buildDashboard(inputs);
+    const usagePanel = model.panels.find((panel) => panel.id === "usage");
+    if (usagePanel === undefined) {
+      throw new Error("expected usage panel");
+    }
+    const table = usagePanel.tables.find(
+      (candidate) => candidate.caption === "Tokens by provider (finished tasks)",
+    );
+    if (table === undefined) {
+      throw new Error("expected tokens by provider table");
+    }
+    expect(table.rows).toEqual([]);
+    expect(table.note).toBe(
+      "token counts not reported for w2-demo; 0 pending entries are not in this table; they count in spend above.",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

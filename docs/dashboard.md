@@ -250,7 +250,7 @@ apply it to). When the scope holds bounded unmeasured entries, the spent-today a
 `Tokens by provider (finished tasks)`: columns
 `provider, model, input tokens, output tokens, requests, sources`, from the
 ledger query over records with full token counts (every `tokens[]` row reports both counts and has no `unmeasuredRequests`), the same coverage rule as Savings, `sources` joined by `", "`. Source: `ledger records tokens[] with full token counts`.
-Note: `over <n> of <m> records; <ids> have no token counts; <ids> have calls without usage` when some records are excluded (each clause only when it has ids, `has` for one id), or `token counts not reported for <ids>; calls without usage for <ids>` when no record is covered (each clause only when it has ids), plus `; <n> pending entries are not in this table; they count in spend above.` A provider row with unmeasured calls would show `<requests> (<n> without usage)`, but no measured record has such calls.
+Note: `over <n> of <m> records; <ids> have no token counts; <ids> have calls without usage` when some records are excluded (each clause only when it has ids, `has` for one id), or `token counts not reported for <ids>; calls without usage for <ids>` when no record is covered (each clause only when it has ids), plus `; <n> pending entries are not in this table; they count in spend above.`
 `Session hours by host (finished tasks)`: columns `host, hours, sources`,
 plus a `total` row with `Σ seconds / 3600` to 2 decimals. Source:
 `ledger records sessionSeconds[]`.

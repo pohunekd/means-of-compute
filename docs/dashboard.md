@@ -254,6 +254,7 @@ Note: `over <n> of <m> records; <ids> have no token counts; <ids> have calls wit
 `Session hours by host (finished tasks)`: columns `host, hours, sources`,
 plus a `total` row with `Σ seconds / 3600` to 2 decimals. Source:
 `ledger records sessionSeconds[]`.
+The table note says that each value is rounded to two decimals and the total is rounded from the unrounded seconds.
 
 ### Savings (finished tasks only)
 

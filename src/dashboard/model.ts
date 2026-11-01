@@ -810,7 +810,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       columns: ["host", "hours", "sources"],
       rows: sessionRows,
       source: "ledger records sessionSeconds[]",
-      note: null,
+      note: "each value is rounded to two decimals; the total is rounded from the unrounded seconds, so the rows can differ from it by 0.01",
     });
   } else if (!inputs.ledger.ok) {
     tables.push(

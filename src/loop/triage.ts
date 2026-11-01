@@ -229,14 +229,11 @@ function lookupLabel(ctx: TriageContext): string {
   return label;
 }
 
-// The issue as the loop filed it: open, with every follow-up label and
-// neither intake label nor the blocked label.
+// The issue as the loop filed it: exactly the follow-up labels.
 function asFiled(ctx: TriageContext, issue: IntakeIssue): boolean {
   return (
     ctx.followupLabels.every((label) => issue.labels.includes(label)) &&
-    !issue.labels.includes(ctx.intake.optInLabel) &&
-    !issue.labels.includes(ctx.intake.readyLabel) &&
-    !issue.labels.includes(ctx.intake.blockedLabel)
+    issue.labels.every((label) => ctx.followupLabels.includes(label))
   );
 }
 

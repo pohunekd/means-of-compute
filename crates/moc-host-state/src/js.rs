@@ -73,47 +73,31 @@ pub fn js_number(s: &str) -> f64 {
             "0o" | "0O" => 8,
             _ => 2,
         };
-        let trimmed = rest.trim_start_matches('0');
-        if trimmed.is_empty() {
-            return 0.0;
-        }
-        let k = match radix {
-            16 => 4,
-            8 => 3,
-            _ => 1,
-        };
-        let mut bit_str = String::with_capacity(trimmed.len() * k as usize);
-        for ch in trimmed.chars() {
+        let r = radix as f64;
+        let mut val = 0.0;
+        for ch in rest.chars() {
             let Some(d) = ch.to_digit(radix) else {
                 return f64::NAN;
             };
-            for i in (0..k).rev() {
-                bit_str.push(if (d >> i) & 1 == 1 { '1' } else { '0' });
+            val = val * r + d as f64;
+        }
+        // From 2^53 on, Bun (JSC parseIntOverflow) re-sums from the last digit, so it does not round once.
+        if val >= 9_007_199_254_740_992.0 {
+            val = 0.0;
+            let mut mult = 1.0;
+            for ch in rest.chars().rev() {
+                let d = ch.to_digit(radix).unwrap_or(0) as f64;
+                if mult == f64::INFINITY {
+                    if d != 0.0 {
+                        return f64::INFINITY;
+                    }
+                } else {
+                    val += d * mult;
+                }
+                mult *= r;
             }
         }
-        let bit_str = bit_str.trim_start_matches('0').to_string();
-        if bit_str.is_empty() {
-            return 0.0;
-        }
-        if bit_str.len() <= 128 {
-            let mut val: u128 = 0;
-            for ch in bit_str.chars() {
-                val = (val << 1) | (ch as u128 - '0' as u128);
-            }
-            return val as f64;
-        }
-        let dropped = bit_str.len() - 128;
-        let top = &bit_str[..128];
-        let rest_bits = &bit_str[128..];
-        let mut val: u128 = 0;
-        for ch in top.chars() {
-            val = (val << 1) | (ch as u128 - '0' as u128);
-        }
-        if rest_bits.contains('1') {
-            val |= 1;
-        }
-        let f = val as f64;
-        return f * 2f64.powi(dropped as i32);
+        return val;
     }
 
     // Decimal pattern: [+-]?(digits[.digits?]|.digits)([eE][+-]?digits)?
@@ -233,10 +217,12 @@ pub fn errno_name(e: &io::Error) -> String {
 }
 
 pub fn spawn_error(program: &str, e: &io::Error) -> String {
-    if !program.contains('/') && e.kind() == io::ErrorKind::NotFound {
+    let errno = errno_name(e);
+    // Bun resolves a bare name to an executable regular file first; a PATH hit that is a
+    // directory or lacks +x is a PATH miss there, where execvp reports EACCES.
+    if !program.contains('/') && matches!(errno.as_str(), "ENOENT" | "EACCES") {
         return format!("Executable not found in $PATH: \"{program}\"");
     }
-    let errno = errno_name(e);
     let description = match errno.as_str() {
         "ENOENT" => "no such file or directory",
         "EACCES" => "permission denied",
@@ -275,6 +261,7 @@ mod tests {
         assert!(js_number(" 0xG ").is_nan());
         assert!(js_number("1€").is_nan());
         assert_eq!(js_number("0x200000000000011"), 144_115_188_075_855_904.0);
+        assert_eq!(js_number("0x191216fb320f377"), 112_908_229_291_340_672.0);
         // parse_timestamp rejects invalid dates
         assert_eq!(parse_timestamp("2026-02-29T00:00:00.000Z"), None);
         assert_eq!(parse_timestamp("2026-10-27T23:59:60.000Z"), None);

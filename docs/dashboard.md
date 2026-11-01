@@ -340,8 +340,9 @@ the registry, and state, free capacity and observed show
 
 Before writing, the page is checked. No `evidenceDenyPatterns` entry of
 `config/coordinator.json` may match it, and no host name from the host map
-(`--hosts`, default `config/hosts.json`) whose alias differs from it may appear,
-matched case-insensitively as a whole name. The host map is gitignored; when it
+(`--hosts`, default `config/hosts.json`) whose alias differs from it may appear.
+A host-map name matches case-insensitively anywhere in the page, also inside a
+longer token; any hit exits 3 and writes no file. The host map is gitignored; when it
 is absent the command says so on stderr and checks the deny patterns only. A
 hit prints `dashboard:snapshot: page matches deny pattern <index> of config/coordinator.json`
 or `dashboard:snapshot: page contains the host name mapped to alias <alias>`,

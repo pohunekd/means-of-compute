@@ -99,8 +99,9 @@ async function readHostNames(path: string): Promise<ReadonlyMap<string, string>>
 }
 
 // Problems name the pattern index or the alias, never the matched text. A
-// host name matches case-insensitively as a whole label run, so a name that
-// is a prefix of an alias (desk, desktop) is not a hit.
+// host name matches case-insensitively anywhere in the page, also inside a
+// longer token such as a hyphenated work item id: the page is public, so a
+// false hit that blocks the snapshot is the safe failure.
 function privacyProblems(
   page: string,
   denyPatterns: readonly string[],
@@ -112,9 +113,9 @@ function privacyProblems(
       problems.push(`page matches deny pattern ${String(index)} of ${COORD_CONFIG_PATH}`);
     }
   });
+  const lowered = page.toLowerCase();
   for (const [hostname, alias] of hostNames) {
-    const escaped = hostname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(?<![A-Za-z0-9-])${escaped}(?![A-Za-z0-9-])`, "i").test(page)) {
+    if (lowered.includes(hostname.toLowerCase())) {
       problems.push(`page contains the host name mapped to alias ${alias}`);
     }
   }

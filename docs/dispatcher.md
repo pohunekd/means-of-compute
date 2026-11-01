@@ -148,17 +148,21 @@ of the usage log; the null meter token keeps `start` refused.
 
 `dispatch:diff` (`src/dispatcher/cli.ts` `runDiff`) takes `--host <alias>`,
 `--session <id>` and `--base <ref>`, each exactly once and all required
-(`src/dispatcher/diff-command.ts` `parseDiffArgs`). It prints the daemon `unifiedDiff` to
-stdout exactly as returned and exits 0; when the daemon reports `truncated`
-it also prints `diff truncated by daemon` to stderr
-(`src/dispatcher/diff-command.ts` `runDiffCommand`). When the reader closes stdout early (for example `| head`), the rest of the diff is dropped, nothing more is printed, and the exit code is the one the command returns anyway: 0 for a fetched diff (`src/dispatcher/diff-command.ts` `ignoreReaderClosed`). An unknown flag, a missing value or a
-missing flag exits 2 without opening the port. An unreachable host exits 2
-with `dispatch: <alias>: unreachable`; a rejected diff exits 2 with
-`dispatch: <alias>: <code>` (`src/dispatcher/diff-command.ts` `runDiffCommand`). Any other
-error exits 2 with one line `dispatch: <message>`
-(`src/dispatcher/cli.ts` `runDiff`). Every adapter event appends one JSON line
-`{"at": <ISO time>, ...event}` to `diffLogPath`, creating the parent
-directory; nothing from the adapter log reaches stdout or stderr.
+(`src/dispatcher/diff-command.ts` `parseDiffArgs`). It prints the daemon
+`unifiedDiff` to stdout exactly as returned and exits 0; when the daemon reports
+`truncated` it also prints `diff truncated by daemon` to stderr
+(`src/dispatcher/diff-command.ts` `runDiffCommand`). When the reader closes
+stdout early (for example `| head`), the rest of the diff is dropped, nothing
+more is printed, and the exit code is the one the command returns anyway: 0 for
+a fetched diff (`src/dispatcher/diff-command.ts` `ignoreReaderClosed`). An
+unknown flag, a missing value or a missing flag exits 2 without opening the
+port. An unreachable host exits 2 with `dispatch: <alias>: unreachable`; a
+rejected diff exits 2 with `dispatch: <alias>: <code>`
+(`src/dispatcher/diff-command.ts` `runDiffCommand`). Any other error exits 2
+with one line `dispatch: <message>` (`src/dispatcher/cli.ts` `runDiff`). Every
+adapter event appends one JSON line `{"at": <ISO time>, ...event}` to
+`diffLogPath`, creating the parent directory; nothing from the adapter log
+reaches stdout or stderr.
 
 ## Resolving a stuck request
 

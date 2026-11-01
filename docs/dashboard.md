@@ -80,10 +80,31 @@ baseline still gives `no data (no <key> baseline in
 config/dashboard.json)` with the source `config/dashboard.json
 baselines.<key>`.
 
+## Layout
+
+The header carries the product name, one line saying what the page is (an
+autonomous software factory on company-owned machines, running on Meta
+models) and the rendered time in a compact UTC form (`2026-11-01 13:03:54
+UTC`) with the full ISO value in the `time` element's `datetime` and `title`.
+Below it, a strip of key figure cards reuses figures the panels already
+compute, in this order: `Total savings`, `Spent total`, `Spent today`,
+`Finished tasks`, `Parked tasks`. Each card shows the figure's value and its
+source line, small and muted; no card derives a new number. The same figures
+still render in their panels below.
+
+Sections render as cards with clear headings. Colours are CSS custom
+properties, light by default and dark under `prefers-color-scheme: dark`, on
+a system font stack with no web fonts. Tables use one light style (row lines
+and zebra rows, no heavy grid), tabular numerals, and right-aligned numeric
+columns. On a narrow screen a wide table scrolls inside its card, so the
+page itself never scrolls sideways. There is still no script and no external
+asset; the inline style stays covered by the CSP `CSS_HASH`.
+
 ## Panels
 
 Fleet, Work, Usage, Savings, Autonomy, Models, in that order. Token counts and
-integers group digits (`1,200,000`); times are ISO UTC. A ledger failure
+integers group digits (`1,200,000`); timestamps render in the compact UTC
+form above with the full ISO value in the cell's `title`. A ledger failure
 makes every ledger-derived cell `error(<ledger code>)`; the page shows the
 code only, never the message. Figures listed "in order" render in that
 order. The Work table shows `showing ${shown} of ${total} items`.
@@ -148,6 +169,19 @@ When none matches, the row came only from a failed source and the cell is
 that failure. Rules 2 and 4 apply only when the registry is ok; registry
 aliases and work item ids are skipped when the registry fails.
 
+The status cell renders as a coloured pill whose text is the status above,
+so the colour is never the only signal: green for `done` and a finished
+session, blue for `running`, `starting`, `review` and a session that ended
+unfinalized, amber for `parked (<reason>)` with the reason inside the pill,
+red for `blocked` and failed, lost or cancelled sessions, and a neutral pill
+for any other status. Branch and model ids render in monospace, shortened
+in the middle when long, with the full value in a `title` attribute; verdict
+head SHAs are already the 12-character form the model records.
+
+The placement cell shows a summary, the chosen host and its score, and the
+full recorded text (the chosen host's reason and every other candidate,
+excluded ones included) inside a native `<details>` element under that
+summary; `no data (...)` stays visible and muted outside any `<details>`.
 `host` is the `aliases` cell of the highest-`n` registry entry's
 `hostAlias`, else the sorted unique aliases of the item's record
 `sessionSeconds` and pending sessions, or `no data (no session)`. `branch`

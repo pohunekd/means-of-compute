@@ -157,17 +157,14 @@ failure. `placement` is the `placement` the dispatcher recorded on the
 highest-`n` entry (docs/dispatcher.md): the decision `reason` with
 `, score <s>` of the chosen candidate, then every other candidate in recorded
 order as `<alias>: <reason>` when excluded or `<alias>: eligible, score <s>`,
-joined by `; `. Hosts that rejected a start of the item are left out of
-placement before the decision, so they are not candidates, unless every other
-host is excluded and placement retries them (`exclusions-retried`,
-docs/loop.md).
+joined by `; `. Hosts that rejected a start of the item and hosts in a start-rejection cooldown (`hostCooldown`) are left out of placement before the decision, so they are not candidates. Rejected hosts come back only when every other host is excluded and placement retries them (`exclusions-retried`); cooled hosts never do (docs/loop.md).
 In an `excluded: not idle (<idleReason>)` reason the page keeps `<idleReason>`
 only up to its first `:`: the host probe puts an error message after it
 (`user activity unknown: <message>`, `power unknown: <message>`), and a
 message can name a path; the snapshot page check stays the backstop. An entry
 without `placement` (an optional registry field) shows
 `no data (not recorded)`; no entry shows `no data (no session)`, and a failed
-registry shows its failure. `model` is `` `<providerId>/<model>` `` of the highest-`n` entry,
+registry shows its failure. A recorded placement whose aliases fail the alias pattern, or whose reason does not start with the chosen alias, shows `no data (placement failed alias check)`. `model` is `` `<providerId>/<model>` `` of the highest-`n` entry,
 else `no data (no session)` when the registry is ok, else the registry
 failure. `verdicts` lists
 every verdict in store order as

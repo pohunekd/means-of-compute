@@ -105,8 +105,8 @@ function failureCell(failure: InputFailure): Cell {
 }
 
 // Every alias arrives validated (F1): the schema and the collector enforce
-// ^[a-z][a-z0-9-]{0,31}$. The renderer re-checks (2.6); anything that fails
-// never reaches a cell text because aliases are stored, not interpolated.
+// ^[a-z][a-z0-9-]{0,31}$. The renderer re-checks (2.6); aliases are stored,
+// not interpolated, except in the Work placement cell, which checks its own.
 function aliasesCell(values: readonly string[]): Cell {
   const aliases = [...new Set(values)].sort();
   return { kind: "aliases", aliases };
@@ -391,6 +391,11 @@ function shownExclusion(reason: string): string {
   return colon === -1 ? reason : `${NOT_IDLE_PREFIX}${detail.slice(0, colon)})`;
 }
 
+// The placement cell interpolates aliases into text, so the render-time alias
+// check never sees them; the cell checks them itself, and a reason must start
+// with the chosen alias as place.ts builds it.
+const PLACEMENT_ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
 function placementCell(inputs: DashboardInputs, latest: RegistryEntry | null): Cell {
   if (!inputs.registry.ok) {
     return failureCell(inputs.registry.failure);
@@ -401,6 +406,12 @@ function placementCell(inputs: DashboardInputs, latest: RegistryEntry | null): C
   const placement = latest.placement;
   if (placement === undefined) {
     return noDataCell("not recorded");
+  }
+  const aliasesValid =
+    PLACEMENT_ALIAS_PATTERN.test(latest.hostAlias) &&
+    placement.candidates.every((candidate) => PLACEMENT_ALIAS_PATTERN.test(candidate.hostAlias));
+  if (!aliasesValid || !placement.reason.startsWith(`${latest.hostAlias} is `)) {
+    return noDataCell("placement failed alias check");
   }
   const chosen = placement.candidates.find((candidate) => candidate.hostAlias === latest.hostAlias);
   const parts = [

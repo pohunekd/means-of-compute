@@ -37,3 +37,27 @@ jobs:
           mkdir -p config
           echo "{\"$(hostname)\":\"desktop\"}" > config/hosts.json
       - run: ./factory-probe | bun run scripts/contracts-check.ts host-capacity -
+
+  rust-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - run: rustup default 1.99.1
+      - run: bun run gates:rs
+
+  rust-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - run: rustup default 1.99.1
+      - run: bun run gates:rs

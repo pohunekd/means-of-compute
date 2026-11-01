@@ -7,6 +7,7 @@
     "contracts:check": "bun run scripts/contracts-check.ts",
     "providers:check": "bun run scripts/providers-check.ts",
     "gates": "bun run scripts/gates.ts",
+    "gates:rs": "bun run scripts/gates.ts rust",
     "docs:links": "bun run scripts/docs-links.ts",
     "audit": "bun run src/auditor/cli.ts",
     "budget:check": "bun run src/budget/check.ts",

@@ -5,3 +5,4 @@ bun.lock
 tests/fixtures/coord/prompt-*-expected.md
 tests/fixtures/coord/report-expected.md
 docs/demo/dashboard.html
+target/

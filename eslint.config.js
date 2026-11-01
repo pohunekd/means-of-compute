@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint";
 const sdkMessage = "Only src/dispatcher/adapter/ may import @pohunek/sdk.";
 
 export default defineConfig(
-  { ignores: ["node_modules/**", "quarantine/**", "logs/**"] },
+  { ignores: ["node_modules/**", "quarantine/**", "logs/**", "target/**"] },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   {

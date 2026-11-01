@@ -1,0 +1,264 @@
+use std::io;
+
+// JS whitespace as defined by ECMAScript WhiteSpace (including BOM).
+#[allow(non_snake_case)]
+pub fn JS_WS(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0009}'
+            | '\u{000A}'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            | '\u{2001}'
+            | '\u{2002}'
+            | '\u{2003}'
+            | '\u{2004}'
+            | '\u{2005}'
+            | '\u{2006}'
+            | '\u{2007}'
+            | '\u{2008}'
+            | '\u{2009}'
+            | '\u{200A}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+            | '\u{FEFF}'
+    )
+}
+
+// Same set as a regex character class, for use inside `[...]`.
+pub const JS_WS_CLASS: &str = "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}";
+
+pub fn js_trim(s: &str) -> &str {
+    s.trim_matches(JS_WS)
+}
+
+pub fn js_number(s: &str) -> f64 {
+    let t = js_trim(s);
+    if t.is_empty() {
+        return 0.0;
+    }
+    if t == "Infinity" || t == "+Infinity" {
+        return f64::INFINITY;
+    }
+    if t == "-Infinity" {
+        return f64::NEG_INFINITY;
+    }
+    // Unsigned 0x/0o/0b literals
+    if t.len() >= 2 {
+        let prefix = &t[0..2];
+        if prefix == "0x"
+            || prefix == "0X"
+            || prefix == "0o"
+            || prefix == "0O"
+            || prefix == "0b"
+            || prefix == "0B"
+        {
+            let rest = &t[2..];
+            if rest.is_empty() {
+                return f64::NAN;
+            }
+            let valid = match prefix {
+                "0x" | "0X" => rest.bytes().all(|b| b.is_ascii_hexdigit()),
+                "0o" | "0O" => rest.bytes().all(|b| (b'0'..=b'7').contains(&b)),
+                "0b" | "0B" => rest.bytes().all(|b| b == b'0' || b == b'1'),
+                _ => false,
+            };
+            if !valid {
+                return f64::NAN;
+            }
+            let radix: u32 = match prefix {
+                "0x" | "0X" => 16,
+                "0o" | "0O" => 8,
+                _ => 2,
+            };
+            let mut val: f64 = 0.0;
+            for ch in rest.chars() {
+                let digit = ch.to_digit(radix).unwrap() as f64;
+                val = val * (radix as f64) + digit;
+            }
+            return val;
+        }
+    }
+
+    // Decimal pattern: [+-]?(digits[.digits?]|.digits)([eE][+-]?digits)?
+    let bytes = t.as_bytes();
+    let mut idx = 0usize;
+    let len = bytes.len();
+
+    if idx < len && (bytes[idx] == b'+' || bytes[idx] == b'-') {
+        idx += 1;
+    }
+    if idx >= len {
+        return f64::NAN;
+    }
+    let start_digits = idx;
+    while idx < len && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    let has_digits_before = idx > start_digits;
+    let has_dot = idx < len && bytes[idx] == b'.';
+    if has_dot {
+        idx += 1;
+        let start_after = idx;
+        while idx < len && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        let has_digits_after = idx > start_after;
+        if !has_digits_before && !has_digits_after {
+            return f64::NAN;
+        }
+    } else if !has_digits_before {
+        return f64::NAN;
+    }
+
+    if idx < len && (bytes[idx] == b'e' || bytes[idx] == b'E') {
+        idx += 1;
+        if idx < len && (bytes[idx] == b'+' || bytes[idx] == b'-') {
+            idx += 1;
+        }
+        let start_exp = idx;
+        while idx < len && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx == start_exp {
+            return f64::NAN;
+        }
+    }
+
+    if idx != len {
+        return f64::NAN;
+    }
+
+    t.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+pub fn js_round(x: f64) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    let f = x.floor();
+    if x - f >= 0.5 { f + 1.0 } else { f }
+}
+
+pub fn format_number(n: f64) -> String {
+    let mut buf = ryu_js::Buffer::new();
+    buf.format(n).to_string()
+}
+
+pub fn errno_name(e: &io::Error) -> String {
+    let code = match e.raw_os_error() {
+        Some(c) => c,
+        None => return "unknown".to_string(),
+    };
+    let name = if code == libc::EACCES {
+        "EACCES"
+    } else if code == libc::EPERM {
+        "EPERM"
+    } else if code == libc::ENOENT {
+        "ENOENT"
+    } else if code == libc::ENOTDIR {
+        "ENOTDIR"
+    } else if code == libc::EISDIR {
+        "EISDIR"
+    } else if code == libc::ELOOP {
+        "ELOOP"
+    } else if code == libc::EIO {
+        "EIO"
+    } else if code == libc::ENXIO {
+        "ENXIO"
+    } else if code == libc::ENODEV {
+        "ENODEV"
+    } else if code == libc::EINVAL {
+        "EINVAL"
+    } else if code == libc::EAGAIN {
+        "EAGAIN"
+    } else if code == libc::EBUSY {
+        "EBUSY"
+    } else if code == libc::ENOMEM {
+        "ENOMEM"
+    } else if code == libc::EMFILE {
+        "EMFILE"
+    } else if code == libc::ENFILE {
+        "ENFILE"
+    } else if code == libc::ENAMETOOLONG {
+        "ENAMETOOLONG"
+    } else if code == libc::ETIMEDOUT {
+        "ETIMEDOUT"
+    } else if code == libc::EOPNOTSUPP {
+        "EOPNOTSUPP"
+    } else if code == libc::ENOEXEC {
+        "ENOEXEC"
+    } else if code == 61 || code == 96 {
+        // ENODATA: 61 on Linux, 96 on macOS; libc may define it per platform
+        "ENODATA"
+    } else {
+        return format!("errno-{code}");
+    };
+    name.to_string()
+}
+
+pub fn spawn_error(program: &str, e: &io::Error) -> String {
+    if !program.contains('/') && e.kind() == io::ErrorKind::NotFound {
+        return format!("Executable not found in $PATH: \"{program}\"");
+    }
+    let errno = errno_name(e);
+    let description = match errno.as_str() {
+        "ENOENT" => "no such file or directory",
+        "EACCES" => "permission denied",
+        "ENOTDIR" => "not a directory",
+        "ENOEXEC" => "exec format error",
+        "EPERM" => "operation not permitted",
+        "ELOOP" => "too many symbolic links encountered",
+        _ => "",
+    };
+    if description.is_empty() {
+        format!("{errno}: posix_spawn '{program}'")
+    } else {
+        format!("{errno}: {description}, posix_spawn '{program}'")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::{format_timestamp, parse_timestamp};
+
+    #[test]
+    fn js_compat() {
+        assert_eq!(format_number(1.0), "1");
+        assert_eq!(format_number(0.1 + 0.2), "0.30000000000000004");
+        assert_eq!(format_number(1e21), "1e+21");
+        assert_eq!(format_number(1e-7), "1e-7");
+        assert_eq!(format_number(-0.0), "0");
+        assert_eq!(js_number(" 0x10 "), 16.0);
+        assert!(js_number("inf").is_nan());
+        assert_eq!(js_number(""), 0.0);
+        assert_eq!(js_number("  "), 0.0);
+        assert_eq!(js_number("Infinity"), f64::INFINITY);
+        assert_eq!(js_number("-Infinity"), f64::NEG_INFINITY);
+        assert!(js_number(" 0xG ").is_nan());
+        // parse_timestamp rejects invalid dates
+        assert_eq!(parse_timestamp("2026-02-29T00:00:00.000Z"), None);
+        assert_eq!(parse_timestamp("2026-10-27T23:59:60.000Z"), None);
+        assert_eq!(parse_timestamp("2026-13-01T00:00:00.000Z"), None);
+        assert_eq!(parse_timestamp("2026-10-27T24:00:00.000Z"), None);
+        assert_eq!(
+            parse_timestamp("2026-10-27T12:00:00.000Z"),
+            Some(1_793_102_400_000)
+        );
+        let ms = 1_793_102_400_000;
+        assert_eq!(format_timestamp(ms), "2026-10-27T12:00:00.000Z");
+        assert_eq!(parse_timestamp(&format_timestamp(ms)), Some(ms));
+        // round-trip for epoch
+        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(parse_timestamp("1970-01-01T00:00:00.000Z"), Some(0));
+    }
+}

@@ -25,6 +25,24 @@ const gates: readonly Gate[] = [
   },
 ];
 
+const rustGates: readonly Gate[] = [
+  { name: "rust-fmt", cmd: ["cargo", "fmt", "--all", "--", "--check"] },
+  {
+    name: "rust-clippy",
+    cmd: ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"],
+  },
+  { name: "rust-test", cmd: ["cargo", "test", "--locked"] },
+];
+
+const args = Bun.argv.slice(2);
+let selectedGates: readonly Gate[] = gates;
+if (args.length === 1 && args[0] === "rust") {
+  selectedGates = rustGates;
+} else if (args.length > 0) {
+  console.log(`gates: unknown argument ${args[0] ?? ""}`);
+  process.exit(2);
+}
+
 async function runGate(gate: Gate): Promise<number> {
   const proc = Bun.spawn([...gate.cmd], { stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, rc] = await Promise.all([
@@ -40,7 +58,7 @@ async function runGate(gate: Gate): Promise<number> {
 }
 
 let failed = 0;
-for (const gate of gates) {
+for (const gate of selectedGates) {
   if ((await runGate(gate)) !== 0) {
     failed += 1;
   }

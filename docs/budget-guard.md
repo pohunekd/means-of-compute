@@ -77,11 +77,11 @@ The committed pools: the main pool `meta` (12 USD a day, 140 USD total)
 holds NVIDIA Build, the Meta API and Muse Wonder. The `baseten` pool holds
 `baseten` (Muse Spark Open), paid from a separate Baseten credit of about
 92 USD that is usable until 2026-11-04: 19 USD a day and 75 USD total, so
-up to four running rounds that finish after a cap (about 4 USD each) still
+up to four running rounds that finish after a cap (about 4 USD each, an estimate from about 30 calls of about 100,000 input tokens at 1.25 USD per 1M; the first factory round on Spark Open, #273, cost 0.24 USD) still
 fit the credit. Its `unmeasuredMeterCall` input bound is 1,048,576 tokens,
 the model's context window (`contextTokens` in `config/providers/baseten.json`;
 source: the Baseten Muse Spark Open launch post and the OpenRouter listing,
-read 2026-11-01), about 1.59 USD per call without usage.
+read 2026-11-01), about 1.59 USD per call without usage. When `baseten:total` escalates, the operator sets `github.intake.defaultModel` back to `meta/muse-glimmer-30b`; items already waiting at the cap stay queued until then, because a budget refusal is not a routing failure.
 
 A token row counts against the pool of its provider, so one record can
 charge two pools (for example a session on one provider and its audit on

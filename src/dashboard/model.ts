@@ -765,35 +765,37 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
   }
   const tables: Table[] = [];
   if (inputs.ledger.ok && scope !== null) {
-    const providerRows = queryLedger(inputs.ledger.value, new Set(["provider"])).byProvider ?? [];
-    const tokenRows = providerRows.map((row): readonly Cell[] => {
-      const input =
-        row.inputTokens === null
-          ? noDataCell("not reported")
-          : textCell(groupDigits(row.inputTokens));
-      const output =
-        row.outputTokens === null
-          ? noDataCell("not reported")
-          : textCell(groupDigits(row.outputTokens));
-      return [
-        textCell(row.provider),
-        textCell(row.model),
-        input,
-        output,
-        textCell(
-          row.unmeasuredRequests !== undefined
-            ? `${groupDigits(row.requests)} (${String(row.unmeasuredRequests)} without usage)`
-            : groupDigits(row.requests),
-        ),
-        textCell(row.sources.join(", ")),
-      ];
-    });
+    const providerResult = queryLedger(inputs.ledger.value, new Set(["provider"]));
+    const providerRows = providerResult.byProvider ?? [];
+    const coverage = providerResult.providerCoverage;
+    const tokenRows = providerRows.map((row): readonly Cell[] => [
+      textCell(row.provider),
+      textCell(row.model),
+      textCell(groupDigits(row.inputTokens)),
+      textCell(groupDigits(row.outputTokens)),
+      textCell(
+        row.unmeasuredRequests !== undefined
+          ? `${groupDigits(row.requests)} (${String(row.unmeasuredRequests)} without usage)`
+          : groupDigits(row.requests),
+      ),
+      textCell(row.sources.join(", ")),
+    ]);
+    const pendingNote = `${String(inputs.ledger.value.pending.length)} pending entries are not in this table; they count in spend above.`;
+    let coverageNote: string | null = null;
+    if (coverage !== undefined) {
+      if (coverage.note !== null) {
+        coverageNote = coverage.note;
+      } else if (coverage.emptyReason !== null) {
+        coverageNote = coverage.emptyReason;
+      }
+    }
+    const tableNote = coverageNote === null ? pendingNote : `${coverageNote}; ${pendingNote}`;
     tables.push({
       caption: "Tokens by provider (finished tasks)",
       columns: ["provider", "model", "input tokens", "output tokens", "requests", "sources"],
       rows: tokenRows,
-      source: "ledger records tokens[]",
-      note: `${String(inputs.ledger.value.pending.length)} pending entries are not in this table; they count in spend above.`,
+      source: "ledger records tokens[] with full token counts",
+      note: tableNote,
     });
     const hostRows = queryLedger(inputs.ledger.value, new Set(["host"])).byHost ?? [];
     const sessionRows = hostRows.map((row): readonly Cell[] => [

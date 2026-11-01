@@ -83,9 +83,7 @@ or defaulted; a missing file with an existing parent directory means empty.
 `queryLedger` aggregates records for the dashboard. Pending entries are
 counted in `pendingEntries` and never mixed into the breakdowns:
 
-- `byProvider` groups record tokens by provider and model. Token counts are
-  null-propagating sums, `requests` is the sum, `sources` the sorted unique
-  values. Rows sort by provider, then model.
+- `byProvider` groups record tokens by provider and model over the records with full token counts (every `tokens[]` row reports both counts and has no `unmeasuredRequests`), the same coverage rule as the Savings panel; token counts are sums over the measured records, `requests` is the sum, `sources` the sorted unique values, rows sort by provider, then model, and `providerCoverage` carries the coverage (`measured`, `total`, `note` with `over <n> of <m> records; <ids> have no token counts; <ids> have calls without usage`, and `emptyReason` with `token counts not reported for <ids>; calls without usage for <ids>` when no record is covered).
 - `byHost` groups `sessionSeconds` by host alias. `seconds` is the sum,
   `hours` is `(seconds / 3600).toFixed(2)` for display only, `sources` the
   sorted unique values. Rows sort by alias.

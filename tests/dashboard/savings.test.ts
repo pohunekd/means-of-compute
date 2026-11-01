@@ -154,7 +154,7 @@ test("token savings cover the measured records and every qualifier is a note", a
   }
 });
 
-test("tokens by provider table covers measured records over w1-demo and w2-demo", async () => {
+test("tokens by provider table covers measured records over w1-demo, w2-demo and w3-demo", async () => {
   const dir = mkdtempSync(join(tmpdir(), "tokens-provider-"));
   try {
     await mkdir(join(dir, "verdicts"), { recursive: true });

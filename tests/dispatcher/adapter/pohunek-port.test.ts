@@ -3,7 +3,7 @@
 // named in 5.3; P1 replay and conflict rows hold. The fake daemon stands in
 // for the host; real Clients run over the Transport seam.
 import { expect, test } from "bun:test";
-import { createFakeDaemon } from "../../../src/dispatcher/adapter/fake-daemon.js";
+import { createFakeDaemon, fakeErrors } from "../../../src/dispatcher/adapter/fake-daemon.js";
 import {
   MOC_METADATA,
   requestDigestOf,
@@ -263,6 +263,43 @@ test("a fresh start that reuses a branch with work beyond the base is voided", a
     ]);
     expect(fake.sessions("laptop-a")).toHaveLength(0);
     expect(eventsOf(log)).toContain("adapter-start-void");
+  } finally {
+    await teardown(fake, port);
+  }
+});
+
+test("a reuse diff that times out voids the start on the open client", async () => {
+  const { fake, log, port } = setup();
+  try {
+    fake.onNew("laptop-a", () => ({
+      warnings: [{ kind: "base_branch_fallback", message: "branch already exists" }],
+    }));
+    fake.failNext("laptop-a", "session.diff", {
+      error: fakeErrors.requestTimeout("laptop-a"),
+      apply: false,
+    });
+    let error: unknown;
+    try {
+      await port.start(request());
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PortRejectedError);
+    expect((error as PortRejectedError).code).toBe("base-branch-fallback");
+    const methods = methodNames(fake, "laptop-a").filter((method) => method.startsWith("session."));
+    expect(methods).toEqual([
+      "session.list",
+      "session.new",
+      "session.diff",
+      "session.stop",
+      "session.set_metadata",
+      "session.remove_accepting_unconfirmed",
+    ]);
+    expect(fake.sessions("laptop-a")).toHaveLength(0);
+    const failed = log.find((entry) => entry.event === "adapter-reuse-diff-failed");
+    expect(failed?.code).toBe("unreachable");
+    expect(eventsOf(log)).toContain("adapter-start-void");
+    expect(eventsOf(log)).not.toContain("adapter-connection-dropped");
   } finally {
     await teardown(fake, port);
   }

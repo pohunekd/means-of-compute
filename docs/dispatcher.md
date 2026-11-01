@@ -13,6 +13,10 @@ on the `DispatcherPort` interface, never on the adapter.
   budget gate, derives the `StartRequest`, and opens the session through the
   port under the item lock. The request and the session handle persist in the
   registry file named by `registryPath` (`config/dispatcher.json` `registryPath`).
+  The entry the start inserts also records `placement`: the `reason` and
+  `candidates` of the `PlacementDecision` it was given, as
+  `src/placement/place.ts` produced them, hosts by alias only. Later writes
+  keep it. The dashboard Work table shows it.
 
 Handle validation checks the returned session handle and rejects with `invalid-handle` when they fail. The checks include `worktree-unique`: the handle's worktree on its host must not be the worktree of a live (non-terminal) registry entry of another request. The check reads the registry again after the port call.
 
@@ -68,7 +72,7 @@ a kebab-case `code`) for daemon refusals. Two implementations exist:
   may import the SDK: no other module imports it
   (`docs/architecture.md` Boundaries).
 
-`retire(ref)` removes a terminal session and its worktree on the host and keeps the branch (Pohunek `session.remove_accepting_unconfirmed`, because a same-user process with an unreadable environment would otherwise block every removal; such processes are not signalled); an unknown session is `absent`; a session the host still reports live is refused `session-live`, so a round whose earlier session was closed as lost but still runs ends start-rejected and escalates. Before every start the dispatcher retires the item's earlier ledgered sessions on the target host and logs `retired`, because a host keeps a finished session's worktree and git refuses a second worktree for that branch (`worktree-branch-in-use`). `dispatcher.retire(requestId)` retires one settled, ledgered entry under the item lock, logs `retired`, and then sets the entry's `retiredAt` for both `removed` and `absent`. An entry that already has `retiredAt` is skipped without a port call. The loop calls it for every closed round. `retiredAt` is the only optional entry field, so registries written without it still validate. The retire-before-start loop ignores it and gets `absent` for a session that is already retired.
+`retire(ref)` removes a terminal session and its worktree on the host and keeps the branch (Pohunek `session.remove_accepting_unconfirmed`, because a same-user process with an unreadable environment would otherwise block every removal; such processes are not signalled); an unknown session is `absent`; a session the host still reports live is refused `session-live`, so a round whose earlier session was closed as lost but still runs ends start-rejected and escalates. Before every start the dispatcher retires the item's earlier ledgered sessions on the target host and logs `retired`, because a host keeps a finished session's worktree and git refuses a second worktree for that branch (`worktree-branch-in-use`). `dispatcher.retire(requestId)` retires one settled, ledgered entry under the item lock, logs `retired`, and then sets the entry's `retiredAt` for both `removed` and `absent`. An entry that already has `retiredAt` is skipped without a port call. The loop calls it for every closed round. `retiredAt` and `placement` are the optional entry fields, so registries written without them still validate. The reverse does not hold: the entry schema allows no other property, so code older than a field rejects a registry whose entries carry it (`registry-invalid`). Before running older code on such a registry, delete that field (`placement`, and `retiredAt` for code older than it) from every entry. The retire-before-start loop ignores `retiredAt` and gets `absent` for a session that is already retired.
 
 `release` (`src/dispatcher/port.ts` `ReleaseRef`) stops every session on the host
 that is either the known `sessionId` or bound to the `requestId` and removes

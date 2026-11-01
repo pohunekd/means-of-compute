@@ -119,8 +119,8 @@ otherwise `` `<n>` ``.
 ### Work
 
 One table, caption `Work`, columns
-`item, status, host, branch, model, verdicts, last activity`.
-Source: `work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item`.
+`item, status, host, placement, branch, model, verdicts, last activity`.
+Source: `work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; placement: decision recorded on the item's newest registry entry; last activity: newest ledger finishedAt or registry time of the item`.
 
 Rows are the union of ledger record and pending `workItemId`s, registry
 `workItemId`s when the registry is ok and work store item ids when the store
@@ -134,7 +134,7 @@ and, when the registry is ok, registry `startedAt`, `lastSeenAt` and
 
 1. A work store item with the id, when the store is ok, shows its status, as
    `<status> (<statusReason>)` when the reason is set: a parked item shows
-   `parked (<reason>)`, the same items `Parked tasks` counts.
+   `parked (<reason>)`, the same items `Parked tasks` counts. The Work table shows at most `workRowLimit` rows (its note says `showing <n> of <m> items`), so a counted item with older activity can be off the table.
 2. A registry entry for the id has `terminal === null`: the value is that
    entry's `lastSeenState` (`starting` or `running`), taken from the open
    entry with the highest `n`.
@@ -153,7 +153,18 @@ aliases and work item ids are skipped when the registry fails.
 `sessionSeconds` and pending sessions, or `no data (no session)`. `branch`
 is the highest-`n` entry's `branch`, else the non-null `WorkItem.branch`,
 else `no data (no session)` when the registry is ok, else the registry
-failure. `model` is `` `<providerId>/<model>` `` of the highest-`n` entry,
+failure. `placement` is the `placement` the dispatcher recorded on the
+highest-`n` entry (docs/dispatcher.md): the decision `reason` with
+`, score <s>` of the chosen candidate, then every other candidate in recorded
+order as `<alias>: <reason>` when excluded or `<alias>: eligible, score <s>`,
+joined by `; `. Hosts that rejected a start of the item and hosts in a start-rejection cooldown (`hostCooldown`) are left out of placement before the decision, so they are not candidates. Rejected hosts come back only when every other host is excluded and placement retries them (`exclusions-retried`); cooled hosts never do (docs/loop.md).
+In an `excluded: not idle (<idleReason>)` reason the page keeps `<idleReason>`
+only up to its first `:`: the host probe puts an error message after it
+(`user activity unknown: <message>`, `power unknown: <message>`), and a
+message can name a path; the snapshot page check stays the backstop. An entry
+without `placement` (an optional registry field) shows
+`no data (not recorded)`; no entry shows `no data (no session)`, and a failed
+registry shows its failure. A recorded placement whose aliases fail the alias pattern, or whose reason does not start with the chosen alias, shows `no data (placement failed alias check)`. `model` is `` `<providerId>/<model>` `` of the highest-`n` entry,
 else `no data (no session)` when the registry is ok, else the registry
 failure. `verdicts` lists
 every verdict in store order as

@@ -915,6 +915,7 @@ export function createDispatcher(deps: DispatcherDeps): {
           cancelReason: null,
           terminal: null,
           resolvedAt: null,
+          placement: { reason: decision.reason, candidates: decision.candidates },
           revision: 0,
         };
         await insertRegistryEntry(deps.config.registryPath, provisional);

@@ -8,6 +8,9 @@
 //! - Directory listings keep read_dir order, never sorted (Bun readdirSync order).
 //! - Failures that only reach stderr need the same exit code, not the same text.
 
+pub mod config;
+pub mod facts;
 pub mod idle_rule;
 pub mod js;
+pub mod platform;
 pub mod time;

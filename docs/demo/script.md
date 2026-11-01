@@ -4,7 +4,7 @@ A runnable checklist for the three-minute demo video. Each step has a one-line
 narration, the command to run and the visible effect to expect. No step needs a
 login, an API key or a secret. Steps 3 to 6 run in a fresh clone; the only
 environment variable is `MOC_DASHBOARD_LISTEN` in step 5, which sets the dashboard
-port. Steps 1, 2, 7 and 8 show the recorded production work on one host through the
+port. Steps 1, 2, 7 and 8 show the recorded production work through the
 repository and public GitHub pages.
 
 ## What the video states
@@ -21,7 +21,7 @@ repository and public GitHub pages.
 - Spend caps from `config/budget.json`: `dayCapUsd` 12, `totalCapUsd` 140 and
   `nvidiaDailyRequestLimit` 1000. At a cap, new sessions and audit calls are
   refused ([budget guard](../budget-guard.md)).
-- The production runs shown here ran on one host, display alias `desktop`.
+- The production runs shown here ran on the hosts with display aliases `desktop` and `laptop-b`. The snapshot's Fleet panel also lists `laptop-mac`, whose starts the host rejected, so it ran no work.
 
 ## Before recording
 

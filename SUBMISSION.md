@@ -78,6 +78,8 @@ It runs the real scheduler, dispatcher, meter, budget guard, auditor and merge r
 on recorded model replies served over loopback, so no paid call is made. Success is
 `loop: stub run done merged=3 blocked=0 parked=0`.
 
+To see the production numbers without running anything, download [docs/demo/dashboard.html](docs/demo/dashboard.html) and open it in a browser. It is the dashboard page rendered from the recorded production data as of the time in its header, with hosts shown by display alias.
+
 ## Spend caps
 
 The budget guard reads `config/budget.json` before every new model session and every

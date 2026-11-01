@@ -45,6 +45,7 @@ export const DASHBOARD_CSS = [
   "tbody tr:nth-child(even){background:var(--row)}",
   ".mono{font-family:var(--mono);font-size:0.86em;overflow-wrap:anywhere}",
   ".nowrap{white-space:nowrap}",
+  ".verdicts{display:inline-block;min-width:22rem;overflow-wrap:normal}",
   ".time{white-space:nowrap}",
   ".pill{display:inline-block;border-radius:999px;padding:0.12rem 0.6rem;font-size:0.85rem;font-weight:700}",
   ".pill-done{background:var(--done-bg);color:var(--done-text)}",
@@ -244,7 +245,7 @@ function renderCell(cell: Cell, panelId: PanelId, column: string): SafeHtml {
     return html`<td class="${base}"><span class="mono nowrap">${text}</span></td>`;
   }
   if (panelId === "work" && column === "verdicts") {
-    return html`<td class="${base}"><span class="mono">${text}</span></td>`;
+    return html`<td class="${base}"><span class="mono verdicts">${text}</span></td>`;
   }
   return html`<td class="${base}">${text}</td>`;
 }

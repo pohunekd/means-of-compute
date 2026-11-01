@@ -139,7 +139,7 @@ host, 2 on any input or config error.
 
 All model traffic from worker sessions flows through the metering proxy
 (`src/meter/`). The proxy holds the provider keys: the session receives
-its caller token through session metadata, and the token is valid only
+its caller token through a secret session env slot, and the token is valid only
 while its grant is open. Provider keys never appear in the usage
 log, the factory log, or error responses. See [meter.md](meter.md) for the proxy, the
 config keys, the env vars, the usage-log format, and the operator secret

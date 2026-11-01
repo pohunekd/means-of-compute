@@ -21,7 +21,7 @@ repository and public GitHub pages.
 - Spend caps from `config/budget.json`: `dayCapUsd` 12, `totalCapUsd` 140 and
   `nvidiaDailyRequestLimit` 1000. At a cap, new sessions and audit calls are
   refused ([budget guard](../budget-guard.md)).
-- The production runs shown here ran on the hosts with display aliases `desktop` and `laptop-b`. The snapshot's Fleet panel also lists `laptop-mac`, whose starts the host rejected, so it ran no work.
+- The production runs shown here ran on the hosts with display aliases `desktop` and `laptop-b`. The snapshot's Fleet panel also lists `laptop-a`, which is probed and considered for placement but ran no work in these runs, and `laptop-mac`, whose starts the host rejected, so it ran no work.
 
 ## Before recording
 

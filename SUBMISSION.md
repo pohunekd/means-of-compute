@@ -15,7 +15,7 @@ on. The factory built much of itself: of the twenty merges from the handover com
 `4f2112a` (PR #144) through `a8670d9`, twelve come from the loop's own `moc/`
 branches (step 7 of [docs/demo/script.md](docs/demo/script.md)). Each carries a
 `moc:work-item` marker and a Muse Spark audit verdict bound to the merged head
-commit. These production runs ran on one host, display alias `desktop`.
+commit. These twelve handover runs ran on one host, display alias `desktop`; later production runs also used `laptop-b`, as the dashboard snapshot shows.
 
 ## Architecture
 

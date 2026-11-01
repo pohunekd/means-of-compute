@@ -20,6 +20,8 @@ export type LoopEventName =
   | "blocked"
   | "escalation"
   | "followup"
+  | "triage"
+  | "triage-pending"
   | "merge-base-race"
   | "merge-hold-cleared"
   | "budget-refused"

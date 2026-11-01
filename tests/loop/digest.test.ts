@@ -1,6 +1,7 @@
 // Daily digest (O9): a new UTC day writes the previous day's digest once,
-// with the merge, the running and parked items and the priced spend; a
-// replay after a crash before the state write keeps the first bytes.
+// with the merge, the running and parked items, the day's triage counts and
+// the priced spend; a replay after a crash before the state write keeps the
+// first bytes.
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -134,6 +135,21 @@ test("a new day writes the previous day's digest once (O9)", async () => {
           baseRace: false,
         },
       ],
+      followups: [
+        {
+          key: "0123456789abcdef",
+          kind: "finding",
+          posted: 9,
+          triage: {
+            decision: "hold",
+            code: "hold-model",
+            at: "2026-10-28T00:05:00.000Z",
+            appendix: null,
+            comment: "<!-- moc:triage:0123456789abcdef -->",
+            done: true,
+          },
+        },
+      ],
     };
     const running: LoopItem = {
       ...initialLoopItem(),
@@ -220,6 +236,10 @@ test("a new day writes the previous day's digest once (O9)", async () => {
       "## Parked and blocked",
       "",
       "- gh-demo-3: stalled: 3 rounds without a newly met DoD item",
+      "",
+      "## Follow-up triage",
+      "",
+      "- auto 0, hold 1, skip 0",
       "",
       "## Spend",
       "",

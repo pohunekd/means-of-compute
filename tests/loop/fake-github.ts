@@ -174,6 +174,11 @@ export class FakeGitHub implements GitHubPort {
     return Promise.resolve();
   }
 
+  editIssueBody(repo: string, issue: number, body: string): Promise<void> {
+    this.calls.push({ method: "editIssueBody", args: [repo, issue, body] });
+    return unused();
+  }
+
   readyIssues(repo: string, labels: readonly string[]): Promise<readonly IntakeIssue[]> {
     this.calls.push({ method: "readyIssues", args: [repo, [...labels]] });
     return unused();

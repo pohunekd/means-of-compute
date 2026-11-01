@@ -229,6 +229,7 @@ export function schedulerContextOf(configs: LoopConfigs, ports: LoopPorts): Sche
     maxRetries: configs.loop.stall.maxRetries,
     followupLabels: configs.loop.github.followupLabels,
     verdictDir: configs.auditor.verdictDir,
+    triage: configs.loop.github.triage,
   };
 }
 

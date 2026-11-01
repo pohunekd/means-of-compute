@@ -89,7 +89,7 @@ export function dependencyNumbers(body: string): readonly number[] {
   return numbers;
 }
 
-function intakeItem(
+export function intakeItem(
   repo: string,
   idPrefix: string,
   issue: IntakeIssue,

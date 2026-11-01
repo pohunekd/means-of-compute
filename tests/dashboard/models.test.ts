@@ -51,6 +51,8 @@ function fixed(): FixedInputs {
   const budget: BudgetConfig = {
     statePath: "logs/budget-state.json",
     escalationLogPath: "logs/budget-escalation.jsonl",
+    poolId: "meta",
+    pools: [],
     dayCapNanoUsd: 1_000_000_000n,
     totalCapNanoUsd: 10_000_000_000n,
     nvidiaDailyRequestLimit: 100,

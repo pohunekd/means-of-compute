@@ -218,6 +218,7 @@ test("a new day writes the previous day's digest once (O9)", async () => {
       spendBounds: {
         auditCall: { inputTokens: 262144, outputTokens: 65536 },
         meterCall: { inputTokens: 16777216, outputTokens: 65536 },
+        meterCallByProvider: new Map(),
       },
       log,
       now: () => new Date("2026-10-29T08:00:00.000Z"),

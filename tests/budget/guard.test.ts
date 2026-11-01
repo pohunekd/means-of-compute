@@ -3,7 +3,16 @@
 // per-call bound instead of refusing as unknown; a null-token session
 // entry on a priced provider still refuses.
 import { expect, test } from "bun:test";
-import { isBoundedAuditToken, summarizeSpend } from "../../src/budget/cost.js";
+import {
+  type BudgetConfig,
+  poolHolds,
+  poolOfProvider,
+  poolsOf,
+  spendBoundsOf,
+} from "../../src/budget/config.js";
+import { entriesOfProviders, isBoundedAuditToken, summarizeSpend } from "../../src/budget/cost.js";
+import { decideAdmission } from "../../src/budget/decision.js";
+import { eventKeyString } from "../../src/budget/escalation.js";
 import type { NanoPricing } from "../../src/budget/pricing.js";
 import type { SpendEntry } from "../../src/ledger/types.js";
 import { AUDITOR_USAGE_SOURCE } from "../../src/ledger/types.js";
@@ -11,6 +20,7 @@ import { AUDITOR_USAGE_SOURCE } from "../../src/ledger/types.js";
 const BOUND = {
   auditCall: { inputTokens: 262144, outputTokens: 65536 },
   meterCall: { inputTokens: 16777216, outputTokens: 65536 },
+  meterCallByProvider: new Map(),
 };
 const NOW = new Date("2026-10-28T12:00:00.000Z");
 
@@ -142,4 +152,88 @@ test("A1 bounded audit spend counts at the bound, session stays unknown", () => 
   );
   expect(mixed.unknownWorkItemIds).toEqual(["gh-demo-3"]);
   expect(mixed.boundedWorkItemIds).toEqual([]);
+});
+
+test("a named pool gates its own providers on its own caps and meter bound", () => {
+  const config: BudgetConfig = {
+    statePath: "logs/budget-state.json",
+    escalationLogPath: "logs/budget-escalations.log",
+    poolId: "meta",
+    pools: [
+      {
+        id: "baseten",
+        providers: ["baseten"],
+        dayCapNanoUsd: 4_000_000_000n,
+        totalCapNanoUsd: 70_000_000_000n,
+        unmeasuredMeterCall: { inputTokens: 1048576, outputTokens: 65536 },
+      },
+    ],
+    dayCapNanoUsd: 12_000_000_000n,
+    totalCapNanoUsd: 140_000_000_000n,
+    nvidiaDailyRequestLimit: 1000,
+    nvidiaProviderId: "nvidia-build",
+    unmeasuredAuditCall: BOUND.auditCall,
+    unmeasuredMeterCall: BOUND.meterCall,
+  };
+  const prices = new Map([
+    ...pricing(),
+    ["baseten", { inputNanoPer1M: 1_250_000_000n, outputNanoPer1M: 4_250_000_000n }],
+  ]);
+  const session: SpendEntry["tokens"][number] = {
+    provider: "baseten",
+    model: "meta-models/muse-spark-open-1026",
+    inputTokens: 2_000_000,
+    outputTokens: 100_000,
+    requests: 10,
+    unmeasuredRequests: 1,
+    source: "meter-proxy",
+  };
+  const audit: SpendEntry["tokens"][number] = {
+    provider: "meta-api",
+    model: "muse-spark-1.3-contributor",
+    inputTokens: 10_000,
+    outputTokens: 1_000,
+    requests: 1,
+    source: AUDITOR_USAGE_SOURCE,
+  };
+  const record: SpendEntry = {
+    workItemId: "gh-demo-5",
+    finishedAt: "2026-10-28T10:00:00.000Z",
+    tokens: [session, audit],
+  };
+  const decide = (records: readonly SpendEntry[], providerId: string) => {
+    const pool = poolOfProvider(config, providerId);
+    const summary = summarizeSpend(
+      entriesOfProviders(records, (id) => poolHolds(config, pool, id)),
+      prices,
+      config.nvidiaProviderId,
+      NOW,
+      spendBoundsOf(config),
+    );
+    return decideAdmission(summary, config, { route: ["nvidia-build", "meta-api"], pool });
+  };
+  expect(poolsOf(config).map((pool) => pool.id)).toEqual(["meta", "baseten"]);
+  // 2.5 + 0.425 USD measured plus one call at the pool bound (1.589248 USD).
+  expect(decide([record], "baseten")).toMatchObject({
+    admit: false,
+    reason: "daily cap reached",
+    pool: "baseten",
+    mainPool: false,
+    spentTodayUsd: 4.514248,
+  });
+  expect(decide([record], "meta-api")).toMatchObject({
+    admit: true,
+    pool: "meta",
+    mainPool: true,
+    spentTodayUsd: 0.0012,
+  });
+  const unknown: SpendEntry = {
+    workItemId: "gh-demo-6",
+    finishedAt: "2026-10-27T10:00:00.000Z",
+    tokens: [{ ...session, inputTokens: null, outputTokens: null }],
+  };
+  expect(decide([unknown], "baseten").reason).toBe("spend unknown");
+  expect(decide([unknown], "nvidia-build").admit).toBe(true);
+  expect(eventKeyString("day", NOW, "baseten")).toBe("baseten:day:2026-10-28");
+  expect(eventKeyString("day", NOW, null)).toBe("day:2026-10-28");
 });

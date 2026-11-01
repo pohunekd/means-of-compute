@@ -1,5 +1,6 @@
 // Budget gate client: run before any model work. It spawns the configured
-// check command and maps its result to admit/refuse. Anything unexpected
+// check command with `--provider <id>`, so the check decides for the budget
+// pool that pays for the call, and maps its result to admit/refuse. Anything unexpected
 // (nonzero rc outside 0/3, signal, timeout, stdout mismatch) throws and
 // never admits.
 import { readInputText, statInputPath } from "../fs/input.js";
@@ -9,7 +10,8 @@ export type Admission =
   | { readonly admit: false; readonly reason: string; readonly line: string };
 
 export interface BudgetGate {
-  admit(): Promise<Admission>;
+  /** `providerId` is the provider the admitted call or session will use. */
+  admit(providerId: string): Promise<Admission>;
 }
 export interface BudgetGateOptions {
   readonly command: readonly string[];
@@ -20,6 +22,7 @@ export interface BudgetGateOptions {
 
 const GATE_CONFIG_PATH = "config/budget-gate.json";
 const MAX_STDERR_SNIPPET = 500;
+const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
 
 export class BudgetGateError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -108,10 +111,13 @@ async function readWithDeadline<T>(promise: Promise<T>, deadlineMs: number): Pro
 
 export function createCliBudgetGate(options: BudgetGateOptions): BudgetGate {
   return {
-    async admit(): Promise<Admission> {
+    async admit(providerId: string): Promise<Admission> {
+      if (!PROVIDER_ID_PATTERN.test(providerId)) {
+        throw new BudgetGateError(`budget gate: invalid provider id "${providerId}"`);
+      }
       let proc: ReturnType<typeof Bun.spawn>;
       try {
-        proc = Bun.spawn([...options.command], {
+        proc = Bun.spawn([...options.command, "--provider", providerId], {
           cwd: options.cwd,
           stdout: "pipe",
           stderr: "pipe",

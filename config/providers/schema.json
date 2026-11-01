@@ -23,6 +23,7 @@
     },
     "apiKeyEnv": { "type": "string" },
     "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 600000 },
+    "contextTokens": { "type": "integer", "minimum": 1 },
     "pricing": {
       "type": "object",
       "required": ["inputPer1M", "outputPer1M"],

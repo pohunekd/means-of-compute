@@ -336,6 +336,7 @@ async function makeHarness(
     spendBounds: {
       auditCall: { inputTokens: 262144, outputTokens: 65536 },
       meterCall: { inputTokens: 16777216, outputTokens: 65536 },
+      meterCallByProvider: new Map(),
     },
     triage: {
       enabled: false,

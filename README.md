@@ -193,6 +193,9 @@ audit call:
   audit calls are refused.
 - `totalCapUsd` (140): at or above this total spend, new sessions and audit calls
   are refused.
+- `pools`: providers paid from a separate credit, each pool with its own day and
+  total cap. The two caps above belong to the main pool (`poolId`), which holds
+  every other provider; a pool at its cap refuses only calls on its own providers.
 - `nvidiaDailyRequestLimit` (1000): at or above this many NVIDIA Build requests in
   the current UTC day, sessions whose route starts at NVIDIA Build are refused.
   NVIDIA Build is priced at 0, so this limit applies instead of a dollar cap.
@@ -200,7 +203,7 @@ audit call:
 A running session is never killed at a cap: it finishes, and its cost still lands in
 the ledger. Spend that cannot be measured counts as unknown, and unknown spend also
 refuses new sessions. Prices come from the provider descriptors in
-`config/providers/`. `bun run budget:check` prints the current decision.
+`config/providers/`. `bun run budget:check` prints the current decision for each pool.
 
 ## Contributing
 

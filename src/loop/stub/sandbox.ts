@@ -103,6 +103,8 @@ export async function sandboxGit(
 interface BudgetCopy {
   readonly statePath: string;
   readonly escalationLogPath: string;
+  readonly poolId: string;
+  readonly pools: readonly unknown[];
   readonly dayCapUsd: number;
   readonly totalCapUsd: number;
   readonly nvidiaDailyRequestLimit: number;

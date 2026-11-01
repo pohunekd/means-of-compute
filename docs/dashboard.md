@@ -230,22 +230,32 @@ it is `null`. It is always a recorded time, never the page clock `now`.
 
 `day = utcCalendarDay(now)`. In order:
 
-| Label                                     | Value                                                                | Source                                                                                                 |
-| ----------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `Spent today (UTC <day>)`                 | exact scaled sum, or no-data by the unknown rule                     | `ledger records and pending entries finished on <day>, tokens × price; <prices>`                       |
-| `Day cap`                                 | `config/budget.json dayCapUsd`                                       | `config/budget.json dayCapUsd`                                                                         |
-| `Spent total`                             | exact scaled sum, or no-data by the unknown rule                     | `ledger records and pending entries, tokens × price; <prices>`                                         |
-| `Total cap`                               | `config/budget.json totalCapUsd`                                     | `config/budget.json totalCapUsd`                                                                       |
-| `NVIDIA Build requests today (UTC <day>)` | `<n> of <limit>`, or no-data by the unknown rule                     | `ledger requests of provider <id> finished on <day>; limit config/budget.json nvidiaDailyRequestLimit` |
-| `New sessions`                            | budget guard decision: `admitted (<reason>)` or `refused (<reason>)` | `budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)`                  |
+| Label                                     | Value                                            | Source                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `Spent today (UTC <day>)`                 | exact scaled sum, or no-data by the unknown rule | `ledger records and pending entries finished on <day>, tokens × price; <prices>`                       |
+| `Spent total`                             | exact scaled sum, or no-data by the unknown rule | `ledger records and pending entries, tokens × price; <prices>`                                         |
+| `NVIDIA Build requests today (UTC <day>)` | `<n> of <limit>`, or no-data by the unknown rule | `ledger requests of provider <id> finished on <day>; limit config/budget.json nvidiaDailyRequestLimit` |
 
-The caps need no ledger or prices; the other figures take the ledger or
-pricing failure. With no entries in scope the price part is prefixed with
+The spent figures sum every pool. The figures take the ledger or pricing
+failure. With no entries in scope the price part is prefixed with
 `no entries; `. Every money figure cites every price entry it used via
 `config/providers/<id>.json input $<in> per 1M, output $<out> per 1M`,
 joined with `"; "`, plus `; upper bound: cached-input pricing of <ids> not
 applied` when a provider prices cached input (there is no cached count to
 apply it to). When the scope holds bounded unmeasured entries, the spent-today and spent-total values carry the note `includes the upper bound for unmeasured calls of <sorted ids>`. The spent-today ids are bounded entries finished that day; the spent-total ids are every bounded entry.
+
+`Budget pools`, the first table: one row per budget pool
+(docs/budget-guard.md), main pool first, columns
+`pool, providers, spent today, day cap, spent total, total cap, new sessions`.
+`providers` is the pool's list, or `every provider outside the other pools`
+for the main pool. Spend is the pool's own token rows, priced and marked
+unknown as above; `new sessions` is the guard decision for the pool,
+`admitted (<reason>)` or `refused (<reason>)`. The caps need no ledger or
+prices; the spend and decision cells take the ledger or pricing failure.
+Source:
+`caps: config/budget.json poolId, dayCapUsd, totalCapUsd and pools[]; spend: ledger records and pending entries of the pool's providers, tokens × price as above; new sessions: budget guard decision per pool (docs/budget-guard.md)`.
+Note: `pool <id> includes the upper bound for unmeasured calls of <sorted ids>`
+per pool with bounded entries, joined with `"; "`, or none.
 
 `Tokens by provider (finished tasks)`: columns
 `provider, model, input tokens, output tokens, requests, sources`, from the

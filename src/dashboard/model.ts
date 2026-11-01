@@ -4,8 +4,14 @@
 // "no data" while an unreadable input shows an error code only.
 import type { UsageRecord } from "../../contracts/v1/types.js";
 import { recount } from "../auditor/verdict.js";
-import { isBoundedAuditToken, isPriced, summarizeSpend, utcCalendarDay } from "../budget/cost.js";
-import { spendBoundsOf } from "../budget/config.js";
+import {
+  entriesOfProviders,
+  isBoundedAuditToken,
+  isPriced,
+  summarizeSpend,
+  utcCalendarDay,
+} from "../budget/cost.js";
+import { poolHolds, poolsOf, spendBoundsOf } from "../budget/config.js";
 import { decideAdmission } from "../budget/decision.js";
 import type { NanoPricing } from "../budget/pricing.js";
 import { providerCoverageOf, queryLedger } from "../ledger/query.js";
@@ -573,6 +579,86 @@ function spendEntriesInScope(
   return { today: all.filter((entry) => utcCalendarDay(new Date(entry.finishedAt)) === day), all };
 }
 
+// One row per budget pool, main pool first. The caps need no ledger or
+// prices (5.3): they stand on every failure, while spend and the guard
+// decision take the ledger or pricing failure.
+function budgetPoolsTable(inputs: DashboardInputs, day: string): Table {
+  const spend:
+    | { readonly failure: InputFailure }
+    | { readonly all: readonly SpendEntry[]; readonly pricing: ReadonlyMap<string, NanoPricing> } =
+    !inputs.ledger.ok
+      ? { failure: inputs.ledger.failure }
+      : !inputs.pricing.ok
+        ? { failure: inputs.pricing.failure }
+        : { all: spendEntriesOf(inputs.ledger.value), pricing: inputs.pricing.value };
+  const bounded: string[] = [];
+  const rows = poolsOf(inputs.budget).map((pool): readonly Cell[] => {
+    const providers =
+      pool.providers === null
+        ? "every provider outside the other pools"
+        : pool.providers.join(", ");
+    const dayCap = textCell(formatUsd(capScaled(pool.dayCapNanoUsd)));
+    const totalCap = textCell(formatUsd(capScaled(pool.totalCapNanoUsd)));
+    if ("failure" in spend) {
+      const cell = failureCell(spend.failure);
+      return [textCell(pool.id), textCell(providers), cell, dayCap, cell, totalCap, cell];
+    }
+    const { pricing } = spend;
+    const all = entriesOfProviders(spend.all, (id) => poolHolds(inputs.budget, pool, id));
+    const today = all.filter((entry) => utcCalendarDay(new Date(entry.finishedAt)) === day);
+    const summary = summarizeSpend(
+      all,
+      pricing,
+      inputs.budget.nvidiaProviderId,
+      inputs.now,
+      spendBoundsOf(inputs.budget),
+    );
+    const spentCell = (entries: readonly SpendEntry[], nanoTimes1M: bigint): Cell => {
+      const unknown = [
+        ...new Set(
+          entries.filter((entry) => moneyUnknown(entry, pricing)).map((entry) => entry.workItemId),
+        ),
+      ].sort();
+      return unknown.length > 0
+        ? noDataCell(`spend unknown for ${unknown.join(", ")}`)
+        : textCell(formatUsd(guardScaled(nanoTimes1M)));
+    };
+    if (summary.boundedWorkItemIds.length > 0) {
+      bounded.push(
+        `pool ${pool.id} includes the upper bound for unmeasured calls of ${[...summary.boundedWorkItemIds].sort().join(", ")}`,
+      );
+    }
+    const admission = decideAdmission(summary, inputs.budget, { route: [...inputs.route], pool });
+    return [
+      textCell(pool.id),
+      textCell(providers),
+      spentCell(today, summary.spentTodayNanoTimes1M),
+      dayCap,
+      spentCell(all, summary.spentTotalNanoTimes1M),
+      totalCap,
+      textCell(
+        admission.admit ? `admitted (${admission.reason})` : `refused (${admission.reason})`,
+      ),
+    ];
+  });
+  return {
+    caption: "Budget pools",
+    columns: [
+      "pool",
+      "providers",
+      "spent today",
+      "day cap",
+      "spent total",
+      "total cap",
+      "new sessions",
+    ],
+    rows,
+    source:
+      "caps: config/budget.json poolId, dayCapUsd, totalCapUsd and pools[]; spend: ledger records and pending entries of the pool's providers, tokens × price as above; new sessions: budget guard decision per pool (docs/budget-guard.md)",
+    note: bounded.length === 0 ? null : bounded.join("; "),
+  };
+}
+
 function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
   const figures: Figure[] = [];
   const scope = spendEntriesInScope(inputs, day);
@@ -593,33 +679,14 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
           ),
         )
       : [];
-  // The caps need no ledger or prices (5.3): they stand on every failure,
-  // in the same figure positions as the success path.
-  const dayCapFigure = textFigure(
-    "Day cap",
-    formatUsd(capScaled(inputs.budget.dayCapNanoUsd)),
-    "config/budget.json dayCapUsd",
-  );
-  const totalCapFigure = textFigure(
-    "Total cap",
-    formatUsd(capScaled(inputs.budget.totalCapNanoUsd)),
-    "config/budget.json totalCapUsd",
-  );
   if (!inputs.ledger.ok) {
     figures.push(
       failedFigure(`Spent today (UTC ${day})`, inputs.ledger.failure, "ledger records"),
-      dayCapFigure,
       failedFigure("Spent total", inputs.ledger.failure, "ledger records"),
-      totalCapFigure,
       failedFigure(
         `NVIDIA Build requests today (UTC ${day})`,
         inputs.ledger.failure,
         "ledger records",
-      ),
-      failedFigure(
-        "New sessions",
-        inputs.ledger.failure,
-        "budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)",
       ),
     );
   } else if (!inputs.pricing.ok) {
@@ -629,18 +696,11 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         inputs.pricing.failure,
         "ledger records and pending entries",
       ),
-      dayCapFigure,
       failedFigure("Spent total", inputs.pricing.failure, "ledger records and pending entries"),
-      totalCapFigure,
       failedFigure(
         `NVIDIA Build requests today (UTC ${day})`,
         inputs.pricing.failure,
         "ledger records and pending entries",
-      ),
-      failedFigure(
-        "New sessions",
-        inputs.pricing.failure,
-        "budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)",
       ),
     );
   } else if (scope !== null) {
@@ -694,13 +754,6 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         source: spentTodaySource,
       });
     }
-    figures.push(
-      textFigure(
-        "Day cap",
-        formatUsd(capScaled(inputs.budget.dayCapNanoUsd)),
-        "config/budget.json dayCapUsd",
-      ),
-    );
     if (unknownAll.length > 0) {
       const ids = [...new Set(unknownAll.map((entry) => entry.workItemId))].sort();
       figures.push({
@@ -725,13 +778,6 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         source: spentTotalSource,
       });
     }
-    figures.push(
-      textFigure(
-        "Total cap",
-        formatUsd(capScaled(inputs.budget.totalCapNanoUsd)),
-        "config/budget.json totalCapUsd",
-      ),
-    );
     if (requestsUnknownToday.length > 0) {
       const ids = [...new Set(requestsUnknownToday.map((entry) => entry.workItemId))].sort();
       figures.push({
@@ -754,16 +800,8 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
           "limit config/budget.json nvidiaDailyRequestLimit",
       });
     }
-    const admission = decideAdmission(summary, inputs.budget, { route: [...inputs.route] });
-    figures.push(
-      textFigure(
-        "New sessions",
-        admission.admit ? `admitted (${admission.reason})` : `refused (${admission.reason})`,
-        "budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)",
-      ),
-    );
   }
-  const tables: Table[] = [];
+  const tables: Table[] = [budgetPoolsTable(inputs, day)];
   if (inputs.ledger.ok && scope !== null) {
     const providerResult = queryLedger(inputs.ledger.value, new Set(["provider"]));
     const providerRows = providerResult.byProvider ?? [];

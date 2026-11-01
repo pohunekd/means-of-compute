@@ -332,3 +332,44 @@ test("wait stores a finished terminal with set_metadata then stop (W5, W6)", asy
     await teardown(fake, port);
   }
 });
+
+// Concurrent worktree creations on one host race on its git fetch, so the
+// port runs one start per host at a time; other hosts never wait.
+test("starts on one host run one at a time and a voided start releases the next", async () => {
+  const fake = createFakeDaemon(["laptop-a", "laptop-b"], CONFIG.agentProfile);
+  const port = createPohunekPort(CONFIG, {
+    connector: fake.connector,
+    log: () => undefined,
+    meterToken: METER_TOKEN,
+  });
+  try {
+    let created = 0;
+    fake.onNew("laptop-a", () => {
+      created += 1;
+      return created === 1
+        ? { warnings: [{ kind: "fetch", message: "fetch of origin failed" }] }
+        : {};
+    });
+    const paused = fake.pauseNext("laptop-a", "session.new");
+    const first = port.start(request());
+    const gate = await paused;
+    const second = port.start(
+      request({ requestId: "req-2", workItemId: "item-2", branch: "moc/item-2" }),
+    );
+    const other = await port.start(request({ requestId: "req-3", hostAlias: "laptop-b" }));
+    expect(other.hostAlias).toBe("laptop-b");
+    const newCalls = methodNames(fake, "laptop-a").filter((method) => method === "session.new");
+    expect(newCalls).toHaveLength(1);
+    gate.release();
+    let error: unknown;
+    try {
+      await first;
+    } catch (caught: unknown) {
+      error = caught;
+    }
+    expect((error as PortRejectedError).code).toBe("fetch-failed");
+    expect((await second).requestId).toBe("req-2");
+  } finally {
+    await teardown(fake, port);
+  }
+});

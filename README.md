@@ -154,7 +154,8 @@ MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve \
   --ledger logs/loop-demo/ledger.jsonl \
   --verdicts logs/loop-demo/verdicts \
   --registry logs/loop-demo-registry.json \
-  --results logs/loop-demo/loop-results.jsonl
+  --results logs/loop-demo/loop-results.jsonl \
+  --work logs/loop-demo/work-items.json
 ```
 
 Success is the line `factory: dashboard listening (dashboard) port 8080`. Then

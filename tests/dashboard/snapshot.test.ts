@@ -54,6 +54,8 @@ async function runSnapshot(dir: string, out: string): Promise<{ code: number; st
       join(dir, "registry.json"),
       "--results",
       join(dir, "results.jsonl"),
+      "--work",
+      join(dir, "work-items.json"),
       "--hosts",
       join(dir, "hosts.json"),
     ],

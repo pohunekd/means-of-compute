@@ -3,7 +3,7 @@
 // code; the message goes to the log. A thrown value that is not an Error is
 // rethrown and becomes a 500.
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
-import { InputPathError } from "../fs/input.js";
+import { InputPathError, statInputPath } from "../fs/input.js";
 import { readResults, LoopResultsDataError } from "../loop/results.js";
 import type { ResultLine } from "../loop/results.js";
 import type { BudgetConfig } from "../budget/config.js";
@@ -15,6 +15,7 @@ import type { LedgerContents } from "../ledger/types.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import { readVerdicts } from "../auditor/store.js";
 import { RegistryDataError, readRegistry, type RegistryEntry } from "../dispatcher/registry.js";
+import { WorkStoreDataError, readWorkStore } from "../work/store.js";
 import { lstat } from "node:fs/promises";
 import { requestIdProblem } from "./sessions.js";
 import { workRows } from "./model.js";
@@ -29,7 +30,9 @@ export type InputErrorCode =
   | "registry-invalid"
   | "registry-unreadable"
   | "results-invalid"
-  | "results-unreadable";
+  | "results-unreadable"
+  | "work-store-invalid"
+  | "work-store-unreadable";
 
 export type InputFailure =
   | { readonly kind: "no-data"; readonly reason: string }
@@ -49,7 +52,7 @@ export interface DashboardInputs {
   readonly pricing: Sourced<ReadonlyMap<string, NanoPricing>>;
   readonly verdicts: ReadonlyMap<string, Sourced<readonly AuditVerdict[]>>;
   readonly hosts: Sourced<readonly HostObservation[]>;
-  readonly workItems: readonly WorkItem[] | null;
+  readonly workItems: Sourced<readonly WorkItem[]>;
   readonly registry: Sourced<readonly RegistryEntry[]>;
   readonly results: Sourced<readonly ResultLine[]>;
 }
@@ -60,6 +63,7 @@ export interface DashboardSources {
   readonly hostState: HostStateCollector | null;
   readonly registryPath: string;
   readonly resultsPath: string;
+  readonly workStorePath: string;
 }
 
 export interface FixedInputs {
@@ -186,6 +190,32 @@ async function readResultsInput(
   }
 }
 
+// readWorkStore reads an absent store as empty; the page shows it as no
+// data, not as zero parked tasks.
+async function readWorkStoreInput(
+  workStorePath: string,
+  log: (input: string, code: InputErrorCode, message: string) => void,
+): Promise<Sourced<readonly WorkItem[]>> {
+  try {
+    if ((await statInputPath("Dashboard work store", workStorePath)) === "absent") {
+      return { ok: false, failure: noData("work store not wired") };
+    }
+    return { ok: true, value: (await readWorkStore(workStorePath)).items };
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    // readWorkStore wraps stat and read failures in a WorkStoreDataError
+    // whose cause is an InputPathError; JSON and shape failures are data errors.
+    const code: InputErrorCode =
+      error instanceof WorkStoreDataError && !(error.cause instanceof InputPathError)
+        ? "work-store-invalid"
+        : "work-store-unreadable";
+    log("work store", code, error.message);
+    return { ok: false, failure: errorFailure(code) };
+  }
+}
+
 async function readVerdictsForShown(
   verdictDir: string,
   shown: readonly string[],
@@ -242,11 +272,12 @@ export async function gatherInputs(
   const emit = (input: string, code: InputErrorCode, message: string): void => {
     log({ input, code, message });
   };
-  const [ledger, hosts, registry, results] = await Promise.all([
+  const [ledger, hosts, registry, results, workItems] = await Promise.all([
     readLedgerInput(sources.ledgerPath, emit),
     readHostsInput(sources.hostState, emit),
     readRegistryInput(sources.registryPath, emit),
     readResultsInput(sources.resultsPath, emit),
+    readWorkStoreInput(sources.workStorePath, emit),
   ]);
   const pricing = await readPricingInput(ledger, fixed.route, fixed.budget.nvidiaProviderId, emit);
   const partial: Omit<DashboardInputs, "verdicts"> = {
@@ -259,7 +290,7 @@ export async function gatherInputs(
     ledger,
     pricing,
     hosts,
-    workItems: null,
+    workItems,
     registry,
     results,
   };

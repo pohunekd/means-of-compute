@@ -43,6 +43,7 @@ function sources(dir: string): DashboardSources {
     hostState: null,
     registryPath: join(dir, "registry.json"),
     resultsPath: join(dir, "results.jsonl"),
+    workStorePath: join(dir, "work-items.json"),
   };
 }
 

@@ -92,7 +92,7 @@ lines, one per item. Order and commit ids vary between runs.
 Narration: "One loopback page shows work, verdicts and spend against the caps."
 
 command:
-`MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --ledger logs/loop-demo/ledger.jsonl --verdicts logs/loop-demo/verdicts --registry logs/loop-demo-registry.json --results logs/loop-demo/loop-results.jsonl`,
+`MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --ledger logs/loop-demo/ledger.jsonl --verdicts logs/loop-demo/verdicts --registry logs/loop-demo-registry.json --results logs/loop-demo/loop-results.jsonl --work logs/loop-demo/work-items.json`,
 then open `http://localhost:8080/`
 
 expected: the line `factory: dashboard listening (dashboard) port 8080`. Work

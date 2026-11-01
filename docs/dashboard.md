@@ -16,7 +16,7 @@ dashboard in this issue.
 ## Run
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>]
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>]
 MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
 ```
 
@@ -24,6 +24,7 @@ MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
 - `--verdicts` defaults to the `verdictDir` of `config/auditor.json`.
 - `--registry` defaults to the `registryPath` of `config/dispatcher.json`.
 - `--results` defaults to the `resultsPath` of `config/loop.json`.
+- `--work` defaults to the `storePath` of `config/work.json`.
 - Each flag is optional and allowed at most once; the value is the next
   argument and must exist and not start with `--`. A repeat, an unknown
   flag, a positional argument or a missing value exits 2.
@@ -119,10 +120,11 @@ otherwise `` `<n>` ``.
 
 One table, caption `Work`, columns
 `item, status, host, branch, model, verdicts, last activity`.
-Source: `work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item`.
+Source: `work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item`.
 
-Rows are the union of ledger record and pending `workItemId`s plus registry
-`workItemId`s when the registry is ok, sorted by latest activity descending,
+Rows are the union of ledger record and pending `workItemId`s, registry
+`workItemId`s when the registry is ok and work store item ids when the store
+is ok, sorted by latest activity descending,
 then id ascending, truncated to `workRowLimit`. Activity is the maximum
 `Date.parse` over the item's record `finishedAt`, pending `finishedAt`
 and, when the registry is ok, registry `startedAt`, `lastSeenAt` and
@@ -130,7 +132,9 @@ and, when the registry is ok, registry `startedAt`, `lastSeenAt` and
 
 ### Status rule (Work)
 
-1. A known work item shows its status (plus reason when set).
+1. A work store item with the id, when the store is ok, shows its status, as
+   `<status> (<statusReason>)` when the reason is set: a parked item shows
+   `parked (<reason>)`, the same items `Parked tasks` counts.
 2. A registry entry for the id has `terminal === null`: the value is that
    entry's `lastSeenState` (`starting` or `running`), taken from the open
    entry with the highest `n`.
@@ -217,12 +221,15 @@ figure with a missing operand gives
 In order: `Human interventions` (source
 `ledger records humanInterventions (<n> records)`), `Retries` (source
 `ledger records retries`), `Parked tasks`
-(`no data (work store not wired)`; source
+(the number of work store items with status `parked`; source
 `work items with status parked (work store, storePath of config/work.json)`),
 `Finished tasks` (`<s> succeeded, <b> blocked`; source `ledger records result`).
-Park state lives only in the work store, and `gatherInputs` sets `workItems`
-to `null`, so no dashboard source carries it; the Work rows of parked items
-show their registry status.
+Park state lives only in the work store (projected from the loop state by
+`src/loop/project.ts`). `gatherInputs` reads it once per request with
+`readWorkStore`, so `Parked tasks` and the Work statuses of status rule 1
+come from the same read. The store's `statusReason` is fixed text and numbers
+(`operator: <code>`, `session lost`, `stalled: <n> rounds ...`,
+`blocked: <n> retries used`).
 Table `Sessions per model (finished tasks)`: columns `model, sessions, ended ok`,
 from the ledger query `byModel`: `sessions` counts record attempts with the
 model (one per dispatcher session entry, so a ledgered start rejection counts
@@ -302,7 +309,9 @@ Never a partial sum.
 | loop results absent with parent present                                                      | empty contents                                   | panel `Models` shows `no closed rounds yet`                              |
 | loop results middle line invalid                                                             | `error results-invalid`, logged                  | panel `Models` shows one row of `error (results-invalid)` cells          |
 | loop results path missing parent, not a file, or unreadable                                  | `error results-unreadable`, logged               | panel `Models` shows one row of `error (results-unreadable)` cells       |
-| work items                                                                                   | `null`                                           | `no data (work store not wired)`                                         |
+| work store absent with parent present                                                        | no-data                                          | `Parked tasks` `no data (work store not wired)`; status rule 1 skipped   |
+| work store not JSON, or fails the store shape or rules                                       | `error work-store-invalid`, logged               | `Parked tasks` `error (work-store-invalid)`; status rule 1 skipped       |
+| work store parent missing, not a file, or unreadable                                         | `error work-store-unreadable`, logged            | `Parked tasks` `error (work-store-unreadable)`; status rule 1 skipped    |
 | Host header not allowed or missing                                                           | 421                                              | none                                                                     |
 | method not `GET`                                                                             | 405                                              | none                                                                     |
 | path not `/`                                                                                 | 404                                              | none                                                                     |
@@ -321,7 +330,7 @@ list shows counts per head SHA, never finding texts.
 
 Run `bun run demo:numbers --ledger <run-ledger>` to print a markdown table of benchmark figures from ledger records plus config prices.
 
-The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems null, then reads figures by panel id and label (`figureOf`). The
+The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems `ok: false`, then reads figures by panel id and label (`figureOf`). The
 `Sessions per model (finished tasks)` section copies the Autonomy table of
 that caption: `model, sessions, ended ok`, with no rate.
 
@@ -334,13 +343,13 @@ Classification config `config/demo-numbers.json` must contain exactly `localProv
 ## Static snapshot (dashboard:snapshot)
 
 ```sh
-bun run dashboard:snapshot -- --as-of <iso> --out <file> [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--hosts <path>]
+bun run dashboard:snapshot -- --as-of <iso> --out <file> [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>] [--hosts <path>]
 ```
 
 The command renders the page once, without a listener, through the server's
 path (`gatherInputs`, `buildDashboard`, `renderDashboard`; `src/factory/snapshot.ts`)
-and writes it atomically to `--out`. `--ledger`, `--verdicts`, `--registry`
-and `--results` default as for `factory:serve`, and the flag rules are the
+and writes it atomically to `--out`. `--ledger`, `--verdicts`, `--registry`,
+`--results` and `--work` default as for `factory:serve`, and the flag rules are the
 same. `--as-of` is required, in the `MOC_DASHBOARD_NOW` form, and is the page
 clock: the header's "Rendered" time, the UTC day of the Usage figures and the
 budget guard decision. The same files and `--as-of` give a byte-identical page.

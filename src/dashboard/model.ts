@@ -345,8 +345,8 @@ function verdictCell(inputs: DashboardInputs, id: string): Cell {
 function workStatus(inputs: DashboardInputs, id: string): Cell {
   const record = recordFor(inputs, id);
   const pending = pendingFor(inputs, id);
-  if (inputs.workItems !== null) {
-    const item = inputs.workItems.find((candidate) => candidate.id === id);
+  if (inputs.workItems.ok) {
+    const item = inputs.workItems.value.find((candidate) => candidate.id === id);
     if (item !== undefined) {
       return item.statusReason === null
         ? textCell(item.status)
@@ -405,8 +405,8 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
     let branch: Cell;
     if (latest !== null) {
       branch = textCell(latest.branch);
-    } else if (inputs.workItems !== null) {
-      const item = inputs.workItems.find((candidate) => candidate.id === id);
+    } else if (inputs.workItems.ok) {
+      const item = inputs.workItems.value.find((candidate) => candidate.id === id);
       if (item !== undefined && item.branch !== null) {
         branch = textCell(item.branch);
       } else {
@@ -443,7 +443,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
         columns: ["item", "status", "host", "branch", "model", "verdicts", "last activity"],
         rows,
         source:
-          "work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item",
+          "work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item",
         note: `showing ${String(shown.length)} of ${String(total)} items`,
       },
     ],
@@ -1067,23 +1067,18 @@ export function modelSuccessRate(row: ModelRow): string | null {
   return (row.successes / decided).toFixed(4);
 }
 
-// gatherInputs sets workItems to null: park state lives only in the work
-// store, which no dashboard source reads.
+// Park state lives only in the work store, projected from the loop state
+// by src/loop/project.ts.
 const PARKED_SOURCE = "work items with status parked (work store, storePath of config/work.json)";
 
 function buildAutonomyPanel(inputs: DashboardInputs): Panel {
-  const parked: Figure =
-    inputs.workItems === null
-      ? {
-          label: "Parked tasks",
-          cell: noDataCell("work store not wired"),
-          source: PARKED_SOURCE,
-        }
-      : textFigure(
-          "Parked tasks",
-          groupDigits(inputs.workItems.filter((item) => item.status === "parked").length),
-          PARKED_SOURCE,
-        );
+  const parked: Figure = inputs.workItems.ok
+    ? textFigure(
+        "Parked tasks",
+        groupDigits(inputs.workItems.value.filter((item) => item.status === "parked").length),
+        PARKED_SOURCE,
+      )
+    : failedFigure("Parked tasks", inputs.workItems.failure, PARKED_SOURCE);
   if (!inputs.ledger.ok) {
     return {
       id: "autonomy",
@@ -1223,10 +1218,10 @@ export function buildDashboard(inputs: DashboardInputs): DashboardModel {
 
 // Row selection for the Work table (rule 5.2.1). The ids are the union of
 // ledger record and pending workItemIds, registry workItemIds when the
-// registry is ok, and work item ids when a source exists. Activity is the
-// newest finishedAt across the item's records, pending entries, and
-// registry times; rows sort by activity descending with null last, then by
-// id ascending. gatherInputs reads verdicts only for the shown ids.
+// registry is ok, and work store item ids when the store is ok. Activity
+// is the newest finishedAt across the item's records, pending entries,
+// and registry times; rows sort by activity descending with null last,
+// then by id ascending. gatherInputs reads verdicts only for the shown ids.
 export function workRows(inputs: Omit<DashboardInputs, "verdicts">): {
   readonly shown: readonly string[];
   readonly total: number;
@@ -1240,8 +1235,8 @@ export function workRows(inputs: Omit<DashboardInputs, "verdicts">): {
       ids.add(entry.workItemId);
     }
   }
-  if (inputs.workItems !== null) {
-    for (const item of inputs.workItems) {
+  if (inputs.workItems.ok) {
+    for (const item of inputs.workItems.value) {
       ids.add(item.id);
     }
   }

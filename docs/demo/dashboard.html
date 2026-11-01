@@ -4,272 +4,452 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Means of Compute dashboard</title>
-        <style>body{font-family:system-ui,sans-serif;max-width:72rem;margin:0 auto;padding:1rem}
-header p{color:#333}
-section{margin-top:2rem;border-top:2px solid #222;padding-top:1rem}
-.figure{margin:0.5rem 0}
-.label{font-weight:bold}
+        <style>:root{color-scheme:light;--bg:#f4f6f8;--surface:#ffffff;--surface-2:#eef2f5;--text:#16202b;--muted:#47596b;--border:#c9d4de;--row:#f7f9fb;--accent:#0b5fa5;--error:#8b1e24;--done-bg:#dcf2e3;--done-text:#14532d;--running-bg:#dbeafe;--running-text:#1e3f7a;--parked-bg:#fdeec9;--parked-text:#6b4e00;--bad-bg:#fadfe0;--bad-text:#7a1f24;--neutral-bg:#e5ebf0;--neutral-text:#33475e;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root{color-scheme:dark;--bg:#0f151c;--surface:#17212c;--surface-2:#1e2c3a;--text:#e8eff6;--muted:#a9bccd;--border:#33475e;--row:#192634;--accent:#7db8ec;--error:#f3a8ad;--done-bg:#173d27;--done-text:#9fe3b6;--running-bg:#1e3a5f;--running-text:#a9ccf5;--parked-bg:#453a12;--parked-text:#f5d67a;--bad-bg:#4a2226;--bad-text:#f3a8ad;--neutral-bg:#2a3a4a;--neutral-text:#c3d3e2}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:17px;line-height:1.45;padding:2rem 1.25rem 3rem}
+header,main{max-width:110rem;margin:0 auto}
+h1{font-size:2.2rem;line-height:1.15;margin:0}
+.tagline{font-size:1.15rem;color:var(--muted);margin:0.5rem 0 0}
+.meta{color:var(--muted);margin:0.75rem 0 0}
+.keyfigures{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem;margin-top:1.25rem}
+.keycard{background:var(--surface);border:1px solid var(--border);border-top:4px solid var(--accent);border-radius:12px;padding:1rem 1.1rem}
+section{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 1px 3px rgb(0 0 0/0.08);margin-top:1.5rem;padding:1.25rem 1.5rem 1.5rem}
+h2{font-size:1.45rem;margin:0 0 1rem}
+.figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:1rem;margin:0 0 1rem}
+.figure{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;margin:0;padding:0.85rem 1rem}
+.label{display:block;font-size:0.8rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted)}
+.keycard .label{font-size:0.78rem}
 .value{font-variant-numeric:tabular-nums}
-.nodata{color:#666;font-style:italic}
-.error{color:#900;font-weight:bold}
-.cite{font-size:0.85rem;color:#444}
-.note{font-size:0.85rem;color:#444}
-table{border-collapse:collapse;margin:1rem 0}
-th,td{border:1px solid #999;padding:0.25rem 0.5rem;text-align:left}
-caption{font-weight:bold;text-align:left;padding-bottom:0.25rem}</style>
+.figure .value,.keycard .value{font-weight:700;font-size:1.25rem}
+.keycard .value{font-size:1.55rem}
+.figure .nodata,.figure .error,.keycard .nodata,.keycard .error{font-size:1rem}
+.nodata{color:var(--muted);font-style:italic}
+.error{color:var(--error);font-weight:700}
+.cite{font-size:0.78rem;color:var(--muted);margin:0.45rem 0 0;overflow-wrap:anywhere}
+.note{font-size:0.85rem;color:var(--muted)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;margin:0.5rem 0;font-size:0.94rem}
+.table-work{min-width:64rem}
+caption{font-weight:700;font-size:1.02rem;text-align:left;padding:0.25rem 0 0.6rem}
+.caption-same{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+thead th{font-size:0.78rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);text-align:left;border-bottom:2px solid var(--border);padding:0.5rem 0.6rem;white-space:nowrap}
+th.num,td.num{text-align:right}
+td{border-bottom:1px solid var(--border);padding:0.55rem 0.6rem;vertical-align:top}
+tbody tr:nth-child(even){background:var(--row)}
+.mono{font-family:var(--mono);font-size:0.86em;overflow-wrap:anywhere}
+.nowrap{white-space:nowrap}
+.verdicts{display:inline-block;min-width:22rem;overflow-wrap:normal}
+.time{white-space:nowrap}
+.pill{display:inline-block;border-radius:999px;padding:0.12rem 0.6rem;font-size:0.85rem;font-weight:700}
+.pill-done{background:var(--done-bg);color:var(--done-text)}
+.pill-running{background:var(--running-bg);color:var(--running-text)}
+.pill-parked{background:var(--parked-bg);color:var(--parked-text)}
+.pill-bad{background:var(--bad-bg);color:var(--bad-text)}
+.pill-neutral{background:var(--neutral-bg);color:var(--neutral-text)}
+details summary{cursor:pointer;font-weight:600;color:var(--accent);white-space:nowrap}
+.placement-full{margin:0.5rem 0 0;color:var(--muted);font-size:0.88rem;max-width:38rem}
+@media (max-width:640px){body{padding:1rem 0.6rem 2rem;font-size:16px}section{padding:1rem}h1{font-size:1.7rem}.keyfigures,.figures{grid-template-columns:1fr}}</style>
       </head>
       <body>
         <header>
           <h1>Means of Compute</h1>
-          <p>
-            Rendered <time datetime="2026-11-01T13:03:54.114Z">2026-11-01T13:03:54.114Z</time>, UTC day
-            2026-11-01. Every figure names its source. "no data" means an input is missing;
+          <p class="tagline">
+            An autonomous software factory on company-owned machines, running on Meta models.
+          </p>
+          <p class="meta">
+            Rendered
+            <time datetime="2026-11-01T14:59:27.742Z" title="2026-11-01T14:59:27.742Z">2026-11-01 14:59:27 UTC</time>, UTC
+            day 2026-11-01. Every figure names its source. "no data" means an input is missing;
             "error" means an input could not be read (details in logs/dashboard.jsonl).
           </p>
+          <div class="keyfigures"><div class="keycard">
+    <span class="label">Total savings</span>
+    <span class="nodata">no data (needs every figure it is computed from)</span>
+    <p class="cite">source: token savings plus compute-hour savings above; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; config/dashboard.json baselines.cloudSandboxHour $0.36 per hour; config/dashboard.json baselines.ownedHostHour $0.045 per hour</p>
+  </div><div class="keycard">
+    <span class="label">Spent total</span>
+    <span class="value">$0.1895 (includes the upper bound for unmeasured calls of gh-moc-130)</span>
+    <p class="cite">source: ledger records and pending entries, tokens × price; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of meta-api not applied</p>
+  </div><div class="keycard">
+    <span class="label">Spent today (UTC 2026-11-01)</span>
+    <span class="value">$0.0091</span>
+    <p class="cite">source: ledger records and pending entries finished on 2026-11-01, tokens × price; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of meta-api not applied</p>
+  </div><div class="keycard">
+    <span class="label">Finished tasks</span>
+    <span class="value">34 succeeded, 0 blocked</span>
+    <p class="cite">source: ledger records result</p>
+  </div><div class="keycard">
+    <span class="label">Parked tasks</span>
+    <span class="value">2</span>
+    <p class="cite">source: work items with status parked (work store, storePath of config/work.json)</p>
+  </div></div>
         </header>
         <main><section id="fleet">
     <h2>Fleet</h2>
-    <table>
-      <caption>
-        Fleet
-      </caption>
-      <thead>
-        <tr>
-          <th>host</th><th>state</th><th>free capacity</th><th>running</th><th>observed</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">desktop</td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value">0</td><td class="nodata">no data (host state not wired)</td>
+    <div class="tablewrap">
+      <table class="table-fleet">
+        <caption class="caption-same">
+          Fleet
+        </caption>
+        <thead>
+          <tr>
+            <th class="">host</th><th class="">state</th><th class="">free capacity</th><th class="num">running</th><th class="">observed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value num">0</td><td class="nodata">no data (host state not wired)</td>
       </tr><tr>
-        <td class="value">laptop-b</td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value">0</td><td class="nodata">no data (host state not wired)</td>
+        <td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value num">0</td><td class="nodata">no data (host state not wired)</td>
       </tr><tr>
-        <td class="value">laptop-mac</td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value">0</td><td class="nodata">no data (host state not wired)</td>
+        <td class="value"><span class="mono nowrap">laptop-mac</span></td><td class="nodata">no data (host state not wired)</td><td class="nodata">no data (host state not wired)</td><td class="value num">0</td><td class="nodata">no data (host state not wired)</td>
       </tr>
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
     <p class="cite">source: collector round of this request (HostCapacity); running sessions from the dispatcher registry</p>
   </section><section id="work">
     <h2>Work</h2>
-    <table>
-      <caption>
-        Work
-      </caption>
-      <thead>
-        <tr>
-          <th>item</th><th>status</th><th>host</th><th>placement</th><th>branch</th><th>model</th><th>verdicts</th><th>last activity</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">gh-moc-239</td><td class="value">done</td><td class="value">desktop</td><td class="value">desktop is idle, on AC power, no battery, CPU 97% free, memory 80% free, GPU present, inside its policy window, 0/2 agents running, score 0.9117; laptop-a: excluded: not idle (user input 0 seconds ago); laptop-b: eligible, score 0.8758</td><td class="value">moc/gh-moc-239</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">4e639dabfdff by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T13:03:54.114Z</td>
+    <div class="tablewrap">
+      <table class="table-work">
+        <caption class="caption-same">
+          Work
+        </caption>
+        <thead>
+          <tr>
+            <th class="">item</th><th class="">status</th><th class="">host</th><th class="">placement</th><th class="">branch</th><th class="">model</th><th class="">verdicts</th><th class="">last activity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">gh-moc-244</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="value"><details>
+    <summary>desktop · score 0.916</summary>
+    <p class="placement-full">desktop is idle, on AC power, no battery, CPU 99% free, memory 80% free, GPU present, inside its policy window, 0/2 agents running, score 0.916; laptop-a: excluded: not idle (user input 0 seconds ago); laptop-b: eligible, score 0.8907</p>
+  </details></td><td class="value"><span class="mono nowrap">moc/gh-moc-244</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">3642d0847019 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T14:59:27.742Z" title="2026-11-01T14:59:27.742Z">2026-11-01 14:59:27 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-235</td><td class="value">done</td><td class="value">laptop-b</td><td class="value">laptop-b is idle, on AC power, battery 98%, CPU 81% free, memory 88% free, GPU inside its policy window, 0/2 agents running, score 0.8776; desktop: excluded: not idle (user input 0 seconds ago); laptop-a: excluded: not idle (user input 0 seconds ago)</td><td class="value">moc/gh-moc-235</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">d88d8e4095a6 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T10:35:43.702Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-239</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="value"><details>
+    <summary>desktop · score 0.9117</summary>
+    <p class="placement-full">desktop is idle, on AC power, no battery, CPU 97% free, memory 80% free, GPU present, inside its policy window, 0/2 agents running, score 0.9117; laptop-a: excluded: not idle (user input 0 seconds ago); laptop-b: eligible, score 0.8758</p>
+  </details></td><td class="value"><span class="mono nowrap">moc/gh-moc-239</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">4e639dabfdff by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T13:03:54.114Z" title="2026-11-01T13:03:54.114Z">2026-11-01 13:03:54 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-233</td><td class="value">done</td><td class="value">desktop</td><td class="value">desktop is idle, on AC power, no battery, CPU 98% free, memory 71% free, GPU inside its policy window, 0/2 agents running, score 0.876; laptop-a: excluded: not idle (outside the policy window); laptop-b: eligible, score 0.8421</td><td class="value">moc/gh-moc-233</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">3d34bd1c2607 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T06:06:22.434Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-235</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="value"><details>
+    <summary>laptop-b · score 0.8776</summary>
+    <p class="placement-full">laptop-b is idle, on AC power, battery 98%, CPU 81% free, memory 88% free, GPU inside its policy window, 0/2 agents running, score 0.8776; desktop: excluded: not idle (user input 0 seconds ago); laptop-a: excluded: not idle (user input 0 seconds ago)</p>
+  </details></td><td class="value"><span class="mono nowrap">moc/gh-moc-235</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">d88d8e4095a6 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T10:35:43.702Z" title="2026-11-01T10:35:43.702Z">2026-11-01 10:35:43 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-197</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-197</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">75fcef65ce16 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T01:06:03.651Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-233</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="value"><details>
+    <summary>desktop · score 0.876</summary>
+    <p class="placement-full">desktop is idle, on AC power, no battery, CPU 98% free, memory 71% free, GPU inside its policy window, 0/2 agents running, score 0.876; laptop-a: excluded: not idle (outside the policy window); laptop-b: eligible, score 0.8421</p>
+  </details></td><td class="value"><span class="mono nowrap">moc/gh-moc-233</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">3d34bd1c2607 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T06:06:22.434Z" title="2026-11-01T06:06:22.434Z">2026-11-01 06:06:22 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-211</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-211</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">8f6e976edc75 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T01:00:34.004Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-197</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-197</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">75fcef65ce16 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T01:06:03.651Z" title="2026-11-01T01:06:03.651Z">2026-11-01 01:06:03 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-207</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-207</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">261fcc12039c by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:58:45.166Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-211</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-211</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">8f6e976edc75 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T01:00:34.004Z" title="2026-11-01T01:00:34.004Z">2026-11-01 01:00:34 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-208</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-208</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">4b328555e931 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:57:21.730Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-207</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-207</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">261fcc12039c by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:58:45.166Z" title="2026-11-01T00:58:45.166Z">2026-11-01 00:58:45 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-212</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-212</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">f443525e4a74 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:54:22.446Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-208</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-208</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">4b328555e931 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:57:21.730Z" title="2026-11-01T00:57:21.730Z">2026-11-01 00:57:21 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-209</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-209</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">33265c6db897 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:51:53.297Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-212</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-212</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">f443525e4a74 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:54:22.446Z" title="2026-11-01T00:54:22.446Z">2026-11-01 00:54:22 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-210</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-210</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">0b0a426ecafa by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:50:21.423Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-209</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-209</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">33265c6db897 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:51:53.297Z" title="2026-11-01T00:51:53.297Z">2026-11-01 00:51:53 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-190</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-190</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">ee9beff3e869 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-11-01T00:23:39.891Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-210</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-210</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">0b0a426ecafa by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:50:21.423Z" title="2026-11-01T00:50:21.423Z">2026-11-01 00:50:21 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-189</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-189</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">fb91abd87be7 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T21:12:39.152Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-190</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-190</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">ee9beff3e869 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-11-01T00:23:39.891Z" title="2026-11-01T00:23:39.891Z">2026-11-01 00:23:39 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-187</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-187</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">c0e68bd2ad8b by muse-spark-1.3-contributor: high 0, medium 0, low 1</td><td class="value">2026-10-31T20:35:36.850Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-189</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-189</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">fb91abd87be7 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T21:12:39.152Z" title="2026-10-31T21:12:39.152Z">2026-10-31 21:12:39 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-186</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-186</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">9e366e440b6d by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T20:09:49.571Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-187</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-187</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">c0e68bd2ad8b by muse-spark-1.3-contributor: high 0, medium 0, low 1</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T20:35:36.850Z" title="2026-10-31T20:35:36.850Z">2026-10-31 20:35:36 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-188</td><td class="value">done</td><td class="value">laptop-b</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-188</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">de3dedbbfafd by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T20:05:33.625Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-186</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-186</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">9e366e440b6d by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T20:09:49.571Z" title="2026-10-31T20:09:49.571Z">2026-10-31 20:09:49 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-183</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-183</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">acbf3230ce32 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T08:38:12.849Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-188</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">laptop-b</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-188</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">de3dedbbfafd by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T20:05:33.625Z" title="2026-10-31T20:05:33.625Z">2026-10-31 20:05:33 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-182</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-182</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">d70cc6c4961e by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T08:29:54.718Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-183</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-183</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">acbf3230ce32 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T08:38:12.849Z" title="2026-10-31T08:38:12.849Z">2026-10-31 08:38:12 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-180</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-180</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">8ed32f624704 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T08:09:19.965Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-182</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-182</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">d70cc6c4961e by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T08:29:54.718Z" title="2026-10-31T08:29:54.718Z">2026-10-31 08:29:54 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-175</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-175</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">ceb6fc21566f by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T07:43:33.295Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-180</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-180</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">8ed32f624704 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T08:09:19.965Z" title="2026-10-31T08:09:19.965Z">2026-10-31 08:09:19 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-174</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-174</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">320a6355ba48 by muse-spark-1.3-contributor: high 0, medium 0, low 0; 42db5f902b20 by muse-spark-1.3-contributor: high 1, medium 0, low 0</td><td class="value">2026-10-31T07:40:14.642Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-175</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-175</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">ceb6fc21566f by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T07:43:33.295Z" title="2026-10-31T07:43:33.295Z">2026-10-31 07:43:33 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-168</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-168</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">773544f26e99 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T07:34:08.759Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-174</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-174</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">320a6355ba48 by muse-spark-1.3-contributor: high 0, medium 0, low 0; 42db5f902b20 by muse-spark-1.3-contributor: high 1, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T07:40:14.642Z" title="2026-10-31T07:40:14.642Z">2026-10-31 07:40:14 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-167</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-167</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">9403edadafc3 by muse-spark-1.3-contributor: high 3, medium 1, low 0; b3f48d3cec5f by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T06:54:38.263Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-168</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-168</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">773544f26e99 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T07:34:08.759Z" title="2026-10-31T07:34:08.759Z">2026-10-31 07:34:08 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-169</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-169</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">e0e4e3a8d82e by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T06:42:03.339Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-167</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-167</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">9403edadafc3 by muse-spark-1.3-contributor: high 3, medium 1, low 0; b3f48d3cec5f by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T06:54:38.263Z" title="2026-10-31T06:54:38.263Z">2026-10-31 06:54:38 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-98</td><td class="value">parked (operator: audit-failed)</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-98</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">none</td><td class="value">2026-10-31T02:44:43.272Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-169</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-169</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">e0e4e3a8d82e by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T06:42:03.339Z" title="2026-10-31T06:42:03.339Z">2026-10-31 06:42:03 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-164</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-164</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">ef1089d24688 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-31T01:47:27.355Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-98</span></td><td class="value"><span class="pill pill-parked">parked (operator: audit-failed)</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-98</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">none</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T02:44:43.272Z" title="2026-10-31T02:44:43.272Z">2026-10-31 02:44:43 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-159</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-159</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">9b72cc1211ae by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T23:42:14.341Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-164</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-164</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">ef1089d24688 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-31T01:47:27.355Z" title="2026-10-31T01:47:27.355Z">2026-10-31 01:47:27 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-26</td><td class="value">parked (operator: no-eligible-auditor)</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-26</td><td class="value">meta-api/muse-spark-1.3-contributor</td><td class="value">none</td><td class="value">2026-10-30T23:06:48.727Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-159</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-159</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">9b72cc1211ae by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T23:42:14.341Z" title="2026-10-30T23:42:14.341Z">2026-10-30 23:42:14 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-156</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-156</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">0465bedd9aba by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T22:09:24.242Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-26</span></td><td class="value"><span class="pill pill-parked">parked (operator: no-eligible-auditor)</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-26</span></td><td class="value"><span class="mono nowrap" title="meta-api/muse-spark-1.3-contributor">meta-api/muse-spar…contributor</span></td><td class="value"><span class="mono verdicts">none</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T23:06:48.727Z" title="2026-10-30T23:06:48.727Z">2026-10-30 23:06:48 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-147</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-147</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">c220f79d9ab0 by muse-spark-1.3-contributor: high 0, medium 0, low 0; e15fe6e59bff by muse-spark-1.3-contributor: high 1, medium 0, low 0</td><td class="value">2026-10-30T20:05:40.022Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-156</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-156</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">0465bedd9aba by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T22:09:24.242Z" title="2026-10-30T22:09:24.242Z">2026-10-30 22:09:24 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">handover-summary-cli</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/handover-summary-cli</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">94c5fe691b0d by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T17:33:11.614Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-147</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-147</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">c220f79d9ab0 by muse-spark-1.3-contributor: high 0, medium 0, low 0; e15fe6e59bff by muse-spark-1.3-contributor: high 1, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T20:05:40.022Z" title="2026-10-30T20:05:40.022Z">2026-10-30 20:05:40 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">handover-docs-links</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/handover-docs-links</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">56141c07cdd4 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T17:19:38.833Z</td>
+        <td class="value"><span class="mono nowrap">handover-summary-cli</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/handover-summary-cli</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">94c5fe691b0d by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T17:33:11.614Z" title="2026-10-30T17:33:11.614Z">2026-10-30 17:33:11 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">handover-work-summary</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/handover-work-summary</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">ba5044bd2341 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T17:07:45.143Z</td>
+        <td class="value"><span class="mono nowrap">handover-docs-links</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/handover-docs-links</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">56141c07cdd4 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T17:19:38.833Z" title="2026-10-30T17:19:38.833Z">2026-10-30 17:19:38 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-139</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-139</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">897f3589714d by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T16:50:50.756Z</td>
+        <td class="value"><span class="mono nowrap">handover-work-summary</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/handover-work-summary</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">ba5044bd2341 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T17:07:45.143Z" title="2026-10-30T17:07:45.143Z">2026-10-30 17:07:45 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-141</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-141</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">d68832709191 by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T16:34:29.119Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-139</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-139</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">897f3589714d by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T16:50:50.756Z" title="2026-10-30T16:50:50.756Z">2026-10-30 16:50:50 UTC</time>
+      </td>
       </tr><tr>
-        <td class="value">gh-moc-130</td><td class="value">done</td><td class="value">desktop</td><td class="nodata">no data (not recorded)</td><td class="value">moc/gh-moc-130</td><td class="value">nvidia-build/meta/muse-glimmer-30b</td><td class="value">a912c33842ab by muse-spark-1.3-contributor: high 0, medium 0, low 0</td><td class="value">2026-10-30T15:56:30.055Z</td>
+        <td class="value"><span class="mono nowrap">gh-moc-141</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-141</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">d68832709191 by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T16:34:29.119Z" title="2026-10-30T16:34:29.119Z">2026-10-30 16:34:29 UTC</time>
+      </td>
+      </tr><tr>
+        <td class="value"><span class="mono nowrap">gh-moc-130</span></td><td class="value"><span class="pill pill-done">done</span></td><td class="value"><span class="mono nowrap">desktop</span></td><td class="nodata">no data (not recorded)</td><td class="value"><span class="mono nowrap">moc/gh-moc-130</span></td><td class="value"><span class="mono nowrap" title="nvidia-build/meta/muse-glimmer-30b">nvidia-build/meta/…glimmer-30b</span></td><td class="value"><span class="mono verdicts">a912c33842ab by muse-spark-1.3-contributor: high 0, medium 0, low 0</span></td><td class="value">
+        <time class="time" datetime="2026-10-30T15:56:30.055Z" title="2026-10-30T15:56:30.055Z">2026-10-30 15:56:30 UTC</time>
+      </td>
       </tr>
-      </tbody>
-    </table>
-    <p class="cite">source: work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; placement: decision recorded on the item&#39;s newest registry entry; last activity: newest ledger finishedAt or registry time of the item</p><p class="note">showing 35 of 35 items</p>
+        </tbody>
+      </table>
+    </div>
+    <p class="cite">source: work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; placement: decision recorded on the item&#39;s newest registry entry; last activity: newest ledger finishedAt or registry time of the item</p><p class="note">showing 36 of 36 items</p>
   </section><section id="usage">
     <h2>Usage</h2>
-    <div class="figure">
-    <span class="label">Spent today (UTC 2026-11-01)</span> <span class="value">$0.0087</span>
+    <div class="figures">
+          <div class="figure">
+    <span class="label">Spent today (UTC 2026-11-01)</span>
+    <span class="value">$0.0091</span>
     <p class="cite">source: ledger records and pending entries finished on 2026-11-01, tokens × price; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of meta-api not applied</p>
   </div><div class="figure">
-    <span class="label">Day cap</span> <span class="value">$12.0000</span>
+    <span class="label">Day cap</span>
+    <span class="value">$12.0000</span>
     <p class="cite">source: config/budget.json dayCapUsd</p>
   </div><div class="figure">
-    <span class="label">Spent total</span> <span class="value">$0.1892 (includes the upper bound for unmeasured calls of gh-moc-130)</span>
+    <span class="label">Spent total</span>
+    <span class="value">$0.1895 (includes the upper bound for unmeasured calls of gh-moc-130)</span>
     <p class="cite">source: ledger records and pending entries, tokens × price; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of meta-api not applied</p>
   </div><div class="figure">
-    <span class="label">Total cap</span> <span class="value">$140.0000</span>
+    <span class="label">Total cap</span>
+    <span class="value">$140.0000</span>
     <p class="cite">source: config/budget.json totalCapUsd</p>
   </div><div class="figure">
-    <span class="label">NVIDIA Build requests today (UTC 2026-11-01)</span> <span class="value">456 of 1,000</span>
+    <span class="label">NVIDIA Build requests today (UTC 2026-11-01)</span>
+    <span class="value">494 of 1,000</span>
     <p class="cite">source: ledger requests of provider nvidia-build finished on 2026-11-01; limit config/budget.json nvidiaDailyRequestLimit</p>
   </div><div class="figure">
-    <span class="label">New sessions</span> <span class="value">admitted (within budget)</span>
+    <span class="label">New sessions</span>
+    <span class="value">admitted (within budget)</span>
     <p class="cite">source: budget guard decision over the ledger, prices and caps above (docs/budget-guard.md)</p>
-  </div><table>
-      <caption>
-        Tokens by provider (finished tasks)
-      </caption>
-      <thead>
-        <tr>
-          <th>provider</th><th>model</th><th>input tokens</th><th>output tokens</th><th>requests</th><th>sources</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">meta-api</td><td class="value">muse-spark-1.3-contributor</td><td class="nodata">no data (not reported)</td><td class="nodata">no data (not reported)</td><td class="value">37</td><td class="value">auditor-usage</td>
+  </div>
+        </div><div class="tablewrap">
+      <table class="table-usage">
+        <caption class="">
+          Tokens by provider (finished tasks)
+        </caption>
+        <thead>
+          <tr>
+            <th class="">provider</th><th class="">model</th><th class="num">input tokens</th><th class="num">output tokens</th><th class="num">requests</th><th class="">sources</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">meta-api</span></td><td class="value"><span class="mono nowrap">muse-spark-1.3-contributor</span></td><td class="nodata num">no data (not reported)</td><td class="nodata num">no data (not reported)</td><td class="value num">38</td><td class="value">auditor-usage</td>
       </tr><tr>
-        <td class="value">nvidia-build</td><td class="value">meta/muse-glimmer-30b</td><td class="nodata">no data (not reported)</td><td class="nodata">no data (not reported)</td><td class="value">1,754</td><td class="value">meter-proxy</td>
+        <td class="value"><span class="mono nowrap">nvidia-build</span></td><td class="value"><span class="mono nowrap">meta/muse-glimmer-30b</span></td><td class="nodata num">no data (not reported)</td><td class="nodata num">no data (not reported)</td><td class="value num">1,792</td><td class="value">meter-proxy</td>
       </tr>
-      </tbody>
-    </table>
-    <p class="cite">source: ledger records tokens[]</p><p class="note">11 pending entries are not in this table; they count in spend above.</p><table>
-      <caption>
-        Session hours by host (finished tasks)
-      </caption>
-      <thead>
-        <tr>
-          <th>host</th><th>hours</th><th>sources</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">desktop</td><td class="value">7.66</td><td class="value">dispatcher-clock</td>
+        </tbody>
+      </table>
+    </div>
+    <p class="cite">source: ledger records tokens[]</p><p class="note">11 pending entries are not in this table; they count in spend above.</p><div class="tablewrap">
+      <table class="table-usage">
+        <caption class="">
+          Session hours by host (finished tasks)
+        </caption>
+        <thead>
+          <tr>
+            <th class="">host</th><th class="num">hours</th><th class="">sources</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">desktop</span></td><td class="value num">7.79</td><td class="value">dispatcher-clock</td>
       </tr><tr>
-        <td class="value">laptop-b</td><td class="value">2.22</td><td class="value">dispatcher-clock</td>
+        <td class="value"><span class="mono nowrap">laptop-b</span></td><td class="value num">2.22</td><td class="value">dispatcher-clock</td>
       </tr><tr>
-        <td class="value">laptop-mac</td><td class="value">0.00</td><td class="value">dispatcher-clock</td>
+        <td class="value"><span class="mono nowrap">laptop-mac</span></td><td class="value num">0.00</td><td class="value">dispatcher-clock</td>
       </tr><tr>
-        <td class="value">total</td><td class="value">9.88</td><td class="value"></td>
+        <td class="value">total</td><td class="value num">10.01</td><td class="value"></td>
       </tr>
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
     <p class="cite">source: ledger records sessionSeconds[]</p>
   </section><section id="savings">
     <h2>Savings</h2>
-    <div class="figure">
-    <span class="label">Frontier-token baseline</span> <span class="nodata">no data (token counts not reported for gh-moc-130, gh-moc-139, gh-moc-141)</span>
+    <div class="figures">
+          <div class="figure">
+    <span class="label">Frontier-token baseline</span>
+    <span class="nodata">no data (token counts not reported for gh-moc-130, gh-moc-139, gh-moc-141)</span>
     <p class="cite">source: ledger records tokens; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M (Claude Opus 5.5 list price (coordinator estimate); https://claude.com/pricing read 2026-10-28; standard tier, no cache or batch discount; as of 2026-10-28)</p>
   </div><div class="figure">
-    <span class="label">Actual token cost</span> <span class="nodata">no data (token counts not reported for gh-moc-130)</span>
+    <span class="label">Actual token cost</span>
+    <span class="nodata">no data (token counts not reported for gh-moc-130)</span>
     <p class="cite">source: ledger records tokens × price; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of meta-api not applied</p>
   </div><div class="figure">
-    <span class="label">Token savings</span> <span class="nodata">no data (needs every figure it is computed from)</span>
+    <span class="label">Token savings</span>
+    <span class="nodata">no data (needs every figure it is computed from)</span>
     <p class="cite">source: frontier-token baseline minus actual token cost above; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M</p>
   </div><div class="figure">
-    <span class="label">Cloud sandbox baseline</span> <span class="value">$3.5578</span>
-    <p class="cite">source: ledger records sessionSeconds (35,578 s); config/dashboard.json baselines.cloudSandboxHour $0.36 per hour (GitHub Codespaces 4-core, compute only (coordinator estimate); https://docs.github.com/en/billing/concepts/product-billing/github-codespaces read 2026-10-28; 0.09 USD per core-hour x 4 cores; as of 2026-10-28)</p>
+    <span class="label">Cloud sandbox baseline</span>
+    <span class="value">$3.6033</span>
+    <p class="cite">source: ledger records sessionSeconds (36,033 s); config/dashboard.json baselines.cloudSandboxHour $0.36 per hour (GitHub Codespaces 4-core, compute only (coordinator estimate); https://docs.github.com/en/billing/concepts/product-billing/github-codespaces read 2026-10-28; 0.09 USD per core-hour x 4 cores; as of 2026-10-28)</p>
   </div><div class="figure">
-    <span class="label">Owned compute cost</span> <span class="value">$0.4447</span>
-    <p class="cite">source: ledger records sessionSeconds (35,578 s); config/dashboard.json baselines.ownedHostHour $0.045 per hour (Electricity at 140 W, upper bound (coordinator estimate); 140 W x 0.3211 USD/kWh, no hardware depreciation; Eurostat nrg_pc_204, Czechia band DC, 2026-S1, 0.2884 EUR/kWh incl. taxes; ECB 2026-10-28, 1 EUR = 1.1133 USD; Mac mini (M4 Pro) max 140 W, https://support.apple.com/en-us/103253 read 2026-10-28; as of 2026-10-28)</p>
+    <span class="label">Owned compute cost</span>
+    <span class="value">$0.4504</span>
+    <p class="cite">source: ledger records sessionSeconds (36,033 s); config/dashboard.json baselines.ownedHostHour $0.045 per hour (Electricity at 140 W, upper bound (coordinator estimate); 140 W x 0.3211 USD/kWh, no hardware depreciation; Eurostat nrg_pc_204, Czechia band DC, 2026-S1, 0.2884 EUR/kWh incl. taxes; ECB 2026-10-28, 1 EUR = 1.1133 USD; Mac mini (M4 Pro) max 140 W, https://support.apple.com/en-us/103253 read 2026-10-28; as of 2026-10-28)</p>
   </div><div class="figure">
-    <span class="label">Compute-hour savings</span> <span class="value">$3.1131</span>
+    <span class="label">Compute-hour savings</span>
+    <span class="value">$3.1529</span>
     <p class="cite">source: cloud sandbox baseline minus owned compute cost above; config/dashboard.json baselines.cloudSandboxHour $0.36 per hour; config/dashboard.json baselines.ownedHostHour $0.045 per hour</p>
   </div><div class="figure">
-    <span class="label">Total savings</span> <span class="nodata">no data (needs every figure it is computed from)</span>
+    <span class="label">Total savings</span>
+    <span class="nodata">no data (needs every figure it is computed from)</span>
     <p class="cite">source: token savings plus compute-hour savings above; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; config/dashboard.json baselines.cloudSandboxHour $0.36 per hour; config/dashboard.json baselines.ownedHostHour $0.045 per hour</p>
   </div><div class="figure">
-    <span class="label">Scope</span> <span class="value">33 finished tasks</span>
+    <span class="label">Scope</span>
+    <span class="value">34 finished tasks</span>
     <p class="cite">source: ledger records; 11 pending entries are not included</p>
   </div>
+        </div>
   </section><section id="autonomy">
     <h2>Autonomy</h2>
-    <div class="figure">
-    <span class="label">Human interventions</span> <span class="value">7</span>
-    <p class="cite">source: ledger records humanInterventions (33 records)</p>
+    <div class="figures">
+          <div class="figure">
+    <span class="label">Human interventions</span>
+    <span class="value">7</span>
+    <p class="cite">source: ledger records humanInterventions (34 records)</p>
   </div><div class="figure">
-    <span class="label">Retries</span> <span class="value">1</span>
+    <span class="label">Retries</span>
+    <span class="value">1</span>
     <p class="cite">source: ledger records retries</p>
   </div><div class="figure">
-    <span class="label">Parked tasks</span> <span class="value">2</span>
+    <span class="label">Parked tasks</span>
+    <span class="value">2</span>
     <p class="cite">source: work items with status parked (work store, storePath of config/work.json)</p>
   </div><div class="figure">
-    <span class="label">Finished tasks</span> <span class="value">33 succeeded, 0 blocked</span>
+    <span class="label">Finished tasks</span>
+    <span class="value">34 succeeded, 0 blocked</span>
     <p class="cite">source: ledger records result</p>
-  </div><table>
-      <caption>
-        Sessions per model (finished tasks)
-      </caption>
-      <thead>
-        <tr>
-          <th>model</th><th>sessions</th><th>ended ok</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">meta/muse-glimmer-30b</td><td class="value">67</td><td class="value">40</td>
+  </div>
+        </div><div class="tablewrap">
+      <table class="table-autonomy">
+        <caption class="">
+          Sessions per model (finished tasks)
+        </caption>
+        <thead>
+          <tr>
+            <th class="">model</th><th class="num">sessions</th><th class="num">ended ok</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">meta/muse-glimmer-30b</span></td><td class="value num">68</td><td class="value num">41</td>
       </tr>
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
     <p class="cite">source: ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)</p>
   </section><section id="models">
     <h2>Models</h2>
-    <table>
-      <caption>
-        Models
-      </caption>
-      <thead>
-        <tr>
-          <th>model</th><th>rounds</th><th>successes</th><th>failures</th><th>excluded</th><th>success rate</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        <td class="value">meta/muse-glimmer-30b</td><td class="value">70</td><td class="value">33</td><td class="value">10</td><td class="value">27</td><td class="value">0.7674</td>
+    <div class="tablewrap">
+      <table class="table-models">
+        <caption class="caption-same">
+          Models
+        </caption>
+        <thead>
+          <tr>
+            <th class="">model</th><th class="num">rounds</th><th class="num">successes</th><th class="num">failures</th><th class="num">excluded</th><th class="num">success rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+        <td class="value"><span class="mono nowrap">meta/muse-glimmer-30b</span></td><td class="value num">71</td><td class="value num">34</td><td class="value num">10</td><td class="value num">27</td><td class="value num">0.7727</td>
       </tr><tr>
-        <td class="value">muse-spark-1.3-contributor</td><td class="value">3</td><td class="value">0</td><td class="value">3</td><td class="value">0</td><td class="value">0.0000</td>
+        <td class="value"><span class="mono nowrap">muse-spark-1.3-contributor</span></td><td class="value num">3</td><td class="value num">0</td><td class="value num">3</td><td class="value num">0</td><td class="value num">0.0000</td>
       </tr>
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
     <p class="cite">source: loop results (resultsPath of config/loop.json, read through readResults)</p>
   </section></main>
       </body>

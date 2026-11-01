@@ -345,24 +345,25 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   if (!autonomyPanel) {
     throw new Error("demo:numbers: autonomy panel missing");
   }
-  const successTable = autonomyPanel.tables.find((t) => t.caption === "Success rate per model");
-  if (!successTable) {
-    throw new Error("demo:numbers: Success rate per model table missing");
+  const sessionsTable = autonomyPanel.tables.find(
+    (t) => t.caption === "Sessions per model (finished tasks)",
+  );
+  if (!sessionsTable) {
+    throw new Error("demo:numbers: Sessions per model table missing");
   }
   const modelRows: NumbersRow[] = [];
-  const tableSource = successTable.source;
-  for (const rowCells of successTable.rows) {
+  const tableSource = sessionsTable.source;
+  for (const rowCells of sessionsTable.rows) {
     const cells = rowCells.map(cellText);
     const modelId = cells[0] ?? "";
-    const attempts = cells[1] ?? "";
-    const successes = cells[2] ?? "";
-    const rate = cells[3] ?? "";
+    const sessions = cells[1] ?? "";
+    const finished = cells[2] ?? "";
     const ids = modelToIds.get(modelId);
     const citation = idList(ids ?? []);
     const source = `${tableSource}; rows: ${citation}; config: none (count, no price)`;
     modelRows.push({
       label: modelId,
-      cells: [mdCell(attempts), mdCell(successes), mdCell(rate)],
+      cells: [mdCell(sessions), mdCell(finished)],
       source,
     });
   }
@@ -399,34 +400,32 @@ export function renderNumbers(numbers: BenchmarkNumbers, withSources = false): s
     }
   }
   lines.push("");
-  lines.push("## Success rate per model");
+  lines.push("## Sessions per model (finished tasks)");
   lines.push("");
   if (withSources) {
-    lines.push("| model | attempts | successes | rate | sources |");
-    lines.push("| --- | --- | --- | --- | --- |");
+    lines.push("| model | sessions | finished | sources |");
+    lines.push("| --- | --- | --- | --- |");
     if (numbers.models.length === 0) {
-      lines.push("| no data (no attempts) |  |  |  |  |");
+      lines.push("| no data (no sessions) |  |  |  |");
     } else {
       for (const row of numbers.models) {
         const model = mdCell(row.label);
-        const attempts = row.cells[0] ?? "";
-        const successes = row.cells[1] ?? "";
-        const rate = row.cells[2] ?? "";
-        lines.push(`| ${model} | ${attempts} | ${successes} | ${rate} | ${mdCell(row.source)} |`);
+        const sessions = row.cells[0] ?? "";
+        const finished = row.cells[1] ?? "";
+        lines.push(`| ${model} | ${sessions} | ${finished} | ${mdCell(row.source)} |`);
       }
     }
   } else {
-    lines.push("| model | attempts | successes | rate |");
-    lines.push("| --- | --- | --- | --- |");
+    lines.push("| model | sessions | finished |");
+    lines.push("| --- | --- | --- |");
     if (numbers.models.length === 0) {
-      lines.push("| no data (no attempts) |  |  |  |");
+      lines.push("| no data (no sessions) |  |  |");
     } else {
       for (const row of numbers.models) {
         const model = mdCell(row.label);
-        const attempts = row.cells[0] ?? "";
-        const successes = row.cells[1] ?? "";
-        const rate = row.cells[2] ?? "";
-        lines.push(`| ${model} | ${attempts} | ${successes} | ${rate} |`);
+        const sessions = row.cells[0] ?? "";
+        const finished = row.cells[1] ?? "";
+        lines.push(`| ${model} | ${sessions} | ${finished} |`);
       }
     }
   }

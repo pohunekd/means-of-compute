@@ -443,7 +443,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
         columns: ["item", "status", "host", "branch", "model", "verdicts", "last activity"],
         rows,
         source:
-          "work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md",
+          "work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item",
         note: `showing ${String(shown.length)} of ${String(total)} items`,
       },
     ],
@@ -1067,18 +1067,22 @@ export function modelSuccessRate(row: ModelRow): string | null {
   return (row.successes / decided).toFixed(4);
 }
 
+// gatherInputs sets workItems to null: park state lives only in the work
+// store, which no dashboard source reads.
+const PARKED_SOURCE = "work items with status parked (work store, storePath of config/work.json)";
+
 function buildAutonomyPanel(inputs: DashboardInputs): Panel {
   const parked: Figure =
     inputs.workItems === null
       ? {
           label: "Parked tasks",
-          cell: noDataCell("no work item source (#15, #17)"),
-          source: "work items with status parked",
+          cell: noDataCell("work store not wired"),
+          source: PARKED_SOURCE,
         }
       : textFigure(
           "Parked tasks",
           groupDigits(inputs.workItems.filter((item) => item.status === "parked").length),
-          "work items with status parked",
+          PARKED_SOURCE,
         );
   if (!inputs.ledger.ok) {
     return {
@@ -1118,15 +1122,15 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
     ],
     tables: [
       {
-        caption: "Success rate per model",
-        columns: ["model", "attempts", "successes", "rate"],
+        caption: "Sessions per model (finished tasks)",
+        columns: ["model", "sessions", "finished"],
         rows: modelRows.map((row): readonly Cell[] => [
           textCell(row.model),
           textCell(groupDigits(row.attempts)),
           textCell(groupDigits(row.successes)),
-          row.successRate === null ? noDataCell("no attempts") : textCell(row.successRate),
         ]),
-        source: "ledger records attempts[] (attempt-level, docs/ledger.md)",
+        source:
+          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; finished: attempt result success (docs/ledger.md)",
         note: null,
       },
     ],

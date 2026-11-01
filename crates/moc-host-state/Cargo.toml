@@ -1,0 +1,13 @@
+[package]
+name = "moc-host-state"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "moc_host_state"
+
+[dependencies]
+ryu-js = "1"
+regex = "1"
+libc = "0.2"

@@ -17,5 +17,5 @@
     "moduleDetection": "force"
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "quarantine"]
+  "exclude": ["node_modules", "quarantine", "target"]
 }

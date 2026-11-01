@@ -6,3 +6,4 @@ logs/*
 !.env.example
 
 config/hosts.json
+target/

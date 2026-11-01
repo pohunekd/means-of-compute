@@ -22,7 +22,7 @@ export interface BudgetGateOptions {
 
 const GATE_CONFIG_PATH = "config/budget-gate.json";
 const MAX_STDERR_SNIPPET = 500;
-const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export class BudgetGateError extends Error {
   constructor(message: string, options?: ErrorOptions) {

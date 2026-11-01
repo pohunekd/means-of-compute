@@ -67,12 +67,15 @@ async function loadRoute(routePath = PROVIDER_ROUTE_PATH): Promise<string[]> {
 }
 
 const NUMBER_PATTERN = /^[0-9]+(\.[0-9]+)?$/;
-const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 function parseOptionalProvider(args: string[]): string | null {
   const index = args.indexOf("--provider");
   if (index === -1) {
     return null;
+  }
+  if (args.lastIndexOf("--provider") !== index) {
+    throw new Error("budget:check: --provider given more than once");
   }
   const raw = args[index + 1];
   if (raw === undefined || !PROVIDER_ID_PATTERN.test(raw)) {

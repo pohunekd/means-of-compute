@@ -5,6 +5,7 @@
 import { expect, test } from "bun:test";
 import {
   type BudgetConfig,
+  loadBudgetConfig,
   poolHolds,
   poolOfProvider,
   poolsOf,
@@ -13,9 +14,13 @@ import {
 import { entriesOfProviders, isBoundedAuditToken, summarizeSpend } from "../../src/budget/cost.js";
 import { decideAdmission } from "../../src/budget/decision.js";
 import { eventKeyString } from "../../src/budget/escalation.js";
+import { BudgetGateError, createCliBudgetGate } from "../../src/budget/gate.js";
 import type { NanoPricing } from "../../src/budget/pricing.js";
 import type { SpendEntry } from "../../src/ledger/types.js";
 import { AUDITOR_USAGE_SOURCE } from "../../src/ledger/types.js";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const BOUND = {
   auditCall: { inputTokens: 262144, outputTokens: 65536 },
@@ -236,4 +241,134 @@ test("a named pool gates its own providers on its own caps and meter bound", () 
   expect(decide([unknown], "nvidia-build").admit).toBe(true);
   expect(eventKeyString("day", NOW, "baseten")).toBe("baseten:day:2026-10-28");
   expect(eventKeyString("day", NOW, null)).toBe("day:2026-10-28");
+});
+
+test("CLI gate routes meta-wonder to wonder pool and meta-api to main pool", async () => {
+  const MOC_BUDGET_NOW = "2026-10-28T12:00:00.000Z";
+  const dir = mkdtempSync(join(tmpdir(), "budget-guard-gate-"));
+  try {
+    cpSync("config", join(dir, "config"), { recursive: true });
+    const budgetPath = join(dir, "config", "budget.json");
+    const base = JSON.parse(readFileSync(budgetPath, "utf8")) as Record<string, unknown>;
+    const wonderPool = {
+      id: "wonder",
+      providers: ["meta-wonder"],
+      dayCapUsd: 1,
+      totalCapUsd: 5,
+      unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+    };
+    const next = { ...base, pools: [wonderPool] };
+    writeFileSync(budgetPath, `${JSON.stringify(next, null, 2)}\n`);
+    mkdirSync(join(dir, "logs"), { recursive: true });
+    const record = {
+      schemaVersion: "v1",
+      workItemId: "w1-budget-pool",
+      finishedAt: "2026-10-28T10:00:00.000Z",
+      tokens: [
+        {
+          provider: "meta-wonder",
+          model: "muse-wonder-1.0",
+          inputTokens: 300000,
+          outputTokens: 0,
+          requests: 1,
+          source: "meter-proxy",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "desktop", seconds: 60, source: "dispatcher-clock" }],
+      attempts: [{ model: "muse-wonder-1.0", result: "success" }],
+      retries: 0,
+      humanInterventions: 0,
+      result: "success",
+    };
+    writeFileSync(join(dir, "logs", "usage-ledger.jsonl"), `${JSON.stringify(record)}\n`);
+    const gate = createCliBudgetGate({
+      command: ["bun", join(process.cwd(), "src/budget/check.ts")],
+      cwd: dir,
+      env: { ...(process.env as Record<string, string>), MOC_BUDGET_NOW },
+      timeoutMs: 10000,
+    });
+    const wonder = await gate.admit("meta-wonder");
+    expect(wonder).toEqual({
+      admit: false,
+      reason: "daily cap reached",
+      line: "refused: daily cap reached (today $1.20, total $1.20, pool wonder)",
+    });
+    const meta = await gate.admit("meta-api");
+    expect(meta.admit).toBe(true);
+    expect(
+      (meta as { admit: true; line: string }).line.endsWith(
+        ", nvidia requests today 0, pool meta)",
+      ),
+    ).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(gate.admit("Bad")).rejects.toBeInstanceOf(BudgetGateError);
+    const state = JSON.parse(readFileSync(join(dir, "logs", "budget-state.json"), "utf8")) as {
+      escalated: string[];
+    };
+    expect(state).toEqual({ escalated: ["wonder:day:2026-10-28"] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadBudgetConfig rejects invalid pool configs with precise messages", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "budget-config-"));
+  try {
+    const base = JSON.parse(readFileSync("config/budget.json", "utf8")) as Record<string, unknown>;
+    const validPool = {
+      id: "wonder",
+      providers: ["meta-wonder"],
+      dayCapUsd: 1,
+      totalCapUsd: 5,
+      unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+    };
+    const poolWithNvidia = { ...validPool, providers: ["nvidia-build"] };
+    const cfg1 = { ...base, pools: [poolWithNvidia] };
+    const path1 = join(dir, "budget1.json");
+    writeFileSync(path1, JSON.stringify(cfg1));
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(loadBudgetConfig(path1)).rejects.toThrow(
+      'nvidiaProviderId "nvidia-build" must stay in the main pool',
+    );
+    const dupPool = {
+      id: "second",
+      providers: ["meta-wonder"],
+      dayCapUsd: 1,
+      totalCapUsd: 5,
+      unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+    };
+    const cfg2 = { ...base, pools: [validPool, dupPool] };
+    const path2 = join(dir, "budget2.json");
+    writeFileSync(path2, JSON.stringify(cfg2));
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(loadBudgetConfig(path2)).rejects.toThrow(
+      'invalid or repeated provider "meta-wonder" in "pools[1].providers"',
+    );
+    const cfg3 = { ...base };
+    delete (cfg3 as Record<string, unknown>).pools;
+    const path3 = join(dir, "budget3.json");
+    writeFileSync(path3, JSON.stringify(cfg3));
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(loadBudgetConfig(path3)).rejects.toThrow(
+      'missing or invalid required field "pools"',
+    );
+    const cfg4 = { ...base };
+    delete (cfg4 as Record<string, unknown>).poolId;
+    const path4 = join(dir, "budget4.json");
+    writeFileSync(path4, JSON.stringify(cfg4));
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(loadBudgetConfig(path4)).rejects.toThrow(
+      'missing or invalid required field "poolId"',
+    );
+    const badCapPool = { ...validPool, dayCapUsd: -1 };
+    const cfg5 = { ...base, pools: [badCapPool] };
+    const path5 = join(dir, "budget5.json");
+    writeFileSync(path5, JSON.stringify(cfg5));
+    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-confusing-void-expression
+    await expect(loadBudgetConfig(path5)).rejects.toThrow(
+      'missing or invalid required field "pools[0].dayCapUsd"',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -31,7 +31,7 @@ export interface BudgetConfig {
 
 const DEFAULT_CONFIG_PATH = "config/budget.json";
 const POOL_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
-const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const POOL_KEYS = ["dayCapUsd", "id", "providers", "totalCapUsd", "unmeasuredMeterCall"];
 
 function requiredString(record: Record<string, unknown>, field: string, path: string): string {
@@ -54,20 +54,21 @@ function requiredCallBound(
   record: Record<string, unknown>,
   field: string,
   path: string,
+  label = field,
 ): UnmeasuredCallBound {
   const value = record[field];
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
+    throw new Error(`Budget config ${path}: missing or invalid required field "${label}"`);
   }
   const entry = value as Record<string, unknown>;
   const keys = Object.keys(entry).sort();
   if (keys.length !== 2 || keys[0] !== "inputTokens" || keys[1] !== "outputTokens") {
-    throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
+    throw new Error(`Budget config ${path}: missing or invalid required field "${label}"`);
   }
   for (const key of keys) {
     const count = entry[key];
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
-      throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
+      throw new Error(`Budget config ${path}: missing or invalid required field "${label}"`);
     }
   }
   return {
@@ -169,17 +170,27 @@ function requiredPools(
     return {
       id,
       providers: [...(providers as string[])],
-      dayCapNanoUsd: requiredCap(entry, "dayCapUsd", path),
-      totalCapNanoUsd: requiredCap(entry, "totalCapUsd", path),
-      unmeasuredMeterCall: requiredCallBound(entry, "unmeasuredMeterCall", path),
+      dayCapNanoUsd: requiredCap(entry, "dayCapUsd", path, `${field}.dayCapUsd`),
+      totalCapNanoUsd: requiredCap(entry, "totalCapUsd", path, `${field}.totalCapUsd`),
+      unmeasuredMeterCall: requiredCallBound(
+        entry,
+        "unmeasuredMeterCall",
+        path,
+        `${field}.unmeasuredMeterCall`,
+      ),
     };
   });
 }
 
-function requiredCap(record: Record<string, unknown>, field: string, path: string): bigint {
+function requiredCap(
+  record: Record<string, unknown>,
+  field: string,
+  path: string,
+  label = field,
+): bigint {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`Budget config ${path}: missing or invalid required field "${field}"`);
+    throw new Error(`Budget config ${path}: missing or invalid required field "${label}"`);
   }
   return priceToNanoUsd(value, field, path);
 }

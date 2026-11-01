@@ -75,7 +75,7 @@ test("a snapshot renders the given files at --as-of and is byte-identical across
     expect([first.code, second.code]).toEqual([0, 0]);
     const page = readFileSync(join(dir, "first.html"), "utf8");
     expect(page).toBe(readFileSync(join(dir, "second.html"), "utf8"));
-    expect(page).toContain(`<time datetime="${AS_OF}">`);
+    expect(page).toContain(`<time datetime="${AS_OF}" title="${AS_OF}">`);
     expect(page).toContain("w1-demo");
   } finally {
     rmSync(dir, { recursive: true, force: true });

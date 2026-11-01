@@ -15,6 +15,7 @@
     "ledger:record": "bun run src/ledger/cli.ts record",
     "ledger:query": "bun run src/ledger/cli.ts query",
     "factory:serve": "bun run src/factory/serve.ts",
+    "dashboard:snapshot": "bun run src/factory/snapshot.ts",
     "dispatch:start": "bun run src/dispatcher/cli.ts start",
     "dispatch:diff": "bun run src/dispatcher/cli.ts diff",
     "dispatch:resolve": "bun run src/dispatcher/cli.ts resolve",

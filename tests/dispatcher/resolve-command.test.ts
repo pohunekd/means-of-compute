@@ -71,6 +71,9 @@ test("an unwritable resolve log exits 2 before the runtime", async () => {
       NVIDIA_API_KEY: "test-nvidia-key",
       META_API_KEY: "test-meta-key",
       BASETEN_API_KEY: "test-baseten-key",
+      PROVIDER_NVIDIA_BUILD_BASE_URL: "http://127.0.0.1:9",
+      PROVIDER_META_API_BASE_URL: "http://127.0.0.1:9",
+      PROVIDER_BASETEN_BASE_URL: "http://127.0.0.1:9",
     };
     const started = Date.now();
     const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
@@ -103,6 +106,9 @@ test("an unknown request with no logs directory is a precondition error", async 
         NVIDIA_API_KEY: "test-nvidia-key",
         META_API_KEY: "test-meta-key",
         BASETEN_API_KEY: "test-baseten-key",
+        PROVIDER_NVIDIA_BUILD_BASE_URL: "http://127.0.0.1:9",
+        PROVIDER_META_API_BASE_URL: "http://127.0.0.1:9",
+        PROVIDER_BASETEN_BASE_URL: "http://127.0.0.1:9",
       };
       const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
       expect(rc).toBe(2);

@@ -183,7 +183,8 @@ section of [docs/loop.md](docs/loop.md), and [docs/meter.md](docs/meter.md) and
   display alias. `config/hosts.json` is gitignored.
 - The GitHub CLI logged in as the account named in `github.factoryLogin`.
 - Environment variables, set by name and never committed: `META_API_KEY`,
-  `NVIDIA_API_KEY`, `MOC_GITHUB_TOKEN`, `MOC_METER_SECRET`, `MOC_METER_LISTEN`,
+  `NVIDIA_API_KEY`, `BASETEN_API_KEY`, `MOC_GITHUB_TOKEN`, `MOC_METER_SECRET`,
+  `MOC_METER_LISTEN`,
   `MOC_METER_HOST_ADDRESSES_FILE`, `MOC_HOST_ROUTES_FILE` and `MOC_DASHBOARD_LISTEN`.
 - Then `bun run loop` for the loop and `bun run coord --goal <file> --phase full`
   for the coordinator.

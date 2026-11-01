@@ -121,7 +121,7 @@ The winner has the highest score; ties break on lower `load1m / cores`, then on
 alias order. When every host is excluded the decision carries
 `chosenHostAlias: null`. The candidate reason names the winning facts:
 `idle, on AC power, no battery` or `idle, on AC power, battery <n>%`, then
-`CPU <p>% free, memory <q>% free`, then `, GPU` when one is present.
+`CPU <p>% free, memory <q>% free`, then `, GPU present` when one is present. The decision reason is `<alias> is <candidate reason>, inside its policy window, <r>/<m> agents running`.
 A host report with `memory.freeMb` above `memory.totalMb` is invalid input.
 The `place` script (`src/placement/cli.ts`) reads
 `--item`, `--hosts`, and `--running` through `src/fs/input.ts`, validates

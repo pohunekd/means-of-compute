@@ -14,7 +14,7 @@ const NOW = new Date("2026-10-28T12:00:00.000Z");
 
 function record(
   workItemId: string,
-  audit: { inputTokens: number | null; outputTokens: number | null },
+  audit: { inputTokens: number | null; outputTokens: number | null; unmeasuredRequests?: number },
   seconds: number,
 ): Record<string, unknown> {
   return {
@@ -46,6 +46,59 @@ function record(
   };
 }
 
+function inputsFor(dir: string) {
+  return gatherInputs(
+    {
+      ledgerPath: join(dir, "ledger.jsonl"),
+      verdictDir: join(dir, "verdicts"),
+      hostState: null,
+      registryPath: join(dir, "registry.json"),
+      resultsPath: join(dir, "results.jsonl"),
+      workStorePath: join(dir, "work-items.json"),
+    },
+    {
+      budget: {
+        statePath: "logs/budget-state.json",
+        escalationLogPath: "logs/budget-escalation.jsonl",
+        dayCapNanoUsd: 1_000_000_000n,
+        totalCapNanoUsd: 10_000_000_000n,
+        nvidiaDailyRequestLimit: 100,
+        nvidiaProviderId: "nvidia-build",
+        unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
+        unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
+      },
+      route: ["meta-api"],
+      baselines: {
+        frontierTokens: {
+          label: "frontier",
+          inputNanoPer1M: 4_000_000_000n,
+          outputNanoPer1M: 20_000_000_000n,
+          source: "test",
+          asOf: "2026-10-28",
+        },
+        cloudSandboxHour: {
+          label: "cloud",
+          nanoPerHour: 360_000_000n,
+          source: "test",
+          asOf: "2026-10-28",
+        },
+        ownedHostHour: {
+          label: "owned",
+          nanoPerHour: 45_000_000n,
+          source: "test",
+          asOf: "2026-10-28",
+        },
+      },
+      workRowLimit: 50,
+      logPath: join("logs", "dashboard.jsonl"),
+    },
+    NOW,
+    () => {
+      throw new Error("expected no input error");
+    },
+  );
+}
+
 test("token savings cover the measured records and every qualifier is a note", async () => {
   const dir = mkdtempSync(join(tmpdir(), "savings-panel-"));
   try {
@@ -58,56 +111,7 @@ test("token savings cover the measured records and every qualifier is a note", a
       join(dir, "ledger.jsonl"),
       lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
     );
-    const inputs = await gatherInputs(
-      {
-        ledgerPath: join(dir, "ledger.jsonl"),
-        verdictDir: join(dir, "verdicts"),
-        hostState: null,
-        registryPath: join(dir, "registry.json"),
-        resultsPath: join(dir, "results.jsonl"),
-        workStorePath: join(dir, "work-items.json"),
-      },
-      {
-        budget: {
-          statePath: "logs/budget-state.json",
-          escalationLogPath: "logs/budget-escalation.jsonl",
-          dayCapNanoUsd: 1_000_000_000n,
-          totalCapNanoUsd: 10_000_000_000n,
-          nvidiaDailyRequestLimit: 100,
-          nvidiaProviderId: "nvidia-build",
-          unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
-          unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
-        },
-        route: ["meta-api"],
-        baselines: {
-          frontierTokens: {
-            label: "frontier",
-            inputNanoPer1M: 4_000_000_000n,
-            outputNanoPer1M: 20_000_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          cloudSandboxHour: {
-            label: "cloud",
-            nanoPerHour: 360_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          ownedHostHour: {
-            label: "owned",
-            nanoPerHour: 45_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-        },
-        workRowLimit: 50,
-        logPath: join("logs", "dashboard.jsonl"),
-      },
-      NOW,
-      () => {
-        throw new Error("expected no input error");
-      },
-    );
+    const inputs = await inputsFor(dir);
     const model = buildDashboard(inputs);
     const figure = (panelId: string, label: string): Figure => {
       const found = model.panels
@@ -157,61 +161,13 @@ test("tokens by provider table covers measured records over w1-demo and w2-demo"
     const lines = [
       record("w1-demo", { inputTokens: 100_000, outputTokens: 10_000 }, 3600),
       record("w2-demo", { inputTokens: null, outputTokens: null }, 1800),
+      record("w3-demo", { inputTokens: 50_000, outputTokens: 5_000, unmeasuredRequests: 1 }, 900),
     ];
     await writeFile(
       join(dir, "ledger.jsonl"),
       lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
     );
-    const inputs = await gatherInputs(
-      {
-        ledgerPath: join(dir, "ledger.jsonl"),
-        verdictDir: join(dir, "verdicts"),
-        hostState: null,
-        registryPath: join(dir, "registry.json"),
-        resultsPath: join(dir, "results.jsonl"),
-        workStorePath: join(dir, "work-items.json"),
-      },
-      {
-        budget: {
-          statePath: "logs/budget-state.json",
-          escalationLogPath: "logs/budget-escalation.jsonl",
-          dayCapNanoUsd: 1_000_000_000n,
-          totalCapNanoUsd: 10_000_000_000n,
-          nvidiaDailyRequestLimit: 100,
-          nvidiaProviderId: "nvidia-build",
-          unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
-          unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
-        },
-        route: ["meta-api"],
-        baselines: {
-          frontierTokens: {
-            label: "frontier",
-            inputNanoPer1M: 4_000_000_000n,
-            outputNanoPer1M: 20_000_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          cloudSandboxHour: {
-            label: "cloud",
-            nanoPerHour: 360_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          ownedHostHour: {
-            label: "owned",
-            nanoPerHour: 45_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-        },
-        workRowLimit: 50,
-        logPath: join("logs", "dashboard.jsonl"),
-      },
-      NOW,
-      () => {
-        throw new Error("expected no input error");
-      },
-    );
+    const inputs = await inputsFor(dir);
     const model = buildDashboard(inputs);
     const usagePanel = model.panels.find((panel) => panel.id === "usage");
     if (usagePanel === undefined) {
@@ -224,7 +180,7 @@ test("tokens by provider table covers measured records over w1-demo and w2-demo"
       throw new Error("expected tokens by provider table");
     }
     const expectedNote =
-      "over 1 of 2 records; w2-demo has no token counts; 0 pending entries are not in this table; they count in spend above.";
+      "over 1 of 3 records; w2-demo has no token counts; w3-demo has calls without usage; 0 pending entries are not in this table; they count in spend above.";
     expect(table.note).toBe(expectedNote);
     expect(table.source).toBe("ledger records tokens[] with full token counts");
     // Rows sorted by provider then model: meta-api before nvidia-build.
@@ -286,56 +242,7 @@ test("tokens by provider table empty when only w2-demo has no token counts", asy
       join(dir, "ledger.jsonl"),
       lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
     );
-    const inputs = await gatherInputs(
-      {
-        ledgerPath: join(dir, "ledger.jsonl"),
-        verdictDir: join(dir, "verdicts"),
-        hostState: null,
-        registryPath: join(dir, "registry.json"),
-        resultsPath: join(dir, "results.jsonl"),
-        workStorePath: join(dir, "work-items.json"),
-      },
-      {
-        budget: {
-          statePath: "logs/budget-state.json",
-          escalationLogPath: "logs/budget-escalation.jsonl",
-          dayCapNanoUsd: 1_000_000_000n,
-          totalCapNanoUsd: 10_000_000_000n,
-          nvidiaDailyRequestLimit: 100,
-          nvidiaProviderId: "nvidia-build",
-          unmeasuredAuditCall: { inputTokens: 262144, outputTokens: 65536 },
-          unmeasuredMeterCall: { inputTokens: 16777216, outputTokens: 65536 },
-        },
-        route: ["meta-api"],
-        baselines: {
-          frontierTokens: {
-            label: "frontier",
-            inputNanoPer1M: 4_000_000_000n,
-            outputNanoPer1M: 20_000_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          cloudSandboxHour: {
-            label: "cloud",
-            nanoPerHour: 360_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-          ownedHostHour: {
-            label: "owned",
-            nanoPerHour: 45_000_000n,
-            source: "test",
-            asOf: "2026-10-28",
-          },
-        },
-        workRowLimit: 50,
-        logPath: join("logs", "dashboard.jsonl"),
-      },
-      NOW,
-      () => {
-        throw new Error("expected no input error");
-      },
-    );
+    const inputs = await inputsFor(dir);
     const model = buildDashboard(inputs);
     const usagePanel = model.panels.find((panel) => panel.id === "usage");
     if (usagePanel === undefined) {

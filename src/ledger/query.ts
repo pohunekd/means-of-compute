@@ -48,6 +48,9 @@ function idsHave(ids: readonly string[], what: string): string {
   return `${ids.join(", ")} ${ids.length === 1 ? "has" : "have"} ${what}`;
 }
 
+// The token figures cover the records with full token counts: every token
+// row reports both counts and has no calls without usage. Excluded records
+// add nothing and are named in the note; no count is invented for them.
 export function providerCoverageOf(records: readonly UsageRecord[]): {
   readonly measured: readonly UsageRecord[];
   readonly coverage: ProviderCoverage;

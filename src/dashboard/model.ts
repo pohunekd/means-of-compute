@@ -852,10 +852,6 @@ function hourPart(baselines: Baselines, key: "cloudSandboxHour" | "ownedHostHour
   return `config/dashboard.json baselines.${key} $${priceText(baseline.nanoPerHour)} per hour`;
 }
 
-// The token figures cover the records with full token counts: every token
-// row reports both counts and has no calls without usage. Excluded records
-// add nothing and are named in the note; no count is invented for them.
-
 function buildSavingsPanel(inputs: DashboardInputs): Panel {
   const figures: Figure[] = [];
   if (!inputs.ledger.ok) {

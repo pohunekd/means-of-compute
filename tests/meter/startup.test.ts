@@ -20,9 +20,11 @@ test("a throwing listening log releases the bound port", async () => {
   const savedEnv: Record<string, string | undefined> = {
     META_API_KEY: process.env.META_API_KEY,
     NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    BASETEN_API_KEY: process.env.BASETEN_API_KEY,
     LOCAL_MODEL_BASE_URL: process.env.LOCAL_MODEL_BASE_URL,
     PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
     PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+    PROVIDER_BASETEN_BASE_URL: process.env.PROVIDER_BASETEN_BASE_URL,
   };
   const restoreEnv = (): void => {
     for (const key of Object.keys(savedEnv)) {
@@ -37,9 +39,11 @@ test("a throwing listening log releases the bound port", async () => {
   };
   process.env.META_API_KEY = "test-meta-key";
   process.env.NVIDIA_API_KEY = "test-nvidia-key";
+  process.env.BASETEN_API_KEY = "test-baseten-key";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
   process.env.PROVIDER_META_API_BASE_URL = "http://127.0.0.1:1";
   process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = "http://127.0.0.1:1";
+  process.env.PROVIDER_BASETEN_BASE_URL = "http://127.0.0.1:1";
   const probe = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,

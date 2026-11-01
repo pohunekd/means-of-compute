@@ -45,7 +45,11 @@ coordinator's daily digest channel.
   bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
   Muse Wonder Standard prices (4.00 input, 0.20 cached input, 20.00 output USD
   per 1M; `config/providers/meta-wonder.json`; source https://dev.meta.ai/docs/pricing-rate-limits,
-  read 2026-10-28) and the unmetered NVIDIA Build (0) come from those
+  read 2026-10-28), the Muse Spark Open prices on Baseten (1.25 input, 0.15
+  cached input, 4.25 output USD per 1M; `config/providers/baseten.json`;
+  third-party list prices from OpenRouter and Artificial Analysis, read
+  2026-11-01, because the Baseten pricing page lists none) and the unmetered
+  NVIDIA Build (0) come from those
   descriptors, never from literals in code.
 - Caps: `config/budget.json` (`poolId` `meta`, `dayCapUsd` 12, `totalCapUsd` 140,
   `pools`, `nvidiaDailyRequestLimit`, `nvidiaProviderId`, `unmeasuredAuditCall`,
@@ -68,6 +72,16 @@ named by `poolId`, which holds every provider outside the named pools. Each
 (the main pool's id included), a provider is in at most one named pool, and
 `nvidiaProviderId` stays in the main pool. `pools` may be empty; a missing
 `poolId` or `pools` exits 2. Every pool provider needs a descriptor.
+
+The committed pools: the main pool `meta` (12 USD a day, 140 USD total)
+holds NVIDIA Build, the Meta API and Muse Wonder. The `baseten` pool holds
+`baseten` (Muse Spark Open), paid from a separate Baseten credit of about
+92 USD that is usable until 2026-11-04: 19 USD a day and 75 USD total, so
+up to four running rounds that finish after a cap (about 4 USD each) still
+fit the credit. Its `unmeasuredMeterCall` input bound is 1,048,576 tokens,
+the model's context window (`contextTokens` in `config/providers/baseten.json`;
+source: the Baseten Muse Spark Open launch post and the OpenRouter listing,
+read 2026-11-01), about 1.59 USD per call without usage.
 
 A token row counts against the pool of its provider, so one record can
 charge two pools (for example a session on one provider and its audit on

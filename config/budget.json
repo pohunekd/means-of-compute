@@ -4,7 +4,18 @@
   "poolId": "meta",
   "dayCapUsd": 12,
   "totalCapUsd": 140,
-  "pools": [],
+  "pools": [
+    {
+      "id": "baseten",
+      "providers": ["baseten"],
+      "dayCapUsd": 19,
+      "totalCapUsd": 75,
+      "unmeasuredMeterCall": {
+        "inputTokens": 1048576,
+        "outputTokens": 65536
+      }
+    }
+  ],
   "nvidiaDailyRequestLimit": 1000,
   "nvidiaProviderId": "nvidia-build",
   "unmeasuredAuditCall": {

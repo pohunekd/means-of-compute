@@ -51,16 +51,15 @@ async function readFrom(
   ) {
     throw new Error("host state limits outside the daemon ceilings");
   }
-  let client: Client;
+  let result;
   try {
-    client = await port.connector.client(alias);
-    const result = await client.runCommand({
+    const client: Client = await port.connector.client(alias);
+    result = await client.runCommand({
       package: packageId,
       command: port.command,
       timeout_ms: limits.pluginTimeoutMs,
       max_output_bytes: limits.maxOutputBytes,
     });
-    return hostStateReplyOf(result);
   } catch (error) {
     const mapped = hostStateErrorOf(error);
     if (mapped === null) {
@@ -71,6 +70,7 @@ async function readFrom(
     }
     throw mapped;
   }
+  return hostStateReplyOf(result);
 }
 
 async function closePort(port: HostStatePortInternals): Promise<void> {

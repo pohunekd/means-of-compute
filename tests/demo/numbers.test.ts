@@ -177,12 +177,12 @@ Ledger: /tmp/ledger.jsonl (records: 2, unfinalized entries: 1)
 | Retries | 1 |
 | Unfinalized entries | 1 (in no figure above) |
 
-## Success rate per model
+## Sessions per model (finished tasks)
 
-| model | attempts | successes | rate |
-| --- | --- | --- | --- |
-| muse-glimmer-30b | 1 | 1 | 1.0000 |
-| muse-spark-1.3-contributor | 2 | 0 | 0.0000 |
+| model | sessions | ended ok |
+| --- | --- | --- |
+| muse-glimmer-30b | 1 | 1 |
+| muse-spark-1.3-contributor | 2 | 0 |
 `;
   expect(output).toBe(expected);
 

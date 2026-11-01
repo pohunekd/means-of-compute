@@ -105,8 +105,8 @@ bun run demo:numbers --ledger logs/loop-demo/ledger.jsonl --sources
 Each figure names its ledger rows and config price entry. The stub run shows 3 tasks
 succeeded and 0 blocked; local token share 0.0000 (0 of 6,352 tokens; NVIDIA Build
 is a cloud provider); actual token cost $0.0001 against a frontier-token baseline of
-$0.0310; 0 human interventions and 0 retries; `meta/muse-glimmer-30b` 4 of 4
-attempts. These come from recorded replies, not from a production run.
+$0.0310; 0 human interventions and 0 retries; `meta/muse-glimmer-30b` 4
+sessions, 4 ended ok. These come from recorded replies, not from a production run.
 
 ## License
 

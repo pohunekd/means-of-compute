@@ -112,7 +112,7 @@ command:
 expected: Tasks completed 3 succeeded, 0 blocked. Local token share
 `0.0000 local (0 of 6,352 tokens)`, since NVIDIA Build is a cloud provider. Actual
 token cost $0.0001 against a frontier-token baseline of $0.0310. Human
-interventions 0, retries 0, `meta/muse-glimmer-30b` 4 of 4 attempts. Each row has a
+interventions 0, retries 0, `meta/muse-glimmer-30b` 4 sessions, 4 ended ok. Each row has a
 sources cell that names the ledger rows and the config price entry, or
 `config: none` for a plain count.
 

@@ -119,7 +119,7 @@ otherwise `` `<n>` ``.
 
 One table, caption `Work`, columns
 `item, status, host, branch, model, verdicts, last activity`.
-Source: `work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md`.
+Source: `work items, dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item`.
 
 Rows are the union of ledger record and pending `workItemId`s plus registry
 `workItemId`s when the registry is ok, sorted by latest activity descending,
@@ -157,7 +157,8 @@ every verdict in store order as
 `<sha12>: invalid (counts disagree)` when the counts disagree;
 `none` when empty; `no data (no verdict store)` when absent; one row's
 `verdicts-unreadable` failure stays on that row. `last activity` is the
-latest ISO timestamp, or `no data (no timestamp)`.
+item's activity above as an ISO timestamp, or `no data (no timestamp)` when
+it is `null`. It is always a recorded time, never the page clock `now`.
 
 ### Usage
 
@@ -216,12 +217,19 @@ figure with a missing operand gives
 In order: `Human interventions` (source
 `ledger records humanInterventions (<n> records)`), `Retries` (source
 `ledger records retries`), `Parked tasks`
-(`no data (no work item source (#15, #17))` in this issue; source
-`work items with status parked`), `Finished tasks`
-(`<s> succeeded, <b> blocked`; source `ledger records result`).
-Table `Success rate per model`: columns `model, attempts, successes, rate`
-with `(s/a).toFixed(4)`. Source:
-`ledger records attempts[] (attempt-level, docs/ledger.md)`.
+(`no data (work store not wired)`; source
+`work items with status parked (work store, storePath of config/work.json)`),
+`Finished tasks` (`<s> succeeded, <b> blocked`; source `ledger records result`).
+Park state lives only in the work store, and `gatherInputs` sets `workItems`
+to `null`, so no dashboard source carries it; the Work rows of parked items
+show their registry status.
+Table `Sessions per model (finished tasks)`: columns `model, sessions, ended ok`,
+from the ledger query `byModel`: `sessions` counts record attempts with the
+model (one per dispatcher session entry, so a ledgered start rejection counts
+as a `failure` session), `ended ok` those with result `success` (the session
+ended in state `finished`). It shows no rate: a session that ended ok is not a
+merged round, and Models excludes start rejections. Source:
+`ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)`.
 
 ### Models (closed loop rounds only)
 
@@ -237,7 +245,9 @@ with `routingResult === "failure"`, and `excluded` counts lines with
 `routingResult === "excluded"`. The success rate covers non-excluded
 rounds only (`successes / (successes + failures)`, `(s/(s+f)).toFixed(4)`)
 and is `n/a` when there are none. Rows sort by `rounds` descending, then
-model id ascending.
+model id ascending. This is the only success rate on the page: a success is
+a merged round, and excluded rounds (`start-rejected`, `lost`, `ci-timeout`,
+`trial-failed`) say nothing about the model.
 
 A middle line that `readResults` rejects is a data error shown as one row
 of `error (results-invalid)` cells; a torn last line is ignored as
@@ -292,7 +302,7 @@ Never a partial sum.
 | loop results absent with parent present                                                      | empty contents                                   | panel `Models` shows `no closed rounds yet`                              |
 | loop results middle line invalid                                                             | `error results-invalid`, logged                  | panel `Models` shows one row of `error (results-invalid)` cells          |
 | loop results path missing parent, not a file, or unreadable                                  | `error results-unreadable`, logged               | panel `Models` shows one row of `error (results-unreadable)` cells       |
-| work items                                                                                   | `null`                                           | `no data (no work item source (#15, #17))`                               |
+| work items                                                                                   | `null`                                           | `no data (work store not wired)`                                         |
 | Host header not allowed or missing                                                           | 421                                              | none                                                                     |
 | method not `GET`                                                                             | 405                                              | none                                                                     |
 | path not `/`                                                                                 | 404                                              | none                                                                     |
@@ -311,7 +321,9 @@ list shows counts per head SHA, never finding texts.
 
 Run `bun run demo:numbers --ledger <run-ledger>` to print a markdown table of benchmark figures from ledger records plus config prices.
 
-The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems null, then reads figures by panel id and label (`figureOf`).
+The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems null, then reads figures by panel id and label (`figureOf`). The
+`Sessions per model (finished tasks)` section copies the Autonomy table of
+that caption: `model, sessions, ended ok`, with no rate.
 
 `Local token share` is a new figure computed over record `tokens[]` (input plus output, auditor-usage included). Locality is from `config/demo-numbers.json` with `localProviderIds` and `cloudProviderIds`. Checks in order: null token counts → `no data (token counts not reported for <ids>)`; unmeasured requests → `no data (requests without usage for <ids>)`; zero total → `no data (no tokens in ledger records)`; else `<ratio> local (<local> of <total> tokens)` with ratio to 4 decimals and counts via `groupDigits`.
 
@@ -332,6 +344,9 @@ and `--results` default as for `factory:serve`, and the flag rules are the
 same. `--as-of` is required, in the `MOC_DASHBOARD_NOW` form, and is the page
 clock: the header's "Rendered" time, the UTC day of the Usage figures and the
 budget guard decision. The same files and `--as-of` give a byte-identical page.
+The coordinator passes the latest ledger `finishedAt` as `--as-of`. When no
+registry time is newer, the newest Work row's `last activity` equals the
+header time: both are that recorded time.
 
 Host state is not collected: a collector round is live fleet I/O, not recorded
 data. Fleet rows are the ledger `sessionSeconds` aliases, `running` comes from

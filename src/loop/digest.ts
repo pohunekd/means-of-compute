@@ -1,5 +1,5 @@
 // Daily digest: one markdown file per finished UTC day, written the day
-// after (merged, running, parked and blocked, spend). A temp file plus
+// after (merged, running, parked and blocked, triage counts, spend). A temp file plus
 // link(2) makes the write exclusive: EEXIST means the file is already
 // written. The digest holds no finding, goal or issue text.
 import { link, open, unlink } from "node:fs/promises";
@@ -44,6 +44,7 @@ export interface DigestInput {
     readonly loop: { readonly phase: string; readonly round: number } | null;
   }[];
   readonly parkedBlocked: readonly { readonly id: string; readonly statusReason: string | null }[];
+  readonly triage: { readonly auto: number; readonly hold: number; readonly skip: number };
   readonly daySpend: string;
   readonly totalSpend: string;
 }
@@ -113,6 +114,12 @@ export function renderDigest(input: DigestInput): string {
       lines.push(`- ${entry.id}: ${entry.statusReason ?? "-"}`);
     }
   }
+  lines.push(
+    "",
+    "## Follow-up triage",
+    "",
+    `- auto ${String(input.triage.auto)}, hold ${String(input.triage.hold)}, skip ${String(input.triage.skip)}`,
+  );
   lines.push("", "## Spend", "", `- Day: ${input.daySpend}`, `- Total: ${input.totalSpend}`, "");
   return lines.join("\n");
 }
@@ -168,8 +175,9 @@ export async function writeDigestFile(
 
 // Runs once per tick after intake: sets a null last run to today without
 // writing, skips while the day is covered, otherwise writes yesterday's
-// file and advances the day in one state write.
-export async function runDigest(ctx: DigestContext): Promise<void> {
+// file and advances the day in one state write. Returns true only when a
+// set day advanced, which starts the day's triage run.
+export async function runDigest(ctx: DigestContext): Promise<boolean> {
   const today = utcCalendarDay(ctx.now());
   const day = await updateLoopState(ctx.statePath, (state) => {
     if (state.lastDigestDay === null) {
@@ -184,7 +192,7 @@ export async function runDigest(ctx: DigestContext): Promise<void> {
     return Promise.resolve({ next: null, value: previousDay(today) });
   });
   if (day === null) {
-    return;
+    return false;
   }
   const written = await writeDigestFile(ctx.digestDir, day, await digestFor(ctx, day));
   if (written === "written") {
@@ -193,6 +201,7 @@ export async function runDigest(ctx: DigestContext): Promise<void> {
   await updateLoopState(ctx.statePath, (state) =>
     Promise.resolve({ next: { ...state, lastDigestDay: today }, value: undefined }),
   );
+  return true;
 }
 
 export async function digestFor(ctx: DigestContext, day: string): Promise<string> {
@@ -229,6 +238,14 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
       parkedBlocked.push({ id: item.id, statusReason: item.statusReason });
     }
   }
+  const triage = { auto: 0, hold: 0, skip: 0 };
+  for (const value of Object.values(state.items)) {
+    for (const entry of (value as unknown as LoopItem).followups) {
+      if (entry.triage !== undefined && utcCalendarDay(new Date(entry.triage.at)) === day) {
+        triage[entry.triage.decision] += 1;
+      }
+    }
+  }
   const providerIds = new Set<string>();
   for (const entry of spendEntriesOf(ledger)) {
     for (const token of entry.tokens) {
@@ -250,6 +267,7 @@ export async function digestFor(ctx: DigestContext, day: string): Promise<string
     merged,
     running,
     parkedBlocked,
+    triage,
     daySpend: spend.day,
     totalSpend: spend.total,
   });

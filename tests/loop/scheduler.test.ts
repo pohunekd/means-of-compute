@@ -337,6 +337,14 @@ async function makeHarness(
       auditCall: { inputTokens: 262144, outputTokens: 65536 },
       meterCall: { inputTokens: 16777216, outputTokens: 65536 },
     },
+    triage: {
+      enabled: false,
+      providerId: PROVIDER,
+      model: "test-auditor",
+      maxAutoPerDay: 1,
+      maxTextChars: 300,
+      denyPatterns: ["/home/"],
+    },
   };
   return {
     ctx,

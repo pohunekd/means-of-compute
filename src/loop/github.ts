@@ -104,6 +104,7 @@ export interface GitHubPort {
     add: readonly string[],
     remove: readonly string[],
   ): Promise<void>;
+  editIssueBody(repo: string, issue: number, body: string): Promise<void>;
   readyIssues(repo: string, labels: readonly string[]): Promise<readonly IntakeIssue[]>;
   issueState(repo: string, issue: number): Promise<"open" | "closed">;
 }
@@ -652,6 +653,21 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     await runGh(config, env, step, argv);
   }
 
+  async function editIssueBody(repo: string, issue: number, body: string): Promise<void> {
+    const step = "editIssueBody";
+    await useBodyFile(config, body, step, async (file) => {
+      await runGh(config, env, step, [
+        "issue",
+        "edit",
+        String(issue),
+        "-R",
+        repo,
+        "--body-file",
+        file,
+      ]);
+    });
+  }
+
   async function readyIssues(
     repo: string,
     labels: readonly string[],
@@ -739,6 +755,7 @@ export function createGhPort(config: LoopGithubConfig, env: GhEnv): GitHubPort {
     createIssue,
     factoryIssues,
     editIssueLabels,
+    editIssueBody,
     readyIssues,
     issueState,
   };

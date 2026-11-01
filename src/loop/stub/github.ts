@@ -650,6 +650,12 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     row.labels = row.labels.filter((label) => !remove.includes(label));
   }
 
+  async function editIssueBody(repo: string, issue: number, body: string): Promise<void> {
+    requireRepo("editIssueBody", repo);
+    await Promise.resolve();
+    requireIssue("editIssueBody", issue).body = body;
+  }
+
   return {
     viewerLogin,
     checkRuns,
@@ -666,6 +672,7 @@ export function createStubGitHub(options: StubGitHubOptions): GitHubPort & {
     seedIssue,
     factoryIssues,
     editIssueLabels,
+    editIssueBody,
     readyIssues,
     issueState,
     snapshot,

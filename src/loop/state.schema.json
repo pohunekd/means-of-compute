@@ -194,7 +194,34 @@
       "properties": {
         "key": { "type": "string", "minLength": 1 },
         "kind": { "enum": ["finding", "blocked"] },
-        "posted": { "type": ["integer", "null"], "minimum": 0 }
+        "posted": { "type": ["integer", "null"], "minimum": 0 },
+        "triage": { "$ref": "#/$defs/followupTriage" }
+      }
+    },
+    "followupTriage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "code", "at", "appendix", "comment", "done"],
+      "properties": {
+        "decision": { "enum": ["auto", "hold", "skip"] },
+        "code": {
+          "enum": [
+            "auto",
+            "hold-model",
+            "hold-chain",
+            "hold-sections",
+            "hold-intake",
+            "hold-privacy",
+            "skip-not-open",
+            "skip-relabelled",
+            "skip-edited",
+            "skip-no-finding"
+          ]
+        },
+        "at": { "$ref": "#/$defs/isoDateTime" },
+        "appendix": { "type": ["string", "null"] },
+        "comment": { "type": ["string", "null"] },
+        "done": { "type": "boolean" }
       }
     },
     "finalize": {

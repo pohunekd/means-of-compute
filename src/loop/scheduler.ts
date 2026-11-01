@@ -22,8 +22,14 @@ import type { SpendBounds } from "../budget/cost.js";
 import { placeObserved } from "../placement/observed.js";
 import { cooledHosts } from "./host-cooldown.js";
 import { createRetireMemory, retireClosedSessions, type SchedulerDispatcher } from "./retire.js";
-import type { LoopHostCooldownConfig, LoopIntakeConfig, LoopRoutingConfig } from "./config.js";
+import type {
+  LoopHostCooldownConfig,
+  LoopIntakeConfig,
+  LoopRoutingConfig,
+  LoopTriageConfig,
+} from "./config.js";
 import { createIntakeState, runIntake, type IntakeState } from "./intake.js";
+import { runTriage } from "./triage.js";
 import { authorModelsOf, readLedger } from "../ledger/read.js";
 import { auditableChoice, chooseModel } from "./policy.js";
 import { briefBranchOf, buildBrief } from "./brief.js";
@@ -76,6 +82,7 @@ export interface SchedulerContext extends MergeContext {
   readonly providersDir: string;
   readonly nvidiaProviderId: string;
   readonly spendBounds: SpendBounds;
+  readonly triage: LoopTriageConfig;
 }
 
 export interface TickReport {
@@ -99,6 +106,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const cooldownsLogged = new Set<string>();
   const retireMemory = createRetireMemory();
   let sweep: Promise<void> | null = null;
+  let triage: Promise<void> | null = null;
 
   // One retire sweep in flight at a time, off the tick's path; settled()
   // waits for it so shutdown never closes the port under a retire. Only a
@@ -116,6 +124,24 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
       (error: unknown) => {
         fail(error);
         sweep = null;
+      },
+    );
+  }
+  // One triage run per new digest day, off the tick's path like the sweep:
+  // its model calls can take minutes. Only a thrown error stops the scheduler.
+  function launchTriage(): void {
+    if (settled() || triage !== null) {
+      return;
+    }
+    const running = runTriage(ctx, settled);
+    triage = running;
+    running.then(
+      () => {
+        triage = null;
+      },
+      (error: unknown) => {
+        fail(error);
+        triage = null;
       },
     );
   }
@@ -184,6 +210,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         ...[...launches.values()].filter((entry) => !entry.watch).map((entry) => entry.promise),
         ...timeouts.values(),
         ...(sweep === null ? [] : [sweep]),
+        ...(triage === null ? [] : [triage]),
       ];
       if (pending.length === 0) {
         if (failure !== null) {
@@ -211,6 +238,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         intake,
         cooldownsLogged,
         launchSweep,
+        launchTriage,
       ),
     stop: () => {
       stopped = true;
@@ -600,6 +628,7 @@ async function tickOnce(
   intake: IntakeState,
   cooldownsLogged: Set<string>,
   launchSweep: () => void,
+  launchTriage: () => void,
 ): Promise<TickReport> {
   if (isStopped()) {
     return { claimed: [], launched: [] };
@@ -651,7 +680,9 @@ async function tickOnce(
   }
   if (!isStopped() && getFailure() === null) {
     await runIntake(ctx, intake);
-    await runDigest(ctx);
+    if (await runDigest(ctx)) {
+      launchTriage();
+    }
     launchSweep();
   }
   const carry: ClaimCarry = { active: 0, running: [], claimed: [], launched: [] };

@@ -65,7 +65,33 @@
       "maxGoalChars": 12000
     },
     "followupLabels": ["factory:followup", "readiness:design-needed"],
-    "escalationLabel": "factory:escalation"
+    "escalationLabel": "factory:escalation",
+    "triage": {
+      "enabled": false,
+      "providerId": "meta-api",
+      "model": "muse-spark-1.3-contributor",
+      "maxAutoPerDay": 3,
+      "maxTextChars": 300,
+      "denyPatterns": [
+        "/home/",
+        "/Users/",
+        "/mnt/",
+        "/var/",
+        "/tmp/",
+        "~/",
+        "192\\.168\\.",
+        "\\b10\\.\\d+\\.\\d+\\.\\d+\\b",
+        "\\b100\\.(6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.\\d+\\.\\d+\\b",
+        "\\b172\\.(1[6-9]|2\\d|3[01])\\.\\d+\\.\\d+\\b",
+        "\\.ts\\.net",
+        "\\bsk-[A-Za-z0-9]",
+        "nvapi-",
+        "ghp_",
+        "github_pat_",
+        "moc1\\.",
+        "BEGIN [A-Z ]*PRIVATE KEY"
+      ]
+    }
   },
   "repos": [
     {

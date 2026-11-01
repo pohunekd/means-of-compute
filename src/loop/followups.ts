@@ -38,7 +38,7 @@ function cutTitle(title: string): string {
 
 // An inline code span: newlines become spaces, wrapped in one more backtick
 // than the longest run inside, padded when the text touches the fence.
-function codeSpan(text: string): string {
+export function codeSpan(text: string): string {
   const flat = text.replace(/\n/g, " ");
   const fence = "`".repeat(longestBacktickRun(flat) + 1);
   const padded = `${flat.startsWith("`") ? " " : ""}${flat}${flat.endsWith("`") ? " " : ""}`;
@@ -118,8 +118,8 @@ export function blockedFollowup(
 
 // The stored verdict with headSha and pull number of the loop item pull.
 // A human merge with no audit at that head yields none.
-async function mergedVerdict(
-  ctx: ParkContext,
+export async function mergedVerdict(
+  ctx: Pick<ParkContext, "verdictDir">,
   item: WorkItem,
   li: LoopItem,
 ): Promise<AuditVerdict | null> {

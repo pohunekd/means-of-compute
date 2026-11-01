@@ -71,10 +71,34 @@ export interface Escalation {
   readonly posted: number | null;
 }
 
+export type TriageCode =
+  | "auto"
+  | "hold-model"
+  | "hold-chain"
+  | "hold-sections"
+  | "hold-intake"
+  | "hold-privacy"
+  | "skip-not-open"
+  | "skip-relabelled"
+  | "skip-edited"
+  | "skip-no-finding";
+
+// One triage decision of a finding follow-up. appendix is set for auto,
+// comment for hold; done is set once the GitHub writes are verified.
+export interface FollowupTriage {
+  readonly decision: "auto" | "hold" | "skip";
+  readonly code: TriageCode;
+  readonly at: string;
+  readonly appendix: string | null;
+  readonly comment: string | null;
+  readonly done: boolean;
+}
+
 export interface Followup {
   readonly key: string;
   readonly kind: "finding" | "blocked";
   readonly posted: number | null;
+  readonly triage?: FollowupTriage;
 }
 
 export interface Finalize {

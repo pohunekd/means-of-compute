@@ -50,6 +50,15 @@ export interface LoopIntakeConfig {
   readonly maxGoalChars: number;
 }
 
+export interface LoopTriageConfig {
+  readonly enabled: boolean;
+  readonly providerId: string;
+  readonly model: string;
+  readonly maxAutoPerDay: number;
+  readonly maxTextChars: number;
+  readonly denyPatterns: readonly string[];
+}
+
 export interface LoopCheckExcerptConfig {
   readonly maxBytes: number;
   readonly stripPrefixes: readonly string[];
@@ -70,6 +79,7 @@ export interface LoopGithubConfig {
   readonly intake: LoopIntakeConfig;
   readonly followupLabels: readonly string[];
   readonly escalationLabel: string;
+  readonly triage: LoopTriageConfig;
 }
 
 export interface LoopRepoConfig {
@@ -392,6 +402,35 @@ function parseIntake(
   };
 }
 
+// The triage model must be a routed model on its routed provider, which
+// loadLoopConfig checks once routing is parsed.
+function parseTriage(value: unknown, path: string): LoopTriageConfig {
+  const prefix = "github.triage";
+  const record = asRecord(value, path, prefix);
+  checkKeys(
+    record,
+    ["enabled", "providerId", "model", "maxAutoPerDay", "maxTextChars", "denyPatterns"],
+    path,
+    prefix,
+  );
+  const denyPatterns = parseStringList(record, path, prefix, "denyPatterns", 1);
+  for (const pattern of denyPatterns) {
+    try {
+      new RegExp(pattern);
+    } catch {
+      throw invalid(path, `${prefix}.denyPatterns`);
+    }
+  }
+  return {
+    enabled: requiredBoolean(record, path, prefix, "enabled"),
+    providerId: requiredString(record, path, prefix, "providerId"),
+    model: requiredString(record, path, prefix, "model"),
+    maxAutoPerDay: requiredInteger(record, path, prefix, "maxAutoPerDay", 1, 50),
+    maxTextChars: requiredInteger(record, path, prefix, "maxTextChars", 20, 1000),
+    denyPatterns,
+  };
+}
+
 function parseGithub(
   value: unknown,
   path: string,
@@ -415,6 +454,7 @@ function parseGithub(
       "intake",
       "followupLabels",
       "escalationLabel",
+      "triage",
     ],
     path,
     "github",
@@ -444,7 +484,16 @@ function parseGithub(
   }
   const intake = parseIntake(record["intake"], path, workModels);
   const followupLabels = parseStringList(record, path, "github", "followupLabels", 1);
-  if (followupLabels.includes(intake.optInLabel)) {
+  if (
+    followupLabels.includes(intake.optInLabel) ||
+    followupLabels.includes(intake.readyLabel) ||
+    followupLabels.includes(intake.blockedLabel)
+  ) {
+    throw invalid(path, "github.followupLabels");
+  }
+  const triage = parseTriage(record["triage"], path);
+  // Triage removes every follow-up label after the first, the lookup label.
+  if (triage.enabled && followupLabels.length < 2) {
     throw invalid(path, "github.followupLabels");
   }
   const escalationLabel = requiredString(record, path, "github", "escalationLabel");
@@ -466,6 +515,7 @@ function parseGithub(
     intake,
     followupLabels,
     escalationLabel,
+    triage,
   };
 }
 
@@ -711,6 +761,10 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     );
   }
   const github = parseGithub(record["github"], path, workModels);
+  const routing = await parseRouting(record["routing"], path);
+  if (routing.models[github.triage.model] !== github.triage.providerId) {
+    throw invalid(path, "github.triage.model");
+  }
   const repos = parseRepos(record["repos"], path, specRepos);
   const maxBriefBytes = requiredInteger(record, path, "", "maxBriefBytes", 1024, 1048576);
   if (github.checkExcerpt.maxBytes * 4 > maxBriefBytes) {
@@ -741,7 +795,7 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     retireRetryMs: requiredInteger(record, path, "", "retireRetryMs", 1000, 86400000),
     maxBriefBytes,
     stall: parseStall(record["stall"], path),
-    routing: await parseRouting(record["routing"], path),
+    routing,
     github,
     repos,
     trialMerge: parseTrialMerge(record["trialMerge"], path),

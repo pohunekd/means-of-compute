@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TriageReply",
+  "description": "Model reply for one follow-up triage: auto with scope, DoD and size S, or hold with a reason.",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "scope", "dod", "size"],
+      "properties": {
+        "decision": { "const": "auto" },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/line" }
+        },
+        "dod": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/line" }
+        },
+        "size": { "const": "S" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "reason"],
+      "properties": {
+        "decision": { "const": "hold" },
+        "reason": { "$ref": "#/$defs/line" }
+      }
+    }
+  ],
+  "$defs": {
+    "line": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^\\S[^\\r\\n]*$" }
+  }
+}

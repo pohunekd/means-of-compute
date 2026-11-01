@@ -318,3 +318,38 @@ The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.
 Classification config `config/demo-numbers.json` must contain exactly `localProviderIds` and `cloudProviderIds`, each an array of unique provider ids with descriptors, disjoint. Current content: local `["local"]`; cloud `["meta-api", "meta-wonder", "nvidia-build"]`. `buildNumbers` fails fast if a provider in records or pending entries is not classified.
 
 `--sources` adds a `sources` column. The flag takes no value and may appear once; repeating it exits 2. With `--sources`, each row cites the ledger rows by `workItemId` or `entryId` and the config entry it was computed from. A row citation is an id, not a line number: records are cited by `workItemId` and pending entries by `entryId`. The source format is `<base>; rows: <citation>`, with count rows appending `; config: none (count, no price)`. For money rows the base names the `config/providers/<id>.json` price or the `config/dashboard.json` baseline; for the share row the base names `config/demo-numbers.json`. Ids are sorted ascending and joined with `, `; an empty list is `none`.
+
+## Static snapshot (dashboard:snapshot)
+
+```sh
+bun run dashboard:snapshot -- --as-of <iso> --out <file> [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--hosts <path>]
+```
+
+The command renders the page once, without a listener, through the server's
+path (`gatherInputs`, `buildDashboard`, `renderDashboard`; `src/factory/snapshot.ts`)
+and writes it atomically to `--out`. `--ledger`, `--verdicts`, `--registry`
+and `--results` default as for `factory:serve`, and the flag rules are the
+same. `--as-of` is required, in the `MOC_DASHBOARD_NOW` form, and is the page
+clock: the header's "Rendered" time, the UTC day of the Usage figures and the
+budget guard decision. The same files and `--as-of` give a byte-identical page.
+
+Host state is not collected: a collector round is live fleet I/O, not recorded
+data. Fleet rows are the ledger `sessionSeconds` aliases, `running` comes from
+the registry, and state, free capacity and observed show
+`no data (host state not wired)`.
+
+Before writing, the page is checked. No `evidenceDenyPatterns` entry of
+`config/coordinator.json` may match it, and no host name from the host map
+(`--hosts`, default `config/hosts.json`) whose alias differs from it may appear.
+A host-map name matches case-insensitively anywhere in the page, also inside a
+longer token; any hit exits 3 and writes no file. The host map is gitignored; when it
+is absent the command says so on stderr and checks the deny patterns only. A
+hit prints `dashboard:snapshot: page matches deny pattern <index> of config/coordinator.json`
+or `dashboard:snapshot: page contains the host name mapped to alias <alias>`,
+never the matched text, and exits 3. A usage or config error, or any input
+error that the server would show as `error (<code>)`, exits 2. Neither writes
+the file. Success prints `dashboard:snapshot: wrote <file> as of <iso>`.
+
+The committed snapshot is `docs/demo/dashboard.html`. It is generated, so it is
+listed in `.prettierignore` and never edited by hand; the coordinator
+regenerates and commits it.

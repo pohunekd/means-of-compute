@@ -1123,14 +1123,14 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
     tables: [
       {
         caption: "Sessions per model (finished tasks)",
-        columns: ["model", "sessions", "finished"],
+        columns: ["model", "sessions", "ended ok"],
         rows: modelRows.map((row): readonly Cell[] => [
           textCell(row.model),
           textCell(groupDigits(row.attempts)),
           textCell(groupDigits(row.successes)),
         ]),
         source:
-          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; finished: attempt result success (docs/ledger.md)",
+          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)",
         note: null,
       },
     ],

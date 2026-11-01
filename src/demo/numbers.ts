@@ -357,13 +357,13 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
     const cells = rowCells.map(cellText);
     const modelId = cells[0] ?? "";
     const sessions = cells[1] ?? "";
-    const finished = cells[2] ?? "";
+    const endedOk = cells[2] ?? "";
     const ids = modelToIds.get(modelId);
     const citation = idList(ids ?? []);
     const source = `${tableSource}; rows: ${citation}; config: none (count, no price)`;
     modelRows.push({
       label: modelId,
-      cells: [mdCell(sessions), mdCell(finished)],
+      cells: [mdCell(sessions), mdCell(endedOk)],
       source,
     });
   }
@@ -403,7 +403,7 @@ export function renderNumbers(numbers: BenchmarkNumbers, withSources = false): s
   lines.push("## Sessions per model (finished tasks)");
   lines.push("");
   if (withSources) {
-    lines.push("| model | sessions | finished | sources |");
+    lines.push("| model | sessions | ended ok | sources |");
     lines.push("| --- | --- | --- | --- |");
     if (numbers.models.length === 0) {
       lines.push("| no data (no sessions) |  |  |  |");
@@ -411,12 +411,12 @@ export function renderNumbers(numbers: BenchmarkNumbers, withSources = false): s
       for (const row of numbers.models) {
         const model = mdCell(row.label);
         const sessions = row.cells[0] ?? "";
-        const finished = row.cells[1] ?? "";
-        lines.push(`| ${model} | ${sessions} | ${finished} | ${mdCell(row.source)} |`);
+        const endedOk = row.cells[1] ?? "";
+        lines.push(`| ${model} | ${sessions} | ${endedOk} | ${mdCell(row.source)} |`);
       }
     }
   } else {
-    lines.push("| model | sessions | finished |");
+    lines.push("| model | sessions | ended ok |");
     lines.push("| --- | --- | --- |");
     if (numbers.models.length === 0) {
       lines.push("| no data (no sessions) |  |  |");
@@ -424,8 +424,8 @@ export function renderNumbers(numbers: BenchmarkNumbers, withSources = false): s
       for (const row of numbers.models) {
         const model = mdCell(row.label);
         const sessions = row.cells[0] ?? "";
-        const finished = row.cells[1] ?? "";
-        lines.push(`| ${model} | ${sessions} | ${finished} |`);
+        const endedOk = row.cells[1] ?? "";
+        lines.push(`| ${model} | ${sessions} | ${endedOk} |`);
       }
     }
   }

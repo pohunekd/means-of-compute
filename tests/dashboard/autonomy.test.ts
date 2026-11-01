@@ -100,7 +100,7 @@ test("the autonomy table counts sessions per model and the only rate column is i
     expect(autonomyOf(model.panels).tables).toEqual([
       {
         caption: "Sessions per model (finished tasks)",
-        columns: ["model", "sessions", "finished"],
+        columns: ["model", "sessions", "ended ok"],
         rows: [
           [
             { kind: "text", text: GLIMMER },
@@ -109,7 +109,7 @@ test("the autonomy table counts sessions per model and the only rate column is i
           ],
         ],
         source:
-          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; finished: attempt result success (docs/ledger.md)",
+          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)",
         note: null,
       },
     ]);

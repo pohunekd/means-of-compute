@@ -223,13 +223,13 @@ In order: `Human interventions` (source
 Park state lives only in the work store, and `gatherInputs` sets `workItems`
 to `null`, so no dashboard source carries it; the Work rows of parked items
 show their registry status.
-Table `Sessions per model (finished tasks)`: columns `model, sessions, finished`,
+Table `Sessions per model (finished tasks)`: columns `model, sessions, ended ok`,
 from the ledger query `byModel`: `sessions` counts record attempts with the
 model (one per dispatcher session entry, so a ledgered start rejection counts
-as a `failure` session), `finished` those with result `success` (the session
-ended in state `finished`). It shows no rate: a finished session is not a
+as a `failure` session), `ended ok` those with result `success` (the session
+ended in state `finished`). It shows no rate: a session that ended ok is not a
 merged round, and Models excludes start rejections. Source:
-`ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; finished: attempt result success (docs/ledger.md)`.
+`ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)`.
 
 ### Models (closed loop rounds only)
 
@@ -323,7 +323,7 @@ Run `bun run demo:numbers --ledger <run-ledger>` to print a markdown table of be
 
 The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems null, then reads figures by panel id and label (`figureOf`). The
 `Sessions per model (finished tasks)` section copies the Autonomy table of
-that caption: `model, sessions, finished`, with no rate.
+that caption: `model, sessions, ended ok`, with no rate.
 
 `Local token share` is a new figure computed over record `tokens[]` (input plus output, auditor-usage included). Locality is from `config/demo-numbers.json` with `localProviderIds` and `cloudProviderIds`. Checks in order: null token counts → `no data (token counts not reported for <ids>)`; unmeasured requests → `no data (requests without usage for <ids>)`; zero total → `no data (no tokens in ledger records)`; else `<ratio> local (<local> of <total> tokens)` with ratio to 4 decimals and counts via `groupDigits`.
 

@@ -179,7 +179,7 @@ Ledger: /tmp/ledger.jsonl (records: 2, unfinalized entries: 1)
 
 ## Sessions per model (finished tasks)
 
-| model | sessions | finished |
+| model | sessions | ended ok |
 | --- | --- | --- |
 | muse-glimmer-30b | 1 | 1 |
 | muse-spark-1.3-contributor | 2 | 0 |

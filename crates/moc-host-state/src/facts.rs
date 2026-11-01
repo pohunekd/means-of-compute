@@ -27,17 +27,6 @@ pub struct Facts {
     pub policyAllowedWindowEnd: Option<String>,
 }
 
-fn is_integer_number(v: &serde_json::Value) -> bool {
-    match v.as_f64() {
-        Some(n) => n.is_finite() && n.fract() == 0.0,
-        None => false,
-    }
-}
-
-fn is_number(v: &serde_json::Value) -> bool {
-    v.as_f64().is_some()
-}
-
 pub fn validate_facts(
     value: &serde_json::Value,
     path: &str,
@@ -50,7 +39,6 @@ pub fn validate_facts(
         None => return Err(format!("{} facts: not an object", prefix)),
     };
 
-    // Known keys in schema order
     const KNOWN: [&str; 19] = [
         "secondsSinceInput",
         "userActivityError",
@@ -74,53 +62,46 @@ pub fn validate_facts(
     ];
     let known_set: HashSet<&str> = KNOWN.iter().copied().collect();
 
-    // Additional properties check first (Ajv reports unknown key first)
     for key in obj.keys() {
         if !known_set.contains(key.as_str()) {
             return Err(format!("{} {}: unknown key", prefix, key));
         }
     }
 
-    // Helper to produce error
     let err_for = |key: &str, msg: &str| format!("{} {}: {}", prefix, key, msg);
-    let host_alias_re = Regex::new(r"^[a-z][a-z0-9-]{0,31}$").unwrap();
-    let timestamp_re = Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$").unwrap();
-    let window_re = Regex::new(r"^([01][0-9]|2[0-3]):[0-5][0-9]$").unwrap();
+    let host_alias_re = crate::config::host_alias_pattern();
+    let timestamp_re =
+        Regex::new(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$").unwrap();
+    let window_re = crate::config::time_pattern();
 
-    // Validate in schema order, returning first error
     for key in KNOWN {
         if let Some(v) = obj.get(key) {
-            // Each key's validation
             match key {
                 "secondsSinceInput" => {
-                    if !is_integer_number(v) {
+                    let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0) else {
                         return Err(err_for(key, "must be integer"));
-                    }
-                    let n = v.as_f64().unwrap();
+                    };
                     if n < 0.0 {
                         return Err(err_for(key, "must be >= 0"));
                     }
                 }
                 "userActivityError" => {
-                    if !v.is_string() {
+                    let Some(s) = v.as_str() else {
                         return Err(err_for(key, "must be string"));
-                    }
-                    let s = v.as_str().unwrap();
+                    };
                     if s.is_empty() {
                         return Err(err_for(key, "must NOT have fewer than 1 characters"));
                     }
                 }
                 "noLocalUserSession" => {
-                    // const true
                     if v != &serde_json::Value::Bool(true) {
                         return Err(err_for(key, "must be true or absent"));
                     }
                 }
                 "sysfsRoot" => {
-                    if !v.is_string() {
+                    let Some(s) = v.as_str() else {
                         return Err(err_for(key, "must be string"));
-                    }
-                    let s = v.as_str().unwrap();
+                    };
                     if !s.starts_with('/') {
                         return Err(err_for(key, "must match pattern \"^/\""));
                     }
@@ -132,11 +113,11 @@ pub fn validate_facts(
                 }
                 "batteryPercent" => {
                     if v.is_null() {
-                        // valid null
-                    } else if !is_integer_number(v) {
-                        return Err(err_for(key, "must be integer,null"));
                     } else {
-                        let n = v.as_f64().unwrap();
+                        let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0)
+                        else {
+                            return Err(err_for(key, "must be integer,null"));
+                        };
                         if n < 0.0 {
                             return Err(err_for(key, "must be >= 0"));
                         }
@@ -146,37 +127,33 @@ pub fn validate_facts(
                     }
                 }
                 "cpuCores" => {
-                    if !is_integer_number(v) {
+                    let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0) else {
                         return Err(err_for(key, "must be integer"));
-                    }
-                    let n = v.as_f64().unwrap();
+                    };
                     if n < 1.0 {
                         return Err(err_for(key, "must be >= 1"));
                     }
                 }
                 "cpuLoad1m" => {
-                    if !is_number(v) {
+                    let Some(n) = v.as_f64() else {
                         return Err(err_for(key, "must be number"));
-                    }
-                    let n = v.as_f64().unwrap();
+                    };
                     if n < 0.0 {
                         return Err(err_for(key, "must be >= 0"));
                     }
                 }
                 "memoryTotalMb" => {
-                    if !is_integer_number(v) {
+                    let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0) else {
                         return Err(err_for(key, "must be integer"));
-                    }
-                    let n = v.as_f64().unwrap();
+                    };
                     if n < 1.0 {
                         return Err(err_for(key, "must be >= 1"));
                     }
                 }
                 "memoryFreeMb" => {
-                    if !is_integer_number(v) {
+                    let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0) else {
                         return Err(err_for(key, "must be integer"));
-                    }
-                    let n = v.as_f64().unwrap();
+                    };
                     if n < 0.0 {
                         return Err(err_for(key, "must be >= 0"));
                     }
@@ -188,10 +165,10 @@ pub fn validate_facts(
                 }
                 "gpuName" => {
                     if v.is_null() {
-                    } else if !v.is_string() {
-                        return Err(err_for(key, "must be string,null"));
                     } else {
-                        let s = v.as_str().unwrap();
+                        let Some(s) = v.as_str() else {
+                            return Err(err_for(key, "must be string,null"));
+                        };
                         if s.is_empty() {
                             return Err(err_for(key, "must NOT have fewer than 1 characters"));
                         }
@@ -199,10 +176,11 @@ pub fn validate_facts(
                 }
                 "gpuFreeMb" => {
                     if v.is_null() {
-                    } else if !is_integer_number(v) {
-                        return Err(err_for(key, "must be integer,null"));
                     } else {
-                        let n = v.as_f64().unwrap();
+                        let Some(n) = v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0)
+                        else {
+                            return Err(err_for(key, "must be integer,null"));
+                        };
                         if n < 0.0 {
                             return Err(err_for(key, "must be >= 0"));
                         }
@@ -214,16 +192,13 @@ pub fn validate_facts(
                     }
                 }
                 "localModels" => {
-                    if !v.is_array() {
+                    let Some(arr) = v.as_array() else {
                         return Err(err_for(key, "must be array"));
-                    }
-                    let arr = v.as_array().unwrap();
-                    // Items validation: each must be string minLength 1
+                    };
                     for (idx, item) in arr.iter().enumerate() {
-                        if !item.is_string() {
+                        let Some(s) = item.as_str() else {
                             return Err(format!("{} {}/{}: must be string", prefix, key, idx));
-                        }
-                        let s = item.as_str().unwrap();
+                        };
                         if s.is_empty() {
                             return Err(format!(
                                 "{} {}/{}: must NOT have fewer than 1 characters",
@@ -231,7 +206,6 @@ pub fn validate_facts(
                             ));
                         }
                     }
-                    // uniqueItems
                     if has_duplicates(arr) {
                         let (a, b) = duplicate_indices(arr);
                         return Err(err_for(
@@ -244,10 +218,9 @@ pub fn validate_facts(
                     }
                 }
                 "hostAlias" => {
-                    if !v.is_string() {
+                    let Some(s) = v.as_str() else {
                         return Err(err_for(key, "must be string"));
-                    }
-                    let s = v.as_str().unwrap();
+                    };
                     if !host_alias_re.is_match(s) {
                         return Err(err_for(
                             key,
@@ -256,10 +229,9 @@ pub fn validate_facts(
                     }
                 }
                 "timestamp" => {
-                    if !v.is_string() {
+                    let Some(s) = v.as_str() else {
                         return Err(err_for(key, "must be string"));
-                    }
-                    let s = v.as_str().unwrap();
+                    };
                     if !timestamp_re.is_match(s) {
                         return Err(err_for(
                             key,
@@ -268,10 +240,9 @@ pub fn validate_facts(
                     }
                 }
                 "policyAllowedWindowStart" | "policyAllowedWindowEnd" => {
-                    if !v.is_string() {
+                    let Some(s) = v.as_str() else {
                         return Err(err_for(key, "must be string"));
-                    }
-                    let s = v.as_str().unwrap();
+                    };
                     if !window_re.is_match(s) {
                         return Err(err_for(
                             key,
@@ -284,7 +255,6 @@ pub fn validate_facts(
         }
     }
 
-    // Timestamp real calendar date check (after Ajv passes)
     if let Some(v) = obj.get("timestamp") {
         if let Some(s) = v.as_str() {
             if parse_timestamp(s).is_none() {
@@ -293,20 +263,19 @@ pub fn validate_facts(
         }
     }
 
-    // sysfsRoot Linux check
     if let Some(v) = obj.get("sysfsRoot") {
         if v.is_string() && platform == Platform::Linux {
-            let s = v.as_str().unwrap();
+            let Some(s) = v.as_str() else {
+                return Err(err_for("sysfsRoot", "must be string"));
+            };
             let label = format!("facts {}: invalid sysfsRoot", path);
             if let Err(e) = crate::config::assert_sysfs_root(s, &label) {
-                // Extract detail after last ": "
                 let detail = e.split(": ").last().unwrap_or("invalid").to_string();
                 return Err(format!("{} sysfsRoot: {}", prefix, detail));
             }
         }
     }
 
-    // noLocalUserSession requires secondsSinceInput
     if obj.get("noLocalUserSession") == Some(&serde_json::Value::Bool(true))
         && !obj.contains_key("secondsSinceInput")
     {
@@ -316,7 +285,6 @@ pub fn validate_facts(
         ));
     }
 
-    // Build Facts struct after validation
     let get_f64 = |k: &str| obj.get(k).and_then(|v| v.as_f64());
     let get_str = |k: &str| obj.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
     let get_bool = |k: &str| obj.get(k).and_then(|v| v.as_bool());
@@ -378,19 +346,13 @@ fn has_duplicates(arr: &[serde_json::Value]) -> bool {
 }
 
 fn duplicate_indices(arr: &[serde_json::Value]) -> (usize, usize) {
-    // Reproduce Ajv behavior: find last index that has duplicate, report with nearest previous
-    // Iterate i from end backwards
+    let mut seen = std::collections::HashMap::new();
     for i in (0..arr.len()).rev() {
-        // Find nearest j < i with same value, largest j
-        let mut nearest: Option<usize> = None;
-        for j in (0..i).rev() {
-            if arr[i] == arr[j] {
-                nearest = Some(j);
-                break;
+        if let Some(s) = arr[i].as_str() {
+            if let Some(&j) = seen.get(s) {
+                return (j, i);
             }
-        }
-        if let Some(j) = nearest {
-            return (i, j);
+            seen.insert(s, i);
         }
     }
     (0, 0)
@@ -423,7 +385,6 @@ mod tests {
 
     #[test]
     fn facts_validation() {
-        // every config/scenarios/*.json validates
         for entry in std::fs::read_dir(workspace_path("config/scenarios")).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path().to_str().unwrap().to_string();
@@ -432,12 +393,50 @@ mod tests {
                 .unwrap_or_else(|e| panic!("scenario {} failed: {}", path, e));
         }
 
-        // {"cpuCores": 4.0} validates to Some(4.0)
         let v = serde_json::json!({"cpuCores": 4.0});
         let f = validate(v).expect("cpuCores 4.0 should validate");
         assert_eq!(f.cpuCores, Some(4.0));
 
-        // rejected cases
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"cpuLoad1m":0.23015367057258163}"#).unwrap();
+        let f = validate(v).expect("cpuLoad1m float should validate");
+        assert_eq!(f.cpuLoad1m, Some(0.23015367057258163));
+
+        let v = serde_json::json!({"batteryPercent": null, "gpuName": null, "gpuFreeMb": null});
+        let f = validate(v).expect("null values should validate");
+        assert_eq!(f.batteryPercent, Some(None));
+        assert_eq!(f.gpuName, Some(None));
+        assert_eq!(f.gpuFreeMb, Some(None));
+
+        let v = serde_json::json!({});
+        let f = validate(v).expect("empty should validate");
+        assert_eq!(f.batteryPercent, None);
+        assert_eq!(f.gpuName, None);
+        assert_eq!(f.gpuFreeMb, None);
+
+        {
+            let base =
+                std::env::temp_dir().join(format!("moc-facts-sysfs-{}-{}", std::process::id(), 1));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(&base).unwrap();
+            let real_root = base.join("real");
+            std::fs::create_dir_all(real_root.join("class")).unwrap();
+            let real_str = real_root.to_str().unwrap().to_string();
+            let v = serde_json::json!({"sysfsRoot": real_str});
+            let f = validate(v).expect("real class dir should validate");
+            assert_eq!(f.sysfsRoot, Some(real_str.clone()));
+            let link_root = base.join("link");
+            let target = base.join("target");
+            std::fs::create_dir_all(&target).unwrap();
+            std::fs::create_dir_all(&link_root).unwrap();
+            std::os::unix::fs::symlink(&target, link_root.join("class")).unwrap();
+            let link_str = link_root.to_str().unwrap().to_string();
+            let v2 = serde_json::json!({"sysfsRoot": link_str});
+            let err = validate(v2).unwrap_err();
+            assert_eq!(err, "facts /tmp/test.json: sysfsRoot: no class directory");
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
         let cases = vec![
             serde_json::json!({"noLocalUserSession": false}),
             serde_json::json!({"noLocalUserSession": true}),

@@ -3,8 +3,6 @@ use crate::platform::Platform;
 use regex::Regex;
 use std::collections::HashSet;
 
-// Reuse slice-1 helpers via `crate::js` and `crate::time`.
-
 #[allow(non_snake_case)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MacosTools {
@@ -67,11 +65,11 @@ pub fn read_json(path: &str) -> Result<serde_json::Value, String> {
     }
 }
 
-fn time_pattern() -> Regex {
+pub(crate) fn time_pattern() -> Regex {
     Regex::new(r"^([01][0-9]|2[0-3]):[0-5][0-9]$").unwrap()
 }
 
-fn host_alias_pattern() -> Regex {
+pub(crate) fn host_alias_pattern() -> Regex {
     Regex::new(r"^[a-z][a-z0-9-]{0,31}$").unwrap()
 }
 
@@ -87,23 +85,28 @@ pub fn assert_sysfs_root(root: &str, label: &str) -> Result<(), String> {
             }
             Ok(())
         }
-        Err(e) => {
-            // If the error message already starts with label, rethrow is not applicable here
-            // since we are the origin; map to errno name.
-            Err(format!("{}: {}: {}", label, root, errno_name(&e)))
-        }
+        Err(e) => Err(format!("{}: {}: {}", label, root, errno_name(&e))),
     }
 }
 
 fn validate_macos_tools(value: &serde_json::Value) -> Result<MacosTools, String> {
     let label = "config probe.json: invalid macosTools";
-    let obj = match value.as_object() {
-        Some(o) => o,
-        None => return Err(label.to_string()),
-    };
     const KEYS: [&str; 5] = ["stat", "pmset", "ioreg", "sysctl", "systemProfiler"];
     let allowed: HashSet<&str> = KEYS.iter().copied().collect();
-    // First loop: unknown keys and value shape for present keys
+    // Handle arrays as objects with numeric keys to match TS typeof [] === "object"
+    let synthetic;
+    let obj = if let Some(o) = value.as_object() {
+        o
+    } else if let Some(arr) = value.as_array() {
+        if arr.is_empty() {
+            synthetic = serde_json::Map::new();
+            &synthetic
+        } else {
+            return Err(format!("config probe.json: invalid macosTools.{}", 0));
+        }
+    } else {
+        return Err(label.to_string());
+    };
     for key in obj.keys() {
         if !allowed.contains(key.as_str()) {
             return Err(format!("config probe.json: invalid macosTools.{}", key));
@@ -114,7 +117,6 @@ fn validate_macos_tools(value: &serde_json::Value) -> Result<MacosTools, String>
             _ => return Err(format!("config probe.json: invalid macosTools.{}", key)),
         }
     }
-    // Second loop: required keys
     for key in KEYS {
         let v = obj.get(key);
         match v.and_then(|x| x.as_str()) {
@@ -125,12 +127,34 @@ fn validate_macos_tools(value: &serde_json::Value) -> Result<MacosTools, String>
     if obj.len() != KEYS.len() {
         return Err(label.to_string());
     }
+    let stat = match obj.get("stat").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return Err("config probe.json: invalid macosTools.stat".to_string()),
+    };
+    let pmset = match obj.get("pmset").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return Err("config probe.json: invalid macosTools.pmset".to_string()),
+    };
+    let ioreg = match obj.get("ioreg").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return Err("config probe.json: invalid macosTools.ioreg".to_string()),
+    };
+    let sysctl = match obj.get("sysctl").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return Err("config probe.json: invalid macosTools.sysctl".to_string()),
+    };
+    let system_profiler = match obj.get("systemProfiler").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return Err("config probe.json: invalid macosTools.systemProfiler".to_string());
+        }
+    };
     Ok(MacosTools {
-        stat: obj["stat"].as_str().unwrap().to_string(),
-        pmset: obj["pmset"].as_str().unwrap().to_string(),
-        ioreg: obj["ioreg"].as_str().unwrap().to_string(),
-        sysctl: obj["sysctl"].as_str().unwrap().to_string(),
-        systemProfiler: obj["systemProfiler"].as_str().unwrap().to_string(),
+        stat,
+        pmset,
+        ioreg,
+        sysctl,
+        systemProfiler: system_profiler,
     })
 }
 
@@ -139,15 +163,11 @@ pub fn load_config(path: &str, platform: Platform) -> Result<ProbeConfig, String
     let raw_obj = match raw.as_object() {
         Some(o) => o,
         None => {
-            // read_json succeeded gives Value::Object for probe config; if not object, the first
-            // numeric check will fail with invalid idleMinutes, but we should mimic TS which
-            // would throw on raw["policy"] access. Safer to treat non-object as policy error?
-            // However probe.json is always object; we can just return generic.
+            // TS reads raw["policy"] first, so a non-object top level fails as invalid policy.
             return Err("config probe.json: invalid policy".to_string());
         }
     };
 
-    // Helpers matching TS closures
     let num = |key: &str, min: f64, max: f64| -> Result<f64, String> {
         let v = raw_obj.get(key);
         match v.and_then(|x| x.as_f64()) {
@@ -171,9 +191,16 @@ pub fn load_config(path: &str, platform: Platform) -> Result<ProbeConfig, String
     };
 
     let policy_raw = raw_obj.get("policy");
+    let empty_map = serde_json::Map::new();
     let policy_obj = match policy_raw.and_then(|v| v.as_object()) {
         Some(o) => o,
-        None => return Err("config probe.json: invalid policy".to_string()),
+        None => {
+            if policy_raw.is_some_and(|v| v.is_array()) {
+                &empty_map
+            } else {
+                return Err("config probe.json: invalid policy".to_string());
+            }
+        }
     };
 
     let time_re = time_pattern();
@@ -196,7 +223,6 @@ pub fn load_config(path: &str, platform: Platform) -> Result<ProbeConfig, String
         assert_sysfs_root(&sysfs_root, "config probe.json: invalid sysfsRoot")?;
     }
 
-    // Now validate remaining fields in the order TS return constructs them
     let idle_minutes = num("idleMinutes", 1.0, f64::INFINITY)?;
     let battery_threshold = num("batteryThreshold", 0.0, 100.0)?;
     let local_models_base_url = str_val("localModelsBaseUrl")?;
@@ -207,12 +233,22 @@ pub fn load_config(path: &str, platform: Platform) -> Result<ProbeConfig, String
         .unwrap_or(&serde_json::Value::Null);
     let macos_tools = validate_macos_tools(macos_tools_val)?;
 
+    let allowed_start = match policy_obj
+        .get("allowedWindowStart")
+        .and_then(|v| v.as_str())
+    {
+        Some(s) => s.to_string(),
+        None => {
+            return Err("config probe.json: invalid policy.allowedWindowStart".to_string());
+        }
+    };
+    let allowed_end = match policy_obj.get("allowedWindowEnd").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return Err("config probe.json: invalid policy.allowedWindowEnd".to_string()),
+    };
     let policy = Policy {
-        allowedWindowStart: policy_obj["allowedWindowStart"]
-            .as_str()
-            .unwrap()
-            .to_string(),
-        allowedWindowEnd: policy_obj["allowedWindowEnd"].as_str().unwrap().to_string(),
+        allowedWindowStart: allowed_start,
+        allowedWindowEnd: allowed_end,
         maxConcurrentAgents: max_agents,
     };
 
@@ -236,7 +272,9 @@ pub fn load_plugin_config(path: &str) -> Result<PluginConfig, String> {
     if obj.len() != 1 || !obj.contains_key("hostFile") {
         return Err("config plugin.json: invalid hostFile".to_string());
     }
-    let host_file = obj.get("hostFile").unwrap();
+    let Some(host_file) = obj.get("hostFile") else {
+        return Err("config plugin.json: invalid hostFile".to_string());
+    };
     match host_file.as_str() {
         Some(s) if s.starts_with('/') => Ok(PluginConfig {
             hostFile: s.to_string(),
@@ -281,7 +319,9 @@ pub fn load_host_file(path: &str) -> Result<HostFile, String> {
             unattended: None,
         });
     }
-    let unattended_val = unattended_raw.unwrap();
+    let Some(unattended_val) = unattended_raw else {
+        return Err(format!("host file {}: invalid unattended", path));
+    };
     let win_obj = match unattended_val.as_object() {
         Some(o) => o,
         None => return Err(format!("host file {}: invalid unattended", path)),

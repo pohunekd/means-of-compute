@@ -11,4 +11,4 @@ name = "moc_host_state"
 ryu-js = "1"
 regex = "1"
 libc = "0.2"
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }

@@ -1,5 +1,5 @@
-// Stall policy tests (matrix rows L6-L8d): stall decisions over synthetic
-// round records. Outcomes come from the design table O2, never from policy.ts.
+// Stall policy test (row L6): stall decisions over synthetic round records.
+// Outcomes come from the design table O2, never from policy.ts.
 import { expect, test } from "bun:test";
 import type { LoopStallConfig } from "../../src/loop/config.js";
 import { stallDecision } from "../../src/loop/policy.js";

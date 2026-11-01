@@ -1,5 +1,6 @@
-// Model routing tests (matrix rows L9-L11b): rule F over the committed
-// routing values, with synthetic records. Deterministic: no clock, no I/O.
+// Model routing tests (row L9 and the rule A row 160a): rule F and rule A
+// over the committed routing values, with synthetic records. Deterministic:
+// no clock, no I/O.
 import { expect, test } from "bun:test";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import type { LoopRoutingConfig } from "../../src/loop/config.js";

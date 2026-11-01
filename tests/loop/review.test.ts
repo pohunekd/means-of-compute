@@ -1,6 +1,6 @@
-// Driver review tests (slice 5d rows RT1-RT21): publish, ci and audit
-// through the real dispatcher, memory port and files, with one named
-// mutation per row killed by its own assertion.
+// Driver review tests (RT1, RT7, RT13, RT22, RT1b, A2 and the red-close
+// row): publish, ci and audit through the real dispatcher, memory port and
+// files.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir } from "node:fs/promises";

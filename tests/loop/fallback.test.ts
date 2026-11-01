@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import type { LoopRoutingConfig } from "../../src/loop/config.js";
 import { auditableChoice, chooseModel } from "../../src/loop/policy.js";
+import type { ResultLine } from "../../src/loop/results.js";
 import type { RoundRecord } from "../../src/loop/types.js";
 
 const PREFERRED = "meta/muse-glimmer-30b";
@@ -45,6 +46,24 @@ function itemWith(overrides?: Partial<WorkItem["modelRouting"]>): WorkItem {
   };
 }
 
+// A closed round on the preferred model whose routing counts as a failure.
+function failedLine(round: number): ResultLine {
+  return {
+    schemaVersion: "v1",
+    key: `demo-a:${String(round)}`,
+    at: "2026-10-28T10:00:00.000Z",
+    workItemId: "demo-a",
+    repo: "example/demo-repo",
+    round,
+    retry: 0,
+    model: PREFERRED,
+    providerId: "nvidia-build",
+    hostAlias: null,
+    outcome: "no-push",
+    routingResult: "failure",
+  };
+}
+
 test("two failures on the preferred model switch to the fallback (L9, O5)", () => {
   const item = itemWith();
   const loopItem = { failures: { [PREFERRED]: 2 }, rounds: [] as RoundRecord[] };
@@ -71,12 +90,14 @@ test("rule A holds the fallback when the preferred model already authored (160a)
     fallbackUsed: false,
     steered: null,
   });
-  const steered = {
-    model: FALLBACK,
-    providerId: "meta-api",
-    fallbackUsed: true,
-    steered: null,
-  };
+  const failedLines = [0, 1, 2, 3, 4].map(failedLine);
+  const steered = chooseModel(
+    itemWith(),
+    { failures: {}, rounds: [] as RoundRecord[] },
+    failedLines,
+    ROUTING,
+  );
+  expect(steered.steered).toEqual({ successes: 0, samples: 5 });
   expect(auditableChoice(itemWith(), steered, [], auditors, ROUTING)).toBe(steered);
   expect(
     auditableChoice(

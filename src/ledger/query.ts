@@ -8,11 +8,17 @@ export type QueryDimension = "provider" | "host" | "model";
 export interface ProviderRow {
   readonly provider: string;
   readonly model: string;
-  readonly inputTokens: number | null;
-  readonly outputTokens: number | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
   readonly requests: number;
   readonly sources: readonly string[];
-  readonly unmeasuredRequests?: number;
+}
+
+export interface ProviderCoverage {
+  readonly measured: number;
+  readonly total: number;
+  readonly note: string | null;
+  readonly emptyReason: string | null;
 }
 
 export interface HostRow {
@@ -35,38 +41,87 @@ export interface LedgerQueryResult {
   readonly byProvider?: readonly ProviderRow[];
   readonly byHost?: readonly HostRow[];
   readonly byModel?: readonly ModelRow[];
+  readonly providerCoverage?: ProviderCoverage;
 }
 
-function nullSum(values: readonly (number | null)[]): number | null {
-  let sum = 0;
-  for (const value of values) {
-    if (value === null) {
-      return null;
+function idsHave(ids: readonly string[], what: string): string {
+  return `${ids.join(", ")} ${ids.length === 1 ? "has" : "have"} ${what}`;
+}
+
+// The token figures cover the records with full token counts: every token
+// row reports both counts and has no calls without usage. Excluded records
+// add nothing and are named in the note; no count is invented for them.
+export function providerCoverageOf(records: readonly UsageRecord[]): {
+  readonly measured: readonly UsageRecord[];
+  readonly coverage: ProviderCoverage;
+} {
+  const nullIds = new Set<string>();
+  const unmeasuredIds = new Set<string>();
+  const measured: UsageRecord[] = [];
+  for (const record of records) {
+    if (record.tokens.some((token) => token.inputTokens === null || token.outputTokens === null)) {
+      nullIds.add(record.workItemId);
+    } else if (record.tokens.some((token) => token.unmeasuredRequests !== undefined)) {
+      unmeasuredIds.add(record.workItemId);
+    } else {
+      measured.push(record);
     }
-    sum += value;
   }
-  return sum;
+  if (measured.length === records.length) {
+    return {
+      measured,
+      coverage: { measured: measured.length, total: records.length, note: null, emptyReason: null },
+    };
+  }
+  const nulls = [...nullIds].sort();
+  const unmeasured = [...unmeasuredIds].sort();
+  if (measured.length === 0) {
+    const reasons = [
+      nulls.length === 0 ? "" : `token counts not reported for ${nulls.join(", ")}`,
+      unmeasured.length === 0 ? "" : `calls without usage for ${unmeasured.join(", ")}`,
+    ].filter((reason) => reason !== "");
+    return {
+      measured,
+      coverage: { measured: 0, total: records.length, note: null, emptyReason: reasons.join("; ") },
+    };
+  }
+  const excluded = [
+    nulls.length === 0 ? "" : idsHave(nulls, "no token counts"),
+    unmeasured.length === 0 ? "" : idsHave(unmeasured, "calls without usage"),
+  ].filter((reason) => reason !== "");
+  return {
+    measured,
+    coverage: {
+      measured: measured.length,
+      total: records.length,
+      note: `over ${String(measured.length)} of ${String(records.length)} records; ${excluded.join("; ")}`,
+      emptyReason: null,
+    },
+  };
 }
 
 function orderStrings(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[] {
+function queryByProvider(records: readonly UsageRecord[]): {
+  readonly rows: readonly ProviderRow[];
+  readonly coverage: ProviderCoverage;
+} {
+  const { measured, coverage } = providerCoverageOf(records);
   const order: string[] = [];
   const groups = new Map<
     string,
     {
       provider: string;
       model: string;
-      inputs: (number | null)[];
-      outputs: (number | null)[];
+      inputs: number[];
+      outputs: number[];
       requests: number;
       sources: Set<string>;
-      unmeasured: number;
     }
   >();
-  for (const record of records) {
+  for (const record of measured) {
     for (const token of record.tokens) {
       const key = JSON.stringify([token.provider, token.model]);
       let group = groups.get(key);
@@ -78,16 +133,15 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
           outputs: [],
           requests: 0,
           sources: new Set<string>(),
-          unmeasured: 0,
         };
         groups.set(key, group);
         order.push(key);
       }
-      group.inputs.push(token.inputTokens);
-      group.outputs.push(token.outputTokens);
+      // Measured records have non-null counts by definition.
+      group.inputs.push(token.inputTokens as number);
+      group.outputs.push(token.outputTokens as number);
       group.requests += token.requests;
       group.sources.add(token.source);
-      group.unmeasured += token.unmeasuredRequests ?? 0;
     }
   }
   const rows = order.map((key) => {
@@ -95,8 +149,8 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
     if (group === undefined) {
       throw new Error(`ledger query: missing provider group ${key}`);
     }
-    const inputTokens = nullSum(group.inputs);
-    const outputTokens = nullSum(group.outputs);
+    const inputTokens = group.inputs.reduce((sum, value) => sum + value, 0);
+    const outputTokens = group.outputs.reduce((sum, value) => sum + value, 0);
     return {
       provider: group.provider,
       model: group.model,
@@ -104,9 +158,6 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
       outputTokens,
       requests: group.requests,
       sources: orderStrings(group.sources),
-      ...(group.unmeasured > 0 && inputTokens !== null && outputTokens !== null
-        ? { unmeasuredRequests: group.unmeasured }
-        : {}),
     };
   });
   rows.sort((a, b) =>
@@ -120,7 +171,7 @@ function queryByProvider(records: readonly UsageRecord[]): readonly ProviderRow[
         ? -1
         : 1,
   );
-  return rows;
+  return { rows, coverage };
 }
 
 function queryByHost(records: readonly UsageRecord[]): readonly HostRow[] {
@@ -181,12 +232,15 @@ export function queryLedger(
     byProvider?: readonly ProviderRow[];
     byHost?: readonly HostRow[];
     byModel?: readonly ModelRow[];
+    providerCoverage?: ProviderCoverage;
   } = {
     records: contents.records.length,
     pendingEntries: contents.pending.length,
   };
   if (by.has("provider")) {
-    result.byProvider = queryByProvider(contents.records);
+    const provider = queryByProvider(contents.records);
+    result.byProvider = provider.rows;
+    result.providerCoverage = provider.coverage;
   }
   if (by.has("host")) {
     result.byHost = queryByHost(contents.records);

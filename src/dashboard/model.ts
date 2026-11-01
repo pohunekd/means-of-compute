@@ -8,7 +8,7 @@ import { isBoundedAuditToken, isPriced, summarizeSpend, utcCalendarDay } from ".
 import { spendBoundsOf } from "../budget/config.js";
 import { decideAdmission } from "../budget/decision.js";
 import type { NanoPricing } from "../budget/pricing.js";
-import { queryLedger } from "../ledger/query.js";
+import { providerCoverageOf, queryLedger } from "../ledger/query.js";
 import { spendEntriesOf } from "../ledger/read.js";
 import type { PendingUsage, SpendEntry } from "../ledger/types.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
@@ -765,35 +765,33 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
   }
   const tables: Table[] = [];
   if (inputs.ledger.ok && scope !== null) {
-    const providerRows = queryLedger(inputs.ledger.value, new Set(["provider"])).byProvider ?? [];
-    const tokenRows = providerRows.map((row): readonly Cell[] => {
-      const input =
-        row.inputTokens === null
-          ? noDataCell("not reported")
-          : textCell(groupDigits(row.inputTokens));
-      const output =
-        row.outputTokens === null
-          ? noDataCell("not reported")
-          : textCell(groupDigits(row.outputTokens));
-      return [
-        textCell(row.provider),
-        textCell(row.model),
-        input,
-        output,
-        textCell(
-          row.unmeasuredRequests !== undefined
-            ? `${groupDigits(row.requests)} (${String(row.unmeasuredRequests)} without usage)`
-            : groupDigits(row.requests),
-        ),
-        textCell(row.sources.join(", ")),
-      ];
-    });
+    const providerResult = queryLedger(inputs.ledger.value, new Set(["provider"]));
+    const providerRows = providerResult.byProvider ?? [];
+    const coverage = providerResult.providerCoverage;
+    const tokenRows = providerRows.map((row): readonly Cell[] => [
+      textCell(row.provider),
+      textCell(row.model),
+      textCell(groupDigits(row.inputTokens)),
+      textCell(groupDigits(row.outputTokens)),
+      textCell(groupDigits(row.requests)),
+      textCell(row.sources.join(", ")),
+    ]);
+    const pendingNote = `${String(inputs.ledger.value.pending.length)} pending entries are not in this table; they count in spend above.`;
+    let coverageNote: string | null = null;
+    if (coverage !== undefined) {
+      if (coverage.note !== null) {
+        coverageNote = coverage.note;
+      } else if (coverage.emptyReason !== null) {
+        coverageNote = coverage.emptyReason;
+      }
+    }
+    const tableNote = coverageNote === null ? pendingNote : `${coverageNote}; ${pendingNote}`;
     tables.push({
       caption: "Tokens by provider (finished tasks)",
       columns: ["provider", "model", "input tokens", "output tokens", "requests", "sources"],
       rows: tokenRows,
-      source: "ledger records tokens[]",
-      note: `${String(inputs.ledger.value.pending.length)} pending entries are not in this table; they count in spend above.`,
+      source: "ledger records tokens[] with full token counts",
+      note: tableNote,
     });
     const hostRows = queryLedger(inputs.ledger.value, new Set(["host"])).byHost ?? [];
     const sessionRows = hostRows.map((row): readonly Cell[] => [
@@ -854,56 +852,6 @@ function hourPart(baselines: Baselines, key: "cloudSandboxHour" | "ownedHostHour
   return `config/dashboard.json baselines.${key} $${priceText(baseline.nanoPerHour)} per hour`;
 }
 
-// The token figures cover the records with full token counts: every token
-// row reports both counts and has no calls without usage. Excluded records
-// add nothing and are named in the note; no count is invented for them.
-// emptyReason is set when records exist and none is covered.
-interface TokenCoverage {
-  readonly measured: readonly UsageRecord[];
-  readonly note: string | null;
-  readonly emptyReason: string | null;
-}
-
-function idsHave(ids: readonly string[], what: string): string {
-  return `${ids.join(", ")} ${ids.length === 1 ? "has" : "have"} ${what}`;
-}
-
-function tokenCoverageOf(records: readonly UsageRecord[]): TokenCoverage {
-  const nullIds = new Set<string>();
-  const unmeasuredIds = new Set<string>();
-  const measured: UsageRecord[] = [];
-  for (const record of records) {
-    if (record.tokens.some((token) => token.inputTokens === null || token.outputTokens === null)) {
-      nullIds.add(record.workItemId);
-    } else if (record.tokens.some((token) => token.unmeasuredRequests !== undefined)) {
-      unmeasuredIds.add(record.workItemId);
-    } else {
-      measured.push(record);
-    }
-  }
-  if (measured.length === records.length) {
-    return { measured, note: null, emptyReason: null };
-  }
-  const nulls = [...nullIds].sort();
-  const unmeasured = [...unmeasuredIds].sort();
-  if (measured.length === 0) {
-    const reasons = [
-      nulls.length === 0 ? "" : `token counts not reported for ${nulls.join(", ")}`,
-      unmeasured.length === 0 ? "" : `calls without usage for ${unmeasured.join(", ")}`,
-    ].filter((reason) => reason !== "");
-    return { measured, note: null, emptyReason: reasons.join("; ") };
-  }
-  const excluded = [
-    nulls.length === 0 ? "" : idsHave(nulls, "no token counts"),
-    unmeasured.length === 0 ? "" : idsHave(unmeasured, "calls without usage"),
-  ].filter((reason) => reason !== "");
-  return {
-    measured,
-    note: `over ${String(measured.length)} of ${String(records.length)} records; ${excluded.join("; ")}`,
-    emptyReason: null,
-  };
-}
-
 function buildSavingsPanel(inputs: DashboardInputs): Panel {
   const figures: Figure[] = [];
   if (!inputs.ledger.ok) {
@@ -946,7 +894,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
   }
   const records = inputs.ledger.value.records;
   const pendingEntries = inputs.ledger.value.pending.length;
-  const coverage = tokenCoverageOf(records);
+  const { measured, coverage } = providerCoverageOf(records);
   const frontier = inputs.baselines.frontierTokens;
   let baselineValue: bigint | null = null;
   if (frontier === null) {
@@ -968,7 +916,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
         source: `ledger records with full token counts; ${frontierCite}`,
       });
     } else {
-      baselineValue = coverage.measured.reduce(
+      baselineValue = measured.reduce(
         (sum, record) =>
           sum +
           record.tokens.reduce(
@@ -980,12 +928,12 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
           ),
         0n,
       );
-      const totalIn = coverage.measured.reduce(
+      const totalIn = measured.reduce(
         (sum, record) =>
           sum + record.tokens.reduce((inner, token) => inner + (token.inputTokens ?? 0), 0),
         0,
       );
-      const totalOut = coverage.measured.reduce(
+      const totalOut = measured.reduce(
         (sum, record) =>
           sum + record.tokens.reduce((inner, token) => inner + (token.outputTokens ?? 0), 0),
         0,
@@ -1024,7 +972,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
         source: actualSource,
       });
     } else {
-      actualValue = coverage.measured.reduce(
+      actualValue = measured.reduce(
         (sum, record) =>
           sum +
           record.tokens.reduce((inner, token) => {

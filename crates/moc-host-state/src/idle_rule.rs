@@ -9,7 +9,7 @@ pub fn parse_minutes(time: &str) -> u32 {
     let h = if h_val.is_nan() || !h_val.is_finite() {
         0
     } else {
-        // TS Number can be float; but we truncate to u32 as minutes
+        // Callers pass HH:MM validated by config/facts; other text is outside the TS contract.
         h_val as u32
     };
     let m = if m_val.is_nan() || !m_val.is_finite() {
@@ -49,6 +49,7 @@ pub struct IdleInputs {
     pub unattended_window: Option<String>,
 }
 
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 pub fn derive_idle(inputs: &IdleInputs) -> (bool, String) {
     if inputs.user_activity_unknown {
         let cause = if inputs.user_activity_cause.is_empty() {
@@ -67,28 +68,24 @@ pub fn derive_idle(inputs: &IdleInputs) -> (bool, String) {
         return (false, format!("power unknown: {cause}"));
     }
 
-    let battery_ok = match inputs.battery_percent {
-        None => true,
-        Some(v) => v > inputs.battery_threshold,
-    };
-
     if !inputs.inside_window {
         return (false, "outside the policy window".to_string());
     }
     if !inputs.ac_power {
         return (false, "not on AC power".to_string());
     }
-    if !battery_ok {
-        let bp = inputs.battery_percent.unwrap();
-        let bt = inputs.battery_threshold;
-        return (
-            false,
-            format!(
-                "battery at {} percent, at or below the {} percent floor",
-                format_number(bp),
-                format_number(bt)
-            ),
-        );
+    if let Some(bp) = inputs.battery_percent {
+        if !(bp > inputs.battery_threshold) {
+            let bt = inputs.battery_threshold;
+            return (
+                false,
+                format!(
+                    "battery at {} percent, at or below the {} percent floor",
+                    format_number(bp),
+                    format_number(bt)
+                ),
+            );
+        }
     }
     if inputs.logged_out {
         return (true, "no user logged in, on AC power".to_string());

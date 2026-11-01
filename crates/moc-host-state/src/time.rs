@@ -112,6 +112,7 @@ pub fn parse_timestamp(s: &str) -> Option<i64> {
     Some(epoch_ms)
 }
 
+/// Matches toISOString for years 0..=9999 only.
 pub fn format_timestamp(epoch_ms: i64) -> String {
     let days = epoch_ms.div_euclid(86_400_000) as i32;
     let ms_of_day = epoch_ms.rem_euclid(86_400_000);
@@ -121,8 +122,6 @@ pub fn format_timestamp(epoch_ms: i64) -> String {
     let minute = ((secs_of_day % 3600) / 60) as u32;
     let second = (secs_of_day % 60) as u32;
     let (year, month, day) = civil_from_days(days);
-    // Clamp year to 0..=9999 as spec says for years 0..=9999; we still format with 4 digits
-    // For negative or >9999, we still produce but spec limits.
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
         year, month, day, hour, minute, second, millis

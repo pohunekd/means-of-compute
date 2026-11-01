@@ -39,7 +39,7 @@ let selectedGates: readonly Gate[] = gates;
 if (args.length === 1 && args[0] === "rust") {
   selectedGates = rustGates;
 } else if (args.length > 0) {
-  console.log(`gates: unknown argument ${args[0] ?? ""}`);
+  console.log(`gates: unknown argument ${args.join(" ")}`);
   process.exit(2);
 }
 

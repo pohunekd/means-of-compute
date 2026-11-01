@@ -52,40 +52,68 @@ pub fn js_number(s: &str) -> f64 {
         return f64::NEG_INFINITY;
     }
     // Unsigned 0x/0o/0b literals
-    if t.len() >= 2 {
-        let prefix = &t[0..2];
-        if prefix == "0x"
-            || prefix == "0X"
-            || prefix == "0o"
-            || prefix == "0O"
-            || prefix == "0b"
-            || prefix == "0B"
-        {
-            let rest = &t[2..];
-            if rest.is_empty() {
-                return f64::NAN;
-            }
-            let valid = match prefix {
-                "0x" | "0X" => rest.bytes().all(|b| b.is_ascii_hexdigit()),
-                "0o" | "0O" => rest.bytes().all(|b| (b'0'..=b'7').contains(&b)),
-                "0b" | "0B" => rest.bytes().all(|b| b == b'0' || b == b'1'),
-                _ => false,
-            };
-            if !valid {
-                return f64::NAN;
-            }
-            let radix: u32 = match prefix {
-                "0x" | "0X" => 16,
-                "0o" | "0O" => 8,
-                _ => 2,
-            };
-            let mut val: f64 = 0.0;
-            for ch in rest.chars() {
-                let digit = ch.to_digit(radix).unwrap() as f64;
-                val = val * (radix as f64) + digit;
-            }
-            return val;
+    let b = t.as_bytes();
+    if b.len() >= 2 && b[0] == b'0' && matches!(b[1], b'x' | b'X' | b'o' | b'O' | b'b' | b'B') {
+        let rest = &t[2..];
+        if rest.is_empty() {
+            return f64::NAN;
         }
+        let prefix = &t[0..2];
+        let valid = match prefix {
+            "0x" | "0X" => rest.bytes().all(|b| b.is_ascii_hexdigit()),
+            "0o" | "0O" => rest.bytes().all(|b| (b'0'..=b'7').contains(&b)),
+            "0b" | "0B" => rest.bytes().all(|b| b == b'0' || b == b'1'),
+            _ => false,
+        };
+        if !valid {
+            return f64::NAN;
+        }
+        let radix: u32 = match prefix {
+            "0x" | "0X" => 16,
+            "0o" | "0O" => 8,
+            _ => 2,
+        };
+        let trimmed = rest.trim_start_matches('0');
+        if trimmed.is_empty() {
+            return 0.0;
+        }
+        let k = match radix {
+            16 => 4,
+            8 => 3,
+            _ => 1,
+        };
+        let mut bit_str = String::with_capacity(trimmed.len() * k as usize);
+        for ch in trimmed.chars() {
+            let Some(d) = ch.to_digit(radix) else {
+                return f64::NAN;
+            };
+            for i in (0..k).rev() {
+                bit_str.push(if (d >> i) & 1 == 1 { '1' } else { '0' });
+            }
+        }
+        let bit_str = bit_str.trim_start_matches('0').to_string();
+        if bit_str.is_empty() {
+            return 0.0;
+        }
+        if bit_str.len() <= 128 {
+            let mut val: u128 = 0;
+            for ch in bit_str.chars() {
+                val = (val << 1) | (ch as u128 - '0' as u128);
+            }
+            return val as f64;
+        }
+        let dropped = bit_str.len() - 128;
+        let top = &bit_str[..128];
+        let rest_bits = &bit_str[128..];
+        let mut val: u128 = 0;
+        for ch in top.chars() {
+            val = (val << 1) | (ch as u128 - '0' as u128);
+        }
+        if rest_bits.contains('1') {
+            val |= 1;
+        }
+        let f = val as f64;
+        return f * 2f64.powi(dropped as i32);
     }
 
     // Decimal pattern: [+-]?(digits[.digits?]|.digits)([eE][+-]?digits)?
@@ -196,8 +224,7 @@ pub fn errno_name(e: &io::Error) -> String {
         "EOPNOTSUPP"
     } else if code == libc::ENOEXEC {
         "ENOEXEC"
-    } else if code == 61 || code == 96 {
-        // ENODATA: 61 on Linux, 96 on macOS; libc may define it per platform
+    } else if code == libc::ENODATA {
         "ENODATA"
     } else {
         return format!("errno-{code}");
@@ -214,9 +241,10 @@ pub fn spawn_error(program: &str, e: &io::Error) -> String {
         "ENOENT" => "no such file or directory",
         "EACCES" => "permission denied",
         "ENOTDIR" => "not a directory",
-        "ENOEXEC" => "exec format error",
-        "EPERM" => "operation not permitted",
+        "ENOEXEC" => "unknown error",
         "ELOOP" => "too many symbolic links encountered",
+        "ENAMETOOLONG" => "name too long",
+        "EPERM" => "operation not permitted",
         _ => "",
     };
     if description.is_empty() {
@@ -245,6 +273,8 @@ mod tests {
         assert_eq!(js_number("Infinity"), f64::INFINITY);
         assert_eq!(js_number("-Infinity"), f64::NEG_INFINITY);
         assert!(js_number(" 0xG ").is_nan());
+        assert!(js_number("1€").is_nan());
+        assert_eq!(js_number("0x200000000000011"), 144_115_188_075_855_904.0);
         // parse_timestamp rejects invalid dates
         assert_eq!(parse_timestamp("2026-02-29T00:00:00.000Z"), None);
         assert_eq!(parse_timestamp("2026-10-27T23:59:60.000Z"), None);

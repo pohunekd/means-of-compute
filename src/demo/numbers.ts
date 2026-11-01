@@ -174,7 +174,7 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
     registry: { ok: true, value: [] },
     results: { ok: false, failure: { kind: "no-data", reason: "not used by demo:numbers" } },
     verdicts: new Map(),
-    workItems: null,
+    workItems: { ok: false, failure: { kind: "no-data", reason: "not used by demo:numbers" } },
   };
 
   const model = buildDashboard(dashboardInputs);

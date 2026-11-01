@@ -1,5 +1,6 @@
 // Dashboard snapshot CLI: bun run dashboard:snapshot --as-of <iso> --out <file>
-// [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--hosts <path>].
+// [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>]
+// [--hosts <path>].
 // Renders the dashboard page once through the server's path (gatherInputs,
 // buildDashboard, renderDashboard) with the clock fixed at --as-of and no
 // host state round, then writes it atomically. A usage, config or input
@@ -23,6 +24,7 @@ import { DEFAULT_LOOP_CONFIG_PATH, loadLoopConfig } from "../loop/config.js";
 import { providerDescriptorExists } from "../providers/config.js";
 import { PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
+import { loadWorkConfig } from "../work/config.js";
 
 const HOSTS_MAP_PATH = "config/hosts.json";
 
@@ -33,6 +35,7 @@ const FLAGS = [
   "--verdicts",
   "--registry",
   "--results",
+  "--work",
   "--hosts",
 ] as const;
 
@@ -169,6 +172,7 @@ async function snapshot(): Promise<number> {
       resultsPath:
         flags.get("--results") ??
         (await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production")).resultsPath,
+      workStorePath: flags.get("--work") ?? (await loadWorkConfig()).storePath,
     };
     const fixed = {
       budget,

@@ -1,4 +1,5 @@
-// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>].
+// Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>]
+// [--results <path>] [--work <path>].
 // Startup parses the flags, pins the clock when asked, loads every config,
 // binds the loopback listener and serves until SIGINT or SIGTERM. Any
 // startup failure prints "factory: <message>" and exits 2; signals exit 0.
@@ -19,21 +20,25 @@ import { loadLedgerConfig } from "../ledger/read.js";
 import { providerDescriptorExists } from "../providers/config.js";
 import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
+import { loadWorkConfig } from "../work/config.js";
 
 function parseServeArgs(argv: readonly string[]): {
   ledger: string | null;
   verdicts: string | null;
   registry: string | null;
   results: string | null;
+  work: string | null;
 } {
   let ledger: string | null = null;
   let verdicts: string | null = null;
   let registry: string | null = null;
   let results: string | null = null;
+  let work: string | null = null;
   let seenLedger = false;
   let seenVerdicts = false;
   let seenRegistry = false;
   let seenResults = false;
+  let seenWork = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] as string;
     if (arg === "--ledger") {
@@ -92,13 +97,27 @@ function parseServeArgs(argv: readonly string[]): {
         throw new Error("--results needs a value");
       }
       results = value;
+    } else if (arg === "--work") {
+      if (seenWork) {
+        throw new Error("--work given twice");
+      }
+      seenWork = true;
+      const value = argv[index + 1];
+      index += 1;
+      if (value === undefined || value === "") {
+        throw new Error("--work needs a value");
+      }
+      if (value.startsWith("--")) {
+        throw new Error("--work needs a value");
+      }
+      work = value;
     } else if (arg.startsWith("--")) {
       throw new Error(`unknown flag ${arg}`);
     } else {
       throw new Error(`unexpected argument ${arg}`);
     }
   }
-  return { ledger, verdicts, registry, results };
+  return { ledger, verdicts, registry, results, work };
 }
 
 async function serve(): Promise<number> {
@@ -107,6 +126,7 @@ async function serve(): Promise<number> {
     verdicts: string | null;
     registry: string | null;
     results: string | null;
+    work: string | null;
   };
   try {
     flags = parseServeArgs(Bun.argv.slice(2));
@@ -158,6 +178,7 @@ async function serve(): Promise<number> {
     logPath: string;
   };
   let resultsPath: string;
+  let workStorePath: string;
   try {
     const budget = await loadBudgetConfig();
     const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
@@ -172,6 +193,7 @@ async function serve(): Promise<number> {
     registryPath = flags.registry ?? (await loadDispatcherConfig()).registryPath;
     resultsPath =
       flags.results ?? (await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production")).resultsPath;
+    workStorePath = flags.work ?? (await loadWorkConfig()).storePath;
     fixed = {
       budget,
       route,
@@ -189,7 +211,14 @@ async function serve(): Promise<number> {
       config,
       listen,
       fixed,
-      sources: { ledgerPath, verdictDir, hostState: null, registryPath, resultsPath },
+      sources: {
+        ledgerPath,
+        verdictDir,
+        hostState: null,
+        registryPath,
+        resultsPath,
+        workStorePath,
+      },
       now: pinned === null ? () => new Date() : () => pinned,
       log,
     });

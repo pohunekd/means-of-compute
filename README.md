@@ -163,6 +163,8 @@ spend against the caps. Fleet columns show "no data (host state not wired)" in t
 mode, which is expected. Without the flags the dashboard reads the production paths
 under `logs/`.
 
+A static snapshot of the production dashboard is committed as [docs/demo/dashboard.html](docs/demo/dashboard.html). It was rendered by `bun run dashboard:snapshot` from the recorded ledger, verdicts, registry and loop results, as of the time in its header. GitHub shows the file as source, so download it and open it in a browser. The "Static snapshot" section of [docs/dashboard.md](docs/dashboard.md) describes the command.
+
 ### Production run (outline)
 
 A production run needs more than this section covers. See the "Production run"

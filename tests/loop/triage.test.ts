@@ -1,7 +1,8 @@
 // Follow-up triage (#237): an auto decision appends Scope, DoD, Dependencies
 // and Size to the filed body and flips the labels, so the next intake poll
 // imports it; a hold posts one marked comment; a decided follow-up, a
-// follow-up of a follow-up and a capped day send nothing to the model.
+// follow-up of a follow-up and a capped day send nothing to the model, and
+// an issue a person edits while the model decides is left as it is.
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -258,7 +259,7 @@ test("an auto decision is imported by the next intake poll and never re-sent", a
   }
 });
 
-test("the daily cap, the chain guard and a hold send each follow-up to the model at most once", async () => {
+test("the daily cap, the chain guard, an edit during the call and a hold send each follow-up to the model at most once", async () => {
   const dir = mkdtempSync(join(tmpdir(), "loop-triage-"));
   try {
     const auto = JSON.stringify({
@@ -287,20 +288,36 @@ test("the daily cap, the chain guard and a hold send each follow-up to the model
       throw new Error("no chained follow-up filed");
     }
     const at = (number: number): string => `${REPO}#${String(number)}`;
+    // A person edits the first follow-up after the run's listing.
+    const edited = `${first.body}A person's note.\n`;
+    const call = fx.ctx.auditor.call;
+    const ctx: TriageContext = {
+      ...fx.ctx,
+      auditor: {
+        ...fx.ctx.auditor,
+        call: async (providerId, request) => {
+          if (fx.calls.length === 0) {
+            await fx.github.editIssueBody(REPO, first.posted, edited);
+          }
+          return call(providerId, request);
+        },
+      },
+    };
 
-    await runTriage(fx.ctx, () => false);
+    await runTriage(ctx, () => false);
     expect(fx.calls).toHaveLength(1);
     expect(fx.events).toEqual([
-      `triage:auto:${at(first.posted)}`,
-      `triage-pending:capped:${at(second.posted)}`,
       `triage:hold-chain:${at(chained.posted)}`,
+      `triage:auto:${at(first.posted)}`,
+      `triage:abandoned:${at(first.posted)}`,
+      `triage-pending:capped:${at(second.posted)}`,
     ]);
 
     fx.clock.now = new Date("2026-11-02T00:01:00.000Z");
-    await runTriage(fx.ctx, () => false);
-    await runTriage(fx.ctx, () => false);
+    await runTriage(ctx, () => false);
+    await runTriage(ctx, () => false);
     expect(fx.calls).toHaveLength(2);
-    expect(fx.events.slice(3)).toEqual([`triage:hold-model:${at(second.posted)}`]);
+    expect(fx.events.slice(4)).toEqual([`triage:hold-model:${at(second.posted)}`]);
     const snapshot = fx.github.snapshot();
     const commentsOf = (number: number): string[] =>
       snapshot.comments.filter((row) => row.number === number).map((row) => row.body);
@@ -318,7 +335,8 @@ test("the daily cap, the chain guard and a hold send each follow-up to the model
     expect(commentsOf(chained.posted)[0]).toContain(
       `Its source work item gh-demo-${String(first.posted)} came from follow-up #${String(first.posted)}`,
     );
-    for (const number of [second.posted, chained.posted]) {
+    expect(snapshot.issues.find((row) => row.number === first.posted)?.body).toBe(edited);
+    for (const number of [first.posted, second.posted, chained.posted]) {
       expect(snapshot.issues.find((row) => row.number === number)?.labels).toEqual(FOLLOWUP_LABELS);
     }
   } finally {

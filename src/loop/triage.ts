@@ -2,10 +2,11 @@
 // decides each open finding follow-up the loop filed and never triaged:
 // auto (scope, DoD, size S) or hold (one-line reason). Candidates come from
 // the loop state, never from GitHub authorship, because the factory login
-// may be a person's login. The decision is recorded on the follow-up before
-// any GitHub write, the body is edited before the labels flip, and done is
-// set only after intake's own query shows the result, so a crash or replay
-// repeats no decision and triages nothing twice.
+// may be a person's login. Every check that needs no model runs for every
+// candidate before the first model call. The decision is recorded on the
+// follow-up before any GitHub write, the body is edited before the labels
+// flip, and done is set only after intake's own query shows the result, so
+// a crash or replay repeats no decision and triages nothing twice.
 import { randomUUID } from "node:crypto";
 import Ajv from "ajv/dist/2020";
 import { isWorkItem } from "../../contracts/v1/validate.js";
@@ -67,6 +68,16 @@ interface Candidate {
   readonly entry: Followup;
   readonly number: number;
   readonly detail: string;
+}
+
+// A candidate that passed every check without a model, with the issue as
+// the run's listing shows it and the finding and body the loop filed.
+interface Ask {
+  readonly repo: LoopRepoConfig;
+  readonly c: Candidate;
+  readonly issue: IntakeIssue;
+  readonly finding: AuditFinding;
+  readonly body: string;
 }
 
 interface RunState {
@@ -219,12 +230,23 @@ function lookupLabel(ctx: TriageContext): string {
 }
 
 // The issue as the loop filed it: open, with every follow-up label and
-// neither intake label.
+// neither intake label nor the blocked label.
 function asFiled(ctx: TriageContext, issue: IntakeIssue): boolean {
   return (
     ctx.followupLabels.every((label) => issue.labels.includes(label)) &&
     !issue.labels.includes(ctx.intake.optInLabel) &&
-    !issue.labels.includes(ctx.intake.readyLabel)
+    !issue.labels.includes(ctx.intake.readyLabel) &&
+    !issue.labels.includes(ctx.intake.blockedLabel)
+  );
+}
+
+// The labels a resumed auto may find: the follow-up labels with any part of
+// the triage flip applied, and no other label.
+function flipOnly(ctx: TriageContext, issue: IntakeIssue): boolean {
+  const allowed = [...ctx.followupLabels, ctx.intake.optInLabel, ctx.intake.readyLabel];
+  return (
+    issue.labels.includes(lookupLabel(ctx)) &&
+    issue.labels.every((label) => allowed.includes(label))
   );
 }
 
@@ -403,16 +425,14 @@ async function askModel(
   return reply;
 }
 
-// The decision for one candidate, or null when it waits for the next run.
-// Every check that needs no model runs first, and the cap stops only calls.
-async function decide(
+// The checks that need no model: a skip or hold decision, or the ask.
+async function precheck(
   ctx: TriageContext,
   repo: LoopRepoConfig,
   c: Candidate,
   open: readonly IntakeIssue[],
   chained: ReadonlySet<string>,
-  run: RunState,
-): Promise<Decision | null> {
+): Promise<Decision | Ask> {
   const issue = open.find((row) => row.number === c.number && !row.isPullRequest);
   if (issue === undefined) {
     return skip("skip-not-open");
@@ -438,11 +458,18 @@ async function decide(
   if (hasSectionLine(draft.body)) {
     return hold(ctx, c, "hold-sections", SECTIONS_TEXT);
   }
+  return { repo, c, issue, finding: draft.finding, body: draft.body };
+}
+
+// The decision the model gives, or null when the candidate waits for the
+// next run. The cap stops only calls.
+async function decide(ctx: TriageContext, ask: Ask, run: RunState): Promise<Decision | null> {
+  const { repo, c, issue } = ask;
   if (run.autos >= ctx.triage.maxAutoPerDay) {
     pending(ctx, c, "capped");
     return null;
   }
-  const reply = await askModel(ctx, c, draft.finding, run);
+  const reply = await askModel(ctx, c, ask.finding, run);
   if (reply === null) {
     return null;
   }
@@ -455,7 +482,7 @@ async function decide(
   if (denied(ctx.triage, appendix)) {
     return hold(ctx, c, "hold-privacy", PRIVACY_TEXT);
   }
-  const body = `${draft.body}${appendix}`;
+  const body = `${ask.body}${appendix}`;
   if (!roundTrips(body, reply.dod)) {
     return hold(ctx, c, "hold-sections", SECTIONS_TEXT);
   }
@@ -499,16 +526,22 @@ async function updateEntry(
   });
 }
 
-// Body first, labels second, then intake's own query must show both.
+// A fresh read, body first, labels second, then intake's own query must
+// show both. GitHub has no compare-and-swap, so a person's edit can still
+// land between the fresh read and the edit; nothing else is overwritten.
 async function applyAuto(
   ctx: TriageContext,
   c: Candidate,
   record: FollowupTriage,
-  open: readonly IntakeIssue[],
+  resumed: boolean,
 ): Promise<"done" | "abandoned" | "unverified"> {
   const draft = await rebuild(ctx, c);
-  const issue = open.find((row) => row.number === c.number && !row.isPullRequest);
-  if (draft === null || issue === undefined || record.appendix === null) {
+  if (draft === null || record.appendix === null) {
+    return "abandoned";
+  }
+  const fresh = await ctx.github.readyIssues(c.item.repo, [lookupLabel(ctx)]);
+  const issue = fresh.find((row) => row.number === c.number && !row.isPullRequest);
+  if (issue === undefined || !(resumed ? flipOnly(ctx, issue) : asFiled(ctx, issue))) {
     return "abandoned";
   }
   const want = `${draft.body}${record.appendix}`;
@@ -520,7 +553,7 @@ async function applyAuto(
   }
   const removed = ctx.followupLabels.slice(1);
   const added = [ctx.intake.optInLabel, ctx.intake.readyLabel];
-  // Only the labels the listing shows as missing or present, so a resumed
+  // Only the labels the fresh read shows as missing or present, so a resumed
   // edit never asks gh to remove a label the issue no longer has.
   const toAdd = added.filter((label) => !issue.labels.includes(label));
   const toRemove = removed.filter((label) => issue.labels.includes(label));
@@ -550,35 +583,37 @@ async function applyHold(
   return "done";
 }
 
+// Records a new decision, then applies it.
 async function triageOne(
   ctx: TriageContext,
-  repo: LoopRepoConfig,
   c: Candidate,
-  open: readonly IntakeIssue[],
-  chained: ReadonlySet<string>,
+  decided: Decision,
   run: RunState,
 ): Promise<void> {
-  let record = c.entry.triage ?? null;
+  const at = ctx.now().toISOString();
+  const stored = await updateEntry(ctx, c, (entry) =>
+    entry.triage === undefined
+      ? { ...entry, triage: { ...decided, at, done: decided.decision === "skip" } }
+      : null,
+  );
+  const record = stored.triage ?? null;
   if (record === null) {
-    const decided = await decide(ctx, repo, c, open, chained, run);
-    if (decided === null) {
-      return;
-    }
-    const at = ctx.now().toISOString();
-    const stored = await updateEntry(ctx, c, (entry) =>
-      entry.triage === undefined
-        ? { ...entry, triage: { ...decided, at, done: decided.decision === "skip" } }
-        : null,
-    );
-    record = stored.triage ?? null;
-    if (record === null) {
-      throw new LoopStateDataError(`loop state ${ctx.statePath}: triage of ${c.entry.key} lost`);
-    }
-    if (record.decision === "auto") {
-      run.autos += 1;
-    }
-    ctx.log.log({ event: "triage", workItemId: c.sourceId, code: record.code, detail: c.detail });
+    throw new LoopStateDataError(`loop state ${ctx.statePath}: triage of ${c.entry.key} lost`);
   }
+  if (record.decision === "auto") {
+    run.autos += 1;
+  }
+  ctx.log.log({ event: "triage", workItemId: c.sourceId, code: record.code, detail: c.detail });
+  await applyRecord(ctx, c, record, false);
+}
+
+// The GitHub writes of a recorded decision, then done.
+async function applyRecord(
+  ctx: TriageContext,
+  c: Candidate,
+  record: FollowupTriage,
+  resumed: boolean,
+): Promise<void> {
   if (record.done) {
     return;
   }
@@ -586,7 +621,7 @@ async function triageOne(
   try {
     applied =
       record.decision === "auto"
-        ? await applyAuto(ctx, c, record, open)
+        ? await applyAuto(ctx, c, record, resumed)
         : await applyHold(ctx, c, record);
   } catch (error: unknown) {
     if (error instanceof GitHubError) {
@@ -619,9 +654,11 @@ async function triageOne(
   );
 }
 
-// One run over every candidate, per configured repo in config order and per
-// loop item in state order. A GitHub list failure skips the repo; settled()
-// is checked before each candidate.
+// One run in two passes, each per configured repo in config order and per
+// loop item in state order: the first resumes recorded decisions and runs
+// the checks that need no model, the second asks the model about the rest,
+// so a model failure never starves a check. A GitHub list failure skips the
+// repo; settled() is checked before each candidate.
 export async function runTriage(ctx: TriageContext, settled: () => boolean): Promise<void> {
   if (!ctx.triage.enabled) {
     return;
@@ -634,6 +671,7 @@ export async function runTriage(ctx: TriageContext, settled: () => boolean): Pro
   const chained = followupIssuesOf(state, items);
   const run: RunState = { autos: autosOn(state, utcCalendarDay(ctx.now())), stopped: false };
   const candidates = candidatesOf(state, items);
+  const asks: Ask[] = [];
   for (const repo of ctx.repos) {
     const mine = candidates.filter((c) => c.item.repo === repo.repo);
     if (mine.length === 0) {
@@ -650,10 +688,28 @@ export async function runTriage(ctx: TriageContext, settled: () => boolean): Pro
       throw error;
     }
     for (const c of mine) {
-      if (settled() || run.stopped) {
+      if (settled()) {
         return;
       }
-      await triageOne(ctx, repo, c, open, chained, run);
+      if (c.entry.triage !== undefined) {
+        await applyRecord(ctx, c, c.entry.triage, true);
+        continue;
+      }
+      const checked = await precheck(ctx, repo, c, open, chained);
+      if ("finding" in checked) {
+        asks.push(checked);
+      } else {
+        await triageOne(ctx, c, checked, run);
+      }
+    }
+  }
+  for (const ask of asks) {
+    if (settled() || run.stopped) {
+      return;
+    }
+    const decided = await decide(ctx, ask, run);
+    if (decided !== null) {
+      await triageOne(ctx, ask.c, decided, run);
     }
   }
 }

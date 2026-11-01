@@ -484,7 +484,11 @@ function parseGithub(
   }
   const intake = parseIntake(record["intake"], path, workModels);
   const followupLabels = parseStringList(record, path, "github", "followupLabels", 1);
-  if (followupLabels.includes(intake.optInLabel) || followupLabels.includes(intake.readyLabel)) {
+  if (
+    followupLabels.includes(intake.optInLabel) ||
+    followupLabels.includes(intake.readyLabel) ||
+    followupLabels.includes(intake.blockedLabel)
+  ) {
     throw invalid(path, "github.followupLabels");
   }
   const triage = parseTriage(record["triage"], path);

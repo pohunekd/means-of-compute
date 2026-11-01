@@ -192,7 +192,7 @@ function requiredCap(
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`Budget config ${path}: missing or invalid required field "${label}"`);
   }
-  return priceToNanoUsd(value, field, path);
+  return priceToNanoUsd(value, label, path);
 }
 
 export async function loadBudgetConfig(path?: string): Promise<BudgetConfig> {

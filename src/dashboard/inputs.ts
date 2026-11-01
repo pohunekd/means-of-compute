@@ -9,6 +9,7 @@ import type { ResultLine } from "../loop/results.js";
 import type { BudgetConfig } from "../budget/config.js";
 import { loadPricingForIds, type NanoPricing } from "../budget/pricing.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
+import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { LedgerDataError } from "../ledger/errors.js";
 import { readLedger, spendEntriesOf } from "../ledger/read.js";
 import type { LedgerContents } from "../ledger/types.js";
@@ -32,7 +33,9 @@ export type InputErrorCode =
   | "results-invalid"
   | "results-unreadable"
   | "work-store-invalid"
-  | "work-store-unreadable";
+  | "work-store-unreadable"
+  | "host-state-log-invalid"
+  | "host-state-log-unreadable";
 
 export type InputFailure =
   | { readonly kind: "no-data"; readonly reason: string }
@@ -40,6 +43,16 @@ export type InputFailure =
 
 export type Sourced<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly failure: InputFailure };
+
+// Fleet input: a collector round of this request, or the newest probe per
+// alias recorded at or before the page clock (the snapshot has no live I/O).
+export type HostView =
+  | { readonly kind: "live"; readonly observations: readonly HostObservation[] }
+  | { readonly kind: "recorded"; readonly probes: readonly RecordedProbe[] };
+
+export type HostStateSource =
+  | { readonly kind: "collector"; readonly collector: HostStateCollector }
+  | { readonly kind: "log"; readonly path: string };
 
 export interface DashboardInputs {
   readonly now: Date;
@@ -51,7 +64,7 @@ export interface DashboardInputs {
   readonly ledger: Sourced<LedgerContents>;
   readonly pricing: Sourced<ReadonlyMap<string, NanoPricing>>;
   readonly verdicts: ReadonlyMap<string, Sourced<readonly AuditVerdict[]>>;
-  readonly hosts: Sourced<readonly HostObservation[]>;
+  readonly hosts: Sourced<HostView>;
   readonly workItems: Sourced<readonly WorkItem[]>;
   readonly registry: Sourced<readonly RegistryEntry[]>;
   readonly results: Sourced<readonly ResultLine[]>;
@@ -60,7 +73,7 @@ export interface DashboardInputs {
 export interface DashboardSources {
   readonly ledgerPath: string;
   readonly verdictDir: string;
-  readonly hostState: HostStateCollector | null;
+  readonly hostState: HostStateSource | null;
   readonly registryPath: string;
   readonly resultsPath: string;
   readonly workStorePath: string;
@@ -126,20 +139,48 @@ async function readPricingInput(
 }
 
 async function readHostsInput(
-  hostState: HostStateCollector | null,
+  hostState: HostStateSource | null,
+  now: Date,
   log: (input: string, code: InputErrorCode, message: string) => void,
-): Promise<Sourced<readonly HostObservation[]>> {
+): Promise<Sourced<HostView>> {
   if (hostState === null) {
     return { ok: false, failure: noData("host state not wired") };
   }
+  if (hostState.kind === "log") {
+    return readRecordedHostsInput(hostState.path, now, log);
+  }
   try {
-    return { ok: true, value: await hostState.collect() };
+    return { ok: true, value: { kind: "live", observations: await hostState.collector.collect() } };
   } catch (error: unknown) {
     if (!(error instanceof Error)) {
       throw error;
     }
     log("hosts", "fleet-round-failed", error.message);
     return { ok: false, failure: errorFailure("fleet-round-failed") };
+  }
+}
+
+async function readRecordedHostsInput(
+  path: string,
+  now: Date,
+  log: (input: string, code: InputErrorCode, message: string) => void,
+): Promise<Sourced<HostView>> {
+  try {
+    const probes = await readRecordedProbes(path, now);
+    if (probes === null) {
+      return { ok: false, failure: noData("no probe recorded; a snapshot has no live host state") };
+    }
+    return { ok: true, value: { kind: "recorded", probes } };
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    const code: InputErrorCode =
+      error instanceof HostStateLogDataError
+        ? "host-state-log-invalid"
+        : "host-state-log-unreadable";
+    log("hosts", code, error.message);
+    return { ok: false, failure: errorFailure(code) };
   }
 }
 
@@ -274,7 +315,7 @@ export async function gatherInputs(
   };
   const [ledger, hosts, registry, results, workItems] = await Promise.all([
     readLedgerInput(sources.ledgerPath, emit),
-    readHostsInput(sources.hostState, emit),
+    readHostsInput(sources.hostState, now, emit),
     readRegistryInput(sources.registryPath, emit),
     readResultsInput(sources.resultsPath, emit),
     readWorkStoreInput(sources.workStorePath, emit),

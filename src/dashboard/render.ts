@@ -34,6 +34,7 @@ export const DASHBOARD_CSS = [
   ".error{color:var(--error);font-weight:700}",
   ".cite{font-size:0.78rem;color:var(--muted);margin:0.45rem 0 0;overflow-wrap:anywhere}",
   ".note{font-size:0.85rem;color:var(--muted)}",
+  ".figure .note,.keycard .note{margin:0.35rem 0 0}",
   ".tablewrap{overflow-x:auto}",
   "table{border-collapse:collapse;width:100%;margin:0.5rem 0;font-size:0.94rem}",
   ".table-work{min-width:64rem}",
@@ -190,10 +191,14 @@ function keyFigures(model: DashboardModel): readonly Figure[] {
   return figures;
 }
 
+// Value, note and source line are separate elements, in falling size: the
+// qualifier never sits inside the value.
 function renderFigure(figure: Figure, cardClass: string): SafeHtml {
+  const note = figure.note === null ? constantHtml("") : html`<p class="note">${figure.note}</p>`;
   return html`<div class="${cardClass}">
     <span class="label">${figure.label}</span>
     <span class="${cellClass(figure.cell)}">${cellText(figure.cell)}</span>
+    ${note}
     <p class="cite">source: ${figure.source}</p>
   </div>`;
 }

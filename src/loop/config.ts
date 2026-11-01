@@ -3,7 +3,7 @@
 // the key. In stub mode the paths the factory writes must stay inside the
 // stub sandbox; the stub section is required in stub mode and forbidden in
 // production.
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { PROVIDERS_DIR } from "../providers/paths.js";
 import { loadWorkConfig } from "../work/config.js";
@@ -12,6 +12,12 @@ import { loadFactorySpecs } from "../work/specs.js";
 export type LoopMode = "production" | "stub";
 
 export const DEFAULT_LOOP_CONFIG_PATH = "config/loop.json";
+
+// Port, meter, dispatcher and host-state events of the loop, next to the
+// loop log; the dashboard snapshot reads the host-state events.
+export function portsLogPath(logPath: string): string {
+  return join(dirname(resolve(logPath)), "loop-ports.jsonl");
+}
 
 export class LoopConfigError extends Error {
   constructor(message: string, options?: ErrorOptions) {

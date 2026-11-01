@@ -1,6 +1,7 @@
 # Budget guard
 
-The budget guard refuses new model sessions at the daily or total spend cap.
+The budget guard refuses new model sessions at the daily or total spend cap
+of the budget pool that pays for them.
 Running sessions are never killed: they finish and their cost still lands in
 the ledger. Escalation emits exactly one event per cap event, routed to the
 coordinator's daily digest channel.
@@ -46,8 +47,9 @@ coordinator's daily digest channel.
   per 1M; `config/providers/meta-wonder.json`; source https://dev.meta.ai/docs/pricing-rate-limits,
   read 2026-10-28) and the unmetered NVIDIA Build (0) come from those
   descriptors, never from literals in code.
-- Caps: `config/budget.json` (`dayCapUsd` 12, `totalCapUsd` 140,
-  `nvidiaDailyRequestLimit`, `nvidiaProviderId`, `unmeasuredAuditCall`). Every field is required; a
+- Caps: `config/budget.json` (`poolId` `meta`, `dayCapUsd` 12, `totalCapUsd` 140,
+  `pools`, `nvidiaDailyRequestLimit`, `nvidiaProviderId`, `unmeasuredAuditCall`,
+  `unmeasuredMeterCall`). Every field is required; a
   missing or unreadable file exits 2. Caps are validated JSON numbers
   converted by the same rule (no float on the decision path); the CLI
   `--spend`/`--day-cap`/`--total-cap` flag strings go through the same
@@ -56,17 +58,35 @@ coordinator's daily digest channel.
   of unique string ids in `providers`. `nvidiaProviderId` must be in the
   route and every route id must have a descriptor, or the run exits 2.
 
+## Budget pools
+
+A pool is a separate money pool with its own caps. The top-level
+`dayCapUsd`, `totalCapUsd` and `unmeasuredMeterCall` belong to the main pool
+named by `poolId`, which holds every provider outside the named pools. Each
+`pools[]` entry has exactly `id`, `providers`, `dayCapUsd`, `totalCapUsd` and
+`unmeasuredMeterCall`; pool ids match `^[a-z][a-z0-9-]{0,31}$` and are unique
+(the main pool's id included), a provider is in at most one named pool, and
+`nvidiaProviderId` stays in the main pool. `pools` may be empty; a missing
+`poolId` or `pools` exits 2. Every pool provider needs a descriptor.
+
+A token row counts against the pool of its provider, so one record can
+charge two pools (for example a session on one provider and its audit on
+another). Each pool is decided over its own rows only: its spend, its
+unknown and bounded items, its caps. The NVIDIA request limit is a main-pool
+rule.
+
 ## Rules
 
 - Day = UTC calendar day of `finishedAt`.
 - Null token counts on a priced provider are "no data", never 0 USD silently:
-  the guard refuses with reason `spend unknown`. An audit call that may be billed but reported no usage (a timeout or an unreadable 200; `source: auditor-usage`, null token counts, known `requests`) is not unknown: it counts at `config/budget.json` `unmeasuredAuditCall` per request, an upper bound because the audit prompt is capped by `maxDiffBytes`. `budget:check` then ends its line with `bounded items <n>`, and the dashboard and the digest mark the spend as including that bound. A metered entry with `unmeasuredRequests` counts each such call at `config/budget.json` `unmeasuredMeterCall`, whose `inputTokens` must be at least `config/meter.json` `maxRequestBytes` (the loop refuses to start otherwise), so the bound is hard on the input side. Every other null-token entry on a priced provider still refuses as `spend unknown`.
-- At or above a USD cap, all new sessions are refused. NVIDIA daily requests
-  at or above the limit refuse only sessions whose route starts at NVIDIA
-  Build (reason names it).
+  the guard refuses with reason `spend unknown`. An audit call that may be billed but reported no usage (a timeout or an unreadable 200; `source: auditor-usage`, null token counts, known `requests`) is not unknown: it counts at `config/budget.json` `unmeasuredAuditCall` per request, an upper bound because the audit prompt is capped by `maxDiffBytes`. `budget:check` then ends its line with `bounded items <n>`, and the dashboard and the digest mark the spend as including that bound. A metered entry with `unmeasuredRequests` counts each such call at the `unmeasuredMeterCall` of its provider's pool. The main pool's `inputTokens` must be at least `config/meter.json` `maxRequestBytes`, so the bound is hard on the input side. A named pool's `inputTokens` must be at least, for each of its providers, the smaller of `maxRequestBytes` and the descriptor's `contextTokens` (or `maxRequestBytes` when the descriptor states none): a provider bills no more input than its context window holds. The loop refuses to start when a bound is lower. Every other null-token entry on a priced provider still refuses as `spend unknown`.
+- At or above a pool's USD cap, every new session and audit call on that
+  pool's providers is refused; other pools go on. In the main pool, NVIDIA
+  daily requests at or above the limit refuse only sessions whose route
+  starts at NVIDIA Build (reason names it).
 - The bound mark belongs to the day that holds the bounded entries: a day line carries it only for bounded entries finished that day, while the total line carries it for every bounded entry.
-- Decision output: `{ admit, reason, spentTodayUsd, spentTotalUsd,
-nvidiaRequestsToday }`.
+- Decision output: `{ admit, reason, pool, mainPool, spentTodayUsd,
+spentTotalUsd, nvidiaRequestsToday }`, with the pool's spend.
 
 ## Escalation
 
@@ -76,22 +96,32 @@ One per cap event: the state file under the configured `statePath`
 are: `day:<UTC day>` for the daily cap, `nvidia:<UTC day>` for the
 NVIDIA daily limit, `total` for the total cap (once regardless of the
 day), `spend-unknown:<UTC day>` for unknown spend (once per day while
-spend stays unknown). An event escalates only when its key is absent;
+spend stays unknown). Those are the main pool's keys; a named pool's keys
+carry its id as a prefix (`baseten:day:<UTC day>`, `baseten:total`). An
+event escalates only when its key is absent;
 keys are never dropped because the set grows by at most a few keys a day.
 The log line is appended first, then the state is persisted. Each
-escalation appends one JSON line to `logs/budget-escalations.log` and
-prints one line on stderr. A second
+escalation appends one JSON line to `logs/budget-escalations.log` (with
+`pool`) and prints `budget escalation: <key> (<reason>, pool <id>)` on stderr. A second
 refusal for the same event writes nothing.
 
 ## CLI
 
 ```sh
-bun run budget:check                                    # real config + ledger
+bun run budget:check                                    # real config + ledger, every pool
+bun run budget:check --provider meta-api                # the pool that holds meta-api
 bun run budget:check --spend 3.20 --day-cap 12 --total-cap 140   # admit (exit 0)
 bun run budget:check --spend 12.00 --day-cap 12 --total-cap 140  # refuse (exit 3)
 ```
 
-Exits 0 on admit, 3 on refuse, 2 on a config or data error. `MOC_BUDGET_NOW`
+The budget gate always passes `--provider <id>`, the provider of the session
+or audit call it admits, and the check decides for that provider's pool.
+Without `--provider` it decides for every pool, main pool first. Each pool
+prints one line,
+`admitted|refused: <reason> (today $<d>, total $<t>[, nvidia requests today <n>][, bounded items <n>], pool <id>)`,
+where the NVIDIA part appears for the main pool only. Exits 0 when every
+evaluated pool admits, 3 when one refuses, 2 on a config or data error; a
+`--provider` id without a descriptor exits 2. `MOC_BUDGET_NOW`
 is test-only: when set, it must match
 `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$` and round-trip
 through `new Date(v).toISOString()` (impossible calendar dates like
@@ -99,6 +129,7 @@ through `new Date(v).toISOString()` (impossible calendar dates like
 "today"; the CLI then prints `evaluation time pinned by
 MOC_BUDGET_NOW: <now.toISOString()>` on stderr. An invalid value exits 2. The
 `--spend` / `--day-cap` / `--total-cap` flags are a test override that
-injects totals into the same decision function; `--day-cap` or `--total-cap`
+injects totals into the same decision function, with the cap flags replacing
+the caps of each evaluated pool; `--day-cap` or `--total-cap`
 without `--spend` exits 2, and the override path never writes escalation
 state or the log — it only prints `would escalate: <event key>` on stderr.

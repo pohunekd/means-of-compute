@@ -377,7 +377,7 @@ async function askModel(
 ): Promise<TriageReply | null> {
   let admission: Awaited<ReturnType<TriageContext["auditor"]["budget"]["admit"]>>;
   try {
-    admission = await ctx.auditor.budget.admit();
+    admission = await ctx.auditor.budget.admit(ctx.triage.providerId);
   } catch (error: unknown) {
     if (error instanceof BudgetGateError) {
       run.stopped = true;

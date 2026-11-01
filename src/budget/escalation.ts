@@ -2,7 +2,9 @@
 // every escalated event key: "day:<UTC day>" for the daily cap,
 // "nvidia:<UTC day>" for the NVIDIA daily limit, "total" for the total
 // cap (once regardless of the day), "spend-unknown:<UTC day>" for
-// unknown spend (once per day while spend stays unknown). An event
+// unknown spend (once per day while spend stays unknown). Those keys belong
+// to the main pool; a named pool's keys carry its id as a prefix
+// ("<pool>:day:<UTC day>", "<pool>:total"). An event
 // escalates only when its key is absent; keys are never dropped because the
 // set grows by at most a few keys a day. Each escalation appends one JSON
 // line to the escalation log and prints one line on stderr for the
@@ -35,7 +37,13 @@ export function capKindOfReason(reason: string): CapKind | null {
   }
 }
 
-export function eventKeyString(kind: CapKind, now: Date): string {
+/** The event key; `pool` is null for the main pool and a named pool's id otherwise. */
+export function eventKeyString(kind: CapKind, now: Date, pool: string | null): string {
+  const key = mainPoolEventKey(kind, now);
+  return pool === null ? key : `${pool}:${key}`;
+}
+
+function mainPoolEventKey(kind: CapKind, now: Date): string {
   switch (kind) {
     case "total":
       return kind;
@@ -46,10 +54,6 @@ export function eventKeyString(kind: CapKind, now: Date): string {
     case "nvidia-daily":
       return `nvidia:${utcCalendarDay(now)}`;
   }
-}
-
-function eventKey(kind: CapKind, now: Date): string {
-  return eventKeyString(kind, now);
 }
 
 async function readState(statePath: string): Promise<EscalationState> {
@@ -102,13 +106,14 @@ export async function maybeEscalate(
   if (kind === null) {
     throw new Error(`Budget escalation: unknown refusal reason "${decision.reason}"`);
   }
-  const key = eventKey(kind, options.now);
+  const key = eventKeyString(kind, options.now, decision.mainPool ? null : decision.pool);
   const state = await readState(options.statePath);
   if (state.escalated.includes(key)) {
     return false;
   }
   const entry = {
     eventKey: key,
+    pool: decision.pool,
     reason: decision.reason,
     spentTodayUsd: decision.spentTodayUsd,
     spentTotalUsd: decision.spentTotalUsd,
@@ -123,9 +128,9 @@ export async function maybeEscalate(
   await appendFile(options.escalationLogPath, `${JSON.stringify(entry)}\n`);
   await writeState(options.statePath, { escalated: [...state.escalated, key] });
   if (options.stderr !== undefined) {
-    options.stderr(`budget escalation: ${key} (${decision.reason})\n`);
+    options.stderr(`budget escalation: ${key} (${decision.reason}, pool ${decision.pool})\n`);
   } else {
-    process.stderr.write(`budget escalation: ${key} (${decision.reason})\n`);
+    process.stderr.write(`budget escalation: ${key} (${decision.reason}, pool ${decision.pool})\n`);
   }
   return true;
 }

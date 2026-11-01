@@ -30,11 +30,12 @@ interface ValidatedPricing {
 interface ValidatedDescriptor {
   readonly id: string;
   readonly pricing: ValidatedPricing;
+  readonly contextTokens?: number;
 }
 
 export { NANO_PER_USD };
 
-export async function loadDescriptor(dir: string, id: string): Promise<NanoPricing> {
+async function readDescriptor(dir: string, id: string): Promise<ValidatedDescriptor> {
   const label = "Budget pricing";
   const file = `${dir}/${id}.json`;
   if (id === "" || id.includes("/") || id === "." || id === "..") {
@@ -62,7 +63,17 @@ export async function loadDescriptor(dir: string, id: string): Promise<NanoPrici
   if (errors !== null) {
     throw new Error(`${label} ${file}: invalid descriptor ${errors}`);
   }
-  const descriptor = parsed as unknown as ValidatedDescriptor;
+  return parsed as unknown as ValidatedDescriptor;
+}
+
+/** The descriptor's `contextTokens`, or null when it states none. */
+export async function loadContextTokens(dir: string, id: string): Promise<number | null> {
+  return (await readDescriptor(dir, id)).contextTokens ?? null;
+}
+
+export async function loadDescriptor(dir: string, id: string): Promise<NanoPricing> {
+  const descriptor = await readDescriptor(dir, id);
+  const file = `${dir}/${id}.json`;
   const pricing: NanoPricing = {
     inputNanoPer1M: priceToNanoUsd(descriptor.pricing.inputPer1M, "inputPer1M", file),
     outputNanoPer1M: priceToNanoUsd(descriptor.pricing.outputPer1M, "outputPer1M", file),

@@ -5,7 +5,8 @@
 // unknownWorkItemIds and refuses the session instead of silently counting
 // zero, except an unmeasured audit call, which counts at the configured
 // bound (isBoundedAuditToken). A known-count entry with unmeasuredRequests
-// adds the configured meterCall bound per unmeasured call (bounded, not unknown).
+// adds the meter-call bound of its provider's pool per unmeasured call
+// (bounded, not unknown).
 import { AUDITOR_USAGE_SOURCE, type SpendEntry } from "../ledger/types.js";
 import type { NanoPricing } from "./pricing.js";
 
@@ -20,6 +21,8 @@ export interface SpendBounds {
   readonly auditCall: UnmeasuredCallBound;
   /** Metered call that was billed but reported no usage (unmeasuredRequests). */
   readonly meterCall: UnmeasuredCallBound;
+  /** The meterCall bound of a named budget pool, by provider id. */
+  readonly meterCallByProvider: ReadonlyMap<string, UnmeasuredCallBound>;
 }
 
 // An audit call that timed out or returned an unreadable 200 may be billed with
@@ -124,17 +127,29 @@ function costOfRecordNanoTimes1M(
       BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M;
     const unmeasured = entry.unmeasuredRequests ?? 0;
     if (unmeasured > 0) {
-      // Each billed call without usage counts at the per-call ceiling; its
-      // input side is the meter's enforced request cap.
+      // Each billed call without usage counts at its pool's per-call
+      // ceiling; the loop checks its input side at startup (compose.ts).
+      const meterCall = bounds.meterCallByProvider.get(entry.provider) ?? bounds.meterCall;
       cost +=
         BigInt(unmeasured) *
-        (BigInt(bounds.meterCall.inputTokens) * providerPricing.inputNanoPer1M +
-          BigInt(bounds.meterCall.outputTokens) * providerPricing.outputNanoPer1M);
+        (BigInt(meterCall.inputTokens) * providerPricing.inputNanoPer1M +
+          BigInt(meterCall.outputTokens) * providerPricing.outputNanoPer1M);
       onBounded?.();
     }
     costNanoTimes1M += cost;
   }
   return costNanoTimes1M;
+}
+
+/** The entries with only the token rows whose provider passes `keep`. */
+export function entriesOfProviders(
+  records: readonly SpendEntry[],
+  keep: (providerId: string) => boolean,
+): SpendEntry[] {
+  return records.map((record) => ({
+    ...record,
+    tokens: record.tokens.filter((token) => keep(token.provider)),
+  }));
 }
 
 export function summarizeSpend(

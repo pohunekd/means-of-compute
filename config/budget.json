@@ -1,8 +1,10 @@
 {
   "statePath": "logs/budget-state.json",
   "escalationLogPath": "logs/budget-escalations.log",
+  "poolId": "meta",
   "dayCapUsd": 12,
   "totalCapUsd": 140,
+  "pools": [],
   "nvidiaDailyRequestLimit": 1000,
   "nvidiaProviderId": "nvidia-build",
   "unmeasuredAuditCall": {

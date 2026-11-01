@@ -7,6 +7,7 @@ import type { AuditDeps } from "../auditor/audit-types.js";
 import { loadBudgetConfig, spendBoundsOf } from "../budget/config.js";
 import type { SpendBounds } from "../budget/cost.js";
 import { loadBudgetGateConfig } from "../budget/gate.js";
+import { loadContextTokens } from "../budget/pricing.js";
 import { loadDispatcherConfig, type DispatcherConfig } from "../dispatcher/config.js";
 import { FileLockError, withFileLock } from "../fs/lock.js";
 import { loadLedgerConfig } from "../ledger/read.js";
@@ -20,6 +21,7 @@ import type { Scheduler } from "./scheduler.js";
 import type { SchedulerContext } from "./scheduler.js";
 import { loadWorkConfig, type WorkConfig } from "../work/config.js";
 import { loadFactorySpecs } from "../work/specs.js";
+import { PROVIDERS_DIR } from "../providers/paths.js";
 import { loadLoopConfig, type LoopConfig, type LoopMode } from "./config.js";
 import type { LoopLog } from "./log.js";
 import type { SchedulerDispatcher } from "./retire.js";
@@ -75,6 +77,25 @@ export async function loadLoopConfigs(
       throw new LoopStartupError(
         `config: budget unmeasuredMeterCall.inputTokens (${String(budget.unmeasuredMeterCall.inputTokens)}) is below meter maxRequestBytes (${String(meter.maxRequestBytes)})`,
       );
+    }
+    // A named pool's input bound is hard when it covers the request cap or
+    // the context window of each of its providers: a provider bills no more
+    // input than its context holds.
+    for (const pool of budget.pools) {
+      for (const id of pool.providers ?? []) {
+        const context = await loadContextTokens(PROVIDERS_DIR, id);
+        const floor =
+          context === null ? meter.maxRequestBytes : Math.min(context, meter.maxRequestBytes);
+        if (pool.unmeasuredMeterCall.inputTokens < floor) {
+          const what =
+            floor === context
+              ? `contextTokens of ${PROVIDERS_DIR}/${id}.json`
+              : "meter maxRequestBytes";
+          throw new LoopStartupError(
+            `config: budget pool ${pool.id} unmeasuredMeterCall.inputTokens (${String(pool.unmeasuredMeterCall.inputTokens)}) is below ${what} (${String(floor)})`,
+          );
+        }
+      }
     }
     return {
       loop,

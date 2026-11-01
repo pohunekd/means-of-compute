@@ -213,6 +213,28 @@ test("production startup checks GitHub first and stops cleanly (P3, L47)", async
     expect(outcome).toContain(
       `config: budget unmeasuredMeterCall.inputTokens (1024) is below meter maxRequestBytes (${String(meter["maxRequestBytes"] as number)})`,
     );
+    const poolOutcome = await loadLoopConfigsWithBudget(
+      dir,
+      {
+        ...lowBudget,
+        pools: [
+          {
+            id: "wonder",
+            providers: ["meta-wonder"],
+            dayCapUsd: 1,
+            totalCapUsd: 1,
+            unmeasuredMeterCall: { inputTokens: 1024, outputTokens: 65536 },
+          },
+        ],
+      },
+      path,
+    ).then(
+      () => "loaded",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(poolOutcome).toContain(
+      `config: budget pool wonder unmeasuredMeterCall.inputTokens (1024) is below meter maxRequestBytes (${String(meter["maxRequestBytes"] as number)})`,
+    );
     for (const owned of ["verdicts", "digest", "trial", "gh-config"]) {
       expect(existsSync(join(dir, owned))).toBe(true);
     }

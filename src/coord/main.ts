@@ -593,7 +593,7 @@ async function sessionStep(
     let admit = false;
     let reason: string | null = null;
     try {
-      const admission: Admission = await gate.admit();
+      const admission: Admission = await gate.admit(loaded.config.providerId);
       if (admission.admit) {
         admit = true;
       } else {

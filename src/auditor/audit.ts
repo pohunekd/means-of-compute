@@ -173,7 +173,7 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
 
   let admission: Awaited<ReturnType<AuditDeps["budget"]["admit"]>>;
   try {
-    admission = await deps.budget.admit();
+    admission = await deps.budget.admit(auditor.providerId);
   } catch (error: unknown) {
     if (error instanceof BudgetGateError) {
       throw new Error(error.message, { cause: error });

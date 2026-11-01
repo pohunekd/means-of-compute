@@ -55,9 +55,11 @@ export async function withMeter(
   const savedEnv: Record<string, string | undefined> = {
     META_API_KEY: process.env.META_API_KEY,
     NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+    BASETEN_API_KEY: process.env.BASETEN_API_KEY,
     LOCAL_MODEL_BASE_URL: process.env.LOCAL_MODEL_BASE_URL,
     PROVIDER_META_API_BASE_URL: process.env.PROVIDER_META_API_BASE_URL,
     PROVIDER_NVIDIA_BUILD_BASE_URL: process.env.PROVIDER_NVIDIA_BUILD_BASE_URL,
+    PROVIDER_BASETEN_BASE_URL: process.env.PROVIDER_BASETEN_BASE_URL,
   };
   const restoreEnv = (): void => {
     for (const key of Object.keys(savedEnv)) {
@@ -81,10 +83,12 @@ export async function withMeter(
       resetProvidersCache();
       process.env.META_API_KEY = overrides.keys?.meta ?? "test-meta-key";
       process.env.NVIDIA_API_KEY = overrides.keys?.nvidia ?? "test-nvidia-key";
+      process.env.BASETEN_API_KEY = "test-baseten-key";
       process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
       const upstream = overrides.upstreamBaseUrl ?? `http://127.0.0.1:${String(loopback.port)}`;
       process.env.PROVIDER_META_API_BASE_URL = upstream;
       process.env.PROVIDER_NVIDIA_BUILD_BASE_URL = upstream;
+      process.env.PROVIDER_BASETEN_BASE_URL = upstream;
       const events: MeterLogEvent[] = [];
       const eventWaiters: Array<{
         match: (e: MeterLogEvent) => boolean;

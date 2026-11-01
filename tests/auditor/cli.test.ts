@@ -39,6 +39,7 @@ async function makeCliTree(): Promise<CliTree> {
       "meta-api.json",
       "nvidia-build.json",
       "meta-wonder.json",
+      "baseten.json",
       "route.json",
       "schema.json",
     ]) {
@@ -95,12 +96,14 @@ function cliEnv(port: number): Record<string, string> {
   }
   env["NVIDIA_API_KEY"] = "test";
   env["META_API_KEY"] = "test";
+  env["BASETEN_API_KEY"] = "test";
   env["LOCAL_MODEL_BASE_URL"] = "http://localhost:1148/v1";
   // Pin every descriptor base URL to the loopback stub, so a regression
   // in a child can never reach a third-party endpoint.
   env["PROVIDER_META_API_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
   env["PROVIDER_NVIDIA_BUILD_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
   env["PROVIDER_META_WONDER_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
+  env["PROVIDER_BASETEN_BASE_URL"] = `http://127.0.0.1:${String(port)}`;
   return env;
 }
 

@@ -28,19 +28,23 @@ Built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11-04).
 | --------------------- | ----------------------------------------------------------- | ------------ |
 | Main coder            | Muse Glimmer 30B, open weights (`meta/muse-glimmer-30b`)    | NVIDIA Build |
 | Fallback coder        | Muse Spark Contributor (`muse-spark-1.3-contributor`)       | Meta API     |
+| Intake coder          | Muse Spark Open (`meta-models/muse-spark-open-1026`)        | Baseten      |
 | Coordinator / planner | Muse Code with Muse Spark Contributor                       | Meta API     |
 | Routine auditor       | Muse Spark Contributor, or Muse Glimmer 30B (see the rule)  | as above     |
 | Phase-critical audit  | Muse Wonder (`muse-wonder-1.0`), only when explicitly asked | Meta API     |
 
-- Every Muse Spark call uses the Contributor variant `muse-spark-1.3-contributor`.
+- Every Muse Spark call uses the Contributor variant `muse-spark-1.3-contributor`. Muse Spark Open
+  is a separate open-weights model served by Baseten, not a Muse Spark API variant.
 - The coordinator runs Muse Code with
   `--model muse-spark-1.3-contributor --contributor-mode on`
   (`config/coordinator.json`).
-- Work items start on Muse Glimmer 30B. The loop routing (`config/loop.json`) can
-  move a whole item to Muse Spark before its first round.
+- Work items start on their preferred model; GitHub intake items start on Muse Spark
+  Open, paid from the separate `baseten` budget pool. The loop routing
+  (`config/loop.json`) can move a whole item to Muse Spark Contributor before its
+  first round, from Glimmer or from Spark Open.
 - A model never audits its own work. The auditor is the first entry of `auditors` in
   `config/auditor.json` that is not an author of the item. Glimmer work is audited
-  by Spark, and Spark work by Glimmer. When no eligible auditor is left, the item
+  by Spark, Spark Open work by Spark Contributor, and Spark work by Glimmer. When no eligible auditor is left, the item
   parks instead of starting.
 - Muse Wonder is the `mergeAuditor`. It runs only for an audit marked
   `--phase-critical yes` and is never in the provider route.

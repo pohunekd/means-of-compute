@@ -20,6 +20,7 @@ export async function makeTempConfig(): Promise<string> {
   for (const name of [
     "meta-api.json",
     "nvidia-build.json",
+    "baseten.json",
     "local.json",
     "route.json",
     "schema.json",
@@ -53,6 +54,7 @@ async function childEnv(cwd: string): Promise<Record<string, string>> {
   }
   env["NVIDIA_API_KEY"] = "test";
   env["META_API_KEY"] = "test";
+  env["BASETEN_API_KEY"] = "test";
   env["LOCAL_MODEL_BASE_URL"] = "http://localhost:1148/v1";
   // Pin every descriptor base URL to a closed loopback port, so a regression
   // in a child can never reach a third-party endpoint.

@@ -70,6 +70,7 @@ test("an unwritable resolve log exits 2 before the runtime", async () => {
       MOC_HOST_ROUTES_FILE: routesFile,
       NVIDIA_API_KEY: "test-nvidia-key",
       META_API_KEY: "test-meta-key",
+      BASETEN_API_KEY: "test-baseten-key",
     };
     const started = Date.now();
     const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
@@ -101,6 +102,7 @@ test("an unknown request with no logs directory is a precondition error", async 
         XDG_RUNTIME_DIR: runtimeBase,
         NVIDIA_API_KEY: "test-nvidia-key",
         META_API_KEY: "test-meta-key",
+        BASETEN_API_KEY: "test-baseten-key",
       };
       const { stdout, stderr, rc } = await runResolveCli(dir, ["--request", "demo-item:0"], env);
       expect(rc).toBe(2);

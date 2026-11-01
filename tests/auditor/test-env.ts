@@ -9,10 +9,12 @@ import { resetProvidersCache } from "../../src/providers/config.js";
 const KEYS = [
   "NVIDIA_API_KEY",
   "META_API_KEY",
+  "BASETEN_API_KEY",
   "LOCAL_MODEL_BASE_URL",
   "PROVIDER_META_API_BASE_URL",
   "PROVIDER_NVIDIA_BUILD_BASE_URL",
   "PROVIDER_META_WONDER_BASE_URL",
+  "PROVIDER_BASETEN_BASE_URL",
   "PROVIDER_META_API_TIMEOUT_MS",
 ] as const;
 
@@ -23,6 +25,8 @@ export function applyTestEnv(): () => void {
   }
   process.env.NVIDIA_API_KEY = "test";
   process.env.META_API_KEY = "test";
+  process.env.BASETEN_API_KEY = "test";
+  process.env.PROVIDER_BASETEN_BASE_URL = "http://127.0.0.1:9";
   process.env.LOCAL_MODEL_BASE_URL = "http://localhost:1234/v1";
   resetProvidersCache();
   return () => {

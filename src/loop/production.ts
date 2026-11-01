@@ -1,7 +1,7 @@
 // Production loop composition: GitHub and path checks, the meter, the
 // Pohunek dispatch and host-state ports, the recovery pass and the tick loop.
 import { mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { PohunekAdapterConfig } from "../dispatcher/adapter/config.js";
 import type { DispatcherPort } from "../dispatcher/port.js";
 import type { AdapterLogEvent } from "../dispatcher/adapter/pohunek-port.js";
@@ -25,7 +25,7 @@ import {
   type LoopConfigs,
   type StopSignal,
 } from "./compose.js";
-import type { LoopGithubConfig } from "./config.js";
+import { portsLogPath, type LoopGithubConfig } from "./config.js";
 import type { AuditorConfig } from "../auditor/config.js";
 import { GitHubError, type GhEnv, type GitHubPort } from "./github.js";
 import { openLoopLog } from "./log.js";
@@ -221,7 +221,7 @@ async function runInside(
     const log = await openLoopLog(loop.logPath, () => new Date());
     closers.push({ name: "loop-log", close: () => log.close() });
     log.log({ event: "factory-start" });
-    const portsLog = await openCallLog(join(dirname(resolve(loop.logPath)), "loop-ports.jsonl"));
+    const portsLog = await openCallLog(portsLogPath(loop.logPath));
     closers.push({ name: "ports-log", close: () => portsLog.close() });
     const portsState: { failed: boolean } = { failed: false };
     const append = (

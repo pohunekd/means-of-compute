@@ -149,6 +149,7 @@ test("parked tasks shows no data when the work store file is absent", async () =
     expect(parked).toEqual({
       label: "Parked tasks",
       cell: { kind: "no-data", reason: "work store not wired" },
+      note: null,
       source: "work items with status parked (work store, storePath of config/work.json)",
     });
   } finally {

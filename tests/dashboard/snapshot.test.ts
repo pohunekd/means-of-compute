@@ -1,6 +1,8 @@
 // Snapshot CLI tests: the page is rendered from the given files with the
-// clock fixed at --as-of, byte-identical across runs, and a host name from
-// the host map anywhere in the page exits 3 without writing the file.
+// clock fixed at --as-of, byte-identical across runs, the Fleet shows the
+// newest recorded host-state probe per alias at or before --as-of, and a
+// host name from the host map anywhere in the page exits 3 without writing
+// the file.
 import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,6 +58,8 @@ async function runSnapshot(dir: string, out: string): Promise<{ code: number; st
       join(dir, "results.jsonl"),
       "--work",
       join(dir, "work-items.json"),
+      "--ports",
+      join(dir, "loop-ports.jsonl"),
       "--hosts",
       join(dir, "hosts.json"),
     ],
@@ -92,6 +96,78 @@ test("a host name from the host map in the page exits 3 and writes no file", asy
     expect(result.stderr).toBe(
       "dashboard:snapshot: page contains the host name mapped to alias desktop\n",
     );
+    expect(existsSync(join(dir, "page.html"))).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function probe(ts: string, hostAlias: string, cause: string | null): string {
+  return JSON.stringify({
+    ts,
+    source: "host-state",
+    event: "host-state",
+    hostAlias,
+    kind: cause === null ? "reported" : "unavailable",
+    cause,
+    detail: cause === null ? null : `${cause} (private_detail_text)`,
+    packageVersion: null,
+    packageDigest: null,
+    durationMs: 12,
+    stdoutBytes: null,
+    stdoutSha256: null,
+  });
+}
+
+test("the fleet shows the newest recorded probe per alias at or before --as-of", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dash-snapshot-"));
+  try {
+    await seedLedger(join(dir, "ledger.jsonl"), "desktop");
+    writeFileSync(
+      join(dir, "loop-ports.jsonl"),
+      [
+        JSON.stringify({ ts: "2026-10-28T09:00:00.000Z", source: "meter", event: "tick" }),
+        probe("2026-10-28T10:00:00.000Z", "desktop", null),
+        probe("2026-10-28T11:00:00.000Z", "laptop-b", "daemon-rejected"),
+        probe("2026-10-28T13:00:00.000Z", "desktop", "host-unreachable"),
+        '{"ts":"2026-10-28T11:30:00.000Z","source":"host-state","hostAlias":"Build',
+      ].join("\n"),
+    );
+    const result = await runSnapshot(dir, join(dir, "page.html"));
+    expect(result.code).toBe(0);
+    const page = readFileSync(join(dir, "page.html"), "utf8");
+    const fleet = page.slice(
+      page.indexOf('<section id="fleet">'),
+      page.indexOf('<section id="work">'),
+    );
+    expect(fleet).toContain("last probe: reported");
+    expect(fleet).toContain('datetime="2026-10-28T10:00:00.000Z"');
+    expect(fleet).toContain("last probe: unavailable: daemon rejected the request");
+    expect(fleet).toContain('datetime="2026-10-28T11:00:00.000Z"');
+    expect(fleet).toContain("no data (capacity values are not recorded)");
+    expect(fleet).toContain(
+      "a snapshot has no live host state: state and observed are the newest probe recorded at or before 2026-10-28T12:00:00.000Z",
+    );
+    expect(fleet).not.toContain("unreachable");
+    expect(page).not.toContain("private_detail_text");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a host-state line with an invalid alias exits 2 without the value", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dash-snapshot-"));
+  try {
+    await seedLedger(join(dir, "ledger.jsonl"), "desktop");
+    writeFileSync(
+      join(dir, "loop-ports.jsonl"),
+      `${probe("2026-10-28T10:00:00.000Z", "Build Box", null)}\n`,
+    );
+    const result = await runSnapshot(dir, join(dir, "page.html"));
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("input hosts host-state-log-invalid: host-state log ");
+    expect(result.stderr).toContain("loop-ports.jsonl: line 1: invalid hostAlias");
+    expect(result.stderr).not.toContain("Build Box");
     expect(existsSync(join(dir, "page.html"))).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });

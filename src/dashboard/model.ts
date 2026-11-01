@@ -28,6 +28,7 @@ import { sessionsOf, type RegistryEntry } from "../dispatcher/registry.js";
 import { latestOpenSession, latestSession, openSessionCount } from "./sessions.js";
 import type { HostObservation } from "../hoststate/collector.js";
 import type { UnavailableCause } from "../hoststate/collector.js";
+import type { RecordedProbe } from "../hoststate/log.js";
 
 export type Cell =
   | { readonly kind: "text"; readonly text: string }
@@ -35,9 +36,12 @@ export type Cell =
   | { readonly kind: "no-data"; readonly reason: string }
   | { readonly kind: "error"; readonly code: InputErrorCode };
 
+// note: the qualifier of the value (an upper bound, the records covered),
+// rendered small under the value; null when the value needs none.
 export interface Figure {
   readonly label: string;
   readonly cell: Cell;
+  readonly note: string | null;
   readonly source: string;
 }
 
@@ -113,11 +117,11 @@ function aliasesCell(values: readonly string[]): Cell {
 }
 
 function textFigure(label: string, value: string, source: string): Figure {
-  return { label, cell: textCell(value), source };
+  return { label, cell: textCell(value), note: null, source };
 }
 
 function failedFigure(label: string, failure: InputFailure, source: string): Figure {
-  return { label, cell: failureCell(failure), source };
+  return { label, cell: failureCell(failure), note: null, source };
 }
 
 function priceCite(ids: readonly string[], pricing: ReadonlyMap<string, NanoPricing>): string {
@@ -160,8 +164,10 @@ function moneyUnknown(entry: SpendEntry, pricing: ReadonlyMap<string, NanoPricin
 function buildFleetPanel(inputs: DashboardInputs): Panel {
   const aliases = new Set<string>();
   if (inputs.hosts.ok) {
-    for (const observation of inputs.hosts.value) {
-      aliases.add(observation.hostAlias);
+    const view = inputs.hosts.value;
+    const seen = view.kind === "live" ? view.observations : view.probes;
+    for (const entry of seen) {
+      aliases.add(entry.hostAlias);
     }
   }
   if (inputs.ledger.ok) {
@@ -183,8 +189,8 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
   }
   const ordered = [...aliases].sort();
   const byAlias = new Map<string, HostObservation>();
-  if (inputs.hosts.ok) {
-    for (const observation of inputs.hosts.value) {
+  if (inputs.hosts.ok && inputs.hosts.value.kind === "live") {
+    for (const observation of inputs.hosts.value.observations) {
       byAlias.set(observation.hostAlias, observation);
     }
   }
@@ -197,6 +203,9 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
       ? textCell(count)
       : textCell(`${count} of ${groupDigits(maxConcurrentAgents)}`);
   };
+  if (inputs.hosts.ok && inputs.hosts.value.kind === "recorded") {
+    return recordedFleetPanel(inputs, ordered, inputs.hosts.value.probes, runningFor);
+  }
   const rows = ordered.map((alias): readonly Cell[] => {
     const observation = byAlias.get(alias);
     if (!inputs.hosts.ok) {
@@ -245,6 +254,46 @@ function buildFleetPanel(inputs: DashboardInputs): Panel {
         source:
           "collector round of this request (HostCapacity); running sessions from the dispatcher registry",
         note: null,
+      },
+    ],
+  };
+}
+
+// A recorded probe holds its outcome and time only: no idle flag and no
+// capacity values, so the snapshot shows neither.
+function recordedFleetPanel(
+  inputs: DashboardInputs,
+  ordered: readonly string[],
+  probes: readonly RecordedProbe[],
+  runningFor: (alias: string, maxConcurrentAgents: number | null) => Cell,
+): Panel {
+  const byAlias = new Map(probes.map((probe) => [probe.hostAlias, probe]));
+  const capacity = noDataCell("capacity values are not recorded");
+  const rows = ordered.map((alias): readonly Cell[] => {
+    const probe = byAlias.get(alias);
+    if (probe === undefined) {
+      const missing = noDataCell("no probe recorded");
+      return [aliasesCell([alias]), missing, capacity, runningFor(alias, null), missing];
+    }
+    const state =
+      probe.cause === null
+        ? textCell("last probe: reported")
+        : textCell(`last probe: unavailable: ${CAUSE_LABELS[probe.cause]}`);
+    return [aliasesCell([alias]), state, capacity, runningFor(alias, null), textCell(probe.at)];
+  });
+  return {
+    id: "fleet",
+    title: "Fleet",
+    figures: [],
+    tables: [
+      {
+        caption: "Fleet",
+        columns: ["host", "state", "free capacity", "running", "observed"],
+        rows,
+        source:
+          "host-state events (ts, kind, cause) in loop-ports.jsonl next to logPath of config/loop.json; " +
+          "running sessions from the dispatcher registry",
+        note: `a snapshot has no live host state: state and observed are the newest probe recorded at or before ${inputs.now.toISOString()}`,
       },
     ],
   };
@@ -627,20 +676,21 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: `Spent today (UTC ${day})`,
         cell: noDataCell(`spend unknown for ${ids.join(", ")}`),
+        note: null,
         source: spentTodaySource,
       });
     } else if (boundedToday.length > 0) {
       figures.push({
         label: `Spent today (UTC ${day})`,
-        cell: textCell(
-          `${formatUsd(guardScaled(summary.spentTodayNanoTimes1M))} (includes the upper bound for unmeasured calls of ${boundedToday.join(", ")})`,
-        ),
+        cell: textCell(formatUsd(guardScaled(summary.spentTodayNanoTimes1M))),
+        note: `includes the upper bound for unmeasured calls of ${boundedToday.join(", ")}`,
         source: spentTodaySource,
       });
     } else {
       figures.push({
         label: `Spent today (UTC ${day})`,
         cell: textCell(formatUsd(guardScaled(summary.spentTodayNanoTimes1M))),
+        note: null,
         source: spentTodaySource,
       });
     }
@@ -656,21 +706,22 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: "Spent total",
         cell: noDataCell(`spend unknown for ${ids.join(", ")}`),
+        note: null,
         source: spentTotalSource,
       });
     } else if (summary.boundedWorkItemIds.length > 0) {
       const ids = [...summary.boundedWorkItemIds].sort();
       figures.push({
         label: "Spent total",
-        cell: textCell(
-          `${formatUsd(guardScaled(summary.spentTotalNanoTimes1M))} (includes the upper bound for unmeasured calls of ${ids.join(", ")})`,
-        ),
+        cell: textCell(formatUsd(guardScaled(summary.spentTotalNanoTimes1M))),
+        note: `includes the upper bound for unmeasured calls of ${ids.join(", ")}`,
         source: spentTotalSource,
       });
     } else {
       figures.push({
         label: "Spent total",
         cell: textCell(formatUsd(guardScaled(summary.spentTotalNanoTimes1M))),
+        note: null,
         source: spentTotalSource,
       });
     }
@@ -686,6 +737,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
       figures.push({
         label: `NVIDIA Build requests today (UTC ${day})`,
         cell: noDataCell(`requests not reported for ${ids.join(", ")}`),
+        note: null,
         source:
           `ledger requests of provider ${inputs.budget.nvidiaProviderId} finished on ${day}; ` +
           "limit config/budget.json nvidiaDailyRequestLimit",
@@ -696,6 +748,7 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
         cell: textCell(
           `${groupDigits(summary.nvidiaRequestsToday)} of ${groupDigits(inputs.budget.nvidiaDailyRequestLimit)}`,
         ),
+        note: null,
         source:
           `ledger requests of provider ${inputs.budget.nvidiaProviderId} finished on ${day}; ` +
           "limit config/budget.json nvidiaDailyRequestLimit",
@@ -801,6 +854,56 @@ function hourPart(baselines: Baselines, key: "cloudSandboxHour" | "ownedHostHour
   return `config/dashboard.json baselines.${key} $${priceText(baseline.nanoPerHour)} per hour`;
 }
 
+// The token figures cover the records with full token counts: every token
+// row reports both counts and has no calls without usage. Excluded records
+// add nothing and are named in the note; no count is invented for them.
+// emptyReason is set when records exist and none is covered.
+interface TokenCoverage {
+  readonly measured: readonly UsageRecord[];
+  readonly note: string | null;
+  readonly emptyReason: string | null;
+}
+
+function idsHave(ids: readonly string[], what: string): string {
+  return `${ids.join(", ")} ${ids.length === 1 ? "has" : "have"} ${what}`;
+}
+
+function tokenCoverageOf(records: readonly UsageRecord[]): TokenCoverage {
+  const nullIds = new Set<string>();
+  const unmeasuredIds = new Set<string>();
+  const measured: UsageRecord[] = [];
+  for (const record of records) {
+    if (record.tokens.some((token) => token.inputTokens === null || token.outputTokens === null)) {
+      nullIds.add(record.workItemId);
+    } else if (record.tokens.some((token) => token.unmeasuredRequests !== undefined)) {
+      unmeasuredIds.add(record.workItemId);
+    } else {
+      measured.push(record);
+    }
+  }
+  if (measured.length === records.length) {
+    return { measured, note: null, emptyReason: null };
+  }
+  const nulls = [...nullIds].sort();
+  const unmeasured = [...unmeasuredIds].sort();
+  if (measured.length === 0) {
+    const reasons = [
+      nulls.length === 0 ? "" : `token counts not reported for ${nulls.join(", ")}`,
+      unmeasured.length === 0 ? "" : `calls without usage for ${unmeasured.join(", ")}`,
+    ].filter((reason) => reason !== "");
+    return { measured, note: null, emptyReason: reasons.join("; ") };
+  }
+  const excluded = [
+    nulls.length === 0 ? "" : idsHave(nulls, "no token counts"),
+    unmeasured.length === 0 ? "" : idsHave(unmeasured, "calls without usage"),
+  ].filter((reason) => reason !== "");
+  return {
+    measured,
+    note: `over ${String(measured.length)} of ${String(records.length)} records; ${excluded.join("; ")}`,
+    emptyReason: null,
+  };
+}
+
 function buildSavingsPanel(inputs: DashboardInputs): Panel {
   const figures: Figure[] = [];
   if (!inputs.ledger.ok) {
@@ -834,6 +937,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
         {
           label: "Scope",
           cell: failureCell(inputs.ledger.failure),
+          note: null,
           source: "ledger records",
         },
       ],
@@ -842,37 +946,29 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
   }
   const records = inputs.ledger.value.records;
   const pendingEntries = inputs.ledger.value.pending.length;
+  const coverage = tokenCoverageOf(records);
   const frontier = inputs.baselines.frontierTokens;
   let baselineValue: bigint | null = null;
   if (frontier === null) {
     figures.push({
       label: "Frontier-token baseline",
       cell: noDataCell("no frontierTokens baseline in config/dashboard.json"),
+      note: null,
       source: "config/dashboard.json baselines.frontierTokens",
     });
   } else {
-    const nullIds = [
-      ...new Set(
-        records
-          .filter((record) =>
-            record.tokens.some(
-              (token) => token.inputTokens === null || token.outputTokens === null,
-            ),
-          )
-          .map((record) => record.workItemId),
-      ),
-    ].sort();
-    if (nullIds.length > 0) {
+    const frontierCite =
+      `config/dashboard.json baselines.frontierTokens input $${priceText(frontier.inputNanoPer1M)} per 1M, ` +
+      `output $${priceText(frontier.outputNanoPer1M)} per 1M (${frontier.label}; ${frontier.source}; as of ${frontier.asOf})`;
+    if (coverage.emptyReason !== null) {
       figures.push({
         label: "Frontier-token baseline",
-        cell: noDataCell(`token counts not reported for ${nullIds.join(", ")}`),
-        source:
-          `ledger records tokens; ` +
-          `config/dashboard.json baselines.frontierTokens input $${priceText(frontier.inputNanoPer1M)} per 1M, ` +
-          `output $${priceText(frontier.outputNanoPer1M)} per 1M (${frontier.label}; ${frontier.source}; as of ${frontier.asOf})`,
+        cell: noDataCell(coverage.emptyReason),
+        note: null,
+        source: `ledger records with full token counts; ${frontierCite}`,
       });
     } else {
-      baselineValue = records.reduce(
+      baselineValue = coverage.measured.reduce(
         (sum, record) =>
           sum +
           record.tokens.reduce(
@@ -884,12 +980,12 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
           ),
         0n,
       );
-      const totalIn = records.reduce(
+      const totalIn = coverage.measured.reduce(
         (sum, record) =>
           sum + record.tokens.reduce((inner, token) => inner + (token.inputTokens ?? 0), 0),
         0,
       );
-      const totalOut = records.reduce(
+      const totalOut = coverage.measured.reduce(
         (sum, record) =>
           sum + record.tokens.reduce((inner, token) => inner + (token.outputTokens ?? 0), 0),
         0,
@@ -897,10 +993,10 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
       figures.push({
         label: "Frontier-token baseline",
         cell: textCell(formatUsd(baselineValue)),
+        note: coverage.note,
         source:
-          `ledger records tokens (input ${groupDigits(totalIn)}, output ${groupDigits(totalOut)}); ` +
-          `config/dashboard.json baselines.frontierTokens input $${priceText(frontier.inputNanoPer1M)} per 1M, ` +
-          `output $${priceText(frontier.outputNanoPer1M)} per 1M (${frontier.label}; ${frontier.source}; as of ${frontier.asOf})`,
+          `ledger records with full token counts (input ${groupDigits(totalIn)}, output ${groupDigits(totalOut)}); ` +
+          frontierCite,
       });
     }
   }
@@ -917,32 +1013,18 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     );
   } else {
     const pricing = inputs.pricing.value;
-    const nullOnPriced = [
-      ...new Set(
-        records
-          .filter((record) =>
-            record.tokens.some((token) => {
-              const entry = pricing.get(token.provider);
-              return (
-                entry !== undefined &&
-                isPriced(entry) &&
-                (token.inputTokens === null || token.outputTokens === null)
-              );
-            }),
-          )
-          .map((record) => record.workItemId),
-      ),
-    ].sort();
-    if (nullOnPriced.length > 0) {
+    const actualSource =
+      `ledger records with full token counts, tokens × price; ` +
+      `${recordIds.length === 0 ? "no entries; " : ""}${priceCite(recordIds, pricing)}${cachedClause(recordIds, pricing)}`;
+    if (coverage.emptyReason !== null) {
       figures.push({
         label: "Actual token cost",
-        cell: noDataCell(`token counts not reported for ${nullOnPriced.join(", ")}`),
-        source:
-          `ledger records tokens × price; ` +
-          `${recordIds.length === 0 ? "no entries; " : ""}${priceCite(recordIds, pricing)}${cachedClause(recordIds, pricing)}`,
+        cell: noDataCell(coverage.emptyReason),
+        note: null,
+        source: actualSource,
       });
     } else {
-      actualValue = records.reduce(
+      actualValue = coverage.measured.reduce(
         (sum, record) =>
           sum +
           record.tokens.reduce((inner, token) => {
@@ -961,23 +1043,25 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
       figures.push({
         label: "Actual token cost",
         cell: textCell(formatUsd(actualValue)),
-        source:
-          `ledger records tokens × price; ` +
-          `${recordIds.length === 0 ? "no entries; " : ""}${priceCite(recordIds, pricing)}${cachedClause(recordIds, pricing)}`,
+        note: coverage.note,
+        source: actualSource,
       });
     }
   }
+  const tokenSavingsSource = `frontier-token baseline minus actual token cost above, over the same records; ${frontierPart(inputs.baselines)}; ${priceCite(recordIds, pricingForRecordCite)}`;
   if (baselineValue === null || actualValue === null) {
     figures.push({
       label: "Token savings",
       cell: noDataCell("needs every figure it is computed from"),
-      source: `frontier-token baseline minus actual token cost above; ${frontierPart(inputs.baselines)}; ${priceCite(recordIds, pricingForRecordCite)}`,
+      note: null,
+      source: tokenSavingsSource,
     });
   } else {
     figures.push({
       label: "Token savings",
       cell: textCell(formatUsd(baselineValue - actualValue)),
-      source: `frontier-token baseline minus actual token cost above; ${frontierPart(inputs.baselines)}; ${priceCite(recordIds, pricingForRecordCite)}`,
+      note: coverage.note,
+      source: tokenSavingsSource,
     });
   }
   const totalSeconds = records.reduce(
@@ -993,6 +1077,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Cloud sandbox baseline",
       cell: noDataCell("no cloudSandboxHour baseline in config/dashboard.json"),
+      note: null,
       source: "config/dashboard.json baselines.cloudSandboxHour",
     });
   } else {
@@ -1000,6 +1085,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Cloud sandbox baseline",
       cell: textCell(formatUsd(cloudValue)),
+      note: null,
       source:
         `ledger records sessionSeconds (${groupDigits(totalSeconds)} s); ` +
         `config/dashboard.json baselines.cloudSandboxHour $${priceText(cloud.nanoPerHour)} per hour ` +
@@ -1010,6 +1096,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Owned compute cost",
       cell: noDataCell("no ownedHostHour baseline in config/dashboard.json"),
+      note: null,
       source: "config/dashboard.json baselines.ownedHostHour",
     });
   } else {
@@ -1017,6 +1104,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Owned compute cost",
       cell: textCell(formatUsd(ownedValue)),
+      note: null,
       source:
         `ledger records sessionSeconds (${groupDigits(totalSeconds)} s); ` +
         `config/dashboard.json baselines.ownedHostHour $${priceText(owned.nanoPerHour)} per hour ` +
@@ -1027,6 +1115,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Compute-hour savings",
       cell: noDataCell("needs every figure it is computed from"),
+      note: null,
       source:
         `cloud sandbox baseline minus owned compute cost above; ${hourPart(inputs.baselines, "cloudSandboxHour")}; ` +
         hourPart(inputs.baselines, "ownedHostHour"),
@@ -1035,6 +1124,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Compute-hour savings",
       cell: textCell(formatUsd(cloudValue - ownedValue)),
+      note: null,
       source:
         `cloud sandbox baseline minus owned compute cost above; ${hourPart(inputs.baselines, "cloudSandboxHour")}; ` +
         hourPart(inputs.baselines, "ownedHostHour"),
@@ -1048,6 +1138,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Total savings",
       cell: noDataCell("needs every figure it is computed from"),
+      note: null,
       source:
         `token savings plus compute-hour savings above; ${frontierPart(inputs.baselines)}; ` +
         `${priceCite(recordIds, pricingForRecordCite)}; ${hourPart(inputs.baselines, "cloudSandboxHour")}; ` +
@@ -1057,6 +1148,10 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     figures.push({
       label: "Total savings",
       cell: textCell(formatUsd(tokenSavings + computeSavings)),
+      note:
+        coverage.note === null
+          ? null
+          : `token savings ${coverage.note}; compute-hour savings over all ${String(records.length)} records`,
       source:
         `token savings plus compute-hour savings above; ${frontierPart(inputs.baselines)}; ` +
         `${priceCite(recordIds, pricingForRecordCite)}; ${hourPart(inputs.baselines, "cloudSandboxHour")}; ` +
@@ -1066,6 +1161,7 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
   figures.push({
     label: "Scope",
     cell: textCell(`${String(records.length)} finished tasks`),
+    note: null,
     source: `ledger records; ${String(pendingEntries)} pending entries are not included`,
   });
   return { id: "savings", title: "Savings", figures, tables: [] };

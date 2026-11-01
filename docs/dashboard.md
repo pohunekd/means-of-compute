@@ -88,9 +88,9 @@ models) and the rendered time in a compact UTC form (`2026-11-01 13:03:54
 UTC`) with the full ISO value in the `time` element's `datetime` and `title`.
 Below it, a strip of key figure cards reuses figures the panels already
 compute, in this order: `Total savings`, `Spent total`, `Spent today`,
-`Finished tasks`, `Parked tasks`. Each card shows the figure's value and its
-source line, small and muted; no card derives a new number. The same figures
-still render in their panels below.
+`Finished tasks`, `Parked tasks`. Each card shows the figure's value, its
+note when it has one, and its source line, small and muted; no card derives a
+new number. The same figures still render in their panels below.
 
 Sections render as cards with clear headings. Colours are CSS custom
 properties, light by default and dark under `prefers-color-scheme: dark`, on
@@ -108,6 +108,11 @@ form above with the full ISO value in the cell's `title`. A ledger failure
 makes every ledger-derived cell `error(<ledger code>)`; the page shows the
 code only, never the message. Figures listed "in order" render in that
 order. The Work table shows `showing ${shown} of ${total} items`.
+
+A figure's qualifier (an upper bound, the records a value covers) is its note:
+a separate line under the value, smaller than the value and larger than the
+source line, never part of the value. A figure without a qualifier has no
+note.
 
 ### Fleet
 
@@ -136,6 +141,18 @@ registry input fails; otherwise `n`, the number of registry entries with
 `` `<n> of <capacity.policy.maxConcurrentAgents>` `` with grouped digits,
 otherwise `` `<n>` ``.
 `observed`: the observation time, or the same failure/no-data as `state`.
+
+The snapshot has no collector round; its Fleet reads the host-state events in
+`loop-ports.jsonl` (see Static snapshot). Then the source is
+`host-state events (ts, kind, cause) in loop-ports.jsonl next to logPath of config/loop.json; running sessions from the dispatcher registry`
+and the note is
+`a snapshot has no live host state: state and observed are the newest probe recorded at or before <as-of>`.
+Rows also take the aliases of the recorded probes. `state`:
+`last probe: reported` or `last probe: unavailable: <label>` (labels above),
+or `no data (no probe recorded)`. `free capacity`:
+`no data (capacity values are not recorded)`. `running`: `n` (no capacity
+to compare with). `observed`: the probe's `ts`. Event `detail`, package and
+stdout fields never reach the page.
 
 ### Work
 
@@ -228,7 +245,7 @@ pricing failure. With no entries in scope the price part is prefixed with
 `config/providers/<id>.json input $<in> per 1M, output $<out> per 1M`,
 joined with `"; "`, plus `; upper bound: cached-input pricing of <ids> not
 applied` when a provider prices cached input (there is no cached count to
-apply it to). When the scope holds bounded unmeasured entries, the spent-today and spent-total cells read `<usd> (includes the upper bound for unmeasured calls of <sorted ids>)`. The spent-today ids are bounded entries finished that day; the spent-total ids are every bounded entry.
+apply it to). When the scope holds bounded unmeasured entries, the spent-today and spent-total values carry the note `includes the upper bound for unmeasured calls of <sorted ids>`. The spent-today ids are bounded entries finished that day; the spent-total ids are every bounded entry.
 
 `Tokens by provider (finished tasks)`: columns
 `provider, model, input tokens, output tokens, requests, sources`, from the
@@ -242,21 +259,32 @@ plus a `total` row with `Σ seconds / 3600` to 2 decimals. Source:
 
 In order:
 
-| Label                     | Value                                     | Source                                                                                                                                                                     |
-| ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Frontier-token baseline` | scaled token sums at the frontier prices  | `ledger records tokens (input <n>, output <n>); config/dashboard.json baselines.frontierTokens input $<in> per 1M, output $<out> per 1M (<label>; <source>; as of <asOf>)` |
-| `Actual token cost`       | scaled token sums at provider prices      | `ledger records tokens × price; <prices>`                                                                                                                                  |
-| `Token savings`           | baseline minus actual                     | `frontier-token baseline minus actual token cost above; <frontier>; <prices>`                                                                                              |
-| `Cloud sandbox baseline`  | scaled session seconds at the cloud price | `ledger records sessionSeconds (<n> s); config/dashboard.json baselines.cloudSandboxHour $<p> per hour (<label>; <source>; as of <asOf>)`                                  |
-| `Owned compute cost`      | scaled session seconds at the owned price | same, with `baselines.ownedHostHour`                                                                                                                                       |
-| `Compute-hour savings`    | cloud baseline minus owned cost           | `cloud sandbox baseline minus owned compute cost above; <cloud>; <owned>`                                                                                                  |
-| `Total savings`           | token plus compute-hour savings           | `token savings plus compute-hour savings above; <frontier>; <prices>; <cloud>; <owned>`                                                                                    |
+| Label                     | Value                                     | Source                                                                                                                                                                                     |
+| ------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Frontier-token baseline` | scaled token sums at the frontier prices  | `ledger records with full token counts (input <n>, output <n>); config/dashboard.json baselines.frontierTokens input $<in> per 1M, output $<out> per 1M (<label>; <source>; as of <asOf>)` |
+| `Actual token cost`       | scaled token sums at provider prices      | `ledger records with full token counts, tokens × price; <prices>`                                                                                                                          |
+| `Token savings`           | baseline minus actual                     | `frontier-token baseline minus actual token cost above, over the same records; <frontier>; <prices>`                                                                                       |
+| `Cloud sandbox baseline`  | scaled session seconds at the cloud price | `ledger records sessionSeconds (<n> s); config/dashboard.json baselines.cloudSandboxHour $<p> per hour (<label>; <source>; as of <asOf>)`                                                  |
+| `Owned compute cost`      | scaled session seconds at the owned price | same, with `baselines.ownedHostHour`                                                                                                                                                       |
+| `Compute-hour savings`    | cloud baseline minus owned cost           | `cloud sandbox baseline minus owned compute cost above; <cloud>; <owned>`                                                                                                                  |
+| `Total savings`           | token plus compute-hour savings           | `token savings plus compute-hour savings above; <frontier>; <prices>; <cloud>; <owned>`                                                                                                    |
 
 A `null` baseline gives
-`no data (no <key> baseline in config/dashboard.json)`. A null count on any
-provider gives `no data (token counts not reported for <ids>)` on the
-frontier baseline; on a priced provider, the same on actual cost. A derived
-figure with a missing operand gives
+`no data (no <key> baseline in config/dashboard.json)`. The three token
+figures cover the same records: those with full token counts, where every
+`tokens[]` row reports both counts and has no `unmeasuredRequests`, on any
+provider, priced or not. The other records add nothing to them; no count and
+no upper bound is used for them. When some records are excluded, the three
+values carry the note
+`over <n> of <m> records; <ids> have no token counts; <ids> have calls without usage`
+(each clause only when it has ids, `has` for one id). When records exist and
+none has full token counts, the three show
+`no data (token counts not reported for <ids>; calls without usage for <ids>)`
+(each clause only when it has ids). `Total savings` adds the token savings
+and the compute-hour savings, which covers every record (session seconds
+are never null); with excluded records its note is
+`token savings over <n> of <m> records; <ids> have no token counts; compute-hour savings over all <m> records`.
+A derived figure with a missing operand gives
 `no data (needs every figure it is computed from)`. Then a `Scope` figure:
 `<n> finished tasks`, sourced
 `ledger records; <m> pending entries are not included`.
@@ -318,9 +346,9 @@ plus the fraction padded to 9 digits with trailing zeros removed
 Unknown spend never shows a number: a null count on a priced provider gives
 `no data (spend unknown for <ids>)` for `Spent today`/`Spent total`, a null
 NVIDIA request count gives `no data (requests not reported for <ids>)` for
-the request figure, and a null count on any provider gives
-`no data (token counts not reported for <ids>)` on the frontier baseline.
-Never a partial sum.
+the request figure. Spend is never a partial sum. The savings token figures
+sum the records with full token counts and state that coverage in their
+note (Savings above).
 
 ## Failure table
 
@@ -339,7 +367,8 @@ Never a partial sum.
 | ledger line invalid, duplicate, unterminated                                                 | `error ledger-invalid`, logged                   | every ledger cell `error (ledger-invalid)`                               |
 | a ledger provider has no descriptor                                                          | `error pricing-unavailable`, logged              | every money cell except caps and baselines `error (pricing-unavailable)` |
 | null counts on a priced provider                                                             | unknown rule above                               | `no data (spend unknown for …)`; never a partial sum                     |
-| null counts on any provider (baseline)                                                       | baseline rule above                              | `no data (token counts not reported for …)`                              |
+| null counts or calls without usage in some records (savings)                                 | coverage rule above                              | savings token values over the other records, coverage note               |
+| no record with full token counts (savings)                                                   | coverage rule above                              | `no data (token counts not reported for …)`                              |
 | baseline `null`                                                                              | baseline rule above                              | `no data (no <key> baseline in config/dashboard.json)`                   |
 | verdict dir absent                                                                           | no-data                                          | `no data (no verdict store)`                                             |
 | verdict file unreadable or invalid                                                           | `error verdicts-unreadable` for that row, logged | that row only                                                            |
@@ -348,6 +377,9 @@ Never a partial sum.
 | `collect()` rejects with an `Error`                                                          | `error fleet-round-failed`, logged               | Fleet state, capacity and observed cells (`running` from the registry)   |
 | one host unavailable                                                                         | its observation                                  | `unavailable: <label>`                                                   |
 | alias seen only in ledger or registry                                                        | no observation                                   | `no data (not in this collector round)`                                  |
+| snapshot: ports log absent with parent present                                               | no-data                                          | Fleet `no data (no probe recorded; a snapshot has no live host state)`   |
+| snapshot: ports log line not JSON, or a bad host-state ts, alias, kind or cause              | `host-state-log-invalid` on stderr, exit 2       | none                                                                     |
+| snapshot: ports log parent missing, not a file, or unreadable                                | `host-state-log-unreadable` on stderr, exit 2    | none                                                                     |
 | registry absent with parent present                                                          | empty contents                                   | `running` `0`                                                            |
 | registry invalid or a bad `requestId`                                                        | `error registry-invalid`, logged                 | `error (registry-invalid)`, logged, registry cells                       |
 | registry unreadable                                                                          | `error registry-unreadable`, logged              | `error (registry-unreadable)`                                            |
@@ -375,7 +407,7 @@ list shows counts per head SHA, never finding texts.
 
 Run `bun run demo:numbers --ledger <run-ledger>` to print a markdown table of benchmark figures from ledger records plus config prices.
 
-The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems `ok: false`, then reads figures by panel id and label (`figureOf`). The
+The command reuses dashboard figures via `buildDashboard` (`src/dashboard/model.ts`). It builds `DashboardInputs` with ledger and pricing `ok: true`, hosts and results `ok: false`, registry empty, verdicts empty and workItems `ok: false`, then reads figures by panel id and label (`figureOf`). A figure with a note prints as `<value> (<note>)`. The
 `Sessions per model (finished tasks)` section copies the Autonomy table of
 that caption: `model, sessions, ended ok`, with no rate.
 
@@ -388,7 +420,7 @@ Classification config `config/demo-numbers.json` must contain exactly `localProv
 ## Static snapshot (dashboard:snapshot)
 
 ```sh
-bun run dashboard:snapshot -- --as-of <iso> --out <file> [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>] [--hosts <path>]
+bun run dashboard:snapshot -- --as-of <iso> --out <file> [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>] [--ports <path>] [--hosts <path>]
 ```
 
 The command renders the page once, without a listener, through the server's
@@ -403,9 +435,16 @@ registry time is newer, the newest Work row's `last activity` equals the
 header time: both are that recorded time.
 
 Host state is not collected: a collector round is live fleet I/O, not recorded
-data. Fleet rows are the ledger `sessionSeconds` aliases, `running` comes from
-the registry, and state, free capacity and observed show
-`no data (host state not wired)`.
+data. The Fleet shows what the loop recorded instead: the newest host-state
+event per alias with `ts` at or before `--as-of` in the loop ports log
+(`--ports`, default `loop-ports.jsonl` next to `logPath` of `config/loop.json`,
+the file the loop writes). Only `ts`, `hostAlias`, `kind` and `cause` are read;
+a host-state line needs a `toISOString` `ts`, an alias matching
+`^[a-z][a-z0-9-]{0,31}$`, and `kind` `reported` with a null `cause` or
+`unavailable` with a known cause. Lines of other sources are skipped and an
+unterminated last line is ignored, so a log the loop is appending to reads
+the same at the same `--as-of`. Capacity values are not recorded, so free
+capacity shows `no data (capacity values are not recorded)` (Fleet above).
 
 Before writing, the page is checked. No `evidenceDenyPatterns` entry of
 `config/coordinator.json` may match it, and no host name from the host map

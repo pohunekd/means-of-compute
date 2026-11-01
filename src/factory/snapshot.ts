@@ -1,9 +1,10 @@
 // Dashboard snapshot CLI: bun run dashboard:snapshot --as-of <iso> --out <file>
 // [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>]
-// [--hosts <path>].
+// [--ports <path>] [--hosts <path>].
 // Renders the dashboard page once through the server's path (gatherInputs,
 // buildDashboard, renderDashboard) with the clock fixed at --as-of and no
-// host state round, then writes it atomically. A usage, config or input
+// host state round: the Fleet shows the newest host-state probe per alias
+// recorded in the loop ports log at or before --as-of. It writes atomically. A usage, config or input
 // error exits 2 and a privacy hit exits 3; neither writes the file.
 import { loadAuditorConfig } from "../auditor/config.js";
 import { loadBudgetConfig } from "../budget/config.js";
@@ -20,7 +21,7 @@ import { loadDispatcherConfig } from "../dispatcher/config.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
 import { loadLedgerConfig } from "../ledger/read.js";
-import { DEFAULT_LOOP_CONFIG_PATH, loadLoopConfig } from "../loop/config.js";
+import { DEFAULT_LOOP_CONFIG_PATH, loadLoopConfig, portsLogPath } from "../loop/config.js";
 import { providerDescriptorExists } from "../providers/config.js";
 import { PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
@@ -36,6 +37,7 @@ const FLAGS = [
   "--registry",
   "--results",
   "--work",
+  "--ports",
   "--hosts",
 ] as const;
 
@@ -167,7 +169,12 @@ async function snapshot(): Promise<number> {
     const sources = {
       ledgerPath: flags.get("--ledger") ?? (await loadLedgerConfig()).ledgerPath,
       verdictDir: flags.get("--verdicts") ?? (await loadAuditorConfig()).verdictDir,
-      hostState: null,
+      hostState: {
+        kind: "log" as const,
+        path:
+          flags.get("--ports") ??
+          portsLogPath((await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production")).logPath),
+      },
       registryPath: flags.get("--registry") ?? (await loadDispatcherConfig()).registryPath,
       resultsPath:
         flags.get("--results") ??

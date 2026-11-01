@@ -60,6 +60,12 @@ function cellText(cell: import("../dashboard/model.js").Cell): string {
   throw new Error(`demo:numbers: unexpected ${cell.kind} cell`);
 }
 
+// A dashboard value over a subset of records carries its coverage note.
+function figureText(figure: import("../dashboard/model.js").Figure): string {
+  const text = cellText(figure.cell);
+  return figure.note === null ? text : `${text} (${figure.note})`;
+}
+
 function getFigure(
   model: ReturnType<typeof buildDashboard>,
   panelId: string,
@@ -237,7 +243,7 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   });
 
   const actualCostFigure = getFigure(model, "savings", "Actual token cost");
-  let actualCostText = cellText(actualCostFigure.cell);
+  let actualCostText = figureText(actualCostFigure);
   if (actualCostFigure.cell.kind === "text" && nullIdsPriced.size > 0) {
     actualCostText = `no data (token counts not reported for ${idList(nullIdsPriced)})`;
   } else if (actualCostFigure.cell.kind !== "no-data" && unmeasuredIds.size > 0) {
@@ -264,7 +270,7 @@ export function buildNumbers(inputs: NumbersInputs): BenchmarkNumbers {
   });
 
   const frontierFigure = getFigure(model, "savings", "Frontier-token baseline");
-  let frontierText = cellText(frontierFigure.cell);
+  let frontierText = figureText(frontierFigure);
   if (frontierFigure.cell.kind === "text" && nullIdsAll.size > 0) {
     frontierText = `no data (token counts not reported for ${idList(nullIdsAll)})`;
   } else if (frontierFigure.cell.kind !== "no-data" && unmeasuredIds.size > 0) {

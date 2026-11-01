@@ -271,7 +271,8 @@ test("models panel shows an explicit empty state for an absent file", async () =
     if (today === undefined || today.cell.kind !== "text") {
       throw new Error("expected a spent-today text cell");
     }
-    expect(today.cell.text.endsWith("unmeasured calls of w1-demo)")).toBe(true);
+    expect(today.cell.text).toMatch(/^\$\d+\.\d{4}$/);
+    expect(today.note).toBe("includes the upper bound for unmeasured calls of w1-demo");
     const emptyDir = mkdtempSync(join(tmpdir(), "models-panel-"));
     try {
       await mkdir(join(emptyDir, "verdicts"), { recursive: true });

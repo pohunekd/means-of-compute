@@ -1,7 +1,8 @@
-// Renderer presentation tests: the key-figure strip reuses panel figures,
-// Work rows carry status pills and a placement <details>, timestamps and
-// long identifiers are compact with the full value in a title attribute,
-// and every data string stays escaped, titles and summaries included.
+// Renderer presentation tests: the key-figure strip reuses panel figures
+// with their notes under the value, Work rows carry status pills and a
+// placement <details>, timestamps and long identifiers are compact with the
+// full value in a title attribute, and every data string stays escaped,
+// titles and summaries included.
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { CSS_HASH, DASHBOARD_CSS, renderDashboard } from "../../src/dashboard/render.js";
@@ -76,16 +77,24 @@ function fixture(): DashboardModel {
           {
             label: "Spent today (UTC 2026-11-01)",
             cell: text("$0.0087"),
+            note: null,
             source: "ledger records",
           },
-          { label: "Spent total", cell: text("$0.1892"), source: "ledger records" },
+          {
+            label: "Spent total",
+            cell: text("$0.1892"),
+            note: "includes the upper bound for unmeasured calls of w1-demo",
+            source: "ledger records",
+          },
         ],
         tables: [],
       },
       {
         id: "savings",
         title: "Savings",
-        figures: [{ label: "Total savings", cell: text("$3.1131"), source: "ledger records" }],
+        figures: [
+          { label: "Total savings", cell: text("$3.1131"), note: null, source: "ledger records" },
+        ],
         tables: [],
       },
       {
@@ -95,11 +104,13 @@ function fixture(): DashboardModel {
           {
             label: "Finished tasks",
             cell: text("33 succeeded, 0 blocked"),
+            note: null,
             source: "ledger records result",
           },
           {
             label: "Parked tasks",
             cell: text("2"),
+            note: null,
             source: "work items with status parked (work store)",
           },
         ],
@@ -125,6 +136,9 @@ test("the page carries the key figures, pills, placement details and compact val
     expect(page.slice(0, workAt)).toContain(label);
   }
   expect(page.slice(0, workAt)).toContain("source: ledger records result");
+  expect(page.slice(0, workAt)).toContain(
+    '<span class="value">$0.1892</span>\n    <p class="note">includes the upper bound for unmeasured calls of w1-demo</p>',
+  );
   expect(page).toContain('<span class="pill pill-parked">parked (operator: audit-failed)</span>');
   expect(page).toContain('<span class="pill pill-done">done</span>');
   expect(page).toContain("<summary>desktop · score 0.9117</summary>");

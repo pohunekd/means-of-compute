@@ -75,6 +75,9 @@ interface PortInternals {
   closeDone: boolean;
   readonly inspected: Map<string, Client>;
   readonly terminals: Map<string, TerminalResult>;
+  // Per host alias, the turn of the latest queued start; it resolves when
+  // that start settles.
+  readonly startTurns: Map<string, Promise<void>>;
 }
 
 function terminalKey(hostAlias: string, sessionId: string): string {
@@ -499,6 +502,30 @@ async function startSession(port: PortInternals, req: StartRequest): Promise<Ses
   };
 }
 
+// One start at a time per host alias: concurrent session.new calls on one
+// host race on its git fetch while they create worktrees. A start waits until
+// every earlier start on its host has settled, accepted or not; starts on
+// different hosts never wait for each other. Every daemon call is bounded by
+// its SDK request budget, so each queued start gets its turn.
+async function queuedStart(port: PortInternals, req: StartRequest): Promise<SessionHandle> {
+  const alias = req.hostAlias;
+  const previous = port.startTurns.get(alias) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const turn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  port.startTurns.set(alias, turn);
+  await previous;
+  try {
+    return await startSession(port, req);
+  } finally {
+    release();
+    if (port.startTurns.get(alias) === turn) {
+      port.startTurns.delete(alias);
+    }
+  }
+}
+
 // Lost terminal shared by W1, W3, W5 and X1: no mark, no stop, cached (3.7).
 // The cursor is the caller's cursor (W1) or null (X1); never "".
 function lostTerminal(
@@ -878,9 +905,10 @@ export function createPohunekPort(
     closeDone: false,
     inspected: new Map(),
     terminals: new Map(),
+    startTurns: new Map(),
   };
   return {
-    start: (req: StartRequest) => startSession(port, req),
+    start: (req: StartRequest) => queuedStart(port, req),
     wait: (ref: SessionRef, timeoutMs: number, cursor: string | null) =>
       waitSession(port, ref, timeoutMs, cursor),
     diff: (ref: SessionRef, base: string) => diffSession(port, ref, base),

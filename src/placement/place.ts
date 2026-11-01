@@ -56,7 +56,7 @@ export function place(
     chosenHostAlias: winner.candidate.hostAlias,
     reason:
       `${winner.candidate.hostAlias} is ${winner.candidate.reason}` +
-      ` inside its policy window, ${String(runningCount)}/${String(winnerHost.policy.maxConcurrentAgents)} agents running`,
+      `, inside its policy window, ${String(runningCount)}/${String(winnerHost.policy.maxConcurrentAgents)} agents running`,
     candidates,
   };
   assertValidDecision(decision);
@@ -158,7 +158,7 @@ function buildCandidate(
       : `idle, on AC power, battery ${String(host.batteryPercent)}%`;
   const cpuPercent = Math.round(cpuFree * 100);
   const memPercent = Math.round(memFree * 100);
-  const gpuText = host.gpu.present ? ", GPU" : "";
+  const gpuText = host.gpu.present ? ", GPU present" : "";
   return {
     loadRatio,
     candidate: {

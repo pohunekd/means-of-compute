@@ -26,7 +26,7 @@ const DECISION = {
   workItemId: "w229-place",
   chosenHostAlias: "laptop-b",
   reason:
-    "laptop-b is idle, on AC power, no battery, CPU 90% free, memory 60% free inside its policy window, 0/2 agents running",
+    "laptop-b is idle, on AC power, no battery, CPU 90% free, memory 60% free, inside its policy window, 0/2 agents running",
   candidates: [
     {
       hostAlias: "desktop",
@@ -151,7 +151,7 @@ test("a started round records its placement and Work shows it without the error 
     expect(await placementOf(dir, registryPath)).toEqual({
       kind: "text",
       text:
-        "laptop-b is idle, on AC power, no battery, CPU 90% free, memory 60% free inside its policy window, 0/2 agents running, score 0.81; " +
+        "laptop-b is idle, on AC power, no battery, CPU 90% free, memory 60% free, inside its policy window, 0/2 agents running, score 0.81; " +
         "desktop: excluded: not idle (power unknown); laptop-a: eligible, score 0.41",
     });
   } finally {

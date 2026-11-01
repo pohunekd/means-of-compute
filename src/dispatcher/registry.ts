@@ -4,6 +4,7 @@
 // An in-process promise chain serializes writes. Entries are provisional
 // until the port start settles them; only settled entries carry a session id.
 import Ajv from "ajv/dist/2020";
+import type { PlacementCandidate } from "../../contracts/v1/types.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { writeFileAtomic } from "../fs/write.js";
 import type { CancelReason, ModelSelection, PortState, PortUsage, TerminalState } from "./port.js";
@@ -20,6 +21,13 @@ export interface RegistryTerminal {
   readonly usageValid: boolean;
   readonly detail: string;
   readonly ledgerAppended: boolean;
+}
+
+// The placement decision the entry's start was given, as src/placement/place.ts
+// produced it: the winner reason and every candidate, by alias only.
+export interface RegistryPlacement {
+  readonly reason: string;
+  readonly candidates: readonly PlacementCandidate[];
 }
 
 interface RegistryEntryBase {
@@ -43,6 +51,9 @@ interface RegistryEntryBase {
   // Set once dispatcher.retire removed the session or found it absent; the
   // retire sweep skips a marked entry. Optional so older registries validate.
   readonly retiredAt?: string;
+  // Set when the start inserts the entry. Optional so registries written
+  // before it validate.
+  readonly placement?: RegistryPlacement;
   readonly revision: number;
 }
 

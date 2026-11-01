@@ -24,7 +24,7 @@ import {
 import type { Baselines } from "./config.js";
 import type { DashboardInputs, InputErrorCode, InputFailure } from "./inputs.js";
 import type { ResultLine } from "../loop/results.js";
-import { sessionsOf } from "../dispatcher/registry.js";
+import { sessionsOf, type RegistryEntry } from "../dispatcher/registry.js";
 import { latestOpenSession, latestSession, openSessionCount } from "./sessions.js";
 import type { HostObservation } from "../hoststate/collector.js";
 import type { UnavailableCause } from "../hoststate/collector.js";
@@ -377,6 +377,48 @@ function workStatus(inputs: DashboardInputs, id: string): Cell {
   return inputs.ledger.ok ? noDataCell("no ledger entry") : failureCell(inputs.ledger.failure);
 }
 
+// A not-idle exclusion carries the host-reported idleReason. The probe puts
+// an error message after the first colon of that reason (user activity or
+// power unknown), and a message can name a path, so the page cuts it there.
+const NOT_IDLE_PREFIX = "excluded: not idle (";
+
+function shownExclusion(reason: string): string {
+  if (!reason.startsWith(NOT_IDLE_PREFIX) || !reason.endsWith(")")) {
+    return reason;
+  }
+  const detail = reason.slice(NOT_IDLE_PREFIX.length, -1);
+  const colon = detail.indexOf(":");
+  return colon === -1 ? reason : `${NOT_IDLE_PREFIX}${detail.slice(0, colon)})`;
+}
+
+function placementCell(inputs: DashboardInputs, latest: RegistryEntry | null): Cell {
+  if (!inputs.registry.ok) {
+    return failureCell(inputs.registry.failure);
+  }
+  if (latest === null) {
+    return noDataCell("no session");
+  }
+  const placement = latest.placement;
+  if (placement === undefined) {
+    return noDataCell("not recorded");
+  }
+  const chosen = placement.candidates.find((candidate) => candidate.hostAlias === latest.hostAlias);
+  const parts = [
+    chosen === undefined ? placement.reason : `${placement.reason}, score ${String(chosen.score)}`,
+  ];
+  for (const candidate of placement.candidates) {
+    if (candidate.hostAlias === latest.hostAlias) {
+      continue;
+    }
+    parts.push(
+      candidate.excluded
+        ? `${candidate.hostAlias}: ${shownExclusion(candidate.reason)}`
+        : `${candidate.hostAlias}: eligible, score ${String(candidate.score)}`,
+    );
+  }
+  return textCell(parts.join("; "));
+}
+
 function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total: number): Panel {
   const rows = shown.map((id): readonly Cell[] => {
     const record = recordFor(inputs, id);
@@ -423,6 +465,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
         : inputs.registry.ok
           ? noDataCell("no session")
           : failureCell(inputs.registry.failure);
+    const placement = placementCell(inputs, latest);
     const verdicts = verdictCell(inputs, id);
     const activity = activityOf(inputs, id);
     const lastActivity =
@@ -431,7 +474,7 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
           ? noDataCell("no timestamp")
           : failureCell(inputs.ledger.failure)
         : textCell(new Date(activity).toISOString());
-    return [textCell(id), status, host, branch, model, verdicts, lastActivity];
+    return [textCell(id), status, host, placement, branch, model, verdicts, lastActivity];
   });
   return {
     id: "work",
@@ -440,10 +483,19 @@ function buildWorkPanel(inputs: DashboardInputs, shown: readonly string[], total
     tables: [
       {
         caption: "Work",
-        columns: ["item", "status", "host", "branch", "model", "verdicts", "last activity"],
+        columns: [
+          "item",
+          "status",
+          "host",
+          "placement",
+          "branch",
+          "model",
+          "verdicts",
+          "last activity",
+        ],
         rows,
         source:
-          "work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; last activity: newest ledger finishedAt or registry time of the item",
+          "work store (storePath of config/work.json), dispatcher registry, ledger and verdict store; status rule in docs/dashboard.md; placement: decision recorded on the item's newest registry entry; last activity: newest ledger finishedAt or registry time of the item",
         note: `showing ${String(shown.length)} of ${String(total)} items`,
       },
     ],

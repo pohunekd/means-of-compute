@@ -62,6 +62,7 @@ pub fn validate_facts(
     ];
     let known_set: HashSet<&str> = KNOWN.iter().copied().collect();
 
+    // Ajv reports an unknown key before any other error.
     for key in obj.keys() {
         if !known_set.contains(key.as_str()) {
             return Err(format!("{} {}: unknown key", prefix, key));
@@ -345,6 +346,7 @@ fn has_duplicates(arr: &[serde_json::Value]) -> bool {
     false
 }
 
+// Ajv scans uniqueItems from the end and reports the first repeat it meets, later index first.
 fn duplicate_indices(arr: &[serde_json::Value]) -> (usize, usize) {
     let mut seen = std::collections::HashMap::new();
     for i in (0..arr.len()).rev() {

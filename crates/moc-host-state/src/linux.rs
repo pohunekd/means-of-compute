@@ -441,16 +441,16 @@ pub fn linux_seconds_since_input(loginctl: &str, now_ms: f64) -> Result<Option<f
             .map_err(ProbeError::Message)?;
         let cls = props.get("Class").map(|s| s.as_str());
         let remote = props.get("Remote").map(|s| s.as_str());
-        if cls.is_none() || cls == Some("") || remote.is_none() || remote == Some("") {
-            return Err(ProbeError::Message(format!(
-                "loginctl session {id} has no Class or Remote"
-            )));
-        }
         let (Some(cls_str), Some(remote_str)) = (cls, remote) else {
             return Err(ProbeError::Message(format!(
                 "loginctl session {id} has no Class or Remote"
             )));
         };
+        if cls_str.is_empty() || remote_str.is_empty() {
+            return Err(ProbeError::Message(format!(
+                "loginctl session {id} has no Class or Remote"
+            )));
+        }
         if user_re.is_match(cls_str) && remote_str != "yes" {
             logged_in_ids.push(id.clone());
         }

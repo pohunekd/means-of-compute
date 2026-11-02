@@ -1,6 +1,9 @@
 use crate::js::spawn_error;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
+
+const BUN_DEFAULT_PATH: &str = "/usr/bin:/bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StderrMode {
@@ -15,21 +18,24 @@ pub fn run(
     args: &[String],
     stderr: StderrMode,
 ) -> Result<(Option<i32>, String), String> {
-    // Resolve bare program name over PATH to match Bun: first dir/program that is a regular file with an exec bit.
     let resolved = if program.contains('/') {
         None
     } else {
-        let mut found: Option<String> = None;
-        if let Some(path_var) = std::env::var_os("PATH") {
-            let path_str = path_var.to_string_lossy();
-            for dir in path_str.split(':') {
-                let dir_path = if dir.is_empty() { "." } else { dir };
-                let candidate = PathBuf::from(dir_path).join(program);
-                if let Ok(meta) = std::fs::metadata(&candidate) {
-                    if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
-                        found = Some(candidate.to_string_lossy().into_owned());
-                        break;
-                    }
+        // Bun searches /usr/bin:/bin when PATH is unset or empty, skips empty entries, and
+        // accepts a regular file whose owner exec bit is set.
+        let path_var = std::env::var_os("PATH")
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| std::ffi::OsString::from(BUN_DEFAULT_PATH));
+        let mut found: Option<PathBuf> = None;
+        for dir in std::env::split_paths(&path_var) {
+            if dir.as_os_str().is_empty() {
+                continue;
+            }
+            let candidate = dir.join(program);
+            if let Ok(meta) = std::fs::metadata(&candidate) {
+                if meta.is_file() && meta.permissions().mode() & 0o100 != 0 {
+                    found = Some(candidate);
+                    break;
                 }
             }
         }
@@ -38,7 +44,7 @@ pub fn run(
             None => return Err(format!("Executable not found in $PATH: \"{program}\"")),
         }
     };
-    let program_to_spawn = resolved.as_deref().unwrap_or(program);
+    let program_to_spawn = resolved.as_deref().unwrap_or(std::path::Path::new(program));
 
     for (i, a) in args.iter().enumerate() {
         if a.contains('\0') {
@@ -50,6 +56,7 @@ pub fn run(
     }
 
     let mut cmd = std::process::Command::new(program_to_spawn);
+    cmd.arg0(program);
     cmd.args(args);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());

@@ -3,7 +3,7 @@
 // cites its ledger field and price entry, and a missing input shows
 // "no data" while an unreadable input shows an error code only.
 import type { UsageRecord } from "../../contracts/v1/types.js";
-import { recount } from "../auditor/verdict.js";
+import { verdictCounts } from "../auditor/verdict.js";
 import {
   entriesOfProviders,
   isBoundedAuditToken,
@@ -381,17 +381,13 @@ function verdictCell(inputs: DashboardInputs, id: string): Cell {
     return textCell("none");
   }
   const parts = sourced.value.map((verdict) => {
-    const counts = recount(verdict.findings);
-    if (
-      counts.high !== verdict.counts.high ||
-      counts.medium !== verdict.counts.medium ||
-      counts.low !== verdict.counts.low
-    ) {
+    const counted = verdictCounts(verdict);
+    if (counted === "invalid") {
       return `${verdict.headSha.slice(0, 12)}: invalid (counts disagree)`;
     }
     return (
       `${verdict.headSha.slice(0, 12)} by ${verdict.auditorModel}: ` +
-      `high ${String(counts.high)}, medium ${String(counts.medium)}, low ${String(counts.low)}`
+      `high ${String(counted.high)}, medium ${String(counted.medium)}, low ${String(counted.low)}`
     );
   });
   return textCell(parts.join("; "));

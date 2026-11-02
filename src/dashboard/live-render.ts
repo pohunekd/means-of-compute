@@ -9,8 +9,12 @@
 import { createHash } from "node:crypto";
 import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
+import { groupDigits } from "./money.js";
 import { stripProvider } from "./live.js";
+import { verdictCounts } from "../auditor/verdict.js";
 import type {
+  AuditPanel,
+  CallPanel,
   HostPanel,
   LiveActivityRow,
   LiveCell,
@@ -19,6 +23,7 @@ import type {
   LiveModel,
   LiveSection,
   LiveTile,
+  TaskPanel,
 } from "./live.js";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -159,20 +164,67 @@ function checkAlias(tile: LiveTile): void {
   }
 }
 
-function buildHref(
-  model: LiveModel,
-  overrides: Partial<Record<string, string | number | null>>,
-): string {
+type LiveHrefOverrides = Partial<Record<string, string | number | boolean | null>>;
+
+function buildHref(model: LiveModel, overrides: LiveHrefOverrides): string {
   const params = new URLSearchParams();
   const view = overrides["view"] !== undefined ? (overrides["view"] as string | null) : model.view;
   const tVal: number | null =
     overrides["t"] !== undefined ? (overrides["t"] as number | null) : model.t;
   const paused =
     overrides["paused"] !== undefined ? (overrides["paused"] as boolean | null) : model.paused;
-  const host =
-    overrides["host"] !== undefined
-      ? (overrides["host"] as string | null)
-      : (model.hostPanel?.alias ?? null);
+  let host: string | null = null;
+  let task: string | null = null;
+  let call: string | null = null;
+  let audit: string | null = null;
+  if (overrides["host"] !== undefined) {
+    host = overrides["host"] as string | null;
+  } else if (overrides["task"] !== undefined) {
+    task = overrides["task"] as string | null;
+  } else if (overrides["call"] !== undefined) {
+    call = overrides["call"] as string | null;
+  } else if (overrides["audit"] !== undefined) {
+    audit = overrides["audit"] as string | null;
+  } else {
+    host = model.hostPanel?.alias ?? null;
+    task = model.taskPanel?.workItemId ?? null;
+    if (model.callPanel !== null) {
+      call = `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`;
+      task = null;
+    }
+    if (model.auditPanel !== null) {
+      audit = `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`;
+      task = null;
+      call = null;
+    }
+    if (host !== null) {
+      task = null;
+      call = null;
+      audit = null;
+    } else if (task !== null) {
+      call = null;
+      audit = null;
+    } else if (call !== null) {
+      audit = null;
+    }
+  }
+  if (overrides["host"] !== undefined) {
+    task = null;
+    call = null;
+    audit = null;
+  } else if (overrides["task"] !== undefined) {
+    host = null;
+    call = null;
+    audit = null;
+  } else if (overrides["call"] !== undefined) {
+    host = null;
+    task = null;
+    audit = null;
+  } else if (overrides["audit"] !== undefined) {
+    host = null;
+    task = null;
+    call = null;
+  }
   if (view !== null) {
     params.set("view", view);
   }
@@ -184,6 +236,12 @@ function buildHref(
   }
   if (host !== null) {
     params.set("host", host);
+  } else if (task !== null) {
+    params.set("task", task);
+  } else if (call !== null) {
+    params.set("call", call);
+  } else if (audit !== null) {
+    params.set("audit", audit);
   }
   const qs = params.toString();
   return qs.length > 0 ? `/?${qs}` : "/";
@@ -251,28 +309,35 @@ function sectionText<T>(section: LiveSection<T>): SafeHtml {
   return constantHtml("");
 }
 
-function renderActivityRow(row: LiveActivityRow): SafeHtml {
+function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml {
   const model = shortenMiddle(row.model, 30);
   const tokens = (value: number | null): string =>
-    value === null ? "no data" : value.toLocaleString("en-US");
+    value === null ? "no data" : groupDigits(value);
   const cost =
     row.cost.kind === "no-data"
       ? html`<td class="nodata" title="${row.cost.reason}">no data</td>`
       : html`<td class="${cellClass(row.cost)}">${cellText(row.cost)}</td>`;
+  const canLinkCall = row.workItemId !== null;
+  const callKey = canLinkCall ? `${row.at}|${row.workItemId}` : "";
+  const modelLink = canLinkCall
+    ? html`<a
+        href="${buildHref(liveModel, { call: callKey })}"
+        class="mono nowrap"
+        title="${row.model}"
+        >${model === row.model ? row.model : model}</a
+      >`
+    : html`<span class="mono nowrap" title="${row.model}"
+        >${model === row.model ? row.model : model}</span
+      >`;
+  const modelCell = html`<td>${modelLink}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
-    <td>
-      ${
-        model === row.model
-          ? html`<span class="mono nowrap">${row.model}</span>`
-          : html`<span class="mono nowrap" title="${row.model}">${model}</span>`
-      }
-    </td>
+    ${modelCell}
     <td>${row.providerId}</td>
     <td>${row.role ?? "-"}</td>
     <td class="num">${tokens(row.inputTokens)}</td>
     <td class="num">${tokens(row.outputTokens)}</td>
-    <td class="num">${row.ms.toLocaleString("en-US")}</td>
+    <td class="num">${groupDigits(row.ms)}</td>
     ${cost}
   </tr>`;
 }
@@ -314,6 +379,17 @@ function renderTabs(model: LiveModel): SafeHtml {
 function renderReplay(model: LiveModel): SafeHtml {
   const jumpMinutes = [0, 60, 120, 180, 240];
   const duration = model.durationMinutes ?? 240;
+  const addSelection = (params: URLSearchParams): void => {
+    if (model.hostPanel !== null) {
+      params.set("host", model.hostPanel.alias);
+    } else if (model.taskPanel !== null) {
+      params.set("task", model.taskPanel.workItemId);
+    } else if (model.callPanel !== null) {
+      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
+    } else if (model.auditPanel !== null) {
+      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
+    }
+  };
   const jumps = jumpMinutes
     .filter((m) => m <= duration)
     .map((m) => {
@@ -323,9 +399,7 @@ function renderReplay(model: LiveModel): SafeHtml {
       if (model.paused) {
         params.set("pause", "1");
       }
-      if (model.hostPanel !== null) {
-        params.set("host", model.hostPanel.alias);
-      }
+      addSelection(params);
       return html`<a href="/?${params.toString()}">${String(m)}</a>`;
     });
   // Helper for controls that preserve view/host.
@@ -342,9 +416,7 @@ function renderReplay(model: LiveModel): SafeHtml {
         params.set("pause", "1");
       }
     }
-    if (model.hostPanel !== null) {
-      params.set("host", model.hostPanel.alias);
-    }
+    addSelection(params);
     const qs = params.toString();
     return qs.length > 0 ? `/?${qs}` : "/";
   };
@@ -384,7 +456,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       ${task === "" ? constantHtml("") : html`<p class="row">Task: ${task}</p>`}
       <p class="row">Running tasks:</p>
       <ul>
-        ${panel.runningTasks.map((t) => html`<li>${t.workItemId} at ${t.at}</li>`)}
+        ${panel.runningTasks.map((t) => html`<li><a href="${buildHref(model, { task: t.workItemId })}">${t.workItemId}</a> at ${t.at}</li>`)}
       </ul>
       <p class="row">Events (up to 6):</p>
       <ul>
@@ -392,7 +464,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       </ul>
       <p class="row">Placements (up to 6):</p>
       <ul>
-        ${panel.placements.map((p) => html`<li>${p.workItemId} -> ${p.chosenHostAlias ?? "none"}: ${p.reason}</li>`)}
+        ${panel.placements.map((p) => html`<li><a href="${buildHref(model, { task: p.workItemId })}">${p.workItemId}</a> -> ${p.chosenHostAlias ?? "none"}: ${p.reason}</li>`)}
       </ul>
       <p><a href="${backHref}">back to live</a></p>
     </div>`;
@@ -410,7 +482,11 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   // Registry block: open sessions with details
   const registryBlock =
     panel.registry.kind !== "ok"
-      ? sectionText(panel.registry)
+      ? panel.registry.kind === "error"
+        ? html`<p class="row">Open sessions:</p>
+            <p class="error">error (${panel.registry.code})</p>`
+        : html`<p class="row">Open sessions:</p>
+            <p class="nodata">no data (${panel.registry.reason})</p>`
       : panel.registry.value.length === 0
         ? html`<p class="row">Open sessions: none</p>`
         : html`<div>
@@ -419,35 +495,413 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
               ${panel.registry.value.map(
                 (s) =>
                   html`<li class="mono">
-                    ${s.workItemId} ${stripProvider(s.model.model)} (${s.model.providerId}) started
-                    ${s.startedAt} lastSeen ${s.lastSeenAt}
+                    <a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a>
+                    ${stripProvider(s.model.model)} (${s.model.providerId}) started ${s.startedAt}
+                    lastSeen ${s.lastSeenAt}
                   </li>`,
               )}
             </ul>
           </div>`;
   const resultsBlock =
     panel.results.kind !== "ok"
-      ? sectionText(panel.results)
+      ? panel.results.kind === "error"
+        ? html`<p class="row">Recent results:</p>
+            <p class="error">error (${panel.results.code})</p>`
+        : html`<p class="row">Recent results:</p>
+            <p class="nodata">no data (${panel.results.reason})</p>`
       : html`<div>
           <p class="row">Recent results:</p>
           <ul>
-            ${panel.results.value.map((r) => html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`)}
+            ${panel.results.value.map((r) =>
+              r.known
+                ? html`<li>
+                    <a href="${buildHref(model, { task: r.workItemId })}">${r.workItemId}</a>
+                    ${r.outcome} at ${r.at}
+                  </li>`
+                : html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`,
+            )}
           </ul>
         </div>`;
   const meterBlock =
     panel.meterCalls.kind !== "ok"
-      ? sectionText(panel.meterCalls)
-      : html`<div>
-          <p class="row">Recent meter calls:</p>
-          <ul>
-            ${panel.meterCalls.value.map((c) => html`<li>${c.model} ${c.at}</li>`)}
-          </ul>
-        </div>`;
+      ? panel.meterCalls.kind === "error"
+        ? html`<p class="row">Recent meter calls:</p>
+            <p class="error">error (${panel.meterCalls.code})</p>`
+        : html`<p class="row">Recent meter calls:</p>
+            <p class="nodata">no data (${panel.meterCalls.reason})</p>`
+      : panel.meterCalls.value.length === 0
+        ? html`<p class="row">Recent meter calls: none</p>`
+        : html`<div>
+            <p class="row">Recent meter calls:</p>
+            <ul>
+              ${panel.meterCalls.value.map((c) => {
+                const canLink = c.workItemId !== null;
+                return canLink
+                  ? html`<li>
+                      <a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
+                        >${c.model}</a
+                      >
+                      ${c.at}
+                    </li>`
+                  : html`<li>${c.model} ${c.at}</li>`;
+              })}
+            </ul>
+          </div>`;
   return html`<div class="host-panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
     ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
+}
+
+function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { task: null });
+  if (panel.kind === "sim") {
+    const hostLink =
+      panel.hostAlias === null
+        ? "none"
+        : html`<a href="${buildHref(model, { host: panel.hostAlias })}">${panel.hostAlias}</a>`;
+    return html`<div class="host-panel" id="task-panel">
+      <h3>${panel.workItemId} <span class="chip">SIMULATED</span></h3>
+      <p class="row">Kind: ${panel.task.kind}</p>
+      <p class="row">Title: ${panel.task.title}</p>
+      <p class="row">Brief: ${panel.brief}</p>
+      <p class="row">Placed at: ${panel.placedAt} on ${hostLink} because ${panel.reason}</p>
+      <p class="row">Eligible count: ${String(panel.eligibleCount)}</p>
+      <p class="row">
+        Status: ${panel.status}${panel.endedAt === null ? "" : ` ended at ${panel.endedAt}`}
+      </p>
+      <p><a href="${backHref}">back to live</a></p>
+    </div>`;
+  }
+  const goal =
+    panel.workItem.kind === "ok"
+      ? (() => {
+          const full = panel.workItem.value.goal;
+          const excerpt = full.length > 280 ? `${full.slice(0, 280)}…` : full;
+          return html`<p class="row" title="${full}">Goal: ${excerpt}</p>`;
+        })()
+      : html`<p class="row">Goal:</p>
+          <p class="${panel.workItem.kind}">
+            ${panel.workItem.kind === "error" ? `error (${panel.workItem.code})` : `no data (${panel.workItem.reason})`}
+          </p>`;
+  const dodBlock =
+    panel.dod.kind !== "ok"
+      ? html`<p class="row">DoD:</p>
+          <p class="${panel.dod.kind}">
+            ${panel.dod.kind === "error" ? `error (${panel.dod.code})` : `no data (${panel.dod.reason})`}
+          </p>`
+      : html`<div>
+          <p class="row">DoD:</p>
+          <ul>
+            ${panel.dod.value.map((d) => html`<li>${d.id}: ${d.text} ${d.done ? "done" : "pending"}</li>`)}
+          </ul>
+        </div>`;
+  const roundsBlock =
+    panel.rounds.kind !== "ok"
+      ? html`<p class="row">Rounds:</p>
+          <p class="${panel.rounds.kind}">
+            ${panel.rounds.kind === "error" ? `error (${panel.rounds.code})` : `no data (${panel.rounds.reason})`}
+          </p>`
+      : html`<div>
+          <p class="row">Rounds:</p>
+          <ul>
+            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${r.model} on ${r.hostAlias ?? "no host"}</li>`)}
+          </ul>
+        </div>`;
+  const verdictsBlock =
+    panel.verdicts.kind !== "ok"
+      ? html`<p class="row">Verdicts:</p>
+          <p class="${panel.verdicts.kind}">
+            ${panel.verdicts.kind === "error" ? `error (${panel.verdicts.code})` : `no data (${panel.verdicts.reason})`}
+          </p>`
+      : html`<div>
+          <p class="row">Verdicts:</p>
+          <ul>
+            ${panel.verdicts.value.map((v) => {
+              const counted = verdictCounts(v);
+              if (counted === "invalid") {
+                return html`<li>
+                  <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                    >${v.headSha.slice(0, 7)}: invalid (counts disagree)</a
+                  >
+                </li>`;
+              }
+              const t = `high ${String(counted.high)} medium ${String(counted.medium)} low ${String(counted.low)}`;
+              return html`<li>
+                <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                  >${v.headSha.slice(0, 7)} ${t}</a
+                >
+              </li>`;
+            })}
+          </ul>
+        </div>`;
+  const ledgerFailed =
+    panel.ledger.kind === "error" ||
+    panel.ledgerSessions.kind === "error" ||
+    panel.ledgerMeta.kind === "error";
+  const ledgerNoData =
+    panel.ledger.kind === "no-data" ||
+    panel.ledgerSessions.kind === "no-data" ||
+    panel.ledgerMeta.kind === "no-data";
+  const ledgerBlock = ledgerFailed
+    ? (() => {
+        const code =
+          (panel.ledger.kind === "error" && panel.ledger.code) ||
+          (panel.ledgerSessions.kind === "error" && panel.ledgerSessions.code) ||
+          (panel.ledgerMeta.kind === "error" && panel.ledgerMeta.code) ||
+          "unknown";
+        return html`<p class="row">Ledger: error (${code})</p>`;
+      })()
+    : ledgerNoData
+      ? (() => {
+          const reason =
+            (panel.ledger.kind === "no-data" && panel.ledger.reason) ||
+            (panel.ledgerSessions.kind === "no-data" && panel.ledgerSessions.reason) ||
+            (panel.ledgerMeta.kind === "no-data" && panel.ledgerMeta.reason) ||
+            "unknown";
+          return html`<p class="row">Ledger: no data (${reason})</p>`;
+        })()
+      : html`<div>
+          <p class="row">Ledger tokens:</p>
+          <ul>
+            ${panel.ledger.value.map((t) => html`<li>${t.model} (${t.provider}) in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
+          </ul>
+          <p class="row">Ledger sessions:</p>
+          <ul>
+            ${panel.ledgerSessions.value.map((s) => html`<li>${s.hostAlias} ${String(s.seconds)}s source ${s.source}</li>`)}
+          </ul>
+          ${
+            panel.ledgerMeta.value === null
+              ? html`<p class="row">Ledger meta: no data</p>`
+              : html`<p class="row">
+                  Ledger meta: ${panel.ledgerMeta.value.result} retries
+                  ${String(panel.ledgerMeta.value.retries)} human
+                  ${String(panel.ledgerMeta.value.humanInterventions)}
+                </p>`
+          }
+        </div>`;
+  const ledgerSessionsBlock = constantHtml("");
+  const ledgerMetaBlock = constantHtml("");
+  const title = panel.workItem.kind === "ok" ? panel.workItem.value.title : panel.workItemId;
+  const statusLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">
+          Status:
+          ${panel.workItem.value.status}${panel.workItem.value.statusReason === null ? "" : ` (${panel.workItem.value.statusReason})`}
+        </p>`
+      : constantHtml("");
+  const repoLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Repo: ${panel.workItem.value.repo}</p>`
+      : constantHtml("");
+  const issueLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.issue !== null
+      ? html`<p class="row">
+          Issue:
+          <a
+            href="https://github.com/${panel.workItem.value.repo}/issues/${String(panel.workItem.value.issue)}"
+            >#${String(panel.workItem.value.issue)}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok" && panel.workItem.value.issue === null
+        ? html`<p class="row">Issue: none</p>`
+        : constantHtml("");
+  const prLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.pullNumber !== null
+      ? html`<p class="row">
+          PR:
+          <a
+            href="https://github.com/${panel.workItem.value.repo}/pull/${String(panel.workItem.value.pullNumber)}"
+            >#${String(panel.workItem.value.pullNumber)}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok" && panel.workItem.value.pullNumber === null
+        ? html`<p class="row">PR: none</p>`
+        : constantHtml("");
+  const branchLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Branch: ${panel.workItem.value.branch ?? "none"}</p>`
+      : constantHtml("");
+  const assignedHostLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.assignedHostAlias !== null
+      ? html`<p class="row">
+          Host:
+          <a href="${buildHref(model, { host: panel.workItem.value.assignedHostAlias })}"
+            >${panel.workItem.value.assignedHostAlias}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok"
+        ? html`<p class="row">Host: none</p>`
+        : constantHtml("");
+  const modelLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">
+          Model: ${stripProvider(panel.workItem.value.modelRouting.preferredModel)}
+        </p>`
+      : constantHtml("");
+  const retryLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Retries: ${String(panel.workItem.value.retryCount)}</p>`
+      : constantHtml("");
+  return html`<div class="host-panel" id="task-panel">
+    <h3>${title} <span class="chip chip-real">REAL</span></h3>
+    ${statusLine} ${repoLine} ${issueLine} ${prLine} ${branchLine} ${assignedHostLine} ${modelLine}
+    ${retryLine} ${goal} ${dodBlock} ${roundsBlock} ${verdictsBlock} ${ledgerBlock}
+    ${ledgerSessionsBlock} ${ledgerMetaBlock}
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { call: null });
+  if (panel.detail.kind !== "ok") {
+    const err =
+      panel.detail.kind === "error"
+        ? html`<p class="error">error (${panel.detail.code})</p>`
+        : html`<p class="nodata">no data (${panel.detail.reason})</p>`;
+    return html`<div class="host-panel" id="call-panel">
+      <h3>Call ${panel.endedAt}</h3>
+      ${err}
+      <p><a href="${backHref}">back to live</a></p>
+    </div>`;
+  }
+  const detail = panel.detail.value;
+  const costCell =
+    detail.cost.kind === "no-data"
+      ? html`<span class="nodata">no data (${detail.cost.reason})</span>`
+      : detail.cost.kind === "error"
+        ? html`<span class="error">error (${detail.cost.code})</span>`
+        : html`<span class="value">${detail.cost.text}</span>`;
+  const hostLink =
+    detail.hostAlias === null
+      ? "none"
+      : html`<a href="${buildHref(model, { host: detail.hostAlias })}">${detail.hostAlias}</a>`;
+  const taskLink =
+    panel.workItemId === null
+      ? "none"
+      : html`<a href="${buildHref(model, { task: panel.workItemId })}">${panel.workItemId}</a>`;
+  return html`<div class="host-panel" id="call-panel">
+    <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
+    <p class="row">Ended at: ${panel.endedAt}</p>
+    <p class="row">Provider: ${detail.providerId}</p>
+    <p class="row">Model: ${detail.model} (${detail.providerId})</p>
+    <p class="row">Role: ${detail.role ?? "-"}</p>
+    <p class="row">Task: ${taskLink}</p>
+    <p class="row">Host: ${hostLink}</p>
+    <p class="row">
+      Tokens: in ${detail.inputTokens === null ? "no data" : groupDigits(detail.inputTokens)} out
+      ${detail.outputTokens === null ? "no data" : groupDigits(detail.outputTokens)} ms
+      ${groupDigits(detail.ms)}
+    </p>
+    <p class="row">Cost: ${costCell}</p>
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { audit: null });
+  const body =
+    panel.verdict.kind !== "ok"
+      ? html`<p class="row">
+          ${panel.verdict.kind === "error" ? `error (${panel.verdict.code})` : `no data (${panel.verdict.reason})`}
+        </p>`
+      : (() => {
+          const verdict = panel.verdict.value;
+          const counted = verdictCounts(verdict);
+          const c =
+            counted === "invalid"
+              ? "invalid (counts disagree)"
+              : `high ${String(counted.high)} medium ${String(counted.medium)} low ${String(counted.low)}`;
+          const countsLine = html`<p class="row">Counts: ${c}</p>`;
+          const repoLine = html`<p class="row">Repo: ${verdict.repo}</p>`;
+          const auditorLine = html`<p class="row">
+            Auditor: ${stripProvider(verdict.auditorModel)}
+          </p>`;
+          const authorsLine = html`<p class="row">
+            Authors: ${verdict.authorModels.map(stripProvider).join(", ") || "none"}
+          </p>`;
+          const prLine =
+            verdict.pullNumber === null
+              ? html`<p class="row">PR: none</p>`
+              : panel.workItemRepo !== null && verdict.repo === panel.workItemRepo
+                ? html`<p class="row">
+                    PR:
+                    <a href="https://github.com/${verdict.repo}/pull/${String(verdict.pullNumber)}"
+                      >#${String(verdict.pullNumber)}</a
+                    >
+                  </p>`
+                : panel.workItemRepo !== null
+                  ? html`<p class="row">PR: #${String(verdict.pullNumber)} (repo differs)</p>`
+                  : html`<p class="row">PR: #${String(verdict.pullNumber)}</p>`;
+          return html`<div>
+            <p class="row">Head: ${verdict.headSha}</p>
+            ${countsLine} ${repoLine} ${auditorLine} ${authorsLine}
+            <p class="row">Findings: ${String(verdict.findings.length)}</p>
+            <ul>
+              ${verdict.findings.map(
+                (finding) =>
+                  html`<li>
+                    ${finding.severity} ${finding.location}: ${finding.defect} — ${finding.scenario}
+                    -> ${finding.fixDirection}
+                  </li>`,
+              )}
+            </ul>
+            <p class="row">
+              Task:
+              <a href="${buildHref(model, { task: verdict.workItemId })}">${verdict.workItemId}</a>
+            </p>
+            ${prLine}
+          </div>`;
+        })();
+  return html`<div class="host-panel" id="audit-panel">
+    <h3>Audit ${panel.workItemId}@${panel.headSha.slice(0, 7)}</h3>
+    ${body}
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderDetailBreadcrumb(model: LiveModel): SafeHtml {
+  const fleetLink = html`<a href="${buildHref(model, { host: null })}">Fleet</a>`;
+  if (model.hostPanel !== null) {
+    return html`<nav class="breadcrumb">
+      ${fleetLink} / ${model.hostPanel.alias}
+      <a href="${buildHref(model, { host: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.taskPanel !== null) {
+    const hostPart =
+      model.taskPanel.kind === "sim" && model.taskPanel.hostAlias !== null
+        ? html` /
+            <a href="${buildHref(model, { host: model.taskPanel.hostAlias })}"
+              >${model.taskPanel.hostAlias}</a
+            >`
+        : constantHtml("");
+    return html`<nav class="breadcrumb">
+      ${fleetLink}${hostPart} / ${model.taskPanel.workItemId}
+      <a href="${buildHref(model, { task: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.callPanel !== null) {
+    const taskPart =
+      model.callPanel.workItemId !== null
+        ? html` /
+            <a href="${buildHref(model, { task: model.callPanel.workItemId })}"
+              >${model.callPanel.workItemId}</a
+            >`
+        : constantHtml("");
+    return html`<nav class="breadcrumb">
+      ${fleetLink}${taskPart} / ${model.callPanel.callId}
+      <a href="${buildHref(model, { call: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.auditPanel !== null) {
+    return html`<nav class="breadcrumb">
+      ${fleetLink} / ${model.auditPanel.workItemId} / ${model.auditPanel.headSha.slice(0, 7)}
+      <a href="${buildHref(model, { audit: null })}">back to live</a>
+    </nav>`;
+  }
+  return constantHtml("");
 }
 
 export function renderLive(model: LiveModel): string {
@@ -461,6 +915,12 @@ export function renderLive(model: LiveModel): string {
     params.set("t", String(nextMinute));
     if (model.hostPanel !== null) {
       params.set("host", model.hostPanel.alias);
+    } else if (model.taskPanel !== null) {
+      params.set("task", model.taskPanel.workItemId);
+    } else if (model.callPanel !== null) {
+      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
+    } else if (model.auditPanel !== null) {
+      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
     }
     return `/?${params.toString()}`;
   })();
@@ -503,7 +963,7 @@ export function renderLive(model: LiveModel): string {
               </tr>
             </thead>
             <tbody>
-              ${model.activity.value.map((row) => renderActivityRow(row))}
+              ${model.activity.value.map((row) => renderActivityRow(row, model))}
             </tbody>
           </table>
         </div>`
@@ -512,6 +972,25 @@ export function renderLive(model: LiveModel): string {
     model.tickerNote === null ? constantHtml("") : html`<p class="note">${model.tickerNote}</p>`;
   const hostPanel =
     model.hostPanel === null ? constantHtml("") : renderHostPanel(model.hostPanel, model);
+  const taskPanel =
+    model.taskPanel === null ? constantHtml("") : renderTaskPanel(model.taskPanel, model);
+  const callPanel =
+    model.callPanel === null ? constantHtml("") : renderCallPanel(model.callPanel, model);
+  const auditPanel =
+    model.auditPanel === null ? constantHtml("") : renderAuditPanel(model.auditPanel, model);
+  const detailPanel =
+    model.hostPanel !== null
+      ? hostPanel
+      : model.taskPanel !== null
+        ? taskPanel
+        : model.callPanel !== null
+          ? callPanel
+          : auditPanel;
+  const hasDetail =
+    model.hostPanel !== null ||
+    model.taskPanel !== null ||
+    model.callPanel !== null ||
+    model.auditPanel !== null;
   const fleetContent = html`<h2>Fleet</h2>
     ${realFleet} ${simFleet}
     <p class="live-legend">
@@ -525,23 +1004,18 @@ export function renderLive(model: LiveModel): string {
     <p class="cite">
       source: real recorded probes and dispatcher registry; simulated fleet trace (sim-trace-v1)
     </p>`;
-  const sideContent =
-    model.hostPanel === null
-      ? html`<section id="live-activity">
-            <h2>Model activity (real)</h2>
-            ${activity}
-            <p class="cite">source: real meter call-end records from the meter usage log</p>
-          </section>
-          <section id="live-ticker" class="live-events">
-            <h2>Events</h2>
-            ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
-            <p class="cite">source: real loop results; simulated host and placement trace lines</p>
-          </section>`
-      : html`<nav class="breadcrumb">
-            <a href="${buildHref(model, { host: null })}">Fleet</a> / ${model.hostPanel.alias}
-            <a href="${buildHref(model, { host: null })}">back to live</a>
-          </nav>
-          ${hostPanel}`;
+  const sideContent = !hasDetail
+    ? html`<section id="live-activity">
+          <h2>Model activity (real)</h2>
+          ${activity}
+          <p class="cite">source: real meter call-end records from the meter usage log</p>
+        </section>
+        <section id="live-ticker" class="live-events">
+          <h2>Events</h2>
+          ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
+          <p class="cite">source: real loop results; simulated host and placement trace lines</p>
+        </section>`
+    : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
   return (
     "<!doctype html>\n" +
     html`<html lang="en">

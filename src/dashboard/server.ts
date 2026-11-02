@@ -79,8 +79,8 @@ const VIEW_IDS = new Set(["overview", "fleet", "work", "usage", "savings", "auto
 const PANEL_VIEW_IDS = new Set(["work", "usage", "savings", "autonomy", "models"]);
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const TASK_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const CALL_PATTERN = /^[^|]+\|[^|]+$/;
-const AUDIT_PATTERN = /^[^@]+@[^@]+$/;
+const CALL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z\|[a-z0-9][a-z0-9-]{0,62}$/;
+const AUDIT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}@[0-9a-f]{40}$/;
 const GRAMMAR_KEYS = ["view", "t", "pause", "host", "task", "call", "audit"] as const;
 
 function allowlist(host: string, port: number): Set<string> {
@@ -225,10 +225,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           activeSelectionValue = rawAudit;
         }
 
-        // If any non-host selection is active, it names nothing known in PR1.
-        if (activeSelectionKey !== null && activeSelectionKey !== "host") {
-          return await respond(textResponse(404, "not found\n"), url.pathname);
-        }
+        // Non-host selections are validated later against the built live model; malformed already 404ed above.
 
         const liveAvailable = deps.live != null && deps.live.simTracePath !== null;
         // Without live sources, overview is not available.
@@ -299,6 +296,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             // Panel views render via dashboard model under same header/tab bar.
             if (PANEL_VIEW_IDS.has(effectiveView)) {
               if (activeSelectionValue !== null) {
+                if (activeSelectionKey !== "host") {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
                 const known = new Set<string>();
                 if (inputs.hosts.ok) {
                   const hv = inputs.hosts.value;
@@ -313,12 +313,16 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 }
               }
               const dashboard = buildDashboard(inputs);
+              const knownWorkIds = inputs.workItems.ok
+                ? new Set(inputs.workItems.value.map((w) => w.id))
+                : new Set<string>();
               const page = renderDashboardWithView(dashboard, {
                 view: effectiveView,
                 t: liveMinute,
                 paused,
                 host: activeSelectionValue,
                 liveAvailable: true,
+                knownWorkIds,
               });
               const response = new Response(page, {
                 status: 200,
@@ -331,10 +335,20 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               view: effectiveView as "overview" | "fleet",
               t: liveMinute,
               paused,
-              host: activeSelectionValue,
+              host: activeSelectionKey === "host" ? activeSelectionValue : null,
+              task: activeSelectionKey === "task" ? activeSelectionValue : null,
+              call: activeSelectionKey === "call" ? activeSelectionValue : null,
+              audit: activeSelectionKey === "audit" ? activeSelectionValue : null,
             });
-            if (activeSelectionValue !== null && liveModel.hostPanel === null) {
-              return await respond(textResponse(404, "not found\n"), url.pathname);
+            if (activeSelectionKey !== null) {
+              const found =
+                (activeSelectionKey === "host" && liveModel.hostPanel !== null) ||
+                (activeSelectionKey === "task" && liveModel.taskPanel !== null) ||
+                (activeSelectionKey === "call" && liveModel.callPanel !== null) ||
+                (activeSelectionKey === "audit" && liveModel.auditPanel !== null);
+              if (!found) {
+                return await respond(textResponse(404, "not found\n"), url.pathname);
+              }
             }
             const livePage = renderLive(liveModel);
             const liveResponse = new Response(livePage, {
@@ -348,6 +362,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           if (rawView !== null && VIEW_IDS.has(rawView)) {
             if (rawView === "fleet" || PANEL_VIEW_IDS.has(rawView)) {
               if (activeSelectionValue !== null) {
+                if (activeSelectionKey !== "host") {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
                 const known = new Set<string>();
                 if (inputs.hosts.ok) {
                   const hv = inputs.hosts.value;
@@ -362,18 +379,40 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 }
               }
               const dashboard = buildDashboard(inputs);
+              const knownWorkIds = inputs.workItems.ok
+                ? new Set(inputs.workItems.value.map((w) => w.id))
+                : new Set<string>();
               const page = renderDashboardWithView(dashboard, {
                 view: rawView,
                 t: liveMinute,
                 paused,
                 host: activeSelectionValue,
                 liveAvailable: false,
+                knownWorkIds,
               });
               const response = new Response(page, {
                 status: 200,
                 headers: { ...TAB_HTML_HEADERS },
               });
               return await respond(response, url.pathname);
+            }
+          }
+          // No-live stacked page has no selection except host; task/call/audit are 404.
+          if (activeSelectionValue !== null && activeSelectionKey !== "host") {
+            return await respond(textResponse(404, "not found\n"), url.pathname);
+          }
+          if (activeSelectionValue !== null && activeSelectionKey === "host") {
+            const known = new Set<string>();
+            if (inputs.hosts.ok) {
+              const hv = inputs.hosts.value;
+              if (hv.kind === "recorded") {
+                for (const p of hv.probes) known.add(p.hostAlias);
+              } else {
+                for (const o of hv.observations) known.add(o.hostAlias);
+              }
+            }
+            if (!known.has(activeSelectionValue)) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
             }
           }
           // Without view and without live, render as today (stacked, no tabs) to keep snapshot untouched.

@@ -26,6 +26,18 @@ export function recount(findings: readonly AuditFinding[]): AuditCounts {
   return { high, medium, low };
 }
 
+export function verdictCounts(verdict: AuditVerdict): AuditCounts | "invalid" {
+  const rec = recount(verdict.findings);
+  if (
+    rec.high !== verdict.counts.high ||
+    rec.medium !== verdict.counts.medium ||
+    rec.low !== verdict.counts.low
+  ) {
+    return "invalid";
+  }
+  return rec;
+}
+
 function sortedFindings(findings: readonly AuditFinding[]): AuditFinding[] {
   return [...findings].sort((a, b) => {
     const rank = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];

@@ -50,6 +50,7 @@ function hostLine(overrides: Record<string, unknown>): Record<string, unknown> {
     running: 0,
     maxAgents: 2,
     batteryPercent: null,
+    task: null,
     ...overrides,
   };
 }
@@ -87,6 +88,7 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
       chosenHostAlias: "desk-001",
       reason:
         "desk-001 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
+      task: null,
       eligibleCount: 1,
       candidates: hosts.length,
     },
@@ -450,6 +452,36 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
         }
       } finally {
         rmSync(invalidTask.dir, { recursive: true, force: true });
+      }
+      const missingTask = makeFixture(
+        traceTextLabeled(
+          [hostLine({}), hostLine({ alias: "desk-002" })],
+          [
+            {
+              kind: "placement",
+              simulated: true,
+              atMinute: 40,
+              at: "2026-11-03T17:40:00.000Z",
+              workItemId: "sim-w-001",
+              chosenHostAlias: "desk-001",
+              reason: "desk-001 is idle",
+              eligibleCount: 1,
+              candidates: 1,
+            },
+          ],
+        ),
+      );
+      try {
+        const missingDashboard = await dashboardInputs(missingTask);
+        const missingLive = buildLive(
+          await gatherLiveInputs(missingTask.sources, missingDashboard, 60, () => {}),
+        );
+        expect(missingLive.simFleet.kind).toBe("error");
+        if (missingLive.simFleet.kind === "error") {
+          expect(missingLive.simFleet.code).toBe("sim-trace-invalid");
+        }
+      } finally {
+        rmSync(missingTask.dir, { recursive: true, force: true });
       }
     } finally {
       rmSync(labeled.dir, { recursive: true, force: true });

@@ -73,7 +73,7 @@ export interface WorkDef {
   readonly count: number;
   readonly durationMinutes: number;
   readonly idPrefix: string;
-  readonly task: TaskDef | null;
+  readonly tasks: readonly TaskDef[];
 }
 
 export interface Timeline {
@@ -137,7 +137,7 @@ const WORK_KEYS = new Set([
   "count",
   "durationMinutes",
   "idPrefix",
-  "task",
+  "tasks",
 ]);
 
 const WORK_REQUIRED_KEYS = new Set([
@@ -146,12 +146,13 @@ const WORK_REQUIRED_KEYS = new Set([
   "count",
   "durationMinutes",
   "idPrefix",
+  "tasks",
 ]);
 
 function hasControlChar(text: string): boolean {
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
-    if (code < 32 || code === 127) {
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
       return true;
     }
   }
@@ -649,7 +650,7 @@ function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[]
     const count = rec["count"];
     const duration = rec["durationMinutes"];
     const idPrefix = rec["idPrefix"];
-    const taskRaw = rec["task"];
+    const tasksRaw = rec["tasks"];
     if (!isInteger(firstAtMinute) || (firstAtMinute as number) < 0) {
       throw new Error(`Timeline work[${String(i)}].firstAtMinute: must be integer >=0`);
     }
@@ -674,12 +675,21 @@ function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[]
     if (lastAt > durationMinutes) {
       throw new Error(`Timeline work[${String(i)}].firstAtMinute: work runs past durationMinutes`);
     }
-    let task: TaskDef | null = null;
-    if (taskRaw !== undefined) {
-      if (taskRaw === null) {
-        throw new Error(`Timeline work[${String(i)}].task: must be an object`);
+    if (!Array.isArray(tasksRaw) || tasksRaw.length === 0) {
+      throw new Error(`Timeline work[${String(i)}].tasks: must be non-empty array`);
+    }
+    const tasks: TaskDef[] = [];
+    for (let j = 0; j < tasksRaw.length; j += 1) {
+      const task = validateTask(tasksRaw[j], `work[${String(i)}].tasks[${String(j)}]`);
+      if (task.title.includes("{n}")) {
+        const expandedLength = task.title.length - 3 + Math.max(3, String(count as number).length);
+        if (expandedLength > 60) {
+          throw new Error(
+            `Timeline work[${String(i)}].tasks[${String(j)}].title: must be string 1..60 after substitution`,
+          );
+        }
       }
-      task = validateTask(taskRaw, `work[${String(i)}].task`);
+      tasks.push(task);
     }
     out.push({
       firstAtMinute: firstAtMinute as number,
@@ -687,7 +697,7 @@ function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[]
       count: count as number,
       durationMinutes: duration as number,
       idPrefix: prefixStr,
-      task,
+      tasks,
     });
   }
   return out;

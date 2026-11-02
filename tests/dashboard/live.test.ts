@@ -338,6 +338,15 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     );
     // Real tile load is bare count, not count/max (M8).
     expect(page).toContain('class="load">1<');
+    // Flagged tile at t=95 keeps 1/1 and ! visible (load not truncated).
+    const live95 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 95, () => {}), {
+      view: "overview",
+      t: 95,
+      paused: false,
+      host: null,
+    });
+    const page95 = renderLive(live95);
+    expect(page95).toContain('class="load">1/1<span class="flag">!</span>');
     // Flagged logic: running while excluded for non-agent-limit shows flagged.
     if (live.simFleet.kind !== "ok") {
       throw new Error("expected simulated fleet groups");
@@ -476,7 +485,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       },
     );
     const pageBroken = renderLive(liveBroken);
-    expect(pageBroken).toContain(">error<");
+    expect(pageBroken).toContain(">err<");
     // Host panel for real host with broken registry shows error code.
     const brokenPanel = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),

@@ -849,7 +849,6 @@ function buildHostPanel(
     : inputs.meter.failure.kind === "error"
       ? { kind: "error", code: inputs.meter.failure.code }
       : { kind: "no-data", reason: inputs.meter.failure.reason };
-  // A real panel exists when the probes, registry, results or meter usage name the alias; each block degrades on its own source.
   const probeFound = probeSection.kind === "ok" && probeSection.value !== null;
   const anyRegistryHost =
     inputs.dashboard.registry.ok &&

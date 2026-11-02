@@ -59,7 +59,7 @@ export const LIVE_CSS = [
   ".tile-sim{border:1px dashed var(--border)}",
   ".tile .alias{font-family:var(--mono);font-size:0.48rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}",
   ".tile .meta{font-size:0.44rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.1rem;line-height:1;min-width:0;overflow:hidden}",
-  ".tile .load{font-variant-numeric:tabular-nums;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".tile .load{font-variant-numeric:tabular-nums;font-weight:600;flex:none;white-space:nowrap}",
   ".tile .state{font-size:0.42rem;text-transform:uppercase;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}",
   ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
   ".tile-flagged .alias{color:var(--parked-text)}",
@@ -201,7 +201,7 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   const href = buildHref(model, { host: tile.alias });
   const load =
     tile.running === null
-      ? "error"
+      ? "err"
       : tile.maxAgents === null
         ? String(tile.running)
         : `${String(tile.running)}/${String(tile.maxAgents)}`;

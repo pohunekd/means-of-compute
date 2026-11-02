@@ -131,6 +131,28 @@ The `place` script (`src/placement/cli.ts`) reads
 them against contracts-v1, and exits 0 on a chosen host, 3 on no eligible
 host, 2 on any input or config error.
 
+## Beyond code
+
+Placement, dispatch, metering and accounting are task-agnostic. Placement scores host
+capacity against a work item's id and status and never reads its goal
+(`src/placement/place.ts`). The meter opens a grant against a work item id, a host
+alias, a provider and a model (`src/meter/usage-log.ts`). The ledger records tokens
+per provider and session seconds per host for a work item id
+(`contracts/v1/types.ts`).
+
+The code shape lives in two places. The `WorkItem` contract requires `repo`, `branch`
+and `pullNumber` (`contracts/v1/work-item.schema.json`). The delivery gate is a
+pull-request pipeline: branch, CI checks, an audit verdict bound to a head SHA, merge
+by rule (`src/loop/merge-rule.ts`).
+
+So non-code work ships today when its deliverable is a document in the repository
+(docs-only PRs such as [#257](https://github.com/pohunekd/means-of-compute/pull/257)
+and [#278](https://github.com/pohunekd/means-of-compute/pull/278)).
+
+The next step is a `deliverable` kind on the work contract, so that a document, a
+dataset or a ticket reply gets an audit gate of its own kind
+([#288](https://github.com/pohunekd/means-of-compute/issues/288)).
+
 ## Boundaries
 
 - `DispatcherPort` is the only seam to the session daemon. Its adapter uses

@@ -115,7 +115,8 @@ export interface LiveTile {
   readonly state: LiveTileState;
   readonly eligible: boolean;
   readonly flagged: boolean;
-  readonly running: number;
+  readonly running: number | null;
+  readonly runningError: string | null;
   readonly maxAgents: number | null;
   readonly batteryPercent: number | null;
   readonly detail: string;
@@ -641,8 +642,12 @@ function realTiles(
     state: probe.kind === "reported" ? "reported" : "unavailable",
     eligible: probe.kind === "reported",
     flagged: false,
-    // When registry source failed, show error instead of a count (audit MEDIUM).
-    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : -1,
+    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : null,
+    runningError: registry.ok
+      ? null
+      : registry.failure.kind === "error"
+        ? registry.failure.code
+        : registry.failure.reason,
     maxAgents: null,
     batteryPercent: null,
     detail:
@@ -652,7 +657,7 @@ function realTiles(
   }));
 }
 
-function stripProvider(model: string): string {
+export function stripProvider(model: string): string {
   const idx = model.lastIndexOf("/");
   if (idx !== -1) return model.slice(idx + 1);
   return model;
@@ -803,9 +808,7 @@ function buildHostPanel(
       };
     }
   }
-  // Try real - per-source degradation: each block keeps its own LiveSection.
-  // A failed probes source turns selection into 404 in server; if we reach here probes input
-  // was ok for fleet, but we re-derive per block so breaking one source shows error (...).
+  // A real panel exists when the probes, registry, results or meter usage name the alias; each block degrades on its own source.
   const probeSection: LiveSection<RecordedProbe | null> = inputs.probes.ok
     ? { kind: "ok", value: inputs.probes.value.find((p) => p.hostAlias === hostAlias) ?? null }
     : inputs.probes.failure.kind === "error"
@@ -846,10 +849,7 @@ function buildHostPanel(
     : inputs.meter.failure.kind === "error"
       ? { kind: "error", code: inputs.meter.failure.code }
       : { kind: "no-data", reason: inputs.meter.failure.reason };
-  // Only return a real panel if the alias is known via any ok source (probe found) OR any section is ok.
-  // Server already 404s unknown host; we rely on probeSection.ok with non-null or any other ok to show panel.
-  // If probes failed, we still want to show error for registry/results/meter blocks, so we need to know if alias
-  // is plausible via registry/results/meter. Simplify: if inputs.probes.ok and probe is null, check other sources.
+  // A real panel exists when the probes, registry, results or meter usage name the alias; each block degrades on its own source.
   const probeFound = probeSection.kind === "ok" && probeSection.value !== null;
   const anyRegistryHost =
     inputs.dashboard.registry.ok &&
@@ -866,8 +866,6 @@ function buildHostPanel(
     });
   })();
   if (!probeFound && !anyRegistryHost && !anyResultsHost && !anyMeterHost) {
-    // Still allow panel if any section is errored (degradation view for broken fixture) and host was previously valid.
-    // The server's known-alias check will 404 unknown hosts; here we fallback to not found.
     return null;
   }
   return {
@@ -983,6 +981,7 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
               !host.eligible &&
               !(host.excludeReason?.startsWith(AGENT_LIMIT_REASON_PREFIX) ?? false),
             running: host.running,
+            runningError: null,
             maxAgents: host.maxAgents,
             batteryPercent: host.batteryPercent,
             detail,

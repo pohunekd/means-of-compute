@@ -2,7 +2,7 @@
 // a small hand-written sim-trace-v1 file, a fixture meter usage log and a
 // recorded probe line, all with synthetic aliases in a temp directory.
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BudgetConfig } from "../../src/budget/config.js";
@@ -220,15 +220,37 @@ function meterLogText(): string {
   return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
 }
 
-interface FixtureDir {
-  readonly dir: string;
-  readonly sources: LiveSources;
-  readonly dashboardSources: Parameters<typeof gatherInputs>[0];
-  readonly fixed: Parameters<typeof gatherInputs>[1];
+function registryText(): string {
+  return JSON.stringify({
+    sessions: [
+      {
+        requestId: "w1-real:0",
+        workItemId: "w1-real",
+        repo: "x",
+        hostAlias: "desktop",
+        branch: "b",
+        baseRef: "main",
+        resume: false,
+        model: { providerId: "meta-api", model: "meta-models/muse-spark-open-1026" },
+        briefSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        sessionId: "s-real-1",
+        worktree: "/tmp/wt",
+        baseCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        startedAt: "2026-11-03T17:58:30.000Z",
+        cursor: null,
+        unreachableCount: 0,
+        lastSeenState: "running",
+        lastSeenAt: "2026-11-03T17:59:00.000Z",
+        cancelReason: null,
+        terminal: null,
+        resolvedAt: null,
+        revision: 0,
+      },
+    ],
+  });
 }
 
-function makeFixture(trace: string): FixtureDir {
-  const dir = mkdtempSync(join(tmpdir(), "live-view-"));
+function writeFixtures(dir: string, trace: string): void {
   const simTracePath = join(dir, "trace.jsonl");
   writeFileSync(simTracePath, trace);
   writeFileSync(join(dir, "meter-usage.jsonl"), meterLogText());
@@ -242,10 +264,33 @@ function makeFixture(trace: string): FixtureDir {
       cause: null,
     }) + "\n",
   );
+  writeFileSync(join(dir, "registry.json"), registryText());
+  writeFileSync(join(dir, "results.jsonl"), "");
+  writeFileSync(join(dir, "ledger.jsonl"), "");
+  writeFileSync(
+    join(dir, "work-items.json"),
+    '{"schemaVersion":"v1","revision":0,"items":[],"submissions":[]}',
+  );
+  const verdictDir = join(dir, "verdicts");
+  writeFileSync(join(dir, "dashboard.jsonl"), "");
+  // ensure verdictDir exists
+  mkdirSync(verdictDir, { recursive: true });
+}
+
+interface FixtureDir {
+  readonly dir: string;
+  readonly sources: LiveSources;
+  readonly dashboardSources: Parameters<typeof gatherInputs>[0];
+  readonly fixed: Parameters<typeof gatherInputs>[1];
+}
+
+function makeFixture(trace: string): FixtureDir {
+  const dir = mkdtempSync(join(tmpdir(), "live-view-"));
+  writeFixtures(dir, trace);
   return {
     dir,
     sources: {
-      simTracePath,
+      simTracePath: join(dir, "trace.jsonl"),
       meterUsagePath: join(dir, "meter-usage.jsonl"),
       portsPath: join(dir, "loop-ports.jsonl"),
     },
@@ -291,6 +336,8 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page.indexOf("Real fleet")).toBeLessThan(
       page.indexOf('<span class="simtag">SIMULATED</span>'),
     );
+    // Real tile load is bare count, not count/max (M8).
+    expect(page).toContain('class="load">1<');
     // Flagged logic: running while excluded for non-agent-limit shows flagged.
     if (live.simFleet.kind !== "ok") {
       throw new Error("expected simulated fleet groups");
@@ -304,7 +351,18 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       .find((tile) => tile.alias === "desk-002");
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
-    // Simulated running tasks must exclude work that ended before t (work-end at 50 excludes sim-w-001 at t=60).
+    // Simulated running tasks: at t=45 the placement is still running, at t=60 it has ended (M10).
+    const live45 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
+      view: "overview",
+      t: 45,
+      paused: false,
+      host: "desk-001",
+    });
+    if (live45.hostPanel === null || live45.hostPanel.kind !== "sim") {
+      throw new Error("expected sim host panel for desk-001 at t=45");
+    }
+    expect(live45.hostPanel.runningTasks).toHaveLength(1);
+    expect(live45.hostPanel.runningTasks[0]?.workItemId).toBe("sim-w-001");
     const liveWithHost = buildLive(
       await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}),
       {
@@ -405,6 +463,33 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     // Well-formed unknown host is 404.
     const unknownHost = await get("/?view=overview&host=unknown-host-xyz");
     expect(unknownHost.status).toBe(404);
+    // Registry failure shows error on tile and in panel (M11/M12).
+    writeFileSync(join(fixture.dir, "registry.json"), "{ invalid json }");
+    const dashBroken = await dashboardInputs(fixture);
+    const liveBroken = buildLive(
+      await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+      },
+    );
+    const pageBroken = renderLive(liveBroken);
+    expect(pageBroken).toContain(">error<");
+    // Host panel for real host with broken registry shows error code.
+    const brokenPanel = buildLive(
+      await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: "desktop",
+      },
+    );
+    expect(brokenPanel.hostPanel).not.toBeNull();
+    const brokenPage = renderLive(brokenPanel);
+    expect(brokenPage).toContain("error (");
   } finally {
     await server.stop();
     rmSync(fixture.dir, { recursive: true, force: true });
@@ -436,6 +521,12 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const body = await res.text();
     expect(body).not.toContain(">overview<");
     expect(body).not.toContain("simulated");
+    // No-live with /?view=work must still have no overview.
+    const workRes = await fetch(`http://localhost:${String(plain.port)}/?view=work`, {
+      headers: { host: `localhost:${String(plain.port)}` },
+    });
+    const workBody = await workRes.text();
+    expect(workBody).not.toContain(">overview<");
   } finally {
     await plain.stop();
     rmSync(plainFixture.dir, { recursive: true, force: true });

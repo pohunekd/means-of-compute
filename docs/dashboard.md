@@ -468,11 +468,7 @@ dashboard stylesheet plus the live rules). A meta refresh is a navigation,
 not a resource load, so `default-src 'none'` does not block it.
 
 Overview fits one 1920x1080 frame without scrolling (with a host selection the page may scroll). The unified tile renderer uses one size for every host (alias, load `running/maxAgents`, state colour): real tiles carry a solid border and a `REAL` chip, simulated tiles a dashed border and a `SIMULATED` group tag; the group heading carries the site/kind count and real group renders first. The grid groups tiles
-by site and kind; the real fleet is one group of tiles showing the
-alias, a `REAL` tag, the state and the running count. Simulated tiles are
-compact blocks under a group heading with a `SIMULATED` tag: the
-alias and the running count are on the tile, the state word and the
-exclusion reason are in the tile title, and the tile outline is dashed.
+by site and kind; the real fleet is one group of tiles showing the alias, count and a `REAL` chip, state as colour and title. Simulated tiles are compact blocks under a group heading with a `SIMULATED` tag: the alias, load and state word are on the tile face, the tile outline is dashed.
 States: `eligible` (can take work now), `running`, `blocked` (idle
 but excluded; the placement reason is in the tile title), `busy` (user
 present), `offline` (left the site network), and for real hosts `reported`
@@ -498,6 +494,8 @@ clips. A simulated tile that is running but whose last host line excludes
 it carries an amber edge and a `!` marker when it is running, now excluded
 for a reason other than its agent limit (the legend reads the same), with
 the reason in the tile title.
+
+The host panel lives in the right rail (the fleet column does not move): a breadcrumb reads `Fleet / <alias>` next to `back to live`, and the panel keeps one block per source. A simulated host shows site, kind, state, running/max load, battery, task, running tasks, events and placements; a real host shows its probe (kind, time and cause), open sessions, recent results and recent meter calls, each block showing `no data (reason)` or `error (code)` when its source is unavailable so an empty list never stands in for a failure.
 
 Failure rule, per section as on `/`: a missing input shows `no data`, an
 unreadable or invalid one shows an error code with details in the

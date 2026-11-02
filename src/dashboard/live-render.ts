@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
+import { stripProvider } from "./live.js";
 import type {
   HostPanel,
   LiveActivityRow,
@@ -58,12 +59,12 @@ export const LIVE_CSS = [
   ".tile-sim{border:1px dashed var(--border)}",
   ".tile .alias{font-family:var(--mono);font-size:0.48rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}",
   ".tile .meta{font-size:0.44rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.1rem;line-height:1;min-width:0;overflow:hidden}",
-  ".tile .load{font-variant-numeric:tabular-nums;font-weight:600}",
-  ".tile .state{font-size:0.42rem;text-transform:uppercase;letter-spacing:0.02em}",
+  ".tile .load{font-variant-numeric:tabular-nums;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".tile .state{font-size:0.42rem;text-transform:uppercase;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}",
   ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
   ".tile-flagged .alias{color:var(--parked-text)}",
   ".flag{color:var(--parked-text);font-weight:700}",
-  ".chip{font-size:0.42rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem}",
+  ".chip{font-size:0.42rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
   ".chip-real{color:var(--accent)}",
   ".tile-eligible{background:var(--done-bg);color:var(--done-text)}",
   ".tile-running{background:var(--running-bg);color:var(--running-text)}",
@@ -199,17 +200,19 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
   const load =
-    tile.running === -1
+    tile.running === null
       ? "error"
       : tile.maxAgents === null
         ? String(tile.running)
         : `${String(tile.running)}/${String(tile.maxAgents)}`;
   const battery = tile.batteryPercent === null ? "" : ` bat ${String(tile.batteryPercent)}%`;
   const displayAlias = shortenAlias(tile.alias);
-  const title =
+  const baseTitle =
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
       : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
+  const title =
+    tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
   const chip = html`<span class="chip chip-real">REAL</span>`;
   const stateWord = tile.state;
   const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
@@ -367,13 +370,16 @@ function renderReplay(model: LiveModel): SafeHtml {
 function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { host: null });
   if (panel.kind === "sim") {
-    const status = panel.eligible ? "eligible" : (panel.excludeReason ?? "excluded");
     const battery = panel.batteryPercent === null ? "" : `battery ${String(panel.batteryPercent)}%`;
     const task = panel.task === null ? "" : `${panel.task.kind}: ${panel.task.title}`;
+    const stateLine =
+      !panel.eligible && panel.excludeReason !== null
+        ? `State: ${panel.state} · ${panel.excludeReason}`
+        : `State: ${panel.state}`;
     return html`<div class="host-panel" id="host-panel">
       <h3>${panel.alias} <span class="chip">SIMULATED</span></h3>
       <p class="row">Site: ${panel.site} · Kind: ${panel.hostKind}</p>
-      <p class="row">State: ${panel.state} · ${status}</p>
+      <p class="row">${stateLine}</p>
       <p class="row">Running: ${String(panel.running)}/${String(panel.maxAgents)} ${battery}</p>
       ${task === "" ? constantHtml("") : html`<p class="row">Task: ${task}</p>`}
       <p class="row">Running tasks:</p>
@@ -413,8 +419,8 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
               ${panel.registry.value.map(
                 (s) =>
                   html`<li class="mono">
-                    ${s.workItemId} ${s.model.providerId}/${s.model.model} started ${s.startedAt}
-                    lastSeen ${s.lastSeenAt}
+                    ${s.workItemId} ${stripProvider(s.model.model)} (${s.model.providerId}) started
+                    ${s.startedAt} lastSeen ${s.lastSeenAt}
                   </li>`,
               )}
             </ul>

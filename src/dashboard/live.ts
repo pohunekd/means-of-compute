@@ -82,6 +82,11 @@ export interface SimPlacementLine {
   readonly task: SimTask | null;
 }
 
+export interface SimWorkEnd {
+  readonly atMinute: number;
+  readonly workItemId: string;
+}
+
 export interface SimTrace {
   readonly timeline: string;
   readonly startAt: string;
@@ -92,6 +97,7 @@ export interface SimTrace {
   readonly hosts: readonly SimHostLine[];
   readonly events: readonly SimEventLine[];
   readonly placements: readonly SimPlacementLine[];
+  readonly workEnds: readonly SimWorkEnd[];
 }
 
 export type LiveTileState = SimTileState | "reported" | "unavailable";
@@ -418,6 +424,7 @@ export function parseSimTrace(text: string): SimTrace {
   const hosts: SimHostLine[] = [];
   const events: SimEventLine[] = [];
   const placements: SimPlacementLine[] = [];
+  const workEnds: SimWorkEnd[] = [];
   lines.slice(1).forEach((record, offset) => {
     const where = `line ${String(offset + 2)}`;
     if (record["simulated"] !== true) {
@@ -460,7 +467,13 @@ export function parseSimTrace(text: string): SimTrace {
         });
         break;
       }
-      case "work-end":
+      case "work-end": {
+        workEnds.push({
+          atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
+          workItemId: reqString(record, "workItemId", where),
+        });
+        break;
+      }
       case "summary": {
         break;
       }
@@ -483,6 +496,7 @@ export function parseSimTrace(text: string): SimTrace {
     hosts,
     events,
     placements,
+    workEnds,
   };
 }
 
@@ -757,9 +771,19 @@ function buildHostPanel(
         )
         .sort((a, b) => (a.at < b.at ? 1 : -1))
         .slice(0, 6);
-      // Running tasks on this host: from placements that chose this host and are still running
-      const runningTasks = placements
-        .filter((p) => p.chosenHostAlias === hostAlias)
+      const workEndById = new Map<string, number>();
+      for (const end of sim.workEnds) {
+        if (end.atMinute <= minute) {
+          const prev = workEndById.get(end.workItemId);
+          if (prev === undefined || end.atMinute < prev)
+            workEndById.set(end.workItemId, end.atMinute);
+        }
+      }
+      const allHostPlacements = sim.placements.filter(
+        (p) => p.chosenHostAlias === hostAlias && p.atMinute <= minute,
+      );
+      const runningTasks = allHostPlacements
+        .filter((p) => !workEndById.has(p.workItemId))
         .map((p) => ({ workItemId: p.workItemId, at: p.at }));
       return {
         kind: "sim",

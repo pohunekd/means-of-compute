@@ -40,12 +40,8 @@ pub fn run_probe(
         let ps = p.to_string_lossy().to_string();
         crate::facts::load_facts(&ps, env.platform)?
     } else if let Some(scn) = opts.scenario.as_deref().filter(|s| !s.is_empty()) {
-        let scn_path = opts
-            .config_dir
-            .join("scenarios")
-            .join(format!("{}.json", scn))
-            .to_string_lossy()
-            .to_string();
+        let config_str = opts.config_dir.to_string_lossy().to_string();
+        let scn_path = crate::js::path_join(&[&config_str, "scenarios", &format!("{}.json", scn)]);
         crate::facts::load_facts(&scn_path, env.platform)?
     } else {
         crate::facts::Facts {

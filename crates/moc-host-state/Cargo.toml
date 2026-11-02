@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 
+[[bin]]
+name = "moc-host-state"
+path = "src/main.rs"
+
 [lib]
 name = "moc_host_state"
 

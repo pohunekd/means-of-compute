@@ -101,19 +101,21 @@ export const LIVE_CSS = [
   ".host-panel .mono{font-family:var(--mono)}",
   ".host-panel ul{margin:0.3rem 0 0;padding-left:1.2rem;font-size:0.8rem}",
   ".host-panel a{color:var(--accent);text-decoration:none}",
-  ".realwork{display:grid;grid-template-columns:repeat(4,1fr);gap:0.3rem;margin:0.2rem 0}",
-  ".rw{background:var(--surface-2);border:1.5px solid var(--accent);border-radius:8px;padding:0.35rem 0.4rem}",
+  ".realwork{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:10px 0}",
+  ".rw{background:var(--surface-2);border:1.5px solid var(--accent);border-radius:12px;padding:9px 12px}",
   ".rw.idle{border-color:var(--border)}",
-  ".rw .al{font-family:var(--mono);font-size:0.66rem;font-weight:700}",
-  ".rw .task{font-size:0.6rem;font-weight:600;margin:0.15rem 0 0.08rem;min-height:1.2rem;line-height:1.2;overflow:hidden}",
-  ".rw .meta{font-size:0.52rem;color:var(--muted);margin:0.05rem 0;line-height:1.1}",
+  ".rw .al{font-size:22px;font-weight:700;font-family:var(--mono)}",
+  ".rw .task{font-size:17px;font-weight:600;margin:4px 0 2px;min-height:40px;line-height:1.3;overflow:hidden}",
+  ".rw .task.idle-task{color:var(--muted)}",
+  ".rw .meta{font-size:15px;color:var(--muted);margin:2px 0;line-height:1.3}",
   ".rw .meta b{color:var(--text);font-weight:700}",
-  ".stage{display:inline-block;border-radius:999px;padding:0.04rem 0.28rem;font-size:0.52rem;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+  ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px}",
+  ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:13px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
   ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
   ".stage.merge{background:var(--done-bg);color:var(--done-text)}",
-  ".fin{display:flex;gap:0.3rem;margin:0.15rem 0 0.2rem}",
-  ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.18rem 0.32rem;font-size:0.54rem;line-height:1.2}",
-  ".fin .fi b{font-size:0.56rem}",
+  ".fin{display:flex;gap:12px;margin:0 0 10px}",
+  ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:15px;line-height:1.3}",
+  ".fin .fi b{font-size:16px}",
   "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}.realwork{grid-template-columns:repeat(2,1fr)}.fin{flex-wrap:wrap}}",
 ].join("\n");
 
@@ -321,7 +323,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   }
   const hostHref = buildHref(model, { host: card.alias });
   const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
-  const stageLabel = card.stage === "idle" ? (card.idleReason ?? "idle") : card.stage;
+  const stageLabel = card.stage === "idle" ? "idle" : card.stage;
   const stageClass =
     card.stage === "implement"
       ? "stage"
@@ -332,11 +334,15 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
           : "stage";
   const idleCls = card.stage === "idle" ? " idle" : "";
   const titleLine =
-    card.title === null
-      ? html`<p class="task"><span class="nodata">no work</span></p>`
-      : taskHref === null
-        ? html`<p class="task">${card.title}</p>`
-        : html`<p class="task"><a href="${taskHref}">${card.title}</a></p>`;
+    card.stage === "idle"
+      ? card.idleReason === null
+        ? constantHtml("")
+        : html`<p class="task idle-task">Idle — ${card.idleReason}</p>`
+      : card.title === null
+        ? html`<p class="task"><span class="nodata">no work</span></p>`
+        : taskHref === null
+          ? html`<p class="task">${card.title}</p>`
+          : html`<p class="task"><a href="${taskHref}">${card.title}</a></p>`;
   const issueLine =
     card.issue === null
       ? constantHtml("")
@@ -400,11 +406,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const probeLine =
     card.probeAt === null
       ? constantHtml("")
-      : card.stage === "idle"
-        ? html`<p class="meta">
-            reported ${clockTime(card.probeAt)} · ${card.idleReason ?? "idle"}
-          </p>`
-        : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
+      : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
   const lastFinishedLine =
     card.lastFinished === null
       ? constantHtml("")
@@ -426,10 +428,6 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
             >${card.today.cost === null ? "—" : cellText(card.today.cost)}</span
           >
         </p>`;
-  const idleReasonLine =
-    card.stage === "idle" && card.idleReason !== null
-      ? html`<p class="meta">Idle — ${card.idleReason}</p>`
-      : constantHtml("");
   return html`<div class="rw${idleCls}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
@@ -437,8 +435,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     </div>
     ${titleLine}
     <p class="meta">${issueLine} ${prLine}</p>
-    ${idleReasonLine} ${modelLine} ${elapsedLine} ${tokensLine} ${tokensCostSoFar} ${costLine}
-    ${callLine} ${probeLine} ${lastFinishedLine} ${todayLine}
+    ${modelLine} ${elapsedLine} ${tokensLine} ${tokensCostSoFar} ${costLine} ${callLine}
+    ${probeLine} ${lastFinishedLine} ${todayLine}
   </div>`;
 }
 
@@ -1228,9 +1226,7 @@ export function renderLive(model: LiveModel): string {
           <section>
             <h2>
               Real work now
-              <span style="color:var(--muted);font-weight:500;font-size:0.6rem"
-                >· what the real machines are doing at this moment</span
-              >
+              <span class="rw-subtitle">· what the real machines are doing at this moment</span>
             </h2>
             ${realWorkBlock} ${justFinishedBlock}
           </section>

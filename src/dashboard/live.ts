@@ -847,6 +847,7 @@ function formatElapsed(startedAt: string, now: Date): string | null {
 
 function idleReasonFromProbe(probe: RecordedProbe): string {
   if (probe.kind === "unavailable") {
+    if (probe.cause === "plugin-busy") return "person at the desk";
     const label = probe.cause === null ? "unavailable" : probe.cause.replace(/-/g, " ");
     return label;
   }
@@ -860,6 +861,7 @@ function newestResultForHost(
   let best: { at: string; outcome: string; workItemId: string } | null = null;
   for (const entry of results) {
     if (entry.hostAlias !== hostAlias) continue;
+    if (entry.outcome !== "merged" && entry.outcome !== "parked") continue;
     if (best === null || entry.at > best.at) {
       best = { at: entry.at, outcome: entry.outcome, workItemId: entry.workItemId };
     }
@@ -1175,12 +1177,13 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
     // No open session: check for pending audit work on this host.
     // The pending audit is the newest non-merged result for the host whose verdict is still missing.
     // A merged result is considered finished and the host becomes idle with lastFinished info.
-    if (lastFinished !== null) {
+    {
       // Look for a pending audit result on this host: newest result with outcome != merged and no verdict yet.
       let pending: (typeof resultsOk)[number] | null = null;
       for (const row of resultsOk) {
         if (row.hostAlias !== alias) continue;
         if (row.outcome === "merged") continue;
+        if (row.outcome === "start-rejected") continue;
         if (pending === null || row.at > pending.at) pending = row;
       }
       if (pending !== null) {
@@ -1220,11 +1223,14 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
             latestCall: null,
             idleReason: null,
             probeAt,
-            lastFinished: {
-              workItemId: lastFinished.workItemId,
-              at: lastFinished.at,
-              outcome: lastFinished.outcome,
-            },
+            lastFinished:
+              lastFinished !== null
+                ? {
+                    workItemId: lastFinished.workItemId,
+                    at: lastFinished.at,
+                    outcome: lastFinished.outcome,
+                  }
+                : null,
             today,
           };
         }

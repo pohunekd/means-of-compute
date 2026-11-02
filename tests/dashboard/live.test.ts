@@ -730,7 +730,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page).toContain("kiosk-a");
     expect(page).toContain("laptop-b");
     expect(page).toContain("no work queued");
-    expect(page).toContain("plugin busy");
+    expect(page).toContain("person at the desk");
     expect(page).toContain("reported");
     expect(page).toContain("last finished");
     expect(page).toContain("today:");

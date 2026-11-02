@@ -95,6 +95,7 @@ export interface LiveTile {
   readonly site: string;
   readonly simulated: boolean;
   readonly state: LiveTileState;
+  readonly eligible: boolean;
   readonly running: number;
   readonly maxAgents: number | null;
   readonly batteryPercent: number | null;
@@ -514,6 +515,7 @@ function realTiles(
     site: "real fleet",
     simulated: false,
     state: probe.kind === "reported" ? "reported" : "unavailable",
+    eligible: probe.kind === "reported",
     running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
     maxAgents: null,
     batteryPercent: null,
@@ -697,6 +699,7 @@ export function buildLive(inputs: LiveInputs): LiveModel {
             site: host.site,
             simulated: true,
             state: host.state,
+            eligible: host.eligible,
             running: host.running,
             maxAgents: host.maxAgents,
             batteryPercent: host.batteryPercent,

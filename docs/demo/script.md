@@ -157,14 +157,21 @@ Narration (said once): "Real placement engine, synthetic fleet; the four real
 machines and the model calls are live."
 
 expected: the page advances on its own every 5 seconds, 5 sim-minutes per
-frame. Dashed tiles tagged SIMULATED fill in as desks go idle, laptops leave
-and rejoin from home, and the lobby kiosks enter their unattended window; one
-laptop tile turns amber when its battery drops to 40 percent. The ticker
-shows `placed sim-w-... on desk-... because ...` rows with the placement
-engine's own reasons next to real rows tagged REAL, and the Model activity
-table lands real meter call-end rows while the factory works. The counters
-keep the simulated counts beside the real ones, never inside them. The final
-frame stops refreshing; the full dashboard stays one click away at `/`.
+frame. Dashed tiles under the SIMULATED group tags fill in as desks go idle,
+laptops leave and rejoin from home, and the lobby kiosks enter their
+unattended window. Battery beat: at simulated 18:35 (minute 95) `laptop-007
+battery at 40 percent` appears in `Simulated events (sim clock)`; the
+`laptop-007` tile keeps running with an amber edge and a `!` (running, now
+excluded - the battery reason is in its title) and turns amber (blocked)
+from minute 215, when its work ends. `desk-142 returned` appears at 18:40
+and `laptop-021 unplugged` at 19:15, each with its reason in the tile title.
+The `Simulated events (sim clock)` block shows `placed sim-... on ...
+because ...` rows with the placement engine's own reasons; real rounds sit
+in the separate `Real events` block above it, real tiles are tagged REAL,
+and the Model activity table lands real meter call-end rows while the
+factory works. The counters keep the simulated counts beside the real ones,
+never inside them. The final frame stops refreshing; the full dashboard
+stays one click away at `/`.
 
 ## Multi-host run (W3.1)
 

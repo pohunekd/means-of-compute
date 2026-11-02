@@ -117,6 +117,18 @@ function fixtureTrace(): string {
       maxAgents: 1,
     }),
     hostLine({
+      alias: "laptop-007",
+      hostKind: "laptop",
+      atMinute: 40,
+      at: "2026-11-03T17:40:00.000Z",
+      state: "running",
+      running: 1,
+      eligible: false,
+      excludeReason: "excluded: battery at 40 percent, at or below the 50 percent floor",
+      batteryPercent: 40,
+      maxAgents: 1,
+    }),
+    hostLine({
       alias: "desk-142",
       state: "busy",
       eligible: false,
@@ -264,7 +276,14 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
     const runningCounter = live.counters.find(
       (counter) => counter.label === "Simulated work running",
     );
-    expect(runningCounter?.cell).toEqual({ kind: "text", text: "1" });
+    expect(runningCounter?.cell).toEqual({ kind: "text", text: "2" });
+    const flaggedTile = live.simFleet.value
+      .flatMap((group) => group.tiles)
+      .find((tile) => tile.alias === "laptop-007");
+    expect(flaggedTile?.state).toBe("running");
+    expect(flaggedTile?.eligible).toBe(false);
+    expect(page).toContain("tile-flagged");
+    expect(page).toContain("running, now excluded");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
 

@@ -53,6 +53,10 @@ export const LIVE_CSS = [
   ".live-grid-sim{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.2rem,1fr));gap:3px}",
   ".group-desk .live-grid-sim{grid-template-columns:repeat(auto-fill,minmax(4.9rem,1fr))}",
   ".group-laptop .live-grid-sim{grid-template-columns:repeat(auto-fill,minmax(5.7rem,1fr))}",
+  ".group-signage .live-grid-sim{grid-template-columns:repeat(auto-fill,minmax(9rem,1fr))}",
+  ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
+  ".tile-flagged .alias{color:var(--parked-text)}",
+  ".flag{color:var(--parked-text);font-weight:700}",
   ".sim-tile{display:flex;justify-content:space-between;align-items:baseline;gap:0.2rem;border:1px dashed;border-radius:4px;padding:0.08rem 0.22rem;line-height:1.2;overflow:hidden}",
   ".sim-tile .alias{font-family:var(--mono);font-size:0.58rem;font-weight:700;white-space:nowrap;overflow:hidden}",
   ".sim-tile .load{font-size:0.6rem;font-variant-numeric:tabular-nums}",
@@ -68,7 +72,12 @@ export const LIVE_CSS = [
   ".live-activity-table{font-size:0.78rem}",
   ".live-activity-table td,.live-activity-table th{padding:0.2rem 0.35rem;white-space:nowrap}",
   ".live-ticker{list-style:none;margin:0;padding:0}",
-  ".live-ticker li{font-size:0.8rem;padding:0.25rem 0.4rem;border-bottom:1px solid var(--border)}",
+  ".live-layout>*{min-width:0}",
+  ".live-side{min-width:0}",
+  ".live-side section{min-width:0;overflow:hidden}",
+  ".live-activity-table{max-width:100%}",
+  ".live-ticker{overflow:hidden}",
+  ".live-ticker li{font-size:0.8rem;padding:0.25rem 0.4rem;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
   ".live-ticker .sim{border-left:4px dashed var(--accent)}",
   ".live-ticker time{font-variant-numeric:tabular-nums;color:var(--muted);margin-right:0.4rem;white-space:nowrap}",
   ".live-events h3{font-size:0.8rem;margin:0.5rem 0 0.25rem;color:var(--muted)}",
@@ -155,6 +164,8 @@ function renderRealTile(tile: LiveTile): SafeHtml {
 
 function renderSimTile(tile: LiveTile): SafeHtml {
   checkAlias(tile);
+  const flagged = tile.running > 0 && !tile.eligible;
+  const flagMark = flagged ? html`<span class="flag">!</span>` : "";
   const load =
     tile.maxAgents === null
       ? String(tile.running)
@@ -164,8 +175,11 @@ function renderSimTile(tile: LiveTile): SafeHtml {
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
       : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
-  return html`<div class="sim-tile tile-${tile.state}" title="${title}">
-    <span class="load">${load}</span><span class="alias">${tile.alias}</span>
+  return html`<div
+    class="sim-tile tile-${tile.state}${flagged ? " tile-flagged" : ""}"
+    title="${title}"
+  >
+    <span class="load">${load}${flagMark}</span><span class="alias">${tile.alias}</span>
   </div>`;
 }
 
@@ -223,7 +237,7 @@ function renderTickerBlock(model: LiveModel, simulated: boolean): SafeHtml {
   const rows = model.ticker.filter((row) => row.simulated === simulated).slice(0, 6);
   const items = rows.map(
     (row) =>
-      html`<li class="${row.simulated ? "sim" : "real"}">
+      html`<li class="${row.simulated ? "sim" : "real"}" title="${row.text}">
         <time datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time>${row.text}
       </li>`,
   );
@@ -318,7 +332,8 @@ export function renderLive(model: LiveModel): string {
                 <span class="dot tile-blocked"></span>blocked (reason in the tile title)
                 <span class="dot tile-busy"></span>busy
                 <span class="dot tile-offline"></span>offline · dashed outline and the SIMULATED
-                group tag mark simulated hosts
+                group tag mark simulated hosts · amber edge with <span class="flag">!</span>:
+                running, now excluded (reason in the title)
               </p>
               <p class="cite">
                 source: real recorded probes and dispatcher registry; simulated fleet trace

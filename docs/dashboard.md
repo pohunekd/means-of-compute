@@ -491,7 +491,12 @@ with the reason in the cell title, never 0. The ticker keeps the two clocks
 apart: a Real events block and a Simulated events block, each newest first
 with the newest 6 rows shown; a simulated placement reads
 `placed <item> on <host> because <reason>` with the reason verbatim from
-the placement engine.
+the placement engine. Activity and ticker rows are one line each, clipped
+with an ellipsis and their full text in the row title, so the frame height
+never depends on event text; signage tiles are wide enough that no alias
+clips. A simulated tile that is running but whose last host line excludes
+it carries an amber edge and a `!` marker (the legend reads: running, now
+excluded), with the reason in the tile title.
 
 Failure rule, per section as on `/`: a missing input shows `no data`, an
 unreadable or invalid one shows an error code with details in the

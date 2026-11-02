@@ -52,13 +52,26 @@ and every `config/scenarios/*.json` file. The toolchain is recorded separately a
 `plugin:digest` prints the digest and exits 0 only when it equals
 `package.sourceDigest` in `config/host-state.json`. It exits 2 with
 `plugin:digest: <file>: include_str!/include_bytes! is not allowed` when a crate
-source file matches `/\binclude_(str|bytes)\b/`, and with
+source file matches `/\binclude_(str|bytes)\b/`, and as a fast early check with
 `plugin:digest: <file>: include!/#[path] is not allowed` when a crate source file
-matches `/\binclude\s*!/`, `/\binclude\s+as\b/` or `/#\s*!?\s*\[\s*path\s*=/`.
-It also exits 2 with `plugin:digest: <path> is not allowed (it changes the build
-outside the digest inputs)` when any of `crates/moc-host-state/build.rs`,
-`.cargo/config.toml`, `.cargo/config`, `rust-toolchain` or `rust-toolchain.toml`
-exists.
+matches `/\binclude\b/` or `/\bcfg_attr\b/` (text regexes cannot cover every Rust
+token spelling, so the authoritative guard is the compiler's dep-info in
+`plugin:build`). It also exits 2 with `plugin:digest: <file>: <key> is not allowed`
+when `crates/moc-host-state/Cargo.toml` or `Cargo.toml` parsed with `Bun.TOML.parse`
+has `package.build` not `false`, `lib.path` or `bin[].path` not under `src/`, any
+`dependencies`/`dev-dependencies`/`build-dependencies` (including `target.*` and
+`workspace.dependencies` in the root manifest) entry with a `path` key, or the root
+manifest has `patch` or `replace`. It also exits 2 with
+`plugin:digest: <path> is not allowed (it changes the build outside the digest inputs)`
+when any of `crates/moc-host-state/build.rs`, `.cargo/config.toml`, `.cargo/config`,
+`rust-toolchain` or `rust-toolchain.toml` exists.
+`plugin:build` is the authoritative guard: after a successful cargo build it reads
+`<root>/target/<triple>/release/moc-host-state.d`, ignores empty and `#` lines,
+takes the rule whose target is the built binary (first line with an unescaped `:` after
+the target path), splits prerequisites on unescaped whitespace handling `\ `, and exits
+2 with `plugin:build: <file> is not a digest input` for any prerequisite not in the
+digest inputs or under `<cargoHome>/registry/src/`; a missing `.d` file exits 2 with
+`plugin:build: <path>: dep-info not found`.
 
 ## Version rule
 

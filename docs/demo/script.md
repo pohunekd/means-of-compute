@@ -170,7 +170,7 @@ because ...` rows with the placement engine's own reasons; real rounds sit
 in the separate `Real events` block above it, real tiles are tagged REAL,
 and the Model activity table lands real meter call-end rows while the
 factory works. The counters keep the simulated counts beside the real ones,
-never inside them. Click a fleet tile, a running task or a meter row to open the right rail: `Fleet / <host> / <task> / <audit>` with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows DoD, rounds and ledger blocks each with its own source; a call shows provider, model without namespace and priced cost. The fleet column does not move. The final frame stops refreshing; the full dashboard
+never inside them. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; the full dashboard
 stays one click away at `/`.
 
 ## Multi-host run (W3.1)

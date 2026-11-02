@@ -255,6 +255,54 @@ function renderCell(cell: Cell, panelId: PanelId, column: string): SafeHtml {
   return html`<td class="${base}">${text}</td>`;
 }
 
+function wrapItemLink(text: string): SafeHtml {
+  if (text.trim() === "") {
+    return html`${text}`;
+  }
+  const encoded = encodeURIComponent(text);
+  return html`<a href="/?view=overview&amp;task=${encoded}">${text}</a>`;
+}
+
+function renderCellTabbed(cell: Cell, panelId: PanelId, column: string): SafeHtml {
+  const numeric = NUMERIC_COLUMNS.has(column) ? " num" : "";
+  const base = `${cellClass(cell)}${numeric}`;
+  if (cell.kind === "aliases") {
+    return html`<td class="${base}"><span class="mono nowrap">${cellText(cell)}</span></td>`;
+  }
+  if (cell.kind !== "text") {
+    return html`<td class="${base}">${cellText(cell)}</td>`;
+  }
+  const text = cell.text;
+  if (column === "item") {
+    return html`<td class="${base}"><span class="mono nowrap">${wrapItemLink(text)}</span></td>`;
+  }
+  if (panelId === "work" && column === "status") {
+    return html`<td class="${base}"><span class="${statusPillClass(text)}">${text}</span></td>`;
+  }
+  if (panelId === "work" && column === "placement") {
+    return html`<td class="${base}">${renderPlacement(text)}</td>`;
+  }
+  if (TIME_COLUMNS.has(column)) {
+    const compact = compactTime(text);
+    if (compact !== null) {
+      return html`<td class="${base}">
+        <time class="time" datetime="${text}" title="${text}">${compact}</time>
+      </td>`;
+    }
+  }
+  if (column === "model" || column === "branch" || column === "provider") {
+    const limit = column === "branch" ? 32 : 30;
+    const shown = shortenMiddle(text, limit);
+    return shown === text
+      ? html`<td class="${base}"><span class="mono nowrap">${text}</span></td>`
+      : html`<td class="${base}"><span class="mono nowrap" title="${text}">${shown}</span></td>`;
+  }
+  if (panelId === "work" && column === "verdicts") {
+    return html`<td class="${base}"><span class="mono verdicts">${text}</span></td>`;
+  }
+  return html`<td class="${base}">${text}</td>`;
+}
+
 function renderTable(table: Table, panelId: PanelId, panelTitle: string): SafeHtml {
   const captionClass = table.caption === panelTitle ? "caption-same" : "";
   const heads = table.columns.map(
@@ -377,9 +425,54 @@ function renderTabs(activeView: string, opts: DashboardViewOptions): SafeHtml {
   return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
 }
 
+function renderTableTabbed(table: Table, panelId: PanelId, panelTitle: string): SafeHtml {
+  const captionClass = table.caption === panelTitle ? "caption-same" : "";
+  const heads = table.columns.map(
+    (column) => html`<th class="${NUMERIC_COLUMNS.has(column) ? "num" : ""}">${column}</th>`,
+  );
+  const rows = table.rows.map(
+    (row) =>
+      html`<tr>
+        ${row.map((cell, index) => renderCellTabbed(cell, panelId, table.columns[index] ?? ""))}
+      </tr>`,
+  );
+  const cite = html`<p class="cite">source: ${table.source}</p>`;
+  const note = table.note === null ? constantHtml("") : html`<p class="note">${table.note}</p>`;
+  return html`<div class="tablewrap">
+      <table class="table-${panelId}">
+        <caption class="${captionClass}">
+          ${table.caption}
+        </caption>
+        <thead>
+          <tr>
+            ${heads}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+    ${cite}${note}`;
+}
+
+function renderPanelTabbed(panel: Panel): SafeHtml {
+  const figures =
+    panel.figures.length === 0
+      ? constantHtml("")
+      : html`<div class="figures">
+          ${panel.figures.map((figure) => renderFigure(figure, "figure"))}
+        </div>`;
+  const tables = panel.tables.map((table) => renderTableTabbed(table, panel.id, panel.title));
+  return html`<section id="${panel.id}">
+    <h2>${panel.title}</h2>
+    ${figures}${tables}
+  </section>`;
+}
+
 export function renderDashboardWithView(model: DashboardModel, opts: DashboardViewOptions): string {
   const activePanel = model.panels.find((panel) => panel.id === opts.view) ?? null;
-  const section = activePanel === null ? constantHtml("") : renderPanel(activePanel);
+  const section = activePanel === null ? constantHtml("") : renderPanelTabbed(activePanel);
   const tabs = renderTabs(opts.view, opts);
   const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
   const rendered = compactTime(model.renderedAt) ?? model.renderedAt;

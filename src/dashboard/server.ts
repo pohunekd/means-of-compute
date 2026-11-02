@@ -79,8 +79,8 @@ const VIEW_IDS = new Set(["overview", "fleet", "work", "usage", "savings", "auto
 const PANEL_VIEW_IDS = new Set(["work", "usage", "savings", "autonomy", "models"]);
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const TASK_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const CALL_PATTERN = /^[^|]+\|[^|]+$/;
-const AUDIT_PATTERN = /^[^@]+@[^@]+$/;
+const CALL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z\|[a-z0-9][a-z0-9-]{0,62}$/;
+const AUDIT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}@[0-9a-f]{40}$/;
 const GRAMMAR_KEYS = ["view", "t", "pause", "host", "task", "call", "audit"] as const;
 
 function allowlist(host: string, port: number): Set<string> {
@@ -387,6 +387,24 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 headers: { ...TAB_HTML_HEADERS },
               });
               return await respond(response, url.pathname);
+            }
+          }
+          // No-live stacked page has no selection except host; task/call/audit are 404.
+          if (activeSelectionValue !== null && activeSelectionKey !== "host") {
+            return await respond(textResponse(404, "not found\n"), url.pathname);
+          }
+          if (activeSelectionValue !== null && activeSelectionKey === "host") {
+            const known = new Set<string>();
+            if (inputs.hosts.ok) {
+              const hv = inputs.hosts.value;
+              if (hv.kind === "recorded") {
+                for (const p of hv.probes) known.add(p.hostAlias);
+              } else {
+                for (const o of hv.observations) known.add(o.hostAlias);
+              }
+            }
+            if (!known.has(activeSelectionValue)) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
             }
           }
           // Without view and without live, render as today (stacked, no tabs) to keep snapshot untouched.

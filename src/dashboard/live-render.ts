@@ -9,7 +9,9 @@
 import { createHash } from "node:crypto";
 import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
+import { groupDigits } from "./money.js";
 import { stripProvider } from "./live.js";
+import { recount } from "../auditor/verdict.js";
 import type {
   AuditPanel,
   CallPanel,
@@ -310,18 +312,23 @@ function sectionText<T>(section: LiveSection<T>): SafeHtml {
 function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml {
   const model = shortenMiddle(row.model, 30);
   const tokens = (value: number | null): string =>
-    value === null ? "no data" : value.toLocaleString("en-US");
+    value === null ? "no data" : groupDigits(value);
   const cost =
     row.cost.kind === "no-data"
       ? html`<td class="nodata" title="${row.cost.reason}">no data</td>`
       : html`<td class="${cellClass(row.cost)}">${cellText(row.cost)}</td>`;
-  const callKey = `${row.at}|${row.workItemId ?? ""}`;
-  const modelLink = html`<a
-    href="${buildHref(liveModel, { call: callKey })}"
-    class="mono nowrap"
-    title="${row.model}"
-    >${model === row.model ? row.model : model}</a
-  >`;
+  const canLinkCall = row.workItemId !== null;
+  const callKey = canLinkCall ? `${row.at}|${row.workItemId}` : "";
+  const modelLink = canLinkCall
+    ? html`<a
+        href="${buildHref(liveModel, { call: callKey })}"
+        class="mono nowrap"
+        title="${row.model}"
+        >${model === row.model ? row.model : model}</a
+      >`
+    : html`<span class="mono nowrap" title="${row.model}"
+        >${model === row.model ? row.model : model}</span
+      >`;
   const modelCell = html`<td>${modelLink}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
@@ -330,7 +337,7 @@ function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml
     <td>${row.role ?? "-"}</td>
     <td class="num">${tokens(row.inputTokens)}</td>
     <td class="num">${tokens(row.outputTokens)}</td>
-    <td class="num">${row.ms.toLocaleString("en-US")}</td>
+    <td class="num">${groupDigits(row.ms)}</td>
     ${cost}
   </tr>`;
 }
@@ -475,7 +482,11 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   // Registry block: open sessions with details
   const registryBlock =
     panel.registry.kind !== "ok"
-      ? sectionText(panel.registry)
+      ? panel.registry.kind === "error"
+        ? html`<p class="row">Open sessions:</p>
+            <p class="error">error (${panel.registry.code})</p>`
+        : html`<p class="row">Open sessions:</p>
+            <p class="nodata">no data (${panel.registry.reason})</p>`
       : panel.registry.value.length === 0
         ? html`<p class="row">Open sessions: none</p>`
         : html`<div>
@@ -484,30 +495,58 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
               ${panel.registry.value.map(
                 (s) =>
                   html`<li class="mono">
-                    ${s.workItemId} ${stripProvider(s.model.model)} (${s.model.providerId}) started
-                    ${s.startedAt} lastSeen ${s.lastSeenAt}
+                    <a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a>
+                    ${stripProvider(s.model.model)} (${s.model.providerId}) started ${s.startedAt}
+                    lastSeen ${s.lastSeenAt}
                   </li>`,
               )}
             </ul>
           </div>`;
   const resultsBlock =
     panel.results.kind !== "ok"
-      ? sectionText(panel.results)
+      ? panel.results.kind === "error"
+        ? html`<p class="row">Recent results:</p>
+            <p class="error">error (${panel.results.code})</p>`
+        : html`<p class="row">Recent results:</p>
+            <p class="nodata">no data (${panel.results.reason})</p>`
       : html`<div>
           <p class="row">Recent results:</p>
           <ul>
-            ${panel.results.value.map((r) => html`<li><a href="${buildHref(model, { task: r.workItemId })}">${r.workItemId}</a> ${r.outcome} at ${r.at}</li>`)}
+            ${panel.results.value.map((r) =>
+              r.known
+                ? html`<li>
+                    <a href="${buildHref(model, { task: r.workItemId })}">${r.workItemId}</a>
+                    ${r.outcome} at ${r.at}
+                  </li>`
+                : html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`,
+            )}
           </ul>
         </div>`;
   const meterBlock =
     panel.meterCalls.kind !== "ok"
-      ? sectionText(panel.meterCalls)
-      : html`<div>
-          <p class="row">Recent meter calls:</p>
-          <ul>
-            ${panel.meterCalls.value.map((c) => html`<li><a href="${buildHref(model, { call: `${c.at}|${c.workItemId ?? ""}` })}">${c.model}</a> ${c.at}</li>`)}
-          </ul>
-        </div>`;
+      ? panel.meterCalls.kind === "error"
+        ? html`<p class="row">Recent meter calls:</p>
+            <p class="error">error (${panel.meterCalls.code})</p>`
+        : html`<p class="row">Recent meter calls:</p>
+            <p class="nodata">no data (${panel.meterCalls.reason})</p>`
+      : panel.meterCalls.value.length === 0
+        ? html`<p class="row">Recent meter calls: none</p>`
+        : html`<div>
+            <p class="row">Recent meter calls:</p>
+            <ul>
+              ${panel.meterCalls.value.map((c) => {
+                const canLink = c.workItemId !== null;
+                return canLink
+                  ? html`<li>
+                      <a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
+                        >${c.model}</a
+                      >
+                      ${c.at}
+                    </li>`
+                  : html`<li>${c.model} ${c.at}</li>`;
+              })}
+            </ul>
+          </div>`;
   return html`<div class="host-panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
     ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
@@ -537,11 +576,21 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
   }
   const goal =
     panel.workItem.kind === "ok"
-      ? html`<p class="row">Goal: ${panel.workItem.value.goal}</p>`
-      : sectionText(panel.workItem);
+      ? (() => {
+          const full = panel.workItem.value.goal;
+          const excerpt = full.length > 280 ? `${full.slice(0, 280)}…` : full;
+          return html`<p class="row" title="${full}">Goal: ${excerpt}</p>`;
+        })()
+      : html`<p class="row">Goal:</p>
+          <p class="${panel.workItem.kind}">
+            ${panel.workItem.kind === "error" ? `error (${panel.workItem.code})` : `no data (${panel.workItem.reason})`}
+          </p>`;
   const dodBlock =
     panel.dod.kind !== "ok"
-      ? sectionText(panel.dod)
+      ? html`<p class="row">DoD:</p>
+          <p class="${panel.dod.kind}">
+            ${panel.dod.kind === "error" ? `error (${panel.dod.code})` : `no data (${panel.dod.reason})`}
+          </p>`
       : html`<div>
           <p class="row">DoD:</p>
           <ul>
@@ -550,7 +599,10 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
         </div>`;
   const roundsBlock =
     panel.rounds.kind !== "ok"
-      ? sectionText(panel.rounds)
+      ? html`<p class="row">Rounds:</p>
+          <p class="${panel.rounds.kind}">
+            ${panel.rounds.kind === "error" ? `error (${panel.rounds.code})` : `no data (${panel.rounds.reason})`}
+          </p>`
       : html`<div>
           <p class="row">Rounds:</p>
           <ul>
@@ -559,46 +611,147 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
         </div>`;
   const verdictsBlock =
     panel.verdicts.kind !== "ok"
-      ? sectionText(panel.verdicts)
+      ? html`<p class="row">Verdicts:</p>
+          <p class="${panel.verdicts.kind}">
+            ${panel.verdicts.kind === "error" ? `error (${panel.verdicts.code})` : `no data (${panel.verdicts.reason})`}
+          </p>`
       : html`<div>
           <p class="row">Verdicts:</p>
           <ul>
-            ${panel.verdicts.value.map((v) => html`<li><a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}">${v.headSha.slice(0, 7)} high ${String(v.counts.high)} medium ${String(v.counts.medium)} low ${String(v.counts.low)}</a></li>`)}
+            ${panel.verdicts.value.map((v) => {
+              const rec = recount(v.findings);
+              const mismatched =
+                rec.high !== v.counts.high ||
+                rec.medium !== v.counts.medium ||
+                rec.low !== v.counts.low;
+              return mismatched
+                ? html`<li>
+                    <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                      >${v.headSha.slice(0, 7)}: invalid (counts disagree)</a
+                    >
+                  </li>`
+                : html`<li>
+                    <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                      >${v.headSha.slice(0, 7)} high ${String(rec.high)} medium
+                      ${String(rec.medium)} low ${String(rec.low)}</a
+                    >
+                  </li>`;
+            })}
           </ul>
         </div>`;
-  const ledgerBlock =
-    panel.ledger.kind !== "ok"
-      ? sectionText(panel.ledger)
+  const ledgerFailed =
+    panel.ledger.kind === "error" ||
+    panel.ledgerSessions.kind === "error" ||
+    panel.ledgerMeta.kind === "error";
+  const ledgerNoData =
+    panel.ledger.kind === "no-data" ||
+    panel.ledgerSessions.kind === "no-data" ||
+    panel.ledgerMeta.kind === "no-data";
+  const ledgerBlock = ledgerFailed
+    ? (() => {
+        const code =
+          (panel.ledger.kind === "error" && panel.ledger.code) ||
+          (panel.ledgerSessions.kind === "error" && panel.ledgerSessions.code) ||
+          (panel.ledgerMeta.kind === "error" && panel.ledgerMeta.code) ||
+          "unknown";
+        return html`<p class="row">Ledger: error (${code})</p>`;
+      })()
+    : ledgerNoData
+      ? (() => {
+          const reason =
+            (panel.ledger.kind === "no-data" && panel.ledger.reason) ||
+            (panel.ledgerSessions.kind === "no-data" && panel.ledgerSessions.reason) ||
+            (panel.ledgerMeta.kind === "no-data" && panel.ledgerMeta.reason) ||
+            "unknown";
+          return html`<p class="row">Ledger: no data (${reason})</p>`;
+        })()
       : html`<div>
           <p class="row">Ledger tokens:</p>
           <ul>
-            ${panel.ledger.value.map((t) => html`<li>${t.provider} ${t.model} in ${String(t.inputTokens ?? "no data")} out ${String(t.outputTokens ?? "no data")} req ${String(t.requests ?? "no data")} source ${t.source}</li>`)}
+            ${panel.ledger.value.map((t) => html`<li>${t.model} (${t.provider}) in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
           </ul>
-        </div>`;
-  const ledgerSessionsBlock =
-    panel.ledgerSessions.kind !== "ok"
-      ? sectionText(panel.ledgerSessions)
-      : html`<div>
           <p class="row">Ledger sessions:</p>
           <ul>
             ${panel.ledgerSessions.value.map((s) => html`<li>${s.hostAlias} ${String(s.seconds)}s source ${s.source}</li>`)}
           </ul>
+          ${
+            panel.ledgerMeta.value === null
+              ? html`<p class="row">Ledger meta: no data</p>`
+              : html`<p class="row">
+                  Ledger meta: ${panel.ledgerMeta.value.result} retries
+                  ${String(panel.ledgerMeta.value.retries)} human
+                  ${String(panel.ledgerMeta.value.humanInterventions)}
+                </p>`
+          }
         </div>`;
-  const ledgerMetaBlock =
-    panel.ledgerMeta.kind !== "ok"
-      ? sectionText(panel.ledgerMeta)
-      : panel.ledgerMeta.value === null
-        ? html`<p class="row">Ledger meta: no data</p>`
-        : html`<p class="row">
-            Ledger meta: ${panel.ledgerMeta.value.result} retries
-            ${String(panel.ledgerMeta.value.retries)} human
-            ${String(panel.ledgerMeta.value.humanInterventions)}
-          </p>`;
-  const title = panel.workItem.kind === "ok" ? panel.workItem.value.id : panel.workItemId;
+  const ledgerSessionsBlock = constantHtml("");
+  const ledgerMetaBlock = constantHtml("");
+  const title = panel.workItem.kind === "ok" ? panel.workItem.value.title : panel.workItemId;
+  const statusLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">
+          Status:
+          ${panel.workItem.value.status}${panel.workItem.value.statusReason === null ? "" : ` (${panel.workItem.value.statusReason})`}
+        </p>`
+      : constantHtml("");
+  const repoLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Repo: ${panel.workItem.value.repo}</p>`
+      : constantHtml("");
+  const issueLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.issue !== null
+      ? html`<p class="row">
+          Issue:
+          <a
+            href="https://github.com/${panel.workItem.value.repo}/issues/${String(panel.workItem.value.issue)}"
+            >#${String(panel.workItem.value.issue)}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok" && panel.workItem.value.issue === null
+        ? html`<p class="row">Issue: none</p>`
+        : constantHtml("");
+  const prLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.pullNumber !== null
+      ? html`<p class="row">
+          PR:
+          <a
+            href="https://github.com/${panel.workItem.value.repo}/pull/${String(panel.workItem.value.pullNumber)}"
+            >#${String(panel.workItem.value.pullNumber)}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok" && panel.workItem.value.pullNumber === null
+        ? html`<p class="row">PR: none</p>`
+        : constantHtml("");
+  const branchLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Branch: ${panel.workItem.value.branch ?? "none"}</p>`
+      : constantHtml("");
+  const assignedHostLine =
+    panel.workItem.kind === "ok" && panel.workItem.value.assignedHostAlias !== null
+      ? html`<p class="row">
+          Host:
+          <a href="${buildHref(model, { host: panel.workItem.value.assignedHostAlias })}"
+            >${panel.workItem.value.assignedHostAlias}</a
+          >
+        </p>`
+      : panel.workItem.kind === "ok"
+        ? html`<p class="row">Host: none</p>`
+        : constantHtml("");
+  const modelLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">
+          Model: ${stripProvider(panel.workItem.value.modelRouting.preferredModel)}
+        </p>`
+      : constantHtml("");
+  const retryLine =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Retries: ${String(panel.workItem.value.retryCount)}</p>`
+      : constantHtml("");
   return html`<div class="host-panel" id="task-panel">
     <h3>${title} <span class="chip chip-real">REAL</span></h3>
-    ${goal} ${dodBlock} ${roundsBlock} ${verdictsBlock} ${ledgerBlock} ${ledgerSessionsBlock}
-    ${ledgerMetaBlock}
+    ${statusLine} ${repoLine} ${issueLine} ${prLine} ${branchLine} ${assignedHostLine} ${modelLine}
+    ${retryLine} ${goal} ${dodBlock} ${roundsBlock} ${verdictsBlock} ${ledgerBlock}
+    ${ledgerSessionsBlock} ${ledgerMetaBlock}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
 }
@@ -623,13 +776,14 @@ function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
     <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
     <p class="row">Ended at: ${panel.endedAt}</p>
     <p class="row">Provider: ${panel.providerId}</p>
-    <p class="row">Model: ${panel.model}</p>
+    <p class="row">Model: ${panel.model} (${panel.providerId})</p>
     <p class="row">Role: ${panel.role ?? "-"}</p>
     <p class="row">Task: ${taskLink}</p>
     <p class="row">Host: ${hostLink}</p>
     <p class="row">
-      Tokens: in ${String(panel.inputTokens ?? "no data")} out
-      ${String(panel.outputTokens ?? "no data")} ms ${String(panel.ms)}
+      Tokens: in ${panel.inputTokens === null ? "no data" : groupDigits(panel.inputTokens)} out
+      ${panel.outputTokens === null ? "no data" : groupDigits(panel.outputTokens)} ms
+      ${groupDigits(panel.ms)}
     </p>
     <p class="row">Cost: ${costCell}</p>
     <p><a href="${backHref}">back to live</a></p>
@@ -640,35 +794,57 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { audit: null });
   const body =
     panel.verdict.kind !== "ok"
-      ? sectionText(panel.verdict)
-      : html`<div>
-          <p class="row">Head: ${panel.verdict.value.headSha}</p>
-          <p class="row">
-            Counts: high ${String(panel.verdict.value.counts.high)} medium
-            ${String(panel.verdict.value.counts.medium)} low
-            ${String(panel.verdict.value.counts.low)}
-          </p>
-          <p class="row">Findings: ${String(panel.verdict.value.findings.length)}</p>
-          <ul>
-            ${panel.verdict.value.findings.map(
-              (finding) =>
-                html`<li>
-                  ${finding.severity} ${finding.location}: ${finding.defect} — ${finding.scenario}
-                  -> ${finding.fixDirection}
-                </li>`,
-            )}
-          </ul>
-          <p class="row">
-            Task:
-            <a href="${buildHref(model, { task: panel.verdict.value.workItemId })}"
-              >${panel.verdict.value.workItemId}</a
-            >
-          </p>
-          <p class="row">
-            PR:
-            ${panel.verdict.value.pullNumber === null ? "none" : String(panel.verdict.value.pullNumber)}
-          </p>
-        </div>`;
+      ? html`<p class="row">
+          ${panel.verdict.kind === "error" ? `error (${panel.verdict.code})` : `no data (${panel.verdict.reason})`}
+        </p>`
+      : (() => {
+          const verdict = panel.verdict.value;
+          const rec = recount(verdict.findings);
+          const mismatched =
+            rec.high !== verdict.counts.high ||
+            rec.medium !== verdict.counts.medium ||
+            rec.low !== verdict.counts.low;
+          const countsLine = mismatched
+            ? html`<p class="row">Counts: invalid (counts disagree)</p>`
+            : html`<p class="row">
+                Counts: high ${String(rec.high)} medium ${String(rec.medium)} low ${String(rec.low)}
+              </p>`;
+          const repoLine = html`<p class="row">Repo: ${verdict.repo}</p>`;
+          const auditorLine = html`<p class="row">
+            Auditor: ${stripProvider(verdict.auditorModel)}
+          </p>`;
+          const authorsLine = html`<p class="row">
+            Authors: ${verdict.authorModels.map(stripProvider).join(", ") || "none"}
+          </p>`;
+          const prLine =
+            verdict.pullNumber === null
+              ? html`<p class="row">PR: none</p>`
+              : html`<p class="row">
+                  PR:
+                  <a href="https://github.com/${verdict.repo}/pull/${String(verdict.pullNumber)}"
+                    >#${String(verdict.pullNumber)}</a
+                  >
+                </p>`;
+          return html`<div>
+            <p class="row">Head: ${verdict.headSha}</p>
+            ${countsLine} ${repoLine} ${auditorLine} ${authorsLine}
+            <p class="row">Findings: ${String(verdict.findings.length)}</p>
+            <ul>
+              ${verdict.findings.map(
+                (finding) =>
+                  html`<li>
+                    ${finding.severity} ${finding.location}: ${finding.defect} — ${finding.scenario}
+                    -> ${finding.fixDirection}
+                  </li>`,
+              )}
+            </ul>
+            <p class="row">
+              Task:
+              <a href="${buildHref(model, { task: verdict.workItemId })}">${verdict.workItemId}</a>
+            </p>
+            ${prLine}
+          </div>`;
+        })();
   return html`<div class="host-panel" id="audit-panel">
     <h3>Audit ${panel.workItemId}@${panel.headSha.slice(0, 7)}</h3>
     ${body}

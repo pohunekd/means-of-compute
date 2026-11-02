@@ -182,7 +182,9 @@ export interface HostPanelReal {
   readonly alias: string;
   readonly probe: LiveSection<RecordedProbe | null>;
   readonly registry: LiveSection<readonly RegistryEntry[]>;
-  readonly results: LiveSection<readonly { at: string; outcome: string; workItemId: string }[]>;
+  readonly results: LiveSection<
+    readonly { at: string; outcome: string; workItemId: string; known: boolean }[]
+  >;
   readonly meterCalls: LiveSection<readonly LiveActivityRow[]>;
 }
 
@@ -563,13 +565,14 @@ export function parseSimTrace(text: string): SimTrace {
         }
         const task = parseTask(record["task"], where);
         const eligibleCountRaw = record["eligibleCount"];
-        let eligibleCount = 0;
-        if (typeof eligibleCountRaw === "number") {
-          if (!Number.isInteger(eligibleCountRaw) || eligibleCountRaw < 0) {
-            fail(`${where}: invalid "eligibleCount"`);
-          }
-          eligibleCount = eligibleCountRaw;
+        if (
+          typeof eligibleCountRaw !== "number" ||
+          !Number.isInteger(eligibleCountRaw) ||
+          eligibleCountRaw < 0
+        ) {
+          fail(`${where}: invalid "eligibleCount"`);
         }
+        const eligibleCount = eligibleCountRaw;
         placements.push({
           atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
           at: reqIso(record, "at", where),
@@ -811,7 +814,7 @@ function activityRows(
       at: end.at,
       model,
       providerId,
-      role: grant === undefined ? null : "session",
+      role: "session",
       workItemId: grant?.workItemId ?? null,
       hostAlias: grant?.hostAlias ?? null,
       inputTokens: end.inputTokens,
@@ -940,14 +943,22 @@ function buildHostPanel(
     : inputs.dashboard.registry.failure.kind === "error"
       ? { kind: "error", code: inputs.dashboard.registry.failure.code }
       : { kind: "no-data", reason: inputs.dashboard.registry.failure.reason };
+  const knownWorkIds = new Set<string>(
+    inputs.dashboard.workItems.ok ? inputs.dashboard.workItems.value.map((w) => w.id) : [],
+  );
   const resultsSection: LiveSection<
-    readonly { at: string; outcome: string; workItemId: string }[]
+    readonly { at: string; outcome: string; workItemId: string; known: boolean }[]
   > = inputs.dashboard.results.ok
     ? {
         kind: "ok",
         value: inputs.dashboard.results.value
           .filter((line) => line.hostAlias === hostAlias)
-          .map((line) => ({ at: line.at, outcome: line.outcome, workItemId: line.workItemId }))
+          .map((line) => ({
+            at: line.at,
+            outcome: line.outcome,
+            workItemId: line.workItemId,
+            known: knownWorkIds.has(line.workItemId),
+          }))
           .sort((a, b) => (a.at < b.at ? 1 : -1))
           .slice(0, 6),
       }
@@ -998,36 +1009,14 @@ function buildTaskPanelSim(
   sim: SimTrace,
   workItemId: string,
 ): TaskPanelSim | null {
-  const placement = sim.placements.find((p) => p.workItemId === workItemId);
+  const placement = sim.placements.find((p) => p.workItemId === workItemId && p.atMinute <= minute);
   if (placement === undefined || placement.task === null) {
     return null;
   }
   const brief = TASK_BRIEFS.get(placement.task.kind) ?? "";
-  let endedAt: string | null = null;
-  let status: "running" | "ended" = "running";
-  for (const end of sim.workEnds) {
-    if (end.workItemId === workItemId && end.atMinute <= minute) {
-      status = "ended";
-      endedAt = end.at;
-      break;
-    }
-    if (end.workItemId === workItemId && end.atMinute > minute) {
-      status = "running";
-    }
-  }
-  // If work-end exists after minute, still running; if before, ended
-  const hasEnd = sim.workEnds.some((e) => e.workItemId === workItemId && e.atMinute <= minute);
-  if (hasEnd) {
-    status = "ended";
-    const endRec = sim.workEnds.find((e) => e.workItemId === workItemId && e.atMinute <= minute);
-    endedAt = endRec?.at ?? null;
-  } else {
-    const futureEnd = sim.workEnds.find((e) => e.workItemId === workItemId);
-    if (futureEnd !== undefined) {
-      status = "running";
-      endedAt = null;
-    }
-  }
+  const ended = sim.workEnds.find((end) => end.workItemId === workItemId && end.atMinute <= minute);
+  const status: "running" | "ended" = ended !== undefined ? "ended" : "running";
+  const endedAt = ended?.at ?? null;
   return {
     kind: "sim",
     workItemId,
@@ -1111,7 +1100,7 @@ function buildTaskPanelReal(inputs: LiveInputs, workItemId: string): TaskPanelRe
     }
     const rec = inputs.dashboard.ledger.value.records.find((r) => r.workItemId === workItemId);
     if (rec === undefined) {
-      // Pending may still have usage; check pending
+      // No record; pending entries may still carry usage.
       const pend = inputs.dashboard.ledger.value.pending.filter((p) => p.workItemId === workItemId);
       if (pend.length > 0) {
         const tokens = pend.flatMap((p) =>
@@ -1218,7 +1207,26 @@ function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
   if (sep === -1) return null;
   const endedAt = callKey.slice(0, sep);
   const workItemId = callKey.slice(sep + 1);
-  if (!inputs.meter.ok) return null;
+  if (!inputs.meter.ok) {
+    const cost: LiveCell =
+      inputs.meter.failure.kind === "error"
+        ? { kind: "error", code: inputs.meter.failure.code }
+        : { kind: "no-data", reason: inputs.meter.failure.reason };
+    return {
+      callId: callKey,
+      endedAt,
+      providerId: "-",
+      model: "-",
+      rawModel: "-",
+      role: null,
+      workItemId,
+      hostAlias: null,
+      inputTokens: null,
+      outputTokens: null,
+      ms: 0,
+      cost,
+    };
+  }
   // Find matching call-end by at and workItemId via grant
   for (const end of inputs.meter.value.ends.values()) {
     if (end.at !== endedAt) continue;
@@ -1256,12 +1264,9 @@ function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
       providerId,
       model,
       rawModel,
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      role: grant === undefined ? null : "session",
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      workItemId: grant.workItemId ?? null,
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      hostAlias: grant.hostAlias ?? null,
+      role: "session",
+      workItemId: grant.workItemId,
+      hostAlias: grant.hostAlias,
       inputTokens: end.inputTokens,
       outputTokens: end.outputTokens,
       ms: end.ms,
@@ -1278,7 +1283,7 @@ function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | nul
   const headSha = auditKey.slice(sep + 1);
   const entry = inputs.dashboard.verdicts.get(workItemId);
   if (entry === undefined) {
-    // No verdict store entry means no data, not 404? But we treat as not found for 404
+    // No verdict store entry for this id.
     return null;
   }
   if (!entry.ok) {

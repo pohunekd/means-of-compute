@@ -934,6 +934,28 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(auditPage).toContain("Auditor: muse-spark-1.3-contributor");
     expect(auditPage).toContain("Authors: muse-spark-open-1026");
     expect(auditPage).toContain('href="https://github.com/example/demo-repo/pull/101"');
+    // repo differs: PR plain with (repo differs) no github.com link
+    {
+      const vOrigRepo = readFileSync(vPath2, "utf8");
+      const diffRepo = JSON.parse(vOrigRepo) as Record<string, unknown>;
+      diffRepo["repo"] = "other-org/other-repo";
+      writeFileSync(vPath2, JSON.stringify(diffRepo));
+      const dashDiffRepo = await dashboardInputs(fixture);
+      const diffAudit = buildLive(
+        await gatherLiveInputs(fixture.sources, dashDiffRepo, 60, () => {}),
+        {
+          view: "overview",
+          t: 60,
+          paused: false,
+          host: null,
+          audit: "w1-real@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      );
+      const diffPage = renderLive(diffAudit);
+      expect(diffPage).toContain("(repo differs)");
+      expect(diffPage).not.toContain("github.com");
+      writeFileSync(vPath2, vOrigRepo);
+    }
     // ledger grouped
     expect(realPage).toContain("1,200");
     expect(realPage).toContain("muse-spark-open-1026 (meta-api)");
@@ -971,6 +993,25 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const tamperedAuditPage = renderLive(tamperedAudit);
     expect(tamperedAuditPage).toContain("invalid (counts disagree)");
     writeFileSync(vPath2, vOrig2);
+    // audit panel with invalid verdict file contains error (
+    {
+      const vOrigBroken = readFileSync(vPath2, "utf8");
+      writeFileSync(vPath2, "{ invalid json }");
+      const dashBrokenVerdict = await dashboardInputs(fixture);
+      const brokenAudit = buildLive(
+        await gatherLiveInputs(fixture.sources, dashBrokenVerdict, 60, () => {}),
+        {
+          view: "overview",
+          t: 60,
+          paused: false,
+          host: null,
+          audit: "w1-real@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      );
+      const brokenAuditPage = renderLive(brokenAudit);
+      expect(brokenAuditPage).toContain("error (");
+      writeFileSync(vPath2, vOrigBroken);
+    }
     // Fix3: real task Rounds: error( when results broken
     const resultsPath = join(fixture.dir, "results.jsonl");
     const resultsOrig = readFileSync(resultsPath, "utf8");
@@ -1039,7 +1080,13 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const brokenMeterPage = renderLive(brokenMeterLive);
     expect(brokenMeterPage).toContain("Call 2026-11-03T17:59:02.000Z");
     expect(brokenMeterPage).toContain("error (");
-    expect(brokenMeterPage).not.toContain("ms 0");
+    // broken meter panel must contain no ms value
+    {
+      const start = brokenMeterPage.indexOf('id="call-panel"');
+      const panelSlice =
+        start === -1 ? brokenMeterPage : brokenMeterPage.slice(start, start + 2000);
+      expect(panelSlice).not.toContain("ms");
+    }
     // unknown call with broken meter should be 404 via server
     const brokenMeterConfig: DashboardConfig = {
       listenEnv: "MOC_DASHBOARD_LISTEN",
@@ -1065,6 +1112,11 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(badCall2.status).toBe(404);
+      const badIdCall = await fetch(
+        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=2026-11-03T17%3A59%3A02.000Z%7CBad_ID`,
+        { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
+      );
+      expect(badIdCall.status).toBe(404);
       const pipeCall = await fetch(
         `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=%7Cnosuch`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },

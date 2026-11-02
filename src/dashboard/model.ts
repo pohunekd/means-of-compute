@@ -1239,20 +1239,6 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
   const success = records.filter((record) => record.result === "success").length;
   const blocked = records.filter((record) => record.result === "blocked").length;
   const modelRows = queryLedger(inputs.ledger.value, new Set(["model"])).byModel ?? [];
-  const tables: readonly Table[] = [
-    {
-      caption: "Sessions per model (finished tasks)",
-      columns: ["model", "sessions", "ended ok"],
-      rows: modelRows.map((row): readonly Cell[] => [
-        textCell(row.model),
-        textCell(groupDigits(row.attempts)),
-        textCell(groupDigits(row.successes)),
-      ]),
-      source:
-        "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)",
-      note: null,
-    },
-  ];
   return {
     id: "autonomy",
     title: "Autonomy",
@@ -1270,7 +1256,20 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
         "ledger records result",
       ),
     ],
-    tables,
+    tables: [
+      {
+        caption: "Sessions per model (finished tasks)",
+        columns: ["model", "sessions", "ended ok"],
+        rows: modelRows.map((row): readonly Cell[] => [
+          textCell(row.model),
+          textCell(groupDigits(row.attempts)),
+          textCell(groupDigits(row.successes)),
+        ]),
+        source:
+          "ledger records attempts[], one per dispatcher session entry, ledgered start rejections included; ended ok: attempt result success (docs/ledger.md)",
+        note: null,
+      },
+    ],
   };
 }
 

@@ -66,7 +66,8 @@ function checkManifest(rootDir: string, rel: string, isRoot: boolean): void {
   try {
     parsed = Bun.TOML.parse(text) as Record<string, unknown>;
   } catch {
-    return;
+    console.error(`plugin:digest: ${rel}: cannot parse manifest`);
+    process.exit(2);
   }
 
   const pkg = parsed.package as Record<string, unknown> | undefined;
@@ -76,7 +77,11 @@ function checkManifest(rootDir: string, rel: string, isRoot: boolean): void {
   }
 
   const lib = parsed.lib as Record<string, unknown> | undefined;
-  if (lib !== undefined && typeof lib.path === "string" && !lib.path.startsWith("src/")) {
+  if (
+    lib !== undefined &&
+    typeof lib.path === "string" &&
+    (!lib.path.startsWith("src/") || lib.path.split("/").includes(".."))
+  ) {
     console.error(`plugin:digest: ${rel}: lib.path is not allowed`);
     process.exit(2);
   }
@@ -86,7 +91,7 @@ function checkManifest(rootDir: string, rel: string, isRoot: boolean): void {
     for (const entry of bin) {
       if (entry !== null && typeof entry === "object" && "path" in entry) {
         const p = (entry as Record<string, unknown>).path;
-        if (typeof p === "string" && !p.startsWith("src/")) {
+        if (typeof p === "string" && (!p.startsWith("src/") || p.split("/").includes(".."))) {
           console.error(`plugin:digest: ${rel}: bin.path is not allowed`);
           process.exit(2);
         }
@@ -217,7 +222,11 @@ function run(): void {
       console.error(`plugin:digest: ${rel}: include_str!/include_bytes! is not allowed`);
       process.exit(2);
     }
-    if (/\binclude\b/.test(text) || /\bcfg_attr\b/.test(text)) {
+    if (
+      /\binclude\b/.test(text) ||
+      /\bcfg_attr\b/.test(text) ||
+      /#\s*!?\s*\[\s*path\b/.test(text)
+    ) {
       console.error(`plugin:digest: ${rel}: include!/#[path] is not allowed`);
       process.exit(2);
     }

@@ -54,14 +54,14 @@ and every `config/scenarios/*.json` file. The toolchain is recorded separately a
 `plugin:digest: <file>: include_str!/include_bytes! is not allowed` when a crate
 source file matches `/\binclude_(str|bytes)\b/`, and as a fast early check with
 `plugin:digest: <file>: include!/#[path] is not allowed` when a crate source file
-matches `/\binclude\b/` or `/\bcfg_attr\b/` (text regexes cannot cover every Rust
+matches `/\binclude\b/`, `/\bcfg_attr\b/` or `/#\s*!?\s*\[\s*path\b/` (text regexes cannot cover every Rust
 token spelling, so the authoritative guard is the compiler's dep-info in
 `plugin:build`). It also exits 2 with `plugin:digest: <file>: <key> is not allowed`
 when `crates/moc-host-state/Cargo.toml` or `Cargo.toml` parsed with `Bun.TOML.parse`
-has `package.build` not `false`, `lib.path` or `bin[].path` not under `src/`, any
+has `package.build` not `false`, `lib.path` or `bin[].path` not under `src/` or containing a `..` segment, any
 `dependencies`/`dev-dependencies`/`build-dependencies` (including `target.*` and
 `workspace.dependencies` in the root manifest) entry with a `path` key, or the root
-manifest has `patch` or `replace`. It also exits 2 with
+manifest has `patch` or `replace`, and exits 2 with `plugin:digest: <file>: cannot parse manifest` when `Bun.TOML.parse` fails. It also exits 2 with
 `plugin:digest: <path> is not allowed (it changes the build outside the digest inputs)`
 when any of `crates/moc-host-state/build.rs`, `.cargo/config.toml`, `.cargo/config`,
 `rust-toolchain` or `rust-toolchain.toml` exists.
@@ -71,7 +71,7 @@ takes the rule whose target is the built binary (first line with an unescaped `:
 the target path), splits prerequisites on unescaped whitespace handling `\ `, and exits
 2 with `plugin:build: <file> is not a digest input` for any prerequisite not in the
 digest inputs or under `<cargoHome>/registry/src/`; a missing `.d` file exits 2 with
-`plugin:build: <path>: dep-info not found`.
+`plugin:build: <path>: dep-info not found` and exits 2 with `plugin:build: <path>: no rule for <builtBinary>` when no rule's target matches the built binary.
 
 ## Version rule
 

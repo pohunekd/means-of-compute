@@ -234,6 +234,7 @@ const cargoEncodedRustflags = remapFlags.join("\x1f");
 const restEnv: Record<string, string | undefined> = { ...process.env };
 delete restEnv.RUSTFLAGS;
 delete restEnv.CARGO_ENCODED_RUSTFLAGS;
+delete restEnv.CARGO_BUILD_DEP_INFO_BASEDIR;
 
 const build = Bun.spawn(
   [
@@ -288,7 +289,11 @@ if (buildRc !== 0) {
       break;
     }
   }
-  if (targetLine !== undefined) {
+  if (targetLine === undefined) {
+    console.error(`plugin:build: ${depInfoPath}: no rule for ${builtBinary}`);
+    process.exit(2);
+  }
+  {
     const colonIdx = indexOfUnescapedColon(targetLine);
     const prereqsPart = targetLine.slice(colonIdx + 1);
     const prereqs = splitPrerequisites(prereqsPart);

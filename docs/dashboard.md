@@ -48,7 +48,7 @@ the bound host with the bound port, or `localhost:<port>`: for an IPv4
 bind `{<host>:<p>, localhost:<p>}` where `<host>` is the configured
 listen host, for a `::1` bind `{[::1]:<p>, localhost:<p>}`; anything
 else, including a missing header, gets 421. Method must be `GET` (405) and
-the path `/` (404, the query string is ignored).
+the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `overview,fleet,work,usage,savings,autonomy,models` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `task` id, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. Without `view`, `view=overview` when live sources are wired else the stacked fleet page (no tabs) for snapshot. Every live view carries a tab bar (active marked) and replay controls (pause/resume, step ±5, restart t=0, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view,host`. Tab links keep `view,t,pause` dropping selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
 
 ## Config keys (`config/dashboard.json`)
 
@@ -467,10 +467,10 @@ dashboard's value with the live style hash (`LIVE_CSS_HASH` over the
 dashboard stylesheet plus the live rules). A meta refresh is a navigation,
 not a resource load, so `default-src 'none'` does not block it.
 
-The page fits one 1920x1080 frame without scrolling. The grid groups tiles
-by site and kind; the real fleet is one group of large tiles showing the
+Overview fits one 1920x1080 frame without scrolling (with a host selection the page may scroll). The unified tile renderer uses one size for every host (alias, load `running/maxAgents`, state colour): real tiles carry a solid border and a `REAL` chip, simulated tiles a dashed border and a `SIMULATED` group tag; the group heading carries the site/kind count and real group renders first. The grid groups tiles
+by site and kind; the real fleet is one group of tiles showing the
 alias, a `REAL` tag, the state and the running count. Simulated tiles are
-compact colour blocks under a group heading with a `SIMULATED` tag: the
+compact blocks under a group heading with a `SIMULATED` tag: the
 alias and the running count are on the tile, the state word and the
 exclusion reason are in the tile title, and the tile outline is dashed.
 States: `eligible` (can take work now), `running`, `blocked` (idle

@@ -70,6 +70,13 @@ const TEXT_HEADERS = {
   "x-content-type-options": "nosniff",
 } as const;
 
+const VIEW_IDS = new Set(["overview", "fleet", "work", "usage", "savings", "autonomy", "models"]);
+const PANEL_VIEW_IDS = new Set(["work", "usage", "savings", "autonomy", "models"]);
+const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const TASK_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
+const CALL_PATTERN = /^[^|]+\|[^|]+$/;
+const AUDIT_PATTERN = /^[^@]+@[^@]+$/;
+
 function allowlist(host: string, port: number): Set<string> {
   if (host === "::1") {
     return new Set([`[::1]:${String(port)}`, `localhost:${String(port)}`]);
@@ -143,21 +150,88 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         if (req.method !== "GET") {
           return respond(textResponse(405, "method not allowed\n", true), url.pathname);
         }
-        const liveSources = url.pathname === "/live" ? (deps.live ?? null) : null;
-        const isLive = liveSources !== null;
-        if (url.pathname !== "/" && !isLive) {
+        // /live always redirects to unified / with t preserved.
+        if (url.pathname === "/live") {
+          const rawMinute = url.searchParams.get("t");
+          if (rawMinute !== null && !/^\d+$/.test(rawMinute)) {
+            return respond(textResponse(404, "not found\n"), url.pathname);
+          }
+          const target = rawMinute === null ? "/" : `/?t=${rawMinute}`;
+          const headers: Record<string, string> = {
+            ...TEXT_HEADERS,
+            location: target,
+          };
+          return respond(new Response("redirect\n", { status: 301, headers }), url.pathname);
+        }
+        if (url.pathname !== "/") {
           return respond(textResponse(404, "not found\n"), url.pathname);
         }
-        let liveMinute = 0;
-        if (isLive) {
-          const rawMinute = url.searchParams.get("t");
-          if (rawMinute !== null) {
-            if (!/^\d+$/.test(rawMinute)) {
-              return respond(textResponse(404, "not found\n"), url.pathname);
-            }
-            liveMinute = Number(rawMinute);
-          }
+        const rawView = url.searchParams.get("view");
+        const rawMinute = url.searchParams.get("t");
+        const rawPause = url.searchParams.get("pause");
+        const rawHostSel = url.searchParams.get("host");
+        const rawTask = url.searchParams.get("task");
+        const rawCall = url.searchParams.get("call");
+        const rawAudit = url.searchParams.get("audit");
+
+        // Validate view.
+        if (rawView !== null && !VIEW_IDS.has(rawView)) {
+          return respond(textResponse(404, "not found\n"), url.pathname);
         }
+        // Validate t.
+        let liveMinute = 0;
+        if (rawMinute !== null) {
+          if (!/^\d+$/.test(rawMinute)) {
+            return respond(textResponse(404, "not found\n"), url.pathname);
+          }
+          liveMinute = Number(rawMinute);
+        }
+        // Validate pause.
+        if (rawPause !== null && rawPause !== "1") {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        const paused = rawPause === "1";
+        // Validate selection patterns - every present selection validated, not just winner.
+        if (rawHostSel !== null && !ALIAS_PATTERN.test(rawHostSel)) {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawTask !== null && !TASK_PATTERN.test(rawTask)) {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawCall !== null && !CALL_PATTERN.test(rawCall)) {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawAudit !== null && !AUDIT_PATTERN.test(rawAudit)) {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        // Selection precedence: host, task, call, audit - at most one honoured.
+        let activeSelectionKey: "host" | "task" | "call" | "audit" | null = null;
+        let activeSelectionValue: string | null = null;
+        if (rawHostSel !== null) {
+          activeSelectionKey = "host";
+          activeSelectionValue = rawHostSel;
+        } else if (rawTask !== null) {
+          activeSelectionKey = "task";
+          activeSelectionValue = rawTask;
+        } else if (rawCall !== null) {
+          activeSelectionKey = "call";
+          activeSelectionValue = rawCall;
+        } else if (rawAudit !== null) {
+          activeSelectionKey = "audit";
+          activeSelectionValue = rawAudit;
+        }
+
+        // If any non-host selection is active, it names nothing known in PR1.
+        if (activeSelectionKey !== null && activeSelectionKey !== "host") {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+
+        const liveAvailable = deps.live !== null && deps.live !== undefined;
+        // Without live sources, overview is not available.
+        if (!liveAvailable && rawView === "overview") {
+          return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+
         try {
           const inputs = await gatherInputs(deps.sources, deps.fixed, deps.now(), (entry) => {
             deps.log({
@@ -168,7 +242,10 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               message: entry.message,
             });
           });
-          if (isLive) {
+
+          if (liveAvailable) {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+            const liveSources = deps.live as LiveSources;
             const liveInputs = await gatherLiveInputs(liveSources, inputs, liveMinute, (entry) => {
               deps.log({
                 level: "error",
@@ -181,13 +258,57 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
               return await respond(textResponse(404, "not found\n"), url.pathname);
             }
-            const livePage = renderLive(buildLive(liveInputs));
+
+            const effectiveView = rawView ?? "overview";
+            // Panel views render via dashboard model under same header/tab bar.
+            if (PANEL_VIEW_IDS.has(effectiveView)) {
+              const dashboard = buildDashboard(inputs);
+              // Render single panel with tabs.
+              const page = renderDashboard(dashboard, {
+                view: effectiveView,
+                t: liveMinute,
+                paused,
+                host: activeSelectionValue,
+                liveAvailable: true,
+              });
+              const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
+              return await respond(response, url.pathname);
+            }
+            // Overview and fleet are live views.
+            const liveModel = buildLive(liveInputs, {
+              view: effectiveView as "overview" | "fleet",
+              t: liveMinute,
+              paused,
+              host: activeSelectionValue,
+            });
+            if (activeSelectionValue !== null && liveModel.hostPanel === null) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
+            const livePage = renderLive(liveModel);
             const liveResponse = new Response(livePage, {
               status: 200,
               headers: { ...LIVE_HTML_HEADERS },
             });
             return await respond(liveResponse, url.pathname);
           }
+
+          // No live sources.
+          if (rawView !== null && VIEW_IDS.has(rawView)) {
+            // Fleet panel view: show Fleet section with tabs (no overview tab)
+            if (rawView === "fleet" || PANEL_VIEW_IDS.has(rawView)) {
+              const dashboard = buildDashboard(inputs);
+              const page = renderDashboard(dashboard, {
+                view: rawView,
+                t: liveMinute,
+                paused,
+                host: null,
+                liveAvailable: false,
+              });
+              const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
+              return await respond(response, url.pathname);
+            }
+          }
+          // Without view and without live, render as today (stacked, no tabs) to keep snapshot untouched.
           const page = renderDashboard(buildDashboard(inputs));
           const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
           return await respond(response, url.pathname);

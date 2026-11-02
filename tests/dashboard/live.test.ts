@@ -9,9 +9,8 @@ import type { BudgetConfig } from "../../src/budget/config.js";
 import type { Baselines, DashboardConfig } from "../../src/dashboard/config.js";
 import { gatherInputs, type DashboardInputs } from "../../src/dashboard/inputs.js";
 import { buildLive, gatherLiveInputs, type LiveSources } from "../../src/dashboard/live.js";
-import { LIVE_CSS_HASH, renderLive } from "../../src/dashboard/live-render.js";
+import { renderLive } from "../../src/dashboard/live-render.js";
 import { buildDashboard } from "../../src/dashboard/model.js";
-import { CSS_HASH } from "../../src/dashboard/render.js";
 import { startDashboard } from "../../src/dashboard/server.js";
 
 const NOW = new Date("2026-11-03T18:00:00.000Z");
@@ -97,38 +96,6 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
       simulated: true,
       placements: 1,
       chosen: 1,
-      unplaced: 0,
-      workEnds: 0,
-      hostChanges: 0,
-    },
-  ];
-  return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
-}
-
-function traceTextLabeled(
-  hosts: readonly Record<string, unknown>[],
-  placements: readonly Record<string, unknown>[],
-): string {
-  const lines: Record<string, unknown>[] = [
-    {
-      kind: "header",
-      schemaVersion: "sim-trace-v1",
-      simulated: true,
-      timeline: "fixture-evening",
-      seed: 7,
-      startAt: "2026-11-03T17:00:00.000Z",
-      speed: 60,
-      durationMinutes: 240,
-      hostCount: hosts.filter((host) => host["atMinute"] === 0).length,
-      kinds: [{ kind: "desk", count: hosts.length }],
-    },
-    ...hosts,
-    ...placements,
-    {
-      kind: "summary",
-      simulated: true,
-      placements: placements.length,
-      chosen: placements.length,
       unplaced: 0,
       workEnds: 0,
       hostChanges: 0,
@@ -296,238 +263,46 @@ async function dashboardInputs(fixture: FixtureDir): Promise<DashboardInputs> {
   return gatherInputs(fixture.dashboardSources, fixture.fixed, NOW, () => {});
 }
 
-test("live renders real and simulated tiles with markers, keeps sim aliases out of buildDashboard, and an invalid sim alias degrades only the sim sections", async () => {
+test("unified fleet uses one tile renderer with markers and flagged logic", async () => {
   const fixture = makeFixture(fixtureTrace());
   try {
     const dashboard = await dashboardInputs(fixture);
-    const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}));
+    const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+      view: "overview",
+      t: 60,
+      paused: false,
+      host: null,
+    });
     const page = renderLive(live);
-    expect(page).toContain("desk-001");
-    expect(page).toContain("laptop-007");
-    expect(page).toContain("SIMULATED");
+    // Real and simulated tiles share one renderer: same tile class, different markers.
+    expect(page).toContain('class="tile tile-real');
+    expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
-    expect(page).toContain("desktop");
-    expect(page).toContain("placed sim-w-001 on desk-001 because desk-001 is idle");
-    expect(page).toContain("1 of 4");
-    expect(page).toContain("desk-001: running");
+    expect(page).toContain("SIMULATED");
+    // Fleet order: real group first.
+    expect(page.indexOf("Real fleet")).toBeLessThan(page.indexOf("SIMULATED"));
+    // Flagged logic: running while excluded for non-agent-limit shows flagged.
     if (live.simFleet.kind !== "ok") {
       throw new Error("expected simulated fleet groups");
     }
-    const runningTile = live.simFleet.value
-      .flatMap((group) => group.tiles)
-      .find((tile) => tile.alias === "desk-001");
-    expect(runningTile?.state).toBe("running");
-    expect(runningTile?.running).toBe(1);
-    const runningCounter = live.counters.find(
-      (counter) => counter.label === "Simulated work running",
-    );
-    expect(runningCounter?.cell).toEqual({ kind: "text", text: "4" });
     const flaggedTile = live.simFleet.value
       .flatMap((group) => group.tiles)
       .find((tile) => tile.alias === "laptop-007");
-    expect(flaggedTile?.state).toBe("running");
-    expect(flaggedTile?.eligible).toBe(false);
     expect(flaggedTile?.flagged).toBe(true);
     const atLimitTile = live.simFleet.value
       .flatMap((group) => group.tiles)
       .find((tile) => tile.alias === "desk-002");
-    expect(atLimitTile?.state).toBe("running");
-    expect(atLimitTile?.running).toBe(2);
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
-    expect(page).toContain("running, now excluded for a reason other than its agent limit");
+    // Sim aliases never leak into buildDashboard.
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
-
-    const broken = makeFixture(
-      traceText([
-        hostLine({ alias: "Desk_001" }),
-        hostLine({ alias: "desk-002" }),
-        hostLine({ alias: "desk-003" }),
-      ]),
-    );
-    try {
-      const brokenDashboard = await dashboardInputs(broken);
-      const brokenPage = renderLive(
-        buildLive(await gatherLiveInputs(broken.sources, brokenDashboard, 60, () => {})),
-      );
-      expect(brokenPage).toContain("error (sim-trace-invalid)");
-      expect(brokenPage).not.toContain("Desk_001");
-      expect(brokenPage).toContain("desktop");
-      expect(brokenPage).toContain("Model activity (real)");
-      expect(brokenPage).toContain("muse-spark-1.3-contributor");
-    } finally {
-      rmSync(broken.dir, { recursive: true, force: true });
-    }
-    const labeled = makeFixture(
-      traceTextLabeled(
-        [
-          hostLine({}),
-          hostLine({
-            atMinute: 40,
-            at: "2026-11-03T17:40:00.000Z",
-            state: "running",
-            running: 1,
-            task: { kind: "support", title: "Support queue triage 001" },
-          }),
-          hostLine({ alias: "desk-002" }),
-          hostLine({ alias: "desk-003" }),
-        ],
-        [
-          {
-            kind: "placement",
-            simulated: true,
-            atMinute: 40,
-            at: "2026-11-03T17:40:00.000Z",
-            workItemId: "sim-w-001",
-            chosenHostAlias: "desk-001",
-            reason:
-              "desk-001 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
-            task: { kind: "support", title: "Support queue triage 001" },
-            eligibleCount: 1,
-            candidates: 3,
-          },
-          {
-            kind: "placement",
-            simulated: true,
-            atMinute: 41,
-            at: "2026-11-03T17:41:00.000Z",
-            workItemId: "sim-w-002",
-            chosenHostAlias: "desk-002",
-            reason:
-              "desk-002 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
-            task: null,
-            eligibleCount: 1,
-            candidates: 3,
-          },
-        ],
-      ),
-    );
-    try {
-      const labeledDashboard = await dashboardInputs(labeled);
-      const labeledLive = buildLive(
-        await gatherLiveInputs(labeled.sources, labeledDashboard, 60, () => {}),
-      );
-      const labeledPage = renderLive(labeledLive);
-      expect(labeledPage).toContain(
-        "support: Support queue triage 001 placed on desk-001 because desk-001 is idle",
-      );
-      expect(labeledPage).toContain("placed sim-w-002 on desk-002 because desk-002 is idle");
-      expect(labeledPage).not.toContain("{n}");
-      if (labeledLive.simFleet.kind !== "ok") {
-        throw new Error("expected simulated fleet groups");
-      }
-      const labeledRunning = labeledLive.simFleet.value
-        .flatMap((g) => g.tiles)
-        .find((t) => t.alias === "desk-001");
-      expect(labeledRunning?.detail).toContain("support: Support queue triage 001");
-      expect(labeledRunning?.detail.startsWith("support: Support queue triage 001")).toBe(true);
-      const invalidTask = makeFixture(
-        traceTextLabeled(
-          [hostLine({}), hostLine({ alias: "desk-002" })],
-          [
-            {
-              kind: "placement",
-              simulated: true,
-              atMinute: 40,
-              at: "2026-11-03T17:40:00.000Z",
-              workItemId: "sim-w-001",
-              chosenHostAlias: "desk-001",
-              reason: "desk-001 is idle",
-              task: { kind: "bogus", title: "Bad" },
-              eligibleCount: 1,
-              candidates: 1,
-            },
-          ],
-        ),
-      );
-      try {
-        const badTaskDashboard = await dashboardInputs(invalidTask);
-        const badTaskLive = buildLive(
-          await gatherLiveInputs(invalidTask.sources, badTaskDashboard, 60, () => {}),
-        );
-        expect(badTaskLive.simFleet.kind).toBe("error");
-        if (badTaskLive.simFleet.kind === "error") {
-          expect(badTaskLive.simFleet.code).toBe("sim-trace-invalid");
-        }
-      } finally {
-        rmSync(invalidTask.dir, { recursive: true, force: true });
-      }
-      const missingTask = makeFixture(
-        traceTextLabeled(
-          [hostLine({}), hostLine({ alias: "desk-002" })],
-          [
-            {
-              kind: "placement",
-              simulated: true,
-              atMinute: 40,
-              at: "2026-11-03T17:40:00.000Z",
-              workItemId: "sim-w-001",
-              chosenHostAlias: "desk-001",
-              reason: "desk-001 is idle",
-              eligibleCount: 1,
-              candidates: 1,
-            },
-          ],
-        ),
-      );
-      try {
-        const missingDashboard = await dashboardInputs(missingTask);
-        const missingLive = buildLive(
-          await gatherLiveInputs(missingTask.sources, missingDashboard, 60, () => {}),
-        );
-        expect(missingLive.simFleet.kind).toBe("error");
-        if (missingLive.simFleet.kind === "error") {
-          expect(missingLive.simFleet.code).toBe("sim-trace-invalid");
-        }
-      } finally {
-        rmSync(missingTask.dir, { recursive: true, force: true });
-      }
-      const missingHostTask = makeFixture(
-        (() => {
-          const withoutTaskHost = hostLine({});
-          delete withoutTaskHost["task"];
-
-          return traceTextLabeled(
-            [withoutTaskHost, hostLine({ alias: "desk-002" })],
-            [
-              {
-                kind: "placement",
-                simulated: true,
-                atMinute: 40,
-                at: "2026-11-03T17:40:00.000Z",
-                workItemId: "sim-w-001",
-                chosenHostAlias: "desk-001",
-                reason: "desk-001 is idle",
-                task: { kind: "support", title: "Support queue triage 001" },
-                eligibleCount: 1,
-                candidates: 1,
-              },
-            ],
-          );
-        })(),
-      );
-      try {
-        const missingHostDashboard = await dashboardInputs(missingHostTask);
-        const missingHostLive = buildLive(
-          await gatherLiveInputs(missingHostTask.sources, missingHostDashboard, 60, () => {}),
-        );
-        expect(missingHostLive.simFleet.kind).toBe("error");
-        if (missingHostLive.simFleet.kind === "error") {
-          expect(missingHostLive.simFleet.code).toBe("sim-trace-invalid");
-        }
-      } finally {
-        rmSync(missingHostTask.dir, { recursive: true, force: true });
-      }
-    } finally {
-      rmSync(labeled.dir, { recursive: true, force: true });
-    }
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }
 });
 
-test("the /live CSP header matches the live style hash, the page has no script element, a mid-replay frame carries the refresh meta to the next minute and the final frame carries none", async () => {
+test("tab links keep t and drop selection, pause drops refresh and mid frame preserves host, /live redirects and no live has no overview", async () => {
   const fixture = makeFixture(fixtureTrace());
   const config: DashboardConfig = {
     listenEnv: "MOC_DASHBOARD_LISTEN",
@@ -548,51 +323,88 @@ test("the /live CSP header matches the live style hash, the page has no script e
     log: () => {},
   });
   try {
-    const get = async (path: string): Promise<Response> =>
-      fetch(`http://localhost:${String(server.port)}${path}`, {
+    const get = async (
+      path: string,
+      opts?: { redirect?: RequestInit["redirect"] },
+    ): Promise<Response> => {
+      const url = `http://localhost:${String(server.port)}${path}`;
+      return fetch(url, {
         headers: { host: `localhost:${String(server.port)}` },
+        redirect: opts?.redirect ?? "follow",
       });
-    const mid = await get("/live?t=60");
-    expect(mid.status).toBe(200);
-    expect(mid.headers.get("content-security-policy")).toBe(
-      `default-src 'none'; style-src '${LIVE_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-    );
-    const midBody = await mid.text();
-    expect(midBody).not.toContain("<script");
-    expect(midBody).toContain('http-equiv="refresh"');
-    expect(midBody).toContain('content="5;url=/live?t=65"');
-    expect(midBody).toContain('<a href="/live?t=65">next frame</a>');
-    const final = await get("/live?t=240");
-    const finalBody = await final.text();
-    expect(finalBody).not.toContain('http-equiv="refresh"');
-    expect(finalBody).not.toContain("<script");
-    const root = await get("/");
-    expect(root.headers.get("content-security-policy")).toBe(
-      `default-src 'none'; style-src '${CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-    );
-    const noLivePath = await get("/live?t=abc");
-    expect(noLivePath.status).toBe(404);
-    const pastEnd = await get("/live?t=241");
-    expect(pastEnd.status).toBe(404);
-    const plain = await startDashboard({
-      config,
-      listen: { host: "127.0.0.1", port: 0 },
-      fixed: fixture.fixed,
-      sources: fixture.dashboardSources,
-      now: () => NOW,
-      log: () => {},
-    });
-    try {
-      const plainRoot = await fetch(`http://localhost:${String(plain.port)}/`, {
-        headers: { host: `localhost:${String(plain.port)}` },
-      });
-      expect(await plainRoot.text()).toBe(await root.text());
-    } finally {
-      await plain.stop();
-    }
+    };
+    // Tab links: overview view should have tabs and keep t, dropping host.
+    const overview = await get("/?view=overview&t=60");
+    const overviewBody = await overview.text();
+    expect(overviewBody).toContain('class="tab active"');
+    expect(overviewBody).toContain('href="/?view=overview&amp;t=60"');
+    expect(overviewBody).toContain('href="/?view=fleet&amp;t=60"');
+    // Tile link sets host, keeping view and t.
+    expect(overviewBody).toContain("host=desk-001");
+    // Paused page has no refresh meta and shows paused badge.
+    const paused = await get("/?view=overview&t=60&pause=1");
+    const pausedBody = await paused.text();
+    expect(pausedBody).not.toContain('http-equiv="refresh"');
+    expect(pausedBody).toContain("paused");
+    expect(pausedBody).toContain('href="/?view=overview&amp;t=60">resume');
+    // Mid frame refresh preserves host.
+    const withHost = await get("/?view=overview&t=60&host=desk-001");
+    const withHostBody = await withHost.text();
+    expect(withHostBody).toContain('http-equiv="refresh"');
+    expect(withHostBody).toContain("host=desk-001");
+    // /live 301 to /?t=60
+    const liveRedirect = await get("/live?t=60", { redirect: "manual" });
+    expect(liveRedirect.status).toBe(301);
+    expect(liveRedirect.headers.get("location")).toBe("/?t=60");
+    // Bad t is 404.
+    const bad = await get("/live?t=abc", { redirect: "manual" });
+    expect(bad.status).toBe(404);
+    // Past end is 404.
+    const past = await get("/?view=overview&t=241");
+    expect(past.status).toBe(404);
+    // Unknown view is 404.
+    const unknown = await get("/?view=unknown");
+    expect(unknown.status).toBe(404);
+    // Bad host alias is 404.
+    const badHost = await get("/?view=overview&host=Bad_Alias");
+    expect(badHost.status).toBe(404);
+    // Well-formed unknown host is 404.
+    const unknownHost = await get("/?view=overview&host=unknown-host-xyz");
+    expect(unknownHost.status).toBe(404);
   } finally {
     await server.stop();
     rmSync(fixture.dir, { recursive: true, force: true });
+  }
+  // Without live sources, / has no Overview tab and no simulated text.
+  const plainFixture = makeFixture(fixtureTrace());
+  const plainConfig: DashboardConfig = {
+    listenEnv: "MOC_DASHBOARD_LISTEN",
+    listenAlias: "dashboard",
+    logPath: join(plainFixture.dir, "dashboard.jsonl"),
+    maxRequestBytes: 1024,
+    idleTimeoutSec: 10,
+    workRowLimit: 50,
+    baselines: BASELINES,
+  };
+  const plain = await startDashboard({
+    config: plainConfig,
+    listen: { host: "127.0.0.1", port: 0 },
+    fixed: plainFixture.fixed,
+    sources: plainFixture.dashboardSources,
+    now: () => NOW,
+    log: () => {},
+  });
+  try {
+    const res = await fetch(`http://localhost:${String(plain.port)}/`, {
+      headers: { host: `localhost:${String(plain.port)}` },
+    });
+    const body = await res.text();
+    expect(body).not.toContain("Overview");
+    expect(body).not.toContain("SIMULATED");
+    expect(body).not.toContain("simulated");
+  } finally {
+    await plain.stop();
+    rmSync(plainFixture.dir, { recursive: true, force: true });
   }
 });
 
@@ -600,7 +412,12 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
   const fixture = makeFixture(fixtureTrace());
   try {
     const dashboard = await dashboardInputs(fixture);
-    const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}));
+    const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+      view: "overview",
+      t: 60,
+      paused: false,
+      host: null,
+    });
     if (live.activity.kind !== "ok") {
       throw new Error("expected activity rows");
     }

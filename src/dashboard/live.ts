@@ -150,6 +150,35 @@ export type LiveSection<T> =
   | { readonly kind: "no-data"; readonly reason: string }
   | { readonly kind: "error"; readonly code: string };
 
+export interface HostPanelSim {
+  readonly kind: "sim";
+  readonly alias: string;
+  readonly site: string;
+  readonly hostKind: string;
+  readonly state: SimTileState;
+  readonly eligible: boolean;
+  readonly excludeReason: string | null;
+  readonly batteryPercent: number | null;
+  readonly running: number;
+  readonly maxAgents: number;
+  readonly task: SimTask | null;
+  readonly runningTasks: readonly { readonly workItemId: string; readonly at: string }[];
+  readonly events: readonly SimEventLine[];
+  readonly placements: readonly SimPlacementLine[];
+}
+
+export interface HostPanelReal {
+  readonly kind: "real";
+  readonly alias: string;
+  readonly probe: RecordedProbe | null;
+  readonly running: number;
+  readonly sessions: readonly RegistryEntry[];
+  readonly results: readonly { at: string; outcome: string; workItemId: string }[];
+  readonly meterCalls: readonly LiveActivityRow[];
+}
+
+export type HostPanel = HostPanelSim | HostPanelReal;
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -163,6 +192,10 @@ export interface LiveModel {
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
   readonly ticker: readonly LiveTickerRow[];
   readonly tickerNote: string | null;
+  readonly view: "overview" | "fleet";
+  readonly t: number;
+  readonly paused: boolean;
+  readonly hostPanel: HostPanel | null;
 }
 
 export interface LiveInputs {
@@ -172,6 +205,13 @@ export interface LiveInputs {
   readonly sim: LiveSourced<SimTrace>;
   readonly meter: LiveSourced<UsageIndex>;
   readonly probes: LiveSourced<readonly RecordedProbe[]>;
+}
+
+export interface LiveOptions {
+  readonly view: "overview" | "fleet";
+  readonly t: number;
+  readonly paused: boolean;
+  readonly host: string | null;
 }
 
 export class SimTraceError extends Error {
@@ -598,6 +638,14 @@ function realTiles(
   }));
 }
 
+function stripProvider(model: string, providerId: string): string {
+  const prefix = `${providerId}/`;
+  if (model.startsWith(prefix)) {
+    return model.slice(prefix.length);
+  }
+  return model;
+}
+
 function activityRows(
   meter: UsageIndex,
   pricing: Sourced<ReadonlyMap<string, NanoPricing>>,
@@ -607,7 +655,8 @@ function activityRows(
     const start = meter.starts.get(end.callId);
     const grant = meter.grants.get(end.requestId)?.open;
     const providerId = start?.providerId ?? grant?.providerId ?? "unknown";
-    const model = start?.model ?? grant?.model ?? "unknown";
+    const rawModel = start?.model ?? grant?.model ?? "unknown";
+    const model = stripProvider(rawModel, providerId);
     let cost: LiveCell;
     if (end.inputTokens === null || end.outputTokens === null) {
       cost = { kind: "no-data", reason: "usage not reported" };
@@ -690,7 +739,90 @@ function tickerRows(inputs: LiveInputs, minute: number, simOk: SimTrace | null):
   return rows.slice(0, 16);
 }
 
-export function buildLive(inputs: LiveInputs): LiveModel {
+function buildHostPanel(
+  inputs: LiveInputs,
+  minute: number,
+  sim: SimTrace | null,
+  hostAlias: string,
+): HostPanel | null {
+  // Try simulated first.
+  if (sim !== null) {
+    const hostLine = simTilesAt(sim, minute).find((host) => host.alias === hostAlias);
+    if (hostLine !== undefined) {
+      const events = sim.events
+        .filter((event) => event.alias === hostAlias && event.atMinute <= minute)
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, 6);
+      const placements = sim.placements
+        .filter(
+          (placement) => placement.chosenHostAlias === hostAlias && placement.atMinute <= minute,
+        )
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, 6);
+      // Running tasks on this host: from placements that chose this host and are still running
+      const runningTasks = placements
+        .filter((p) => p.chosenHostAlias === hostAlias)
+        .map((p) => ({ workItemId: p.workItemId, at: p.at }));
+      return {
+        kind: "sim",
+        alias: hostLine.alias,
+        site: hostLine.site,
+        hostKind: hostLine.hostKind,
+        state: hostLine.state,
+        eligible: hostLine.eligible,
+        excludeReason: hostLine.excludeReason,
+        batteryPercent: hostLine.batteryPercent,
+        running: hostLine.running,
+        maxAgents: hostLine.maxAgents,
+        task: hostLine.task,
+        runningTasks,
+        events,
+        placements,
+      };
+    }
+  }
+  // Try real.
+  if (inputs.probes.ok) {
+    const probe = inputs.probes.value.find((p) => p.hostAlias === hostAlias) ?? null;
+    if (probe !== null) {
+      const registry = inputs.dashboard.registry;
+      const sessions: readonly RegistryEntry[] = registry.ok
+        ? registry.value.filter((entry: RegistryEntry) => entry.hostAlias === hostAlias)
+        : [];
+      // Open sessions on that host
+      const openSessions = registry.ok
+        ? registry.value.filter((entry) => entry.hostAlias === hostAlias && entry.terminal === null)
+        : [];
+      const running = openSessions.length;
+      // Results on that host
+      const results = inputs.dashboard.results.ok
+        ? inputs.dashboard.results.value
+            .filter((line) => line.hostAlias === hostAlias)
+            .map((line) => ({ at: line.at, outcome: line.outcome, workItemId: line.workItemId }))
+            .sort((a, b) => (a.at < b.at ? 1 : -1))
+            .slice(0, 6)
+        : [];
+      // Meter calls on that host: use activityRows filtered.
+      const allActivity = inputs.meter.ok
+        ? activityRows(inputs.meter.value, inputs.dashboard.pricing).filter(
+            (row) => row.hostAlias === hostAlias,
+          )
+        : [];
+      return {
+        kind: "real",
+        alias: hostAlias,
+        probe,
+        running,
+        sessions,
+        results,
+        meterCalls: allActivity.slice(0, 6),
+      };
+    }
+  }
+  return null;
+}
+
+export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
   const nowIso = inputs.now.toISOString();
   const utcDay = nowIso.slice(0, 10);
   const sim = inputs.sim.ok ? inputs.sim.value : null;
@@ -814,6 +946,10 @@ export function buildLive(inputs: LiveInputs): LiveModel {
             })),
         };
       })();
+  const hostPanel =
+    opts?.host !== undefined && opts.host !== null
+      ? buildHostPanel(inputs, minute, sim, opts.host)
+      : null;
   return {
     renderedAt: nowIso,
     simAt: sim === null ? null : new Date(Date.parse(sim.startAt) + minute * 60000).toISOString(),
@@ -833,5 +969,9 @@ export function buildLive(inputs: LiveInputs): LiveModel {
     tickerNote: inputs.dashboard.results.ok
       ? null
       : `real events: ${inputs.dashboard.results.failure.kind === "error" ? `error (${inputs.dashboard.results.failure.code})` : `no data (${inputs.dashboard.results.failure.reason})`}`,
+    view: opts?.view ?? "overview",
+    t: opts?.t ?? minute,
+    paused: opts?.paused ?? false,
+    hostPanel,
   };
 }

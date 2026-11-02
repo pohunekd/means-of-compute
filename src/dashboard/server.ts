@@ -1,5 +1,6 @@
 // Dashboard HTTP server. One Bun.serve on the loopback listen address:
-// only GET / renders; everything else gets a plain error status. The first
+// GET / renders the dashboard and GET /live the live view when live sources
+// are wired; everything else gets a plain error status. The first
 // failing step answers (Host allowlist, method, path), and any throw while
 // gathering, building or rendering becomes a 500 without details.
 import { appendFile } from "node:fs/promises";
@@ -12,6 +13,8 @@ import {
 } from "./inputs.js";
 import { buildDashboard } from "./model.js";
 import { CSS_HASH, renderDashboard } from "./render.js";
+import { buildLive, gatherLiveInputs, type LiveInputCode, type LiveSources } from "./live.js";
+import { LIVE_CSS_HASH, renderLive } from "./live-render.js";
 
 export type DashboardEventKind =
   "listening" | "request" | "input-error" | "render-error" | "stopped";
@@ -27,7 +30,7 @@ export interface DashboardLogEvent {
   readonly ms?: number;
   readonly bytes?: number;
   readonly input?: string;
-  readonly code?: InputErrorCode;
+  readonly code?: InputErrorCode | LiveInputCode;
   readonly message?: string;
 }
 
@@ -36,6 +39,8 @@ export interface DashboardDeps {
   readonly listen: { readonly host: string; readonly port: number };
   readonly fixed: FixedInputs;
   readonly sources: DashboardSources;
+  // Live view sources; without them /live is 404 like any other path.
+  readonly live?: LiveSources | null;
   readonly now: () => Date;
   readonly log: (event: DashboardLogEvent) => void;
 }
@@ -52,6 +57,11 @@ const HTML_HEADERS = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
+} as const;
+
+const LIVE_HTML_HEADERS = {
+  ...HTML_HEADERS,
+  "content-security-policy": `default-src 'none'; style-src '${LIVE_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
 } as const;
 
 const TEXT_HEADERS = {
@@ -133,8 +143,20 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         if (req.method !== "GET") {
           return respond(textResponse(405, "method not allowed\n", true), url.pathname);
         }
-        if (url.pathname !== "/") {
+        const liveSources = url.pathname === "/live" ? (deps.live ?? null) : null;
+        const isLive = liveSources !== null;
+        if (url.pathname !== "/" && !isLive) {
           return respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        let liveMinute = 0;
+        if (isLive) {
+          const rawMinute = url.searchParams.get("t");
+          if (rawMinute !== null) {
+            if (!/^\d+$/.test(rawMinute)) {
+              return respond(textResponse(404, "not found\n"), url.pathname);
+            }
+            liveMinute = Number(rawMinute);
+          }
         }
         try {
           const inputs = await gatherInputs(deps.sources, deps.fixed, deps.now(), (entry) => {
@@ -146,6 +168,23 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               message: entry.message,
             });
           });
+          if (isLive) {
+            const liveInputs = await gatherLiveInputs(liveSources, inputs, liveMinute, (entry) => {
+              deps.log({
+                level: "error",
+                event: "input-error",
+                input: entry.input,
+                code: entry.code,
+                message: entry.message,
+              });
+            });
+            const livePage = renderLive(buildLive(liveInputs));
+            const liveResponse = new Response(livePage, {
+              status: 200,
+              headers: { ...LIVE_HTML_HEADERS },
+            });
+            return await respond(liveResponse, url.pathname);
+          }
           const page = renderDashboard(buildDashboard(inputs));
           const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
           return await respond(response, url.pathname);

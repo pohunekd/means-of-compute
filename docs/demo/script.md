@@ -140,6 +140,29 @@ expected: the body starts with the marker `moc:work-item:gh-moc-167`. Two
 `audit:v1` comments by `muse-spark-1.3-contributor`: high 3, medium 1 at
 `9403eda`, then high 0, medium 0, low 0 at the merged head `b3f48d3`.
 
+### 9. The fleet at scale (live view)
+
+Before recording, off camera, generate the simulated evening once:
+
+`bun run sim:fleet --timeline config/sim/evening-300.json --out logs/sim/evening-300.jsonl`
+
+expected: one summary line with 300 hosts. Then keep the server from step 5
+running (or start it again with the same flags) plus `--sim-trace logs/sim/evening-300.jsonl`,
+and open `http://localhost:8080/live`.
+
+Narration (said once): "Real placement engine, synthetic fleet; the four real
+machines and the model calls are live."
+
+expected: the page advances on its own every 5 seconds, 5 sim-minutes per
+frame. Dashed tiles tagged SIMULATED fill in as desks go idle, laptops leave
+and rejoin from home, and the lobby kiosks enter their unattended window; one
+laptop tile turns amber when its battery drops to 40 percent. The ticker
+shows `placed sim-w-... on desk-... because ...` rows with the placement
+engine's own reasons next to real rows tagged REAL, and the Model activity
+table lands real meter call-end rows while the factory works. The counters
+keep the simulated counts beside the real ones, never inside them. The final
+frame stops refreshing; the full dashboard stays one click away at `/`.
+
 ## Multi-host run (W3.1)
 
 This section is filled from the #18 run record.

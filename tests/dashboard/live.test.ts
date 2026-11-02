@@ -92,6 +92,14 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
       candidates: hosts.length,
     },
     {
+      kind: "work-end",
+      simulated: true,
+      atMinute: 50,
+      at: "2026-11-03T17:50:00.000Z",
+      workItemId: "sim-w-001",
+      hostAlias: "desk-001",
+    },
+    {
       kind: "summary",
       simulated: true,
       placements: 1,
@@ -158,7 +166,7 @@ function meterLogText(): string {
       workItemId: "w1-demo",
       hostAlias: "desktop",
       providerId: "meta-api",
-      model: "muse-spark-1.3-contributor",
+      model: "meta-models/muse-spark-open-1026",
     },
     {
       kind: "call-start",
@@ -166,7 +174,7 @@ function meterLogText(): string {
       callId: "c1",
       requestId: "w1-demo:0",
       providerId: "meta-api",
-      model: "muse-spark-1.3-contributor",
+      model: "meta-models/muse-spark-open-1026",
       stream: false,
     },
     {
@@ -190,7 +198,7 @@ function meterLogText(): string {
       callId: "c2",
       requestId: "w1-demo:0",
       providerId: "meta-api",
-      model: "muse-spark-1.3-contributor",
+      model: "meta-models/muse-spark-open-1026",
       stream: false,
     },
     {
@@ -278,9 +286,11 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page).toContain('class="tile tile-real');
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
-    expect(page).toContain("SIMULATED");
+    expect(page).toContain('<span class="simtag">SIMULATED</span>');
     // Fleet order: real group first.
-    expect(page.indexOf("Real fleet")).toBeLessThan(page.indexOf("SIMULATED"));
+    expect(page.indexOf("Real fleet")).toBeLessThan(
+      page.indexOf('<span class="simtag">SIMULATED</span>'),
+    );
     // Flagged logic: running while excluded for non-agent-limit shows flagged.
     if (live.simFleet.kind !== "ok") {
       throw new Error("expected simulated fleet groups");
@@ -294,6 +304,20 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       .find((tile) => tile.alias === "desk-002");
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
+    // Simulated running tasks must exclude work that ended before t (work-end at 50 excludes sim-w-001 at t=60).
+    const liveWithHost = buildLive(
+      await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: "desk-001",
+      },
+    );
+    if (liveWithHost.hostPanel === null || liveWithHost.hostPanel.kind !== "sim") {
+      throw new Error("expected sim host panel for desk-001");
+    }
+    expect(liveWithHost.hostPanel.runningTasks).toHaveLength(0);
     // Sim aliases never leak into buildDashboard.
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
@@ -341,6 +365,16 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(overviewBody).toContain('href="/?view=fleet&amp;t=60"');
     // Tile link sets host, keeping view and t.
     expect(overviewBody).toContain("host=desk-001");
+    // Tab links must NOT keep host: when host is selected, tabs drop it.
+    const withHostOverview = await get("/?view=overview&t=60&host=desk-001");
+    const withHostOverviewBody = await withHostOverview.text();
+    // Tabs on host page should not contain host param
+    const tabHrefMatch = /href="\/\?view=fleet[^"]*"/.exec(withHostOverviewBody);
+    expect(tabHrefMatch?.[0]).not.toContain("host=");
+    // Exact refresh must preserve host and advance to t=65
+    expect(withHostOverviewBody).toContain(
+      'content="5;url=/?view=overview&amp;t=65&amp;host=desk-001"',
+    );
     // Paused page has no refresh meta and shows paused badge.
     const paused = await get("/?view=overview&t=60&pause=1");
     const pausedBody = await paused.text();
@@ -391,6 +425,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     listen: { host: "127.0.0.1", port: 0 },
     fixed: plainFixture.fixed,
     sources: plainFixture.dashboardSources,
+    live: { ...plainFixture.sources, simTracePath: null },
     now: () => NOW,
     log: () => {},
   });
@@ -399,8 +434,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       headers: { host: `localhost:${String(plain.port)}` },
     });
     const body = await res.text();
-    expect(body).not.toContain("Overview");
-    expect(body).not.toContain("SIMULATED");
+    expect(body).not.toContain(">overview<");
     expect(body).not.toContain("simulated");
   } finally {
     await plain.stop();
@@ -426,7 +460,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     if (priced === undefined) {
       throw new Error("expected the priced row");
     }
-    expect(priced.model).toBe("muse-spark-1.3-contributor");
+    expect(priced.model).toBe("muse-spark-open-1026");
     expect(priced.providerId).toBe("meta-api");
     expect(priced.role).toBe("session");
     expect(priced.workItemId).toBe("w1-demo");
@@ -441,6 +475,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const page = renderLive(live);
     expect(page).toContain("$0.0002");
     expect(page).toContain('title="usage not reported">no data</td>');
+    expect(page).toContain("<td>meta-api</td>");
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

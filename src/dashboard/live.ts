@@ -176,11 +176,10 @@ export interface HostPanelSim {
 export interface HostPanelReal {
   readonly kind: "real";
   readonly alias: string;
-  readonly probe: RecordedProbe | null;
-  readonly running: number;
-  readonly sessions: readonly RegistryEntry[];
-  readonly results: readonly { at: string; outcome: string; workItemId: string }[];
-  readonly meterCalls: readonly LiveActivityRow[];
+  readonly probe: LiveSection<RecordedProbe | null>;
+  readonly registry: LiveSection<readonly RegistryEntry[]>;
+  readonly results: LiveSection<readonly { at: string; outcome: string; workItemId: string }[]>;
+  readonly meterCalls: LiveSection<readonly LiveActivityRow[]>;
 }
 
 export type HostPanel = HostPanelSim | HostPanelReal;
@@ -642,7 +641,8 @@ function realTiles(
     state: probe.kind === "reported" ? "reported" : "unavailable",
     eligible: probe.kind === "reported",
     flagged: false,
-    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
+    // When registry source failed, show error instead of a count (audit MEDIUM).
+    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : -1,
     maxAgents: null,
     batteryPercent: null,
     detail:
@@ -803,45 +803,81 @@ function buildHostPanel(
       };
     }
   }
-  // Try real.
-  if (inputs.probes.ok) {
-    const probe = inputs.probes.value.find((p) => p.hostAlias === hostAlias) ?? null;
-    if (probe !== null) {
-      const registry = inputs.dashboard.registry;
-      const sessions: readonly RegistryEntry[] = registry.ok
-        ? registry.value.filter((entry: RegistryEntry) => entry.hostAlias === hostAlias)
-        : [];
-      // Open sessions on that host
-      const openSessions = registry.ok
-        ? registry.value.filter((entry) => entry.hostAlias === hostAlias && entry.terminal === null)
-        : [];
-      const running = openSessions.length;
-      // Results on that host
-      const results = inputs.dashboard.results.ok
-        ? inputs.dashboard.results.value
-            .filter((line) => line.hostAlias === hostAlias)
-            .map((line) => ({ at: line.at, outcome: line.outcome, workItemId: line.workItemId }))
-            .sort((a, b) => (a.at < b.at ? 1 : -1))
-            .slice(0, 6)
-        : [];
-      // Meter calls on that host: use activityRows filtered.
-      const allActivity = inputs.meter.ok
-        ? activityRows(inputs.meter.value, inputs.dashboard.pricing).filter(
-            (row) => row.hostAlias === hostAlias,
-          )
-        : [];
-      return {
-        kind: "real",
-        alias: hostAlias,
-        probe,
-        running,
-        sessions,
-        results,
-        meterCalls: allActivity.slice(0, 6),
-      };
-    }
+  // Try real - per-source degradation: each block keeps its own LiveSection.
+  // A failed probes source turns selection into 404 in server; if we reach here probes input
+  // was ok for fleet, but we re-derive per block so breaking one source shows error (...).
+  const probeSection: LiveSection<RecordedProbe | null> = inputs.probes.ok
+    ? { kind: "ok", value: inputs.probes.value.find((p) => p.hostAlias === hostAlias) ?? null }
+    : inputs.probes.failure.kind === "error"
+      ? { kind: "error", code: inputs.probes.failure.code }
+      : { kind: "no-data", reason: inputs.probes.failure.reason };
+  // Registry block: open sessions on this host
+  const registrySection: LiveSection<readonly RegistryEntry[]> = inputs.dashboard.registry.ok
+    ? {
+        kind: "ok",
+        value: inputs.dashboard.registry.value.filter(
+          (entry: RegistryEntry) => entry.hostAlias === hostAlias && entry.terminal === null,
+        ),
+      }
+    : inputs.dashboard.registry.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.registry.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.registry.failure.reason };
+  const resultsSection: LiveSection<
+    readonly { at: string; outcome: string; workItemId: string }[]
+  > = inputs.dashboard.results.ok
+    ? {
+        kind: "ok",
+        value: inputs.dashboard.results.value
+          .filter((line) => line.hostAlias === hostAlias)
+          .map((line) => ({ at: line.at, outcome: line.outcome, workItemId: line.workItemId }))
+          .sort((a, b) => (a.at < b.at ? 1 : -1))
+          .slice(0, 6),
+      }
+    : inputs.dashboard.results.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.results.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
+  const meterSection: LiveSection<readonly LiveActivityRow[]> = inputs.meter.ok
+    ? {
+        kind: "ok",
+        value: activityRows(inputs.meter.value, inputs.dashboard.pricing)
+          .filter((row) => row.hostAlias === hostAlias)
+          .slice(0, 6),
+      }
+    : inputs.meter.failure.kind === "error"
+      ? { kind: "error", code: inputs.meter.failure.code }
+      : { kind: "no-data", reason: inputs.meter.failure.reason };
+  // Only return a real panel if the alias is known via any ok source (probe found) OR any section is ok.
+  // Server already 404s unknown host; we rely on probeSection.ok with non-null or any other ok to show panel.
+  // If probes failed, we still want to show error for registry/results/meter blocks, so we need to know if alias
+  // is plausible via registry/results/meter. Simplify: if inputs.probes.ok and probe is null, check other sources.
+  const probeFound = probeSection.kind === "ok" && probeSection.value !== null;
+  const anyRegistryHost =
+    inputs.dashboard.registry.ok &&
+    inputs.dashboard.registry.value.some((e) => e.hostAlias === hostAlias);
+  const anyResultsHost =
+    inputs.dashboard.results.ok &&
+    inputs.dashboard.results.value.some((l) => l.hostAlias === hostAlias);
+  const anyMeterHost = (() => {
+    if (!inputs.meter.ok) return false;
+    const meter = inputs.meter.value;
+    return [...meter.ends.values()].some((end) => {
+      const grant = meter.grants.get(end.requestId)?.open;
+      return grant?.hostAlias === hostAlias;
+    });
+  })();
+  if (!probeFound && !anyRegistryHost && !anyResultsHost && !anyMeterHost) {
+    // Still allow panel if any section is errored (degradation view for broken fixture) and host was previously valid.
+    // The server's known-alias check will 404 unknown hosts; here we fallback to not found.
+    return null;
   }
-  return null;
+  return {
+    kind: "real",
+    alias: hostAlias,
+    probe: probeSection,
+    registry: registrySection,
+    results: resultsSection,
+    meterCalls: meterSection,
+  };
 }
 
 export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {

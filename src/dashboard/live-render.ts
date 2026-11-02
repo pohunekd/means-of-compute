@@ -199,9 +199,11 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
   const load =
-    tile.maxAgents === null
-      ? String(tile.running)
-      : `${String(tile.running)}/${String(tile.maxAgents)}`;
+    tile.running === -1
+      ? "error"
+      : tile.maxAgents === null
+        ? String(tile.running)
+        : `${String(tile.running)}/${String(tile.maxAgents)}`;
   const battery = tile.batteryPercent === null ? "" : ` bat ${String(tile.batteryPercent)}%`;
   const displayAlias = shortenAlias(tile.alias);
   const title =
@@ -389,24 +391,55 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       <p><a href="${backHref}">back to live</a></p>
     </div>`;
   }
-  const probeText =
-    panel.probe === null
-      ? "no probe"
-      : panel.probe.kind === "reported"
-        ? "reported"
-        : `unavailable: ${panel.probe.cause ?? ""}`;
+  // Probe block with time and cause
+  const probeBlock =
+    panel.probe.kind !== "ok"
+      ? sectionText(panel.probe)
+      : panel.probe.value === null
+        ? html`<p class="row">Probe: no probe</p>`
+        : html`<p class="row">
+            Probe: ${panel.probe.value.kind} at
+            ${panel.probe.value.at}${panel.probe.value.cause === null ? "" : ` cause ${panel.probe.value.cause}`}
+          </p>`;
+  // Registry block: open sessions with details
+  const registryBlock =
+    panel.registry.kind !== "ok"
+      ? sectionText(panel.registry)
+      : panel.registry.value.length === 0
+        ? html`<p class="row">Open sessions: none</p>`
+        : html`<div>
+            <p class="row">Open sessions:</p>
+            <ul>
+              ${panel.registry.value.map(
+                (s) =>
+                  html`<li class="mono">
+                    ${s.workItemId} ${s.model.providerId}/${s.model.model} started ${s.startedAt}
+                    lastSeen ${s.lastSeenAt}
+                  </li>`,
+              )}
+            </ul>
+          </div>`;
+  const resultsBlock =
+    panel.results.kind !== "ok"
+      ? sectionText(panel.results)
+      : html`<div>
+          <p class="row">Recent results:</p>
+          <ul>
+            ${panel.results.value.map((r) => html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`)}
+          </ul>
+        </div>`;
+  const meterBlock =
+    panel.meterCalls.kind !== "ok"
+      ? sectionText(panel.meterCalls)
+      : html`<div>
+          <p class="row">Recent meter calls:</p>
+          <ul>
+            ${panel.meterCalls.value.map((c) => html`<li>${c.model} ${c.at}</li>`)}
+          </ul>
+        </div>`;
   return html`<div class="host-panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
-    <p class="row">Probe: ${probeText}</p>
-    <p class="row">Running sessions: ${String(panel.running)}</p>
-    <p class="row">Recent results:</p>
-    <ul>
-      ${panel.results.map((r) => html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`)}
-    </ul>
-    <p class="row">Recent meter calls:</p>
-    <ul>
-      ${panel.meterCalls.map((c) => html`<li>${c.model} ${c.at}</li>`)}
-    </ul>
+    ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
 }

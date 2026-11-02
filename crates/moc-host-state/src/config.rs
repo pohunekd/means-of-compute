@@ -93,7 +93,7 @@ fn validate_macos_tools(value: &serde_json::Value) -> Result<MacosTools, String>
     let label = "config probe.json: invalid macosTools";
     const KEYS: [&str; 5] = ["stat", "pmset", "ioreg", "sysctl", "systemProfiler"];
     let allowed: HashSet<&str> = KEYS.iter().copied().collect();
-    // Handle arrays as objects with numeric keys to match TS typeof [] === "object"
+    // typeof [] is "object" in TS: an empty array fails on stat, a non-empty one on key 0.
     let synthetic;
     let obj = if let Some(o) = value.as_object() {
         o

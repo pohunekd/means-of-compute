@@ -7,12 +7,14 @@
 //!   trim and \s use js::JS_WS. Regexes use [0-9] and js::JS_WS_CLASS, never \d or \s.
 //! - Directory listings keep read_dir order, never sorted (Bun readdirSync order).
 //! - Failures that only reach stderr need the same exit code, not the same text.
-//! - Documented divergences: JSON input with unpaired surrogate escapes, numbers that overflow f64, or nesting deeper than 128 levels is rejected (exit 1) where the TypeScript loader may accept it; the probe's config, host and facts files never contain them.
+//! - Documented divergences: JSON input with unpaired surrogate escapes, numbers that overflow f64, or nesting of 128 levels or more (the top-level value counts as one) is rejected (exit 1) where the TypeScript loader may accept it; the probe's config, host and facts files never contain them. cpu.cores counts the cpuN lines of /proc/stat; Bun counts online CPUs (sysconf), which differs only when /proc/stat is virtualised (for example lxcfs).
 //! - For stderr-only text, the key named when several keys fail may differ.
 
 pub mod config;
 pub mod facts;
 pub mod idle_rule;
 pub mod js;
+pub mod linux;
 pub mod platform;
+pub mod proc;
 pub mod time;

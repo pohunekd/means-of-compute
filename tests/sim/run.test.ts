@@ -19,7 +19,7 @@ describe("fleet simulator", () => {
     const b = linesB.map((l) => JSON.stringify(l)).join("\n") + "\n";
     expect(a).toBe(b);
     expect(createHash("sha256").update(a).digest("hex")).toBe(
-      "0b465d78ad29f2be59d3a0717efa1f92733f881c818deaa25966ec00d2004cf9",
+      "30d82a1ea98ce08cd536a573483037b59dad4b620a5ea39a0898cd07e53d06e2",
     );
     const lines = linesA as unknown as Record<string, unknown>[];
     const header = lines[0] as Record<string, unknown>;
@@ -95,6 +95,53 @@ describe("fleet simulator", () => {
         expect(hostLine["running"]).toBe(expected);
       }
     }
+    const taskKindByPrefix: Record<string, string> = {
+      "sim-w-": "support",
+      "sim-x-": "research",
+      "sim-y-": "data-analysis",
+      "sim-z-": "code",
+    };
+    const titlePrefixByKind: Record<string, string> = {
+      support: "Support queue triage ",
+      research: "Supplier research ",
+      "data-analysis": "Sales data analysis ",
+      code: "Code change ",
+    };
+    for (const placement of placements) {
+      const workItemId = placement["workItemId"] as string;
+      const prefix = Object.keys(taskKindByPrefix).find((p) => workItemId.startsWith(p));
+      expect(prefix).toBeDefined();
+      const expectedKind = taskKindByPrefix[prefix as string] as string;
+      const task = placement["task"] as unknown as { kind: string; title: string } | null;
+      expect(task).not.toBeNull();
+      expect(task?.kind).toBe(expectedKind);
+      const num = Number(workItemId.split("-").pop());
+      const prefixTitle = titlePrefixByKind[expectedKind] as string;
+      const expectedTitle = `${prefixTitle}${String(num).padStart(3, "0")}`;
+      expect(task?.title).toBe(expectedTitle);
+      expect(task?.title.includes("{n}")).toBe(false);
+    }
+    const runningLine = lines.find(
+      (l) =>
+        l["kind"] === "host" && l["alias"] === first["chosenHostAlias"] && l["atMinute"] === 15,
+    ) as Record<string, unknown> | undefined;
+    expect(runningLine).toBeDefined();
+    const runningTask = runningLine?.["task"] as unknown as { kind: string; title: string } | null;
+    const firstTask = (first as Record<string, unknown>)["task"] as unknown as {
+      kind: string;
+      title: string;
+    } | null;
+    expect(runningTask).toEqual(firstTask);
+    const stripped = linesA.map((l) => {
+      const rec = l as unknown as Record<string, unknown>;
+      if (rec["kind"] === "placement" || rec["kind"] === "host") {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { task: _task, ...rest } = rec;
+        return rest;
+      }
+      return rec;
+    });
+    expect(stripped.every((r) => !("task" in r))).toBe(true);
   });
 
   test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-142 ineligible at its minute", async () => {
@@ -180,6 +227,36 @@ describe("fleet simulator", () => {
       expect(simSources).not.toContain("ledger");
       expect(simSources).not.toContain("meter");
       expect(simSources).not.toContain("registry");
+      const base2 = JSON.parse(readFileSync("config/sim/evening-300.json", "utf8")) as Record<
+        string,
+        unknown
+      >;
+      const withoutTask = structuredClone(base2) as Record<string, unknown>;
+      const workWithout = (withoutTask["work"] as Record<string, unknown>[])[0] as Record<
+        string,
+        unknown
+      >;
+      delete workWithout["task"];
+      const withoutPath = join(dir, "without-task.json");
+      const outWithout = join(dir, "out-without.jsonl");
+      writeFileSync(withoutPath, JSON.stringify(withoutTask));
+      const procWithout = Bun.spawnSync(
+        ["bun", "run", "src/sim/cli.ts", "--timeline", withoutPath, "--out", outWithout],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      expect(procWithout.exitCode).toBe(0);
+      const badKind = structuredClone(base2) as Record<string, unknown>;
+      const workBad = (badKind["work"] as Record<string, unknown>[])[0] as Record<string, unknown>;
+      (workBad["task"] as Record<string, unknown>)["kind"] = "unknown-kind";
+      const badKindPath = join(dir, "bad-kind.json");
+      const outBadKind = join(dir, "out-bad-kind.jsonl");
+      writeFileSync(badKindPath, JSON.stringify(badKind));
+      const procBadKind = Bun.spawnSync(
+        ["bun", "run", "src/sim/cli.ts", "--timeline", badKindPath, "--out", outBadKind],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      expect(procBadKind.exitCode).toBe(2);
+      expect(procBadKind.stderr.toString()).toContain("work[0].task.kind");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

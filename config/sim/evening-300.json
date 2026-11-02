@@ -96,28 +96,32 @@
       "everyMinutes": 2,
       "count": 25,
       "durationMinutes": 50,
-      "idPrefix": "sim-w-"
+      "idPrefix": "sim-w-",
+      "task": { "kind": "support", "title": "Support queue triage {n}" }
     },
     {
       "firstAtMinute": 50,
       "everyMinutes": 1,
       "count": 100,
       "durationMinutes": 120,
-      "idPrefix": "sim-x-"
+      "idPrefix": "sim-x-",
+      "task": { "kind": "research", "title": "Supplier research {n}" }
     },
     {
       "firstAtMinute": 65,
       "everyMinutes": 1,
       "count": 100,
       "durationMinutes": 120,
-      "idPrefix": "sim-y-"
+      "idPrefix": "sim-y-",
+      "task": { "kind": "data-analysis", "title": "Sales data analysis {n}" }
     },
     {
       "firstAtMinute": 80,
       "everyMinutes": 1,
       "count": 90,
       "durationMinutes": 120,
-      "idPrefix": "sim-z-"
+      "idPrefix": "sim-z-",
+      "task": { "kind": "code", "title": "Code change {n}" }
     }
   ]
 }

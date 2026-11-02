@@ -62,12 +62,18 @@ export interface EventDef {
   readonly set?: Readonly<Record<string, unknown>>;
 }
 
+export interface TaskDef {
+  readonly kind: string;
+  readonly title: string;
+}
+
 export interface WorkDef {
   readonly firstAtMinute: number;
   readonly everyMinutes: number;
   readonly count: number;
   readonly durationMinutes: number;
   readonly idPrefix: string;
+  readonly task: TaskDef | null;
 }
 
 export interface Timeline {
@@ -113,13 +119,78 @@ const GENERATOR_KEYS = new Set(["kind", "count", "aliasPrefix", "site"]);
 const WAVE_KEYS = new Set(["atMinute", "kind", "type", "fraction", "staggerMinutes"]);
 const EVENT_KEYS = new Set(["atMinute", "alias", "type", "set"]);
 const EVENT_KEYS_NO_SET = new Set(["atMinute", "alias", "type"]);
+const TASK_KINDS = [
+  "code",
+  "research",
+  "data-analysis",
+  "report",
+  "support",
+  "translation",
+  "document",
+] as const;
+
+const TASK_KIND_SET = new Set<string>(TASK_KINDS);
+
 const WORK_KEYS = new Set([
   "firstAtMinute",
   "everyMinutes",
   "count",
   "durationMinutes",
   "idPrefix",
+  "task",
 ]);
+
+const WORK_REQUIRED_KEYS = new Set([
+  "firstAtMinute",
+  "everyMinutes",
+  "count",
+  "durationMinutes",
+  "idPrefix",
+]);
+
+function hasControlChar(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validateTask(raw: unknown, fieldPath: string): TaskDef {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(`Timeline ${fieldPath}: must be an object`);
+  }
+  const rec = raw as Record<string, unknown>;
+  const allowed = new Set(["kind", "title"]);
+  for (const key of Object.keys(rec)) {
+    if (!allowed.has(key)) {
+      throw new Error(`Timeline ${fieldPath}: unexpected key "${key}"`);
+    }
+  }
+  for (const key of allowed) {
+    if (!(key in rec)) {
+      throw new Error(`Timeline ${fieldPath}: missing required field "${key}"`);
+    }
+  }
+  const kind = rec["kind"];
+  if (typeof kind !== "string" || !TASK_KIND_SET.has(kind)) {
+    throw new Error(`Timeline ${fieldPath}.kind: must be one of ${TASK_KINDS.join(", ")}`);
+  }
+  const title = rec["title"];
+  if (typeof title !== "string" || title.length < 1 || title.length > 60) {
+    throw new Error(`Timeline ${fieldPath}.title: must be string 1..60`);
+  }
+  if (hasControlChar(title)) {
+    throw new Error(`Timeline ${fieldPath}.title: must not contain control characters`);
+  }
+  const occurrences = title.split("{n}").length - 1;
+  if (occurrences > 1) {
+    throw new Error(`Timeline ${fieldPath}.title: placeholder "{n}" may appear at most once`);
+  }
+  return { kind: kind as string, title: title as string };
+}
 
 function assertExactKeys(
   record: Record<string, unknown>,
@@ -563,12 +634,22 @@ function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[]
       throw new Error(`Timeline work[${String(i)}]: must be an object`);
     }
     const rec = entry as Record<string, unknown>;
-    assertExactKeys(rec, WORK_KEYS, `work[${String(i)}]`);
+    for (const key of Object.keys(rec)) {
+      if (!WORK_KEYS.has(key)) {
+        throw new Error(`Timeline work[${String(i)}]: unexpected key "${key}"`);
+      }
+    }
+    for (const key of WORK_REQUIRED_KEYS) {
+      if (!(key in rec)) {
+        throw new Error(`Timeline work[${String(i)}]: missing required field "${key}"`);
+      }
+    }
     const firstAtMinute = rec["firstAtMinute"];
     const everyMinutes = rec["everyMinutes"];
     const count = rec["count"];
     const duration = rec["durationMinutes"];
     const idPrefix = rec["idPrefix"];
+    const taskRaw = rec["task"];
     if (!isInteger(firstAtMinute) || (firstAtMinute as number) < 0) {
       throw new Error(`Timeline work[${String(i)}].firstAtMinute: must be integer >=0`);
     }
@@ -593,12 +674,20 @@ function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[]
     if (lastAt > durationMinutes) {
       throw new Error(`Timeline work[${String(i)}].firstAtMinute: work runs past durationMinutes`);
     }
+    let task: TaskDef | null = null;
+    if (taskRaw !== undefined) {
+      if (taskRaw === null) {
+        throw new Error(`Timeline work[${String(i)}].task: must be an object`);
+      }
+      task = validateTask(taskRaw, `work[${String(i)}].task`);
+    }
     out.push({
       firstAtMinute: firstAtMinute as number,
       everyMinutes: everyMinutes as number,
       count: count as number,
       durationMinutes: duration as number,
       idPrefix: prefixStr,
+      task,
     });
   }
   return out;

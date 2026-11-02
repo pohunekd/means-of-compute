@@ -491,7 +491,7 @@ with the reason in the cell title, never 0. The ticker keeps the two clocks
 apart: a Real events block and a Simulated events block, each newest first
 with the newest 6 rows shown; a simulated placement reads
 `placed <item> on <host> because <reason>` with the reason verbatim from
-the placement engine. Activity and ticker rows are one line each, clipped
+the placement engine, or `<kind>: <title> placed on <host> because <reason>` when the placement carries a `task` (e.g. `research: Supplier research 012 placed on desk-121 because desk-121 is idle, ...`). A running simulated tile's title is `<alias>: running - <kind>: <title>` followed by the existing exclusion or idle detail, so `desk-121: running - data-analysis: Sales data analysis 033`; the tile face stays compact so the 1080p layout is unchanged. Activity and ticker rows are one line each, clipped
 with an ellipsis and their full text in the row title, so the frame height
 never depends on event text; signage tiles are wide enough that no alias
 clips. A simulated tile that is running but whose last host line excludes

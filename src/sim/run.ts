@@ -13,10 +13,16 @@ export interface HostState {
   readonly site: string;
 }
 
+export interface TraceTask {
+  readonly kind: string;
+  readonly title: string;
+}
+
 interface RunningEntry {
   readonly workItem: WorkItem;
   readonly hostAlias: string;
   readonly endMinute: number;
+  readonly task: TraceTask | null;
 }
 
 interface Eligibility {
@@ -50,6 +56,7 @@ export interface TraceHost {
   readonly running: number;
   readonly maxAgents: number;
   readonly batteryPercent: number | null;
+  readonly task: TraceTask | null;
   readonly simulated: true;
 }
 
@@ -70,6 +77,7 @@ export interface TracePlacement {
   readonly workItemId: string;
   readonly chosenHostAlias: string | null;
   readonly reason: string;
+  readonly task: TraceTask | null;
   readonly eligibleCount: number;
   readonly candidates: readonly {
     readonly hostAlias: string;
@@ -419,6 +427,20 @@ function countRunningForHost(running: readonly RunningEntry[], alias: string): n
   return c;
 }
 
+function formatTaskTitle(pattern: string, n: number): string {
+  const padded = String(n + 1).padStart(3, "0");
+  return pattern.includes("{n}") ? pattern.replace("{n}", padded) : pattern;
+}
+
+function taskForHost(running: readonly RunningEntry[], alias: string): TraceTask | null {
+  for (const entry of running) {
+    if (entry.hostAlias === alias) {
+      return entry.task;
+    }
+  }
+  return null;
+}
+
 function computeState(
   hostCapacity: HostCapacity,
   offline: boolean,
@@ -495,6 +517,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
   });
 
   const workDurationById = new Map<string, number>();
+  const workTaskById = new Map<string, TraceTask | null>();
   const workSchedule: { atMinute: number; id: string }[] = [];
   for (const block of timeline.work) {
     for (let n = 0; n < block.count; n += 1) {
@@ -503,6 +526,12 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         const id = `${block.idPrefix}${String(n + 1).padStart(3, "0")}`;
         workSchedule.push({ atMinute, id });
         workDurationById.set(id, block.durationMinutes);
+        if (block.task !== null) {
+          const title = formatTaskTitle(block.task.title, n);
+          workTaskById.set(id, { kind: block.task.kind, title });
+        } else {
+          workTaskById.set(id, null);
+        }
       }
     }
   }
@@ -544,6 +573,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       running: runningCount,
       maxAgents: state.hostCapacity.policy.maxConcurrentAgents,
       batteryPercent: state.hostCapacity.batteryPercent,
+      task: taskForHost(running, alias),
       simulated: true,
     });
   }
@@ -735,6 +765,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         const runningItems = running.map((r) => r.workItem);
         const decision = place(item, onlineHosts, runningItems, config);
         const eligibleCount = decision.candidates.filter((c) => !c.excluded).length;
+        const placementTask = workTaskById.get(item.id) ?? null;
         lines.push({
           kind: "placement",
           atMinute,
@@ -742,6 +773,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
           workItemId: item.id,
           chosenHostAlias: decision.chosenHostAlias,
           reason: decision.reason,
+          task: placementTask,
           eligibleCount,
           candidates: [...decision.candidates],
           simulated: true,
@@ -756,7 +788,8 @@ export function runTimeline(options: RunOptions): TraceLine[] {
           }
           const endMinute = atMinute + duration;
           const runningItem = createWorkItem(item.id, hostAlias);
-          running.push({ workItem: runningItem, hostAlias, endMinute });
+          const runningTask = workTaskById.get(item.id) ?? null;
+          running.push({ workItem: runningItem, hostAlias, endMinute, task: runningTask });
           placementsThisMinuteNeedRefresh = true;
           placedAliases.push(hostAlias);
         } else {
@@ -800,6 +833,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
           running: runningCount,
           maxAgents: state.hostCapacity.policy.maxConcurrentAgents,
           batteryPercent: state.hostCapacity.batteryPercent,
+          task: taskForHost(running, alias),
           simulated: true,
         });
         hostChanges += 1;

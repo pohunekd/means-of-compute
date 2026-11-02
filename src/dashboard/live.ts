@@ -45,6 +45,11 @@ export interface LiveSources {
 
 export type SimTileState = "offline" | "busy" | "blocked" | "eligible" | "running";
 
+export interface SimTask {
+  readonly kind: string;
+  readonly title: string;
+}
+
 export interface SimHostLine {
   readonly atMinute: number;
   readonly at: string;
@@ -57,6 +62,7 @@ export interface SimHostLine {
   readonly running: number;
   readonly maxAgents: number;
   readonly batteryPercent: number | null;
+  readonly task: SimTask | null;
 }
 
 export interface SimEventLine {
@@ -73,6 +79,7 @@ export interface SimPlacementLine {
   readonly workItemId: string;
   readonly chosenHostAlias: string | null;
   readonly reason: string;
+  readonly task: SimTask | null;
 }
 
 export interface SimTrace {
@@ -183,6 +190,54 @@ const SIM_STATES: ReadonlySet<string> = new Set([
   "running",
 ]);
 
+const TASK_KINDS = new Set([
+  "code",
+  "research",
+  "data-analysis",
+  "report",
+  "support",
+  "translation",
+  "document",
+]);
+
+function hasControlChar(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseTask(raw: unknown, where: string): SimTask | null {
+  if (raw === null) {
+    return null;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    fail(`${where}: invalid "task"`);
+  }
+  const rec = raw as Record<string, unknown>;
+  const allowed = new Set(["kind", "title"]);
+  for (const key of Object.keys(rec)) {
+    if (!allowed.has(key)) {
+      fail(`${where}: invalid "task"`);
+    }
+  }
+  if (!("kind" in rec) || !("title" in rec)) {
+    fail(`${where}: invalid "task"`);
+  }
+  const kind = rec["kind"];
+  if (typeof kind !== "string" || !TASK_KINDS.has(kind)) {
+    fail(`${where}: invalid "task"`);
+  }
+  const title = rec["title"];
+  if (typeof title !== "string" || title.length < 1 || title.length > 60 || hasControlChar(title)) {
+    fail(`${where}: invalid "task"`);
+  }
+  return { kind, title };
+}
+
 function fail(message: string): never {
   throw new SimTraceError(`sim trace: ${message}`);
 }
@@ -262,6 +317,7 @@ function parseHostLine(
   if (batteryRaw !== null && (typeof batteryRaw !== "number" || !Number.isInteger(batteryRaw))) {
     fail(`${where}: invalid "batteryPercent"`);
   }
+  const task = parseTask(record["task"] ?? null, where);
   return {
     atMinute: reqInt(record, "atMinute", where, 0, duration),
     at: reqIso(record, "at", where),
@@ -274,6 +330,7 @@ function parseHostLine(
     running: reqInt(record, "running", where, 0, 1000000),
     maxAgents: reqInt(record, "maxAgents", where, 1, 1000000),
     batteryPercent: batteryRaw,
+    task,
   };
 }
 
@@ -346,12 +403,14 @@ export function parseSimTrace(text: string): SimTrace {
         ) {
           fail(`${where}: invalid "chosenHostAlias"`);
         }
+        const task = parseTask(record["task"] ?? null, where);
         placements.push({
           atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
           at: reqIso(record, "at", where),
           workItemId: reqString(record, "workItemId", where),
           chosenHostAlias: chosenRaw,
           reason: reqString(record, "reason", where),
+          task,
         });
         break;
       }
@@ -602,10 +661,14 @@ function tickerRows(inputs: LiveInputs, minute: number, simOk: SimTrace | null):
     }
     for (const placement of simOk.placements) {
       if (placement.atMinute <= minute && placement.chosenHostAlias !== null) {
+        const text =
+          placement.task !== null
+            ? `${placement.task.kind}: ${placement.task.title} placed on ${placement.chosenHostAlias} because ${placement.reason}`
+            : `placed ${placement.workItemId} on ${placement.chosenHostAlias} because ${placement.reason}`;
         simRows.push({
           at: placement.at,
           simulated: true,
-          text: `placed ${placement.workItemId} on ${placement.chosenHostAlias} because ${placement.reason}`,
+          text,
         });
       }
     }
@@ -700,6 +763,18 @@ export function buildLive(inputs: LiveInputs): LiveModel {
         const groups = new Map<string, LiveTile[]>();
         for (const host of tiles) {
           const title = `${host.site} - ${host.hostKind}`;
+          const baseDetail =
+            host.excludeReason ??
+            (host.state === "offline"
+              ? "left the site network"
+              : host.state === "busy"
+                ? "user present"
+                : "");
+          let detail = baseDetail;
+          if (host.state === "running" && host.task !== null) {
+            const taskLabel = `${host.task.kind}: ${host.task.title}`;
+            detail = baseDetail === "" ? taskLabel : `${taskLabel} - ${baseDetail}`;
+          }
           const tile: LiveTile = {
             alias: host.alias,
             hostKind: host.hostKind,
@@ -714,13 +789,7 @@ export function buildLive(inputs: LiveInputs): LiveModel {
             running: host.running,
             maxAgents: host.maxAgents,
             batteryPercent: host.batteryPercent,
-            detail:
-              host.excludeReason ??
-              (host.state === "offline"
-                ? "left the site network"
-                : host.state === "busy"
-                  ? "user present"
-                  : ""),
+            detail,
           };
           const list = groups.get(title);
           if (list === undefined) {

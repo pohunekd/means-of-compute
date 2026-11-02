@@ -103,6 +103,38 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
   return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
 }
 
+function traceTextLabeled(
+  hosts: readonly Record<string, unknown>[],
+  placements: readonly Record<string, unknown>[],
+): string {
+  const lines: Record<string, unknown>[] = [
+    {
+      kind: "header",
+      schemaVersion: "sim-trace-v1",
+      simulated: true,
+      timeline: "fixture-evening",
+      seed: 7,
+      startAt: "2026-11-03T17:00:00.000Z",
+      speed: 60,
+      durationMinutes: 240,
+      hostCount: hosts.filter((host) => host["atMinute"] === 0).length,
+      kinds: [{ kind: "desk", count: hosts.length }],
+    },
+    ...hosts,
+    ...placements,
+    {
+      kind: "summary",
+      simulated: true,
+      placements: placements.length,
+      chosen: placements.length,
+      unplaced: 0,
+      workEnds: 0,
+      hostChanges: 0,
+    },
+  ];
+  return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
+}
+
 function fixtureTrace(): string {
   return traceText([
     hostLine({}),
@@ -324,6 +356,103 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
       expect(brokenPage).toContain("muse-spark-1.3-contributor");
     } finally {
       rmSync(broken.dir, { recursive: true, force: true });
+    }
+    const labeled = makeFixture(
+      traceTextLabeled(
+        [
+          hostLine({}),
+          hostLine({
+            atMinute: 40,
+            at: "2026-11-03T17:40:00.000Z",
+            state: "running",
+            running: 1,
+            task: { kind: "support", title: "Support queue triage 001" },
+          }),
+          hostLine({ alias: "desk-002" }),
+          hostLine({ alias: "desk-003" }),
+        ],
+        [
+          {
+            kind: "placement",
+            simulated: true,
+            atMinute: 40,
+            at: "2026-11-03T17:40:00.000Z",
+            workItemId: "sim-w-001",
+            chosenHostAlias: "desk-001",
+            reason:
+              "desk-001 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
+            task: { kind: "support", title: "Support queue triage 001" },
+            eligibleCount: 1,
+            candidates: 3,
+          },
+          {
+            kind: "placement",
+            simulated: true,
+            atMinute: 41,
+            at: "2026-11-03T17:41:00.000Z",
+            workItemId: "sim-w-002",
+            chosenHostAlias: "desk-002",
+            reason:
+              "desk-002 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
+            task: null,
+            eligibleCount: 1,
+            candidates: 3,
+          },
+        ],
+      ),
+    );
+    try {
+      const labeledDashboard = await dashboardInputs(labeled);
+      const labeledLive = buildLive(
+        await gatherLiveInputs(labeled.sources, labeledDashboard, 60, () => {}),
+      );
+      const labeledPage = renderLive(labeledLive);
+      expect(labeledPage).toContain(
+        "support: Support queue triage 001 placed on desk-001 because desk-001 is idle",
+      );
+      expect(labeledPage).toContain("placed sim-w-002 on desk-002 because desk-002 is idle");
+      expect(labeledPage).not.toContain("{n}");
+      if (labeledLive.simFleet.kind !== "ok") {
+        throw new Error("expected simulated fleet groups");
+      }
+      const labeledRunning = labeledLive.simFleet.value
+        .flatMap((g) => g.tiles)
+        .find((t) => t.alias === "desk-001");
+      expect(labeledRunning?.detail).toContain("support: Support queue triage 001");
+      expect(labeledRunning?.detail.startsWith("support: Support queue triage 001")).toBe(true);
+      const invalidTask = makeFixture(
+        traceTextLabeled(
+          [hostLine({}), hostLine({ alias: "desk-002" })],
+          [
+            {
+              kind: "placement",
+              simulated: true,
+              atMinute: 40,
+              at: "2026-11-03T17:40:00.000Z",
+              workItemId: "sim-w-001",
+              chosenHostAlias: "desk-001",
+              reason: "desk-001 is idle",
+              task: { kind: "bogus", title: "Bad" },
+              eligibleCount: 1,
+              candidates: 1,
+            },
+          ],
+        ),
+      );
+      try {
+        const badTaskDashboard = await dashboardInputs(invalidTask);
+        const badTaskLive = buildLive(
+          await gatherLiveInputs(invalidTask.sources, badTaskDashboard, 60, () => {}),
+        );
+        expect(badTaskLive.simFleet.kind).toBe("error");
+        if (badTaskLive.simFleet.kind === "error") {
+          expect(badTaskLive.simFleet.code).toBe("sim-trace-invalid");
+        }
+      } finally {
+        rmSync(invalidTask.dir, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(labeled.dir, { recursive: true, force: true });
     }
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });

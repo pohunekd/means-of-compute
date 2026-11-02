@@ -373,24 +373,12 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
         : card.providerId === null
           ? html`<p class="meta">${card.modelText}</p>`
           : html`<p class="meta">${card.modelText} (${card.providerId})</p>`;
-  const tokensLine =
-    card.tokens === null
-      ? constantHtml("")
-      : html`<p class="meta">
-          tokens in ${groupDigits(card.tokens.input)} out ${groupDigits(card.tokens.output)}
-        </p>`;
-  const costLine =
-    card.cost === null
-      ? constantHtml("")
-      : html`<p class="meta">
-          cost <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
-        </p>`;
   const tokensCostSoFar =
     card.tokens === null || card.cost === null
       ? constantHtml("")
       : html`<p class="meta">
-          this task so far ${groupDigits(card.tokens.input)} / ${groupDigits(card.tokens.output)}
-          tokens ·
+          this task so far ${groupDigits(card.tokens.input)} in / ${groupDigits(card.tokens.output)}
+          out tokens ·
           <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
         </p>`;
   const callLine =
@@ -404,7 +392,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
           out · ${groupDigits(card.latestCall.ms)} ms · ${card.latestCall.model}
         </p>`;
   const probeLine =
-    card.probeAt === null
+    card.stage !== "idle" || card.probeAt === null
       ? constantHtml("")
       : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
   const lastFinishedLine =
@@ -435,8 +423,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     </div>
     ${titleLine}
     <p class="meta">${issueLine} ${prLine}</p>
-    ${modelLine} ${elapsedLine} ${tokensLine} ${tokensCostSoFar} ${costLine} ${callLine}
-    ${probeLine} ${lastFinishedLine} ${todayLine}
+    ${modelLine} ${elapsedLine} ${tokensCostSoFar} ${callLine} ${probeLine} ${lastFinishedLine}
+    ${todayLine}
   </div>`;
 }
 

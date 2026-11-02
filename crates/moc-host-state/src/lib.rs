@@ -15,6 +15,8 @@ pub mod facts;
 pub mod idle_rule;
 pub mod js;
 pub mod linux;
+pub mod local_models;
+pub mod macos;
 pub mod platform;
 pub mod proc;
 pub mod time;

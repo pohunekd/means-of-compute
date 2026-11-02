@@ -12,3 +12,4 @@ ryu-js = "1"
 regex = "1"
 libc = "0.2"
 serde_json = { version = "1", features = ["float_roundtrip"] }
+ureq = { version = "3", default-features = false }

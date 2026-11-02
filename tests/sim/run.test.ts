@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,9 @@ describe("fleet simulator", () => {
     const a = linesA.map((l) => JSON.stringify(l)).join("\n") + "\n";
     const b = linesB.map((l) => JSON.stringify(l)).join("\n") + "\n";
     expect(a).toBe(b);
+    expect(createHash("sha256").update(a).digest("hex")).toBe(
+      "0b465d78ad29f2be59d3a0717efa1f92733f881c818deaa25966ec00d2004cf9",
+    );
     const lines = linesA as unknown as Record<string, unknown>[];
     const header = lines[0] as Record<string, unknown>;
     expect(header["kind"]).toBe("header");

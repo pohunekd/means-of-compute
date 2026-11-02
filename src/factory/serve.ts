@@ -242,11 +242,16 @@ async function serve(): Promise<number> {
     ledgerPath = flags.ledger ?? (await loadLedgerConfig()).ledgerPath;
     verdictDir = flags.verdicts ?? (await loadAuditorConfig()).verdictDir;
     registryPath = flags.registry ?? (await loadDispatcherConfig()).registryPath;
-    const loopConfig = await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production");
-    resultsPath = flags.results ?? loopConfig.resultsPath;
+    // Each config loads only when a flag that needs it is absent.
+    let loopConfig: Awaited<ReturnType<typeof loadLoopConfig>> | null = null;
+    const loopConfigOnce = async (): Promise<Awaited<ReturnType<typeof loadLoopConfig>>> => {
+      loopConfig ??= await loadLoopConfig(DEFAULT_LOOP_CONFIG_PATH, "production");
+      return loopConfig;
+    };
+    resultsPath = flags.results ?? (await loopConfigOnce()).resultsPath;
     workStorePath = flags.work ?? (await loadWorkConfig()).storePath;
     meterUsagePath = flags.meterUsage ?? (await loadMeterConfig()).usageLogPath;
-    portsPath = flags.ports ?? portsLogPath(loopConfig.logPath);
+    portsPath = flags.ports ?? portsLogPath((await loopConfigOnce()).logPath);
     fixed = {
       budget,
       route,

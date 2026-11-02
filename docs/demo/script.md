@@ -142,12 +142,15 @@ expected: the body starts with the marker `moc:work-item:gh-moc-167`. Two
 
 ### 9. The fleet at scale (live view)
 
-Before recording, off camera, generate the simulated evening once:
+Before recording, off camera, stop the step 5 server, generate the simulated
+evening once, and start the live server against the real factory logs:
 
-`bun run sim:fleet --timeline config/sim/evening-300.json --out logs/sim/evening-300.jsonl`
+`mkdir -p logs/sim && bun run sim:fleet --timeline config/sim/evening-300.json --out logs/sim/evening-300.jsonl`
 
-expected: one summary line with 300 hosts. Then keep the server from step 5
-running (or start it again with the same flags) plus `--sim-trace logs/sim/evening-300.jsonl`,
+expected: one summary line with 300 hosts. Then:
+
+`MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-300.jsonl`
+
 and open `http://localhost:8080/live`.
 
 Narration (said once): "Real placement engine, synthetic fleet; the four real

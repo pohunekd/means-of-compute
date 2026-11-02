@@ -178,6 +178,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 message: entry.message,
               });
             });
+            if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
             const livePage = renderLive(buildLive(liveInputs));
             const liveResponse = new Response(livePage, {
               status: 200,

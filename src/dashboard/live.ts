@@ -8,15 +8,17 @@ import type { RegistryEntry } from "../dispatcher/registry.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { MeterLogError, replayUsageLog, type UsageIndex } from "../meter/usage-log.js";
+import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
+import type { DashboardInputs, InputFailure, Sourced } from "./inputs.js";
+import { openSessionCount } from "./sessions.js";
+import { stat } from "node:fs/promises";
+
 // Cell text for counters and activity rows: like the dashboard Cell, but
 // the error code may be a live input code as well as a dashboard one.
 export type LiveCell =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "no-data"; readonly reason: string }
   | { readonly kind: "error"; readonly code: string };
-import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
-import type { DashboardInputs, InputFailure, Sourced } from "./inputs.js";
-import { openSessionCount } from "./sessions.js";
 
 export const LIVE_STEP_MINUTES = 5;
 
@@ -372,6 +374,10 @@ export function parseSimTrace(text: string): SimTrace {
   };
 }
 
+// Parsed traces are cached per path, keyed by file size and mtime, so a
+// refresh of /live never reparses an unchanged trace file.
+const traceCache = new Map<string, { size: number; mtimeMs: number; trace: SimTrace }>();
+
 async function readSimInput(
   path: string | null,
   log: (input: string, code: LiveInputCode, message: string) => void,
@@ -384,7 +390,14 @@ async function readSimInput(
       log("sim trace", "sim-trace-unreadable", `sim trace ${path}: file is missing`);
       return { ok: false, failure: { kind: "error", code: "sim-trace-unreadable" } };
     }
-    return { ok: true, value: parseSimTrace(await readInputText("Sim trace", path)) };
+    const info = await stat(path);
+    const cached = traceCache.get(path);
+    if (cached !== undefined && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+      return { ok: true, value: cached.trace };
+    }
+    const trace = parseSimTrace(await readInputText("Sim trace", path));
+    traceCache.set(path, { size: info.size, mtimeMs: info.mtimeMs, trace });
+    return { ok: true, value: trace };
   } catch (error: unknown) {
     if (!(error instanceof Error)) {
       throw error;
@@ -603,7 +616,7 @@ export function buildLive(inputs: LiveInputs): LiveModel {
   const nowIso = inputs.now.toISOString();
   const utcDay = nowIso.slice(0, 10);
   const sim = inputs.sim.ok ? inputs.sim.value : null;
-  const minute = sim === null ? inputs.minute : Math.min(inputs.minute, sim.durationMinutes);
+  const minute = inputs.minute;
   const tiles = sim === null ? [] : simTilesAt(sim, minute);
   const nextMinute =
     sim !== null && minute < sim.durationMinutes ? minute + LIVE_STEP_MINUTES : null;

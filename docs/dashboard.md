@@ -454,8 +454,10 @@ MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/e
   at or before the page clock, as in the static snapshot's Fleet.
 
 The cursor is the query: `/live?t=<minute>` shows the simulated fleet at
-that minute of the trace. A `t` that is not a non-negative integer is 404,
-and a `t` past the end of the trace shows the final frame. Each frame
+that minute of the trace. A `t` that is not a non-negative integer, or one
+past the end of the trace, is 404. The parsed trace is cached in the server
+process keyed by its path, size and modification time, so a refresh never
+reparses an unchanged file. Each frame
 advances 5 sim-minutes and carries a meta refresh of
 `ceil(5 * 60 / speed)` seconds (clamped to 2..30; 5 seconds at the trace
 speed 60) plus a plain `next frame` link to the same address, so the page
@@ -465,12 +467,16 @@ dashboard's value with the live style hash (`LIVE_CSS_HASH` over the
 dashboard stylesheet plus the live rules). A meta refresh is a navigation,
 not a resource load, so `default-src 'none'` does not block it.
 
-The grid groups tiles by site and kind; the real fleet is one group. A tile
-shows the alias, a `SIMULATED` or `REAL` tag, the state and the running
-count. States: `eligible` (can take work now), `running`, `blocked` (idle
+The page fits one 1920x1080 frame without scrolling. The grid groups tiles
+by site and kind; the real fleet is one group of large tiles showing the
+alias, a `REAL` tag, the state and the running count. Simulated tiles are
+compact colour blocks under a group heading with a `SIMULATED` tag: the
+alias and the running count are on the tile, the state word and the
+exclusion reason are in the tile title, and the tile outline is dashed.
+States: `eligible` (can take work now), `running`, `blocked` (idle
 but excluded; the placement reason is in the tile title), `busy` (user
 present), `offline` (left the site network), and for real hosts `reported`
-or `unavailable`. Simulated tiles have a dashed outline. Counters keep the
+or `unavailable`. Counters keep the
 sources apart and never sum them: `Real hosts reporting`, `Sessions
 running`, `Meter calls today`, then `Simulated hosts eligible`,
 `Simulated work running` and `Simulated placements`, each labelled
@@ -480,10 +486,10 @@ Model activity is real only: the newest 12 meter `call-end` records, each
 joined to its `call-start` for provider and model and to its grant for the
 work item and host. The role is `session` when the grant is found (planner
 and auditor calls are not metered, so they never appear). Cost is priced
-with the dashboard's own arithmetic; a null token count shows
-`no data (usage not reported)`, never 0. The ticker merges the newest 8
-real loop-result rows with the newest 8 simulated event and chosen
-placement rows, newest first; a simulated placement reads
+with the dashboard's own arithmetic; a null token count shows `no data`
+with the reason in the cell title, never 0. The ticker keeps the two clocks
+apart: a Real events block and a Simulated events block, each newest first
+with the newest 6 rows shown; a simulated placement reads
 `placed <item> on <host> because <reason>` with the reason verbatim from
 the placement engine.
 

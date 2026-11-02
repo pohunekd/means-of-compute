@@ -4,6 +4,10 @@
 // the CSP. Aliases are checked against the host-alias pattern; a failure
 // throws without the value (a 500 in the server). There is no script:
 // frames advance through a meta refresh and a plain next-frame link.
+// The layout fits one 1920x1080 frame: real tiles stay large, simulated
+// tiles are compact colour blocks whose state word and exclusion reason
+// sit in the tile title, under a group heading that carries the
+// SIMULATED tag.
 import { createHash } from "node:crypto";
 import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
@@ -15,43 +19,61 @@ import type {
   LiveModel,
   LiveSection,
   LiveTile,
-  LiveTickerRow,
 } from "./live.js";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
 export const LIVE_CSS = [
-  ".live-head{display:flex;flex-wrap:wrap;gap:0.5rem 2rem;align-items:baseline}",
-  ".live-clocks{font-variant-numeric:tabular-nums;color:var(--muted);font-size:1.05rem}",
+  "body{padding:0.6rem 0.9rem 0.6rem;font-size:15px}",
+  "h1{font-size:1.35rem}",
+  ".tagline{font-size:0.92rem;margin:0.25rem 0 0}",
+  ".live-head{display:flex;flex-wrap:wrap;gap:0.3rem 2rem;align-items:baseline}",
+  ".live-clocks{font-variant-numeric:tabular-nums;color:var(--muted);font-size:0.95rem;margin:0}",
   ".live-clocks strong{color:var(--text)}",
-  ".live-layout{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(0,1fr);gap:1.5rem;align-items:start}",
-  ".live-side{display:grid;gap:1.5rem}",
+  ".live-nav{font-size:0.9rem;margin:0.25rem 0 0}",
+  ".keyfigures{grid-template-columns:repeat(6,1fr);gap:0.6rem;margin-top:0.6rem}",
+  ".keycard{padding:0.35rem 0.55rem;border-radius:8px}",
+  ".keycard .label{font-size:0.62rem}",
+  ".keycard .value{font-size:1.15rem}",
+  ".keycard .cite{font-size:0.62rem;margin:0.15rem 0 0}",
+  ".keycard.live-simcard{border-top-style:dashed}",
+  "section{padding:0.6rem 0.8rem 0.7rem;margin-top:0.7rem;border-radius:10px}",
+  "h2{font-size:1.05rem;margin:0 0 0.4rem}",
+  ".live-layout{display:grid;grid-template-columns:minmax(0,1.66fr) minmax(0,1fr);gap:0.8rem;align-items:start}",
+  ".live-side{display:grid;gap:0.8rem}",
   ".live-side section{margin-top:0}",
-  ".live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.8rem,1fr));gap:6px}",
-  ".live-group h3{font-size:0.95rem;margin:1rem 0 0.45rem;color:var(--muted)}",
+  ".live-group h3{font-size:0.8rem;margin:0.28rem 0 0.15rem;color:var(--muted)}",
   ".live-group:first-child h3{margin-top:0}",
-  ".live-tile{border:1px solid var(--border);border-radius:8px;padding:0.32rem 0.45rem;min-height:3.9rem;background:var(--surface-2)}",
+  ".live-group .simtag{font-size:0.58rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:4px;padding:0 0.25rem;margin-left:0.4rem}",
+  ".live-grid-real{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}",
+  ".live-tile{border:1px solid var(--border);border-radius:8px;padding:0.32rem 0.45rem;min-height:2.7rem;background:var(--surface-2)}",
   ".live-tile .alias{font-family:var(--mono);font-size:0.8rem;font-weight:700;white-space:nowrap}",
   ".live-tile .tag{display:block;font-size:0.55rem;font-weight:700;letter-spacing:0.05em;margin-bottom:0.15rem}",
   ".live-tile .state{font-size:0.75rem}",
+  ".live-grid-sim{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.2rem,1fr));gap:3px}",
+  ".group-desk .live-grid-sim{grid-template-columns:repeat(auto-fill,minmax(4.9rem,1fr))}",
+  ".group-laptop .live-grid-sim{grid-template-columns:repeat(auto-fill,minmax(5.7rem,1fr))}",
+  ".sim-tile{display:flex;justify-content:space-between;align-items:baseline;gap:0.2rem;border:1px dashed;border-radius:4px;padding:0.08rem 0.22rem;line-height:1.2;overflow:hidden}",
+  ".sim-tile .alias{font-family:var(--mono);font-size:0.58rem;font-weight:700;white-space:nowrap;overflow:hidden}",
+  ".sim-tile .load{font-size:0.6rem;font-variant-numeric:tabular-nums}",
   ".tile-eligible{background:var(--done-bg);color:var(--done-text)}",
   ".tile-running{background:var(--running-bg);color:var(--running-text)}",
   ".tile-blocked{background:var(--parked-bg);color:var(--parked-text)}",
   ".tile-busy{background:var(--neutral-bg);color:var(--neutral-text)}",
-  ".tile-offline{background:var(--surface);color:var(--muted);border-style:dashed}",
+  ".tile-offline{background:var(--surface);color:var(--muted)}",
   ".tile-reported{background:var(--neutral-bg);color:var(--neutral-text)}",
   ".tile-unavailable{background:var(--bad-bg);color:var(--bad-text)}",
-  ".tile-sim{border-style:dashed}",
-  ".live-legend{font-size:0.78rem;color:var(--muted);margin:0.8rem 0 0}",
+  ".live-legend{font-size:0.72rem;color:var(--muted);margin:0.5rem 0 0}",
+  ".dot{display:inline-block;width:0.6rem;height:0.6rem;border-radius:2px;margin:0 0.15rem 0 0.55rem;vertical-align:-1px}",
+  ".live-activity-table{font-size:0.78rem}",
+  ".live-activity-table td,.live-activity-table th{padding:0.2rem 0.35rem;white-space:nowrap}",
   ".live-ticker{list-style:none;margin:0;padding:0}",
-  ".live-ticker li{font-size:0.9rem;padding:0.42rem 0.5rem;border-bottom:1px solid var(--border)}",
-  ".live-ticker .badge{font-size:0.62rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:4px;padding:0 0.25rem;margin-right:0.4rem;white-space:nowrap}",
+  ".live-ticker li{font-size:0.8rem;padding:0.25rem 0.4rem;border-bottom:1px solid var(--border)}",
   ".live-ticker .sim{border-left:4px dashed var(--accent)}",
-  ".live-ticker li:nth-child(1){opacity:1}.live-ticker li:nth-child(2){opacity:.95}.live-ticker li:nth-child(3){opacity:.9}.live-ticker li:nth-child(4){opacity:.85}.live-ticker li:nth-child(5){opacity:.8}.live-ticker li:nth-child(6){opacity:.75}.live-ticker li:nth-child(7){opacity:.7}.live-ticker li:nth-child(8){opacity:.65}.live-ticker li:nth-child(n+9){opacity:.55}",
   ".live-ticker time{font-variant-numeric:tabular-nums;color:var(--muted);margin-right:0.4rem;white-space:nowrap}",
-  ".keycard.live-simcard{border-top-style:dashed}",
-  ".live-nav{font-size:1rem;margin:0.5rem 0 0}",
-  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}}",
+  ".live-events h3{font-size:0.8rem;margin:0.5rem 0 0.25rem;color:var(--muted)}",
+  ".live-events h3:first-child{margin-top:0}",
+  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}}",
 ].join("\n");
 
 export const LIVE_CSS_HASH = `sha256-${createHash("sha256")
@@ -110,30 +132,55 @@ function renderCounter(counter: LiveCounter): SafeHtml {
   </div>`;
 }
 
-function renderTile(tile: LiveTile): SafeHtml {
+function checkAlias(tile: LiveTile): void {
   if (!ALIAS_PATTERN.test(tile.alias)) {
     throw new Error("dashboard live: invalid host alias in model");
   }
+}
+
+function renderRealTile(tile: LiveTile): SafeHtml {
+  checkAlias(tile);
   const load =
     tile.maxAgents === null
       ? `${String(tile.running)} running`
       : `(${String(tile.running)}/${String(tile.maxAgents)})`;
   const stateLine = tile.state === "running" ? `running ${load}` : `${tile.state} ${load}`;
   const battery = tile.batteryPercent === null ? "" : `, bat ${String(tile.batteryPercent)}%`;
-  return html`<div
-    class="live-tile tile-${tile.state} ${tile.simulated ? "tile-sim" : "tile-real"}"
-    title="${tile.detail}"
-  >
-    <span class="tag">${tile.simulated ? "SIMULATED" : "REAL"}</span>
+  return html`<div class="live-tile tile-${tile.state}" title="${tile.detail}">
+    <span class="tag">REAL</span>
     <span class="alias">${tile.alias}</span>
     <div class="state">${stateLine}${battery}</div>
   </div>`;
 }
 
+function renderSimTile(tile: LiveTile): SafeHtml {
+  checkAlias(tile);
+  const load =
+    tile.maxAgents === null
+      ? String(tile.running)
+      : `${String(tile.running)}/${String(tile.maxAgents)}`;
+  const battery = tile.batteryPercent === null ? "" : `, battery ${String(tile.batteryPercent)}%`;
+  const title =
+    tile.detail === ""
+      ? `${tile.alias}: ${tile.state}${battery}`
+      : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
+  return html`<div class="sim-tile tile-${tile.state}" title="${title}">
+    <span class="load">${load}</span><span class="alias">${tile.alias}</span>
+  </div>`;
+}
+
 function renderGroup(group: LiveGroup): SafeHtml {
+  const simulated = group.tiles.length > 0 && (group.tiles[0]?.simulated ?? false);
+  if (simulated) {
+    const kind = group.tiles[0]?.hostKind ?? "";
+    return html`<div class="live-group group-${kind}">
+      <h3>${group.title}<span class="simtag">SIMULATED</span></h3>
+      <div class="live-grid-sim">${group.tiles.map((tile) => renderSimTile(tile))}</div>
+    </div>`;
+  }
   return html`<div class="live-group">
     <h3>${group.title}</h3>
-    <div class="live-grid">${group.tiles.map((tile) => renderTile(tile))}</div>
+    <div class="live-grid-real">${group.tiles.map((tile) => renderRealTile(tile))}</div>
   </div>`;
 }
 
@@ -151,6 +198,10 @@ function renderActivityRow(row: LiveActivityRow): SafeHtml {
   const model = shortenMiddle(row.model, 30);
   const tokens = (value: number | null): string =>
     value === null ? "no data" : value.toLocaleString("en-US");
+  const cost =
+    row.cost.kind === "no-data"
+      ? html`<td class="nodata" title="${row.cost.reason}">no data</td>`
+      : html`<td class="${cellClass(row.cost)}">${cellText(row.cost)}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
     <td>
@@ -164,24 +215,32 @@ function renderActivityRow(row: LiveActivityRow): SafeHtml {
     <td class="num">${tokens(row.inputTokens)}</td>
     <td class="num">${tokens(row.outputTokens)}</td>
     <td class="num">${row.ms.toLocaleString("en-US")}</td>
-    <td class="${cellClass(row.cost)}">${cellText(row.cost)}</td>
+    ${cost}
   </tr>`;
 }
 
-function renderTickerRow(row: LiveTickerRow): SafeHtml {
-  return html`<li class="${row.simulated ? "sim" : "real"}">
-    <span class="badge">${row.simulated ? "SIM" : "REAL"}</span
-    ><time datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time>${row.text}
-  </li>`;
+function renderTickerBlock(model: LiveModel, simulated: boolean): SafeHtml {
+  const rows = model.ticker.filter((row) => row.simulated === simulated).slice(0, 6);
+  const items = rows.map(
+    (row) =>
+      html`<li class="${row.simulated ? "sim" : "real"}">
+        <time datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time>${row.text}
+      </li>`,
+  );
+  return html`<h3>${simulated ? "Simulated events (sim clock)" : "Real events"}</h3>
+    <ul class="live-ticker">
+      ${items}
+    </ul>`;
 }
 
 export function renderLive(model: LiveModel): string {
   const refresh =
-    model.refreshSeconds !== null && model.nextMinute !== null
-      ? constantHtml(
-          `<meta http-equiv="refresh" content="${String(model.refreshSeconds)};url=/live?t=${String(model.nextMinute)}" />`,
-        )
-      : constantHtml("");
+    model.refreshSeconds === null || model.nextMinute === null
+      ? constantHtml("")
+      : html`<meta
+          http-equiv="refresh"
+          content="${model.refreshSeconds};url=/live?t=${model.nextMinute}"
+        />`;
   const nextLink =
     model.nextMinute === null
       ? constantHtml("")
@@ -201,7 +260,7 @@ export function renderLive(model: LiveModel): string {
   const activity =
     model.activity.kind === "ok"
       ? html`<div class="tablewrap">
-          <table>
+          <table class="live-activity-table">
             <thead>
               <tr>
                 <th>time</th>
@@ -238,13 +297,13 @@ export function renderLive(model: LiveModel): string {
             <p class="live-clocks">
               real <strong>${compactTime(model.renderedAt)}</strong> · ${simClock}
             </p>
+            <p class="live-nav">
+              ${nextLink}<a href="/live">restart replay</a> · <a href="/">full dashboard</a>
+            </p>
           </div>
           <p class="tagline">
             Real placement engine, synthetic fleet. The four real machines and the model calls are
             live.
-          </p>
-          <p class="live-nav">
-            ${nextLink}<a href="/live">restart replay</a> · <a href="/">full dashboard</a>
           </p>
           <div class="keyfigures">${model.counters.map((counter) => renderCounter(counter))}</div>
         </header>
@@ -254,9 +313,12 @@ export function renderLive(model: LiveModel): string {
               <h2>Fleet</h2>
               ${realFleet} ${simFleet}
               <p class="live-legend">
-                eligible: can take work now; running: simulated or real work on the host; blocked:
-                idle but excluded (reason in the tile title); busy: user present; offline: left the
-                site network. Dashed outline and the SIMULATED tag mark simulated hosts.
+                <span class="dot tile-eligible"></span>eligible
+                <span class="dot tile-running"></span>running
+                <span class="dot tile-blocked"></span>blocked (reason in the tile title)
+                <span class="dot tile-busy"></span>busy
+                <span class="dot tile-offline"></span>offline · dashed outline and the SIMULATED
+                group tag mark simulated hosts
               </p>
               <p class="cite">
                 source: real recorded probes and dispatcher registry; simulated fleet trace
@@ -269,12 +331,9 @@ export function renderLive(model: LiveModel): string {
                 ${activity}
                 <p class="cite">source: real meter call-end records from the meter usage log</p>
               </section>
-              <section id="live-ticker">
+              <section id="live-ticker" class="live-events">
                 <h2>Events</h2>
-                <ul class="live-ticker">
-                  ${model.ticker.map((row) => renderTickerRow(row))}
-                </ul>
-                ${tickerNote}
+                ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
                 <p class="cite">
                   source: real loop results; simulated host and placement trace lines
                 </p>

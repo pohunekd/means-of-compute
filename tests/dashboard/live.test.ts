@@ -65,7 +65,7 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
       startAt: "2026-11-03T17:00:00.000Z",
       speed: 60,
       durationMinutes: 240,
-      hostCount: hosts.length,
+      hostCount: hosts.filter((host) => host["atMinute"] === 0).length,
       kinds: [{ kind: "desk", count: hosts.length }],
     },
     ...hosts,
@@ -106,6 +106,7 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
 function fixtureTrace(): string {
   return traceText([
     hostLine({}),
+    hostLine({ atMinute: 40, at: "2026-11-03T17:40:00.000Z", state: "running", running: 1 }),
     hostLine({
       alias: "laptop-007",
       hostKind: "laptop",
@@ -251,6 +252,19 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
     expect(page).toContain("desktop");
     expect(page).toContain("placed sim-w-001 on desk-001 because desk-001 is idle");
     expect(page).toContain("1 of 3");
+    expect(page).toContain("desk-001: running");
+    if (live.simFleet.kind !== "ok") {
+      throw new Error("expected simulated fleet groups");
+    }
+    const runningTile = live.simFleet.value
+      .flatMap((group) => group.tiles)
+      .find((tile) => tile.alias === "desk-001");
+    expect(runningTile?.state).toBe("running");
+    expect(runningTile?.running).toBe(1);
+    const runningCounter = live.counters.find(
+      (counter) => counter.label === "Simulated work running",
+    );
+    expect(runningCounter?.cell).toEqual({ kind: "text", text: "1" });
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
 
@@ -311,7 +325,8 @@ test("the /live CSP header matches the live style hash, the page has no script e
     );
     const midBody = await mid.text();
     expect(midBody).not.toContain("<script");
-    expect(midBody).toContain('<meta http-equiv="refresh" content="5;url=/live?t=65" />');
+    expect(midBody).toContain('http-equiv="refresh"');
+    expect(midBody).toContain('content="5;url=/live?t=65"');
     expect(midBody).toContain('<a href="/live?t=65">next frame</a>');
     const final = await get("/live?t=240");
     const finalBody = await final.text();
@@ -323,6 +338,24 @@ test("the /live CSP header matches the live style hash, the page has no script e
     );
     const noLivePath = await get("/live?t=abc");
     expect(noLivePath.status).toBe(404);
+    const pastEnd = await get("/live?t=241");
+    expect(pastEnd.status).toBe(404);
+    const plain = await startDashboard({
+      config,
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: fixture.fixed,
+      sources: fixture.dashboardSources,
+      now: () => NOW,
+      log: () => {},
+    });
+    try {
+      const plainRoot = await fetch(`http://localhost:${String(plain.port)}/`, {
+        headers: { host: `localhost:${String(plain.port)}` },
+      });
+      expect(await plainRoot.text()).toBe(await root.text());
+    } finally {
+      await plain.stop();
+    }
   } finally {
     await server.stop();
     rmSync(fixture.dir, { recursive: true, force: true });
@@ -356,7 +389,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(unmeasured.cost).toEqual({ kind: "no-data", reason: "usage not reported" });
     const page = renderLive(live);
     expect(page).toContain("$0.0002");
-    expect(page).toContain("no data (usage not reported)");
+    expect(page).toContain('title="usage not reported">no data</td>');
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

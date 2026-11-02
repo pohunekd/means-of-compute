@@ -25,12 +25,10 @@ describe("fleet simulator", () => {
     const placements = lines.filter((l) => l["kind"] === "placement") as Record<string, unknown>[];
     expect(placements.length).toBe(315);
     const first = placements[0] as Record<string, unknown>;
-    expect(first["chosenHostAlias"]).toBeDefined();
-    const reason = String(first["reason"]);
-    expect(reason).toContain("is idle");
-    expect(reason).toContain("on AC power");
-    expect(reason).toContain("CPU");
-    expect(reason).toContain("memory");
+    expect(first["chosenHostAlias"]).toBe("desk-085");
+    expect(first["reason"]).toBe(
+      "desk-085 is idle, on AC power, no battery, CPU 93% free, memory 71% free, inside its policy window, 0/2 agents running",
+    );
     const candidates = first["candidates"] as unknown[];
     expect(Array.isArray(candidates)).toBe(true);
     const eligibleCount = first["eligibleCount"] as number;
@@ -49,6 +47,50 @@ describe("fleet simulator", () => {
         String(l["excludeReason"]).includes("at agent limit"),
     );
     expect(atLimitHost).toBeDefined();
+    const truth = new Map<string, number>();
+    const last = new Map<string, Record<string, unknown>>();
+    let currentMinute = -1;
+    function flushMinute(): void {
+      if (currentMinute === -1) {
+        return;
+      }
+      for (const [alias, hostLine] of last) {
+        const expected = truth.get(alias) ?? 0;
+        expect(hostLine["running"]).toBe(expected);
+        if ((hostLine["running"] as number) === (hostLine["maxAgents"] as number)) {
+          expect(hostLine["eligible"]).toBe(false);
+        }
+      }
+    }
+    for (const line of lines) {
+      const atMinute = line["atMinute"] as number | undefined;
+      if (atMinute !== undefined && atMinute !== currentMinute) {
+        // flush previous minute before advancing
+        if (currentMinute !== -1) {
+          flushMinute();
+        }
+        currentMinute = atMinute;
+      }
+      if (line["kind"] === "placement") {
+        const chosen = line["chosenHostAlias"] as string | null;
+        if (chosen !== null) {
+          truth.set(chosen, (truth.get(chosen) ?? 0) + 1);
+        }
+      } else if (line["kind"] === "work-end") {
+        const hostAlias = line["hostAlias"] as string;
+        truth.set(hostAlias, (truth.get(hostAlias) ?? 0) - 1);
+      } else if (line["kind"] === "host") {
+        last.set(String(line["alias"]), line);
+      }
+    }
+    flushMinute();
+    // also verify every host's last line matches truth
+    for (const [alias, expected] of truth) {
+      const hostLine = last.get(alias);
+      if (hostLine !== undefined) {
+        expect(hostLine["running"]).toBe(expected);
+      }
+    }
   });
 
   test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-142 ineligible at its minute", async () => {

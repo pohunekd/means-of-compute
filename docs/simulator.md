@@ -14,10 +14,10 @@ File `config/sim/evening-300.json` with `schemaVersion sim-v1`.
 - Kinds: `desk` (180), `laptop` (80), `kiosk` (12), `meeting` (20), `signage` (8). Each kind carries cores, memory, gpu, battery, window `allowedWindow`, `startsIdle`, `maxConcurrentAgents`.
 - Generators in file order, each `kind`, `count`, `aliasPrefix`, `site`. Two `desk-` rows (90+90) continue the three-digit suffix per prefix, so `desk-001`..`desk-180` with no duplicates. Laptops are `laptop-001`..`laptop-080` on `hq-floor-2`, kiosks on `kiosk-lobby-*`, meeting on `meeting-3b-*`, signage on `signage-lobby-*`.
 - Waves in file order: desk leave 0.5 at 10 stagger 1, desk leave 0.5 at 40 stagger 1; laptop leave 0.6 at 20 stagger 1, laptop depart 0.4 at 35 stagger 1, laptop rejoin 0.4 at 70 stagger 2; kiosk window-enter 1.0 at 120 stagger 0; meeting window-enter 1.0 at 15 stagger 0. Fraction uses `ceil(fraction * kindCount)`; stagger is `atMinute + i * staggerMinutes`, and a wave that would run past `durationMinutes` or wrap and re-select hosts exits 2.
-- Explicit events: `laptop-007` rejoin at 94, leave at 94, battery 40 at 95; `desk-142` return at 100; `laptop-021` rejoin and leave at 134, unplug at 135. The rejoin+leave pair pins each laptop-00x online and idle whichever wave set it landed in.
+- Explicit events: `laptop-007` rejoin at 94, leave at 94, battery 40 at 95; `desk-142` return at 100; `laptop-021` rejoin and leave at 134, unplug at 135. The rejoin+leave pair pins `laptop-007` and `laptop-021` online and idle whichever wave set they landed in.
 - Work is an array of burst blocks, each with `firstAtMinute`, `everyMinutes`, `count`, `durationMinutes`, `idPrefix`; `idPrefix` must be unique (duplicate exits 2 naming `work`), a single object is invalid. Each item keeps its own block's `durationMinutes`. Committed value: `sim-w-` 15/2/25/50, `sim-x-` 50/1/100/120, `sim-y-` 65/1/100/120, `sim-z-` 80/1/90/120 (315 items total). The engine merges all blocks into one schedule sorted by `atMinute`.
 
-Validation forbids unknown or missing keys at every level and validates `alias` against `^[a-z][a-z0-9-]{0,31}$`, `HH:MM` windows, `kind` via `Object.hasOwn`, and that every event alias exists in the expanded fleet. A wave of type `battery` exits 2 naming `waves[i].type`, a `battery`/`unplug` event on a `battery:none` kind exits 2, and an extra key exits 2 naming the field.
+Validation forbids unknown or missing keys at every level and validates `alias` against `^[a-z][a-z0-9-]{0,31}$`, `HH:MM` windows, `kind` via `Object.hasOwn`, and that every event alias exists in the expanded fleet. A wave of type `battery` exits 2 naming `waves[i].type`, a `battery`/`unplug`/`plug-in` event on a `battery:none` kind exits 2, and an extra key exits 2 naming the field.
 
 ## Fleet expansion
 
@@ -82,7 +82,7 @@ bun run sim:fleet --timeline config/sim/evening-300.json --out logs/sim/evening-
 - Determinism: `mulberry32` with draws in generator order then per-kind shuffles; every collection sorted before iteration.
 - Real placement: every refresh and queue placement calls `place()`; trace reasons are live reasons.
 - No silent defaults: every required key checked, extra keys rejected, single work object rejected.
-- `config/sim/evening-300.json` `work`/`events` follow the designer decision in `286-work-volume-decision.md`.
+- `config/sim/evening-300.json` `work`/`events` follow the work-volume decision on #284.
 
 ## Design vs reality
 

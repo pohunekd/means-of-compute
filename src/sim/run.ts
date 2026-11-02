@@ -750,7 +750,10 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         if (decision.chosenHostAlias !== null) {
           chosen += 1;
           const hostAlias = decision.chosenHostAlias;
-          const duration = workDurationById.get(item.id) ?? 25;
+          const duration = workDurationById.get(item.id);
+          if (duration === undefined) {
+            throw new Error(`work item ${item.id}: no duration`);
+          }
           const endMinute = atMinute + duration;
           const runningItem = createWorkItem(item.id, hostAlias);
           running.push({ workItem: runningItem, hostAlias, endMinute });

@@ -371,17 +371,30 @@ function validateWaves(
     }
     const kindStr = kind as string;
     const count = Math.ceil((fraction as number) * (kindCounts.get(kindStr) ?? 0));
-    const lastMinute = (atMinute as number) + Math.max(0, count - 1) * (staggerMinutes as number);
-    if (lastMinute > durationMinutes) {
-      throw new Error(
-        `Timeline waves[${String(i)}].staggerMinutes: wave runs past durationMinutes`,
-      );
-    }
     if (type === "rejoin") {
       const departSize = departByKind.get(kindStr);
-      if (departSize !== undefined && departSize !== count) {
-        // rejoin should match depart size; but we enforce pointer not wrap instead
+      if (departSize === undefined) {
+        throw new Error(
+          `Timeline waves[${String(i)}].type: rejoin needs an earlier depart of kind ${kindStr}`,
+        );
       }
+      const lastMinute =
+        (atMinute as number) + Math.max(0, departSize - 1) * (staggerMinutes as number);
+      if (lastMinute > durationMinutes) {
+        throw new Error(
+          `Timeline waves[${String(i)}].staggerMinutes: wave runs past durationMinutes`,
+        );
+      }
+    } else {
+      const lastMinute = (atMinute as number) + Math.max(0, count - 1) * (staggerMinutes as number);
+      if (lastMinute > durationMinutes) {
+        throw new Error(
+          `Timeline waves[${String(i)}].staggerMinutes: wave runs past durationMinutes`,
+        );
+      }
+    }
+    if (type === "rejoin") {
+      // no pointer advance for rejoin
     } else if (type === "depart") {
       const pointer = pointerByKind.get(kindStr) ?? 0;
       if (pointer + count > (kindCounts.get(kindStr) ?? 0)) {
@@ -393,14 +406,12 @@ function validateWaves(
       departByKind.set(kindStr, count);
     } else {
       const pointer = pointerByKind.get(kindStr) ?? 0;
-      if (type !== "rejoin") {
-        if (pointer + count > (kindCounts.get(kindStr) ?? 0)) {
-          throw new Error(
-            `Timeline waves[${String(i)}].fraction: wave would wrap and re-select hosts`,
-          );
-        }
-        pointerByKind.set(kindStr, pointer + count);
+      if (pointer + count > (kindCounts.get(kindStr) ?? 0)) {
+        throw new Error(
+          `Timeline waves[${String(i)}].fraction: wave would wrap and re-select hosts`,
+        );
       }
+      pointerByKind.set(kindStr, pointer + count);
     }
     out.push({
       atMinute: atMinute as number,

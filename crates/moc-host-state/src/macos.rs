@@ -277,7 +277,7 @@ pub fn macos_memory() -> Result<(f64, f64), String> {
         libc::host_statistics64(
             host,
             libc::HOST_VM_INFO64,
-            &mut stats as *mut _ as *mut libc::host_info_t,
+            &mut stats as *mut _ as libc::host_info64_t,
             &mut count,
         )
     };

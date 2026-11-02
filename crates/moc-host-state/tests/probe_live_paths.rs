@@ -281,6 +281,68 @@ fn unattended_window() {
         assert_eq!(output.secondsSinceInput, 0.0);
         let _ = fs::remove_dir_all(&config_dir);
     }
+
+    // U4 — logged-out via manager idle (no sessions)
+    {
+        let config_dir = create_temp_config_with_sysfs(&sysfs_abs);
+        let facts_path = config_dir.join("facts.json");
+        write_facts(&facts_path, facts_json.clone());
+        let host_path = config_dir.join("host.json");
+        write_host(
+            &host_path,
+            r#"{"hostAlias":"laptop-b","unattended":{"start":"00:00","end":"00:00"}}"#,
+        );
+        let loginctl_path = config_dir.join("loginctl");
+        fs::write(
+            &loginctl_path,
+            "#!/bin/sh\ncase \"$*\" in\n  \"list-sessions --no-legend\")\n    ;;\n  \"show-session -p IdleHint -p IdleSinceHint\")\n    echo \"IdleHint=yes\"\n    echo \"IdleSinceHint=1793059200000000\"\n    ;;\n  *)\n    exit 2\n    ;;\nesac\n",
+        )
+        .expect("write loginctl");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&loginctl_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&loginctl_path, perms).unwrap();
+        }
+        let opts = ProbeOptions {
+            config_dir: config_dir.clone(),
+            facts_path: Some(facts_path.clone()),
+            scenario: None,
+        };
+        let env = ProbeEnv {
+            platform: Platform::Linux,
+            loginctl: loginctl_path.to_str().unwrap().to_string(),
+            nvidia_smi: "nvidia-smi".to_string(),
+            local_minutes: local_minutes_utc,
+            now_ms: now_ms_fixed,
+        };
+        let host_path_clone = host_path.clone();
+        let output = moc_host_state::probe::run_probe(&opts, &env, &|| {
+            let text = fs::read_to_string(&host_path_clone).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let alias = v["hostAlias"].as_str().unwrap().to_string();
+            let unattended = v.get("unattended").and_then(|u| {
+                if u.is_null() {
+                    None
+                } else {
+                    Some(moc_host_state::config::TimeWindow {
+                        start: u["start"].as_str().unwrap().to_string(),
+                        end: u["end"].as_str().unwrap().to_string(),
+                    })
+                }
+            });
+            Ok(moc_host_state::config::HostFile {
+                hostAlias: alias,
+                unattended,
+            })
+        })
+        .expect("U4 run_probe failed");
+        assert!(output.idle);
+        assert_eq!(output.idleReason, "no user logged in, on AC power");
+        assert_eq!(output.secondsSinceInput, 43200.0);
+        let _ = fs::remove_dir_all(&config_dir);
+    }
 }
 
 #[test]
@@ -306,18 +368,18 @@ fn darwin_branch_and_number_format() {
         "cpuLoad1m": 1,
         "memoryTotalMb": 8192.0,
         "memoryFreeMb": 4096,
-        "gpuPresent": false,
-        "gpuName": null,
-        "gpuFreeMb": null,
+        "gpuPresent": true,
+        "gpuName": "GPU \"x\"\u{1}",
+        "gpuFreeMb": 512,
         "localModelsReachable": false,
-        "localModels": [],
+        "localModels": ["a", "b"],
         "hostAlias": "laptop-b",
         "timestamp": "2026-10-27T12:00:00.000Z",
         "policyAllowedWindowStart": "00:00",
         "policyAllowedWindowEnd": "00:00"
     });
     let facts_path = config_dir.join("facts.json");
-    write_facts(&facts_path, facts_json);
+    write_facts(&facts_path, facts_json.clone());
 
     let opts = ProbeOptions {
         config_dir: config_dir.clone(),
@@ -337,15 +399,9 @@ fn darwin_branch_and_number_format() {
     .expect("darwin run_probe failed");
 
     let line = to_json_line(&output);
-    assert!(
-        line.contains("\"load1m\":1"),
-        "line should contain \"load1m\":1, got {}",
-        line
-    );
-    assert!(
-        line.contains("\"totalMb\":8192,"),
-        "line should contain \"totalMb\":8192, got {}",
-        line
+    assert_eq!(
+        line,
+        "{\"schemaVersion\":\"v1\",\"hostAlias\":\"laptop-b\",\"timestamp\":\"2026-10-27T12:00:00.000Z\",\"idle\":true,\"idleReason\":\"no user input for 60 minutes, on AC power\",\"secondsSinceInput\":3600,\"acPower\":true,\"batteryPercent\":null,\"cpu\":{\"cores\":4,\"load1m\":1},\"memory\":{\"totalMb\":8192,\"freeMb\":4096},\"gpu\":{\"present\":true,\"name\":\"GPU \\\"x\\\"\\u0001\",\"freeMb\":512},\"localModels\":{\"reachable\":false,\"models\":[\"a\",\"b\"]},\"policy\":{\"allowedWindow\":{\"start\":\"00:00\",\"end\":\"00:00\"},\"insideWindow\":true,\"maxConcurrentAgents\":2}}\n"
     );
     assert_eq!(
         output.idleReason,
@@ -353,4 +409,49 @@ fn darwin_branch_and_number_format() {
     );
 
     let _ = fs::remove_dir_all(&config_dir);
+
+    // second run — Darwin logged-out via root console owner
+    {
+        let stat_path = std::env::temp_dir().join(format!(
+            "moc-stat-root-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
+        fs::write(
+            &stat_path,
+            "#!/bin/sh\n[ \"$*\" = \"-f %Su /dev/console\" ] || exit 2\necho root\n",
+        )
+        .expect("write stat");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&stat_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&stat_path, perms).unwrap();
+        }
+        let config_dir2 =
+            create_temp_config_with_macos_tools(stat_path.to_str().unwrap(), &ioreg_abs);
+        let facts_path2 = config_dir2.join("facts.json");
+        write_facts(&facts_path2, facts_json.clone());
+        let opts2 = ProbeOptions {
+            config_dir: config_dir2.clone(),
+            facts_path: Some(facts_path2.clone()),
+            scenario: None,
+        };
+        let env2 = ProbeEnv {
+            platform: Platform::Darwin,
+            loginctl: "loginctl".to_string(),
+            nvidia_smi: "nvidia-smi".to_string(),
+            local_minutes: local_minutes_utc,
+            now_ms: now_ms_fixed,
+        };
+        let output2 = moc_host_state::probe::run_probe(&opts2, &env2, &|| {
+            panic!("resolve_host should not be called");
+        })
+        .expect("darwin root run_probe failed");
+        assert_eq!(output2.idleReason, "no user logged in, on AC power");
+        assert_eq!(output2.secondsSinceInput, 3600.0);
+        let _ = fs::remove_dir_all(&config_dir2);
+        let _ = fs::remove_file(&stat_path);
+    }
 }

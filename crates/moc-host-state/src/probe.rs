@@ -32,10 +32,14 @@ pub fn run_probe(
     resolve_host: &dyn Fn() -> Result<HostFile, String>,
 ) -> Result<HostCapacity, String> {
     // Load facts
-    let facts = if let Some(p) = &opts.facts_path {
+    let facts = if let Some(p) = opts
+        .facts_path
+        .as_ref()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
         let ps = p.to_string_lossy().to_string();
         crate::facts::load_facts(&ps, env.platform)?
-    } else if let Some(scn) = &opts.scenario {
+    } else if let Some(scn) = opts.scenario.as_deref().filter(|s| !s.is_empty()) {
         let scn_path = opts
             .config_dir
             .join("scenarios")
@@ -110,6 +114,7 @@ pub fn run_probe(
     let mut seconds_since_input = facts.secondsSinceInput.unwrap_or(0.0);
     let mut ac_power = facts.acPower.unwrap_or(true);
     let mut battery_percent: Option<f64> = facts.batteryPercent.unwrap_or(None);
+    // default 0.0 is always replaced by the live CPU reader when the fact is absent
     let mut cpu_cores = facts.cpuCores.unwrap_or(0.0);
     let mut cpu_load1m = facts.cpuLoad1m.unwrap_or(0.0);
     let mut memory_total_mb = facts.memoryTotalMb.unwrap_or(0.0);
@@ -160,12 +165,14 @@ pub fn run_probe(
                     }
                 }
                 if logged_out {
-                    if logged_out_secs.is_none() {
-                        return Err(UserActivityError::Message(
-                            "logged out but input time unreadable".to_string(),
-                        ));
+                    match logged_out_secs {
+                        Some(v) => seconds_since_input = v,
+                        None => {
+                            return Err(UserActivityError::Message(
+                                "logged out but input time unreadable".to_string(),
+                            ));
+                        }
                     }
-                    seconds_since_input = logged_out_secs.unwrap();
                 }
             } else if env.platform == Platform::Darwin {
                 match crate::macos::macos_console_owner(&cfg.macosTools.stat) {
@@ -182,11 +189,6 @@ pub fn run_probe(
                     Err(e) => return Err(UserActivityError::Message(e)),
                 }
                 if logged_out {
-                    if env.platform == Platform::Linux && logged_out_secs.is_none() {
-                        return Err(UserActivityError::Message(
-                            "logged out but input time unreadable".to_string(),
-                        ));
-                    }
                     if let Some(v) = logged_out_secs {
                         seconds_since_input = v;
                     } else {

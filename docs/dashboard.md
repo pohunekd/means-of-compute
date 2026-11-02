@@ -428,6 +428,84 @@ Classification config `config/demo-numbers.json` must contain exactly `localProv
 
 `--sources` adds a `sources` column. The flag takes no value and may appear once; repeating it exits 2. With `--sources`, each row cites the ledger rows by `workItemId` or `entryId` and the config entry it was computed from. A row citation is an id, not a line number: records are cited by `workItemId` and pending entries by `entryId`. The source format is `<base>; rows: <citation>`, with count rows appending `; config: none (count, no price)`. For money rows the base names the `config/providers/<id>.json` price or the `config/dashboard.json` baseline; for the share row the base names `config/demo-numbers.json`. Ids are sorted ascending and joined with `, `; an empty list is `none`.
 
+## Live view (`/live`)
+
+`GET /live` on the same loopback listener is a second, script-free page for
+watching the fleet at scale: a tile grid of the real recorded fleet plus a
+simulated fleet replayed from a simulator trace, the real meter activity
+feed, an event ticker and headline counters. It is built by `buildLive`
+(`src/dashboard/live.ts`) and rendered by `renderLive`
+(`src/dashboard/live-render.ts`); the dashboard panels of `/` are not
+involved, and simulated data never enters their inputs, the ledger,
+Savings or `demo:numbers`.
+
+Run it through `factory:serve` with three extra flags, each at most once:
+
+```sh
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-300.jsonl
+```
+
+- `--sim-trace <path>` has no default. Without it the simulated groups show
+  `no data (no simulated input)`; the real sections still serve.
+- `--meter-usage <path>` defaults to `usageLogPath` of `config/meter.json`.
+  The usage log is replayed read-only on every request; nothing writes to it.
+- `--ports <path>` defaults to `loop-ports.jsonl` next to `logPath` of
+  `config/loop.json`. The real tiles are the newest recorded probe per alias
+  at or before the page clock, as in the static snapshot's Fleet.
+
+The cursor is the query: `/live?t=<minute>` shows the simulated fleet at
+that minute of the trace. A `t` that is not a non-negative integer, or one
+past the end of the trace, is 404. The parsed trace is cached in the server
+process keyed by its path, size and modification time, so a refresh never
+reparses an unchanged file. Each frame
+advances 5 sim-minutes and carries a meta refresh of
+`ceil(5 * 60 / speed)` seconds (clamped to 2..30; 5 seconds at the trace
+speed 60) plus a plain `next frame` link to the same address, so the page
+works even where a refresh does not fire. The final frame carries no
+refresh. There is no script and no external resource: the CSP is the
+dashboard's value with the live style hash (`LIVE_CSS_HASH` over the
+dashboard stylesheet plus the live rules). A meta refresh is a navigation,
+not a resource load, so `default-src 'none'` does not block it.
+
+The page fits one 1920x1080 frame without scrolling. The grid groups tiles
+by site and kind; the real fleet is one group of large tiles showing the
+alias, a `REAL` tag, the state and the running count. Simulated tiles are
+compact colour blocks under a group heading with a `SIMULATED` tag: the
+alias and the running count are on the tile, the state word and the
+exclusion reason are in the tile title, and the tile outline is dashed.
+States: `eligible` (can take work now), `running`, `blocked` (idle
+but excluded; the placement reason is in the tile title), `busy` (user
+present), `offline` (left the site network), and for real hosts `reported`
+or `unavailable`. Counters keep the
+sources apart and never sum them: `Real hosts reporting`, `Sessions
+running`, `Meter calls today`, then `Simulated hosts eligible`,
+`Simulated work running` and `Simulated placements`, each labelled
+simulated.
+
+Model activity is real only: the newest 12 meter `call-end` records, each
+joined to its `call-start` for provider and model and to its grant for the
+work item and host. The role is `session` when the grant is found (planner
+and auditor calls are not metered, so they never appear). Cost is priced
+with the dashboard's own arithmetic; a null token count shows `no data`
+with the reason in the cell title, never 0. The ticker keeps the two clocks
+apart: a Real events block and a Simulated events block, each newest first
+with the newest 6 rows shown; a simulated placement reads
+`placed <item> on <host> because <reason>` with the reason verbatim from
+the placement engine. Activity and ticker rows are one line each, clipped
+with an ellipsis and their full text in the row title, so the frame height
+never depends on event text; signage tiles are wide enough that no alias
+clips. A simulated tile that is running but whose last host line excludes
+it carries an amber edge and a `!` marker when it is running, now excluded
+for a reason other than its agent limit (the legend reads the same), with
+the reason in the tile title.
+
+Failure rule, per section as on `/`: a missing input shows `no data`, an
+unreadable or invalid one shows an error code with details in the
+dashboard log. One invalid alias fails the whole simulated source with
+`error (sim-trace-invalid)` and the real sections still render. Every
+alias is checked against `^[a-z][a-z0-9-]{0,31}$` before it can reach the
+page, and every value is escaped as on `/`.
+
 ## Static snapshot (dashboard:snapshot)
 
 ```sh

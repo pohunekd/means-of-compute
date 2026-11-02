@@ -436,14 +436,13 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       host: null,
     });
     const page = renderLive(live);
-    expect(page).toContain('class="tile tile-real');
+    expect(page).toContain('id="real-work"');
+    expect(page).toContain("Real work now");
+    expect(page).toContain("implement");
+    expect(page).not.toContain("Real fleet");
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
-    expect(page.indexOf("Real fleet")).toBeLessThan(
-      page.indexOf('<span class="simtag">SIMULATED</span>'),
-    );
-    expect(page).toContain('class="load">1<');
     const live95 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 95, () => {}), {
       view: "overview",
       t: 95,
@@ -748,7 +747,8 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       },
     );
     const pageBroken = renderLive(liveBroken);
-    expect(pageBroken).toContain(">err<");
+    expect(pageBroken).toContain('id="real-work"');
+    expect(pageBroken).toContain("Real task title");
     const brokenPanel = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {

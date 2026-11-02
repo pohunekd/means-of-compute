@@ -16,6 +16,7 @@ import type {
   AuditPanel,
   CallPanel,
   HostPanel,
+  JustFinishedEntry,
   LiveActivityRow,
   LiveCell,
   LiveCounter,
@@ -23,6 +24,7 @@ import type {
   LiveModel,
   LiveSection,
   LiveTile,
+  RealWorkCard,
   TaskPanel,
 } from "./live.js";
 
@@ -99,7 +101,20 @@ export const LIVE_CSS = [
   ".host-panel .mono{font-family:var(--mono)}",
   ".host-panel ul{margin:0.3rem 0 0;padding-left:1.2rem;font-size:0.8rem}",
   ".host-panel a{color:var(--accent);text-decoration:none}",
-  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}}",
+  ".realwork{display:grid;grid-template-columns:repeat(4,1fr);gap:0.3rem;margin:0.2rem 0}",
+  ".rw{background:var(--surface-2);border:1.5px solid var(--accent);border-radius:8px;padding:0.35rem 0.4rem}",
+  ".rw.idle{border-color:var(--border)}",
+  ".rw .al{font-family:var(--mono);font-size:0.66rem;font-weight:700}",
+  ".rw .task{font-size:0.6rem;font-weight:600;margin:0.15rem 0 0.08rem;min-height:1.2rem;line-height:1.2;overflow:hidden}",
+  ".rw .meta{font-size:0.52rem;color:var(--muted);margin:0.05rem 0;line-height:1.1}",
+  ".rw .meta b{color:var(--text);font-weight:700}",
+  ".stage{display:inline-block;border-radius:999px;padding:0.04rem 0.28rem;font-size:0.52rem;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+  ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
+  ".stage.merge{background:var(--done-bg);color:var(--done-text)}",
+  ".fin{display:flex;gap:0.3rem;margin:0.15rem 0 0.2rem}",
+  ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.18rem 0.32rem;font-size:0.54rem;line-height:1.2}",
+  ".fin .fi b{font-size:0.56rem}",
+  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}.realwork{grid-template-columns:repeat(2,1fr)}.fin{flex-wrap:wrap}}",
 ].join("\n");
 
 export const LIVE_CSS_HASH = `sha256-${createHash("sha256")
@@ -147,6 +162,7 @@ function cellClass(cell: LiveCell): string {
   return cell.kind === "text" ? "value" : cell.kind === "no-data" ? "nodata" : "error";
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function renderCounter(counter: LiveCounter): SafeHtml {
   const label = counter.simulated ? `${counter.label} (simulated)` : counter.label;
   return html`<div class="keycard ${counter.simulated ? "live-simcard" : ""}">
@@ -296,6 +312,77 @@ function renderGroup(group: LiveGroup, model: LiveModel): SafeHtml {
   return html`<div class="live-group">
     ${heading}
     <div class="tile-grid">${group.tiles.map((tile) => renderTile(tile, model))}</div>
+  </div>`;
+}
+
+function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
+  if (!ALIAS_PATTERN.test(card.alias)) {
+    throw new Error("dashboard live: invalid host alias in model");
+  }
+  const hostHref = buildHref(model, { host: card.alias });
+  const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
+  const stageLabel = card.stage === "idle" ? (card.idleReason ?? "idle") : card.stage;
+  const stageClass =
+    card.stage === "implement"
+      ? "stage"
+      : card.stage === "audit"
+        ? "stage audit"
+        : card.stage === "merge"
+          ? "stage merge"
+          : "stage";
+  const idleCls = card.stage === "idle" ? " idle" : "";
+  const titleLine =
+    card.title === null
+      ? html`<p class="task"><span class="nodata">no work</span></p>`
+      : taskHref === null
+        ? html`<p class="task">${card.title}</p>`
+        : html`<p class="task"><a href="${taskHref}">${card.title}</a></p>`;
+  const issueLine =
+    card.issue === null ? constantHtml("") : html`<span>#${String(card.issue)}</span>`;
+  const prLine =
+    card.pullNumber === null ? constantHtml("") : html`<span>PR #${String(card.pullNumber)}</span>`;
+  const elapsedLine =
+    card.elapsed === null
+      ? constantHtml("")
+      : html`<p class="meta">elapsed <b>${card.elapsed}</b></p>`;
+  const tokensLine =
+    card.tokens === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          tokens in ${groupDigits(card.tokens.input)} out ${groupDigits(card.tokens.output)}
+        </p>`;
+  const costLine =
+    card.cost === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          cost <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
+        </p>`;
+  const callLine =
+    card.latestCall === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          last call ${clockTime(card.latestCall.at)} ${groupDigits(card.latestCall.ms)}ms
+        </p>`;
+  return html`<div class="rw${idleCls}">
+    <div>
+      <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
+      <span class="${stageClass}">${stageLabel}</span>
+    </div>
+    ${titleLine}
+    <p class="meta">${issueLine} ${prLine}</p>
+    ${elapsedLine} ${tokensLine} ${costLine} ${callLine}
+  </div>`;
+}
+
+function renderJustFinished(entry: JustFinishedEntry, model: LiveModel): SafeHtml {
+  const taskHref = buildHref(model, { task: entry.workItemId });
+  const costText =
+    entry.cost === null
+      ? constantHtml("no cost")
+      : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
+  const title = entry.title ?? entry.workItemId;
+  return html`<div class="fi">
+    <a href="${taskHref}">${title}</a> ${entry.outcome} · ${costText} · ${clockTime(entry.at)}
   </div>`;
 }
 
@@ -938,10 +1025,21 @@ export function renderLive(model: LiveModel): string {
   const pausedBadge = model.paused
     ? html`<span class="paused-badge">paused</span>`
     : constantHtml("");
-  const realFleet =
-    model.realFleet.kind === "ok"
-      ? renderGroup({ title: "Real fleet", tiles: model.realFleet.value }, model)
-      : sectionText(model.realFleet);
+  const realWorkBlock = (() => {
+    if (model.realWork.kind !== "ok") return sectionText(model.realWork);
+    if (model.realWork.value.length === 0) return html`<p class="nodata">no real machines</p>`;
+    return html`<div id="real-work" class="realwork">
+      ${model.realWork.value.map((card) => renderRealWorkCard(card, model))}
+    </div>`;
+  })();
+  const justFinishedBlock = (() => {
+    if (model.justFinished.kind !== "ok") return sectionText(model.justFinished);
+    if (model.justFinished.value.length === 0) return constantHtml("");
+    return html`<div id="just-finished" class="fin">
+      <div class="fi"><b>Just finished</b></div>
+      ${model.justFinished.value.map((entry) => renderJustFinished(entry, model))}
+    </div>`;
+  })();
   const simFleet =
     model.simFleet.kind === "ok"
       ? model.simFleet.value.map((group) => renderGroup(group, model))
@@ -992,7 +1090,7 @@ export function renderLive(model: LiveModel): string {
     model.callPanel !== null ||
     model.auditPanel !== null;
   const fleetContent = html`<h2>Fleet</h2>
-    ${realFleet} ${simFleet}
+    ${simFleet}
     <p class="live-legend">
       <span class="dot tile-eligible"></span>eligible <span class="dot tile-running"></span>running
       <span class="dot tile-blocked"></span>blocked (reason in the title)
@@ -1039,9 +1137,17 @@ export function renderLive(model: LiveModel): string {
             Real placement engine, synthetic fleet. The four real machines and the model calls are
             live.
           </p>
-          <div class="keyfigures">${model.counters.map((counter) => renderCounter(counter))}</div>
         </header>
         <main>
+          <section>
+            <h2>
+              Real work now
+              <span style="color:var(--muted);font-weight:500;font-size:0.6rem"
+                >· what the real machines are doing at this moment</span
+              >
+            </h2>
+            ${realWorkBlock} ${justFinishedBlock}
+          </section>
           <div class="live-layout">
             <section id="live-fleet">${fleetContent}</section>
             <div class="live-side">${sideContent}</div>

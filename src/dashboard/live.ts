@@ -260,6 +260,49 @@ export interface AuditPanel {
   readonly workItemRepo: string | null;
 }
 
+export interface RealWorkCard {
+  readonly alias: string;
+  readonly stage: "implement" | "audit" | "merge" | "idle";
+  readonly workItemId: string | null;
+  readonly title: string | null;
+  readonly issue: number | null;
+  readonly pullNumber: number | null;
+  readonly repo: string | null;
+  readonly branch: string | null;
+  readonly modelText: string | null;
+  readonly auditorModelText: string | null;
+  readonly elapsed: string | null;
+  readonly tokens: { readonly input: number; readonly output: number } | null;
+  readonly cost: LiveCell | null;
+  // Null when source failed, the reason is in outer LiveSection error/no-data.
+  readonly latestCall: {
+    readonly at: string;
+    readonly inputTokens: number | null;
+    readonly outputTokens: number | null;
+    readonly ms: number;
+    readonly model: string;
+  } | null;
+  readonly idleReason: string | null;
+  readonly probeAt: string | null;
+  readonly lastFinished: {
+    readonly workItemId: string;
+    readonly at: string;
+    readonly outcome: string;
+  } | null;
+  readonly today: { readonly count: number; readonly cost: LiveCell | null } | null;
+}
+
+export interface JustFinishedEntry {
+  readonly workItemId: string;
+  readonly title: string | null;
+  readonly hostAlias: string | null;
+  readonly verdictCounts:
+    { readonly high: number; readonly medium: number; readonly low: number } | "invalid" | null;
+  readonly outcome: string;
+  readonly cost: LiveCell | null;
+  readonly at: string;
+}
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -268,6 +311,8 @@ export interface LiveModel {
   readonly refreshSeconds: number | null;
   readonly nextMinute: number | null;
   readonly counters: readonly LiveCounter[];
+  readonly realWork: LiveSection<readonly RealWorkCard[]>;
+  readonly justFinished: LiveSection<readonly JustFinishedEntry[]>;
   readonly realFleet: LiveSection<readonly LiveTile[]>;
   readonly simFleet: LiveSection<readonly LiveGroup[]>;
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
@@ -784,6 +829,410 @@ export function stripProvider(model: string): string {
   const idx = model.lastIndexOf("/");
   if (idx !== -1) return model.slice(idx + 1);
   return model;
+}
+
+function formatElapsed(startedAt: string, now: Date): string | null {
+  const startMs = Date.parse(startedAt);
+  if (!Number.isFinite(startMs)) return null;
+  const diffMs = now.getTime() - startMs;
+  if (diffMs < 0) return "0 min";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${String(mins)} min`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(rem)}m`;
+}
+
+function idleReasonFromProbe(probe: RecordedProbe): string {
+  if (probe.kind === "unavailable") {
+    const label = probe.cause === null ? "unavailable" : probe.cause.replace(/-/g, " ");
+    return label;
+  }
+  return "no work queued";
+}
+
+function newestResultForHost(
+  results: readonly { at: string; outcome: string; workItemId: string; hostAlias: string | null }[],
+  hostAlias: string,
+): { at: string; outcome: string; workItemId: string } | null {
+  let best: { at: string; outcome: string; workItemId: string } | null = null;
+  for (const entry of results) {
+    if (entry.hostAlias !== hostAlias) continue;
+    if (best === null || entry.at > best.at) {
+      best = { at: entry.at, outcome: entry.outcome, workItemId: entry.workItemId };
+    }
+  }
+  return best;
+}
+
+function sumMeterForWorkItem(
+  meter: UsageIndex,
+  workItemId: string,
+  pricing: Sourced<ReadonlyMap<string, NanoPricing>>,
+): {
+  tokens: { input: number; output: number } | null;
+  cost: LiveCell | null;
+  latestCall: RealWorkCard["latestCall"];
+} {
+  let sumIn = 0;
+  let sumOut = 0;
+  let scaledIn = 0n;
+  let scaledOut = 0n;
+  let hasTokens = false;
+  let missingTokens = false;
+  let costUnknown = false;
+  let latest: {
+    at: string;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    ms: number;
+    model: string;
+  } | null = null;
+  for (const end of meter.ends.values()) {
+    const grant = meter.grants.get(end.requestId)?.open;
+    if (grant === undefined || grant.workItemId !== workItemId) continue;
+    if (latest === null || end.at > latest.at) {
+      const start = meter.starts.get(end.callId);
+      const rawModel = start?.model ?? grant.model;
+      latest = {
+        at: end.at,
+        inputTokens: end.inputTokens,
+        outputTokens: end.outputTokens,
+        ms: end.ms,
+        model: stripProvider(rawModel),
+      };
+    }
+    if (end.inputTokens === null || end.outputTokens === null) {
+      missingTokens = true;
+      continue;
+    }
+    hasTokens = true;
+    sumIn += end.inputTokens;
+    sumOut += end.outputTokens;
+    if (pricing.ok) {
+      const price = pricing.value.get(grant.providerId);
+      if (price === undefined) costUnknown = true;
+      else {
+        scaledIn += tokenCostScaled(end.inputTokens, price.inputNanoPer1M);
+        scaledOut += tokenCostScaled(end.outputTokens, price.outputNanoPer1M);
+      }
+    }
+  }
+  if (latest === null) return { tokens: null, cost: null, latestCall: null };
+  const tokens = hasTokens ? { input: sumIn, output: sumOut } : null;
+  let cost: LiveCell | null = null;
+  if (hasTokens) {
+    if (!pricing.ok) cost = failureCell(pricing.failure);
+    else if (costUnknown) cost = { kind: "no-data", reason: "no price found" };
+    else cost = { kind: "text", text: formatUsd(scaledIn + scaledOut) };
+  } else if (missingTokens) {
+    cost = { kind: "no-data", reason: "usage not reported" };
+  }
+  return { tokens, cost, latestCall: latest };
+}
+
+function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly JustFinishedEntry[]> {
+  if (!inputs.dashboard.results.ok) {
+    return inputs.dashboard.results.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.results.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
+  }
+  const results = inputs.dashboard.results.value;
+  // Real results only: results filtered to those whose workItem host is real (ledger or work store).
+  // The previous live spec mixed simulated fleet but JustFinished is real-work only.
+  // Use ledger records to identify real work items? As fallback, use work store ids.
+  const realIds = new Set<string>();
+  if (inputs.dashboard.workItems.ok) {
+    for (const item of inputs.dashboard.workItems.value) realIds.add(item.id);
+  }
+  if (inputs.dashboard.ledger.ok) {
+    for (const record of inputs.dashboard.ledger.value.records) realIds.add(record.workItemId);
+  }
+  // If sets empty, fall back to all results.
+  const sorted = [...results]
+    .filter((r) => (realIds.size === 0 ? true : realIds.has(r.workItemId)))
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, 3);
+  if (sorted.length === 0) return { kind: "ok", value: [] };
+  const workById = new Map<string, WorkItem>();
+  if (inputs.dashboard.workItems.ok) {
+    for (const item of inputs.dashboard.workItems.value) workById.set(item.id, item);
+  }
+  const entries: JustFinishedEntry[] = sorted.map((row) => {
+    const work = workById.get(row.workItemId);
+    const title = work?.title ?? row.workItemId;
+    // verdict counts for this work's latest head - use newest verdict entry whose head matches? Without headSha in results we pick latest verdict's counts.
+    let verdictCounts: JustFinishedEntry["verdictCounts"] = null;
+    const verdicts = inputs.dashboard.verdicts.get(row.workItemId);
+    if (verdicts !== undefined && verdicts.ok && verdicts.value.length > 0) {
+      // pick newest verdict by position (store order)
+      const latestVerdict = verdicts.value[verdicts.value.length - 1];
+      if (latestVerdict !== undefined) {
+        // recount via same rule as dashboard: simple counts length by severity
+        const c = latestVerdict.counts as unknown;
+        // Use stored counts if valid shape, else derive from findings
+        if (
+          typeof c === "object" &&
+          c !== null &&
+          typeof (c as { high?: unknown }).high === "number" &&
+          typeof (c as { medium?: unknown }).medium === "number" &&
+          typeof (c as { low?: unknown }).low === "number"
+        ) {
+          const cc = c as { high: number; medium: number; low: number };
+          // Check mismatch: recount manually
+          let rh = 0;
+          let rm = 0;
+          let rl = 0;
+          for (const f of latestVerdict.findings as readonly { severity: string }[]) {
+            if (f.severity === "high") rh += 1;
+            else if (f.severity === "medium") rm += 1;
+            else if (f.severity === "low") rl += 1;
+          }
+          if (rh !== cc.high || rm !== cc.medium || rl !== cc.low) verdictCounts = "invalid";
+          else verdictCounts = { high: cc.high, medium: cc.medium, low: cc.low };
+        }
+      }
+    }
+    let cost: LiveCell | null;
+    if (!inputs.dashboard.ledger.ok) {
+      cost =
+        inputs.dashboard.ledger.failure.kind === "error"
+          ? { kind: "error", code: inputs.dashboard.ledger.failure.code }
+          : { kind: "no-data", reason: inputs.dashboard.ledger.failure.reason };
+    } else if (!inputs.dashboard.pricing.ok) {
+      cost = failureCell(inputs.dashboard.pricing.failure);
+    } else {
+      const rec = inputs.dashboard.ledger.value.records.find(
+        (r) => r.workItemId === row.workItemId,
+      );
+      if (rec !== undefined) {
+        let scaled = 0n;
+        let unknown = false;
+        for (const t of rec.tokens) {
+          if (t.inputTokens === null || t.outputTokens === null) {
+            unknown = true;
+            continue;
+          }
+          const price = inputs.dashboard.pricing.value.get(t.provider);
+          if (price === undefined) {
+            unknown = true;
+            continue;
+          }
+          scaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
+          scaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+        }
+        cost =
+          unknown && scaled === 0n
+            ? { kind: "no-data", reason: "no price found" }
+            : { kind: "text", text: formatUsd(scaled) };
+      } else {
+        cost = { kind: "text", text: "$0.0000" };
+      }
+    }
+    return {
+      workItemId: row.workItemId,
+      title,
+      hostAlias: row.hostAlias,
+      verdictCounts,
+      outcome: row.outcome,
+      cost,
+      at: row.at,
+    };
+  });
+  return { kind: "ok", value: entries };
+}
+
+function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWorkCard[]> {
+  if (!inputs.probes.ok) {
+    return inputs.probes.failure.kind === "error"
+      ? { kind: "error", code: inputs.probes.failure.code }
+      : { kind: "no-data", reason: inputs.probes.failure.reason };
+  }
+  const probes = inputs.probes.value;
+  // aliases: union of probes + open registry hostAliases
+  const aliasSet = new Set<string>(probes.map((p) => p.hostAlias));
+  if (inputs.dashboard.registry.ok) {
+    for (const entry of inputs.dashboard.registry.value) {
+      if (entry.terminal === null) aliasSet.add(entry.hostAlias);
+    }
+  }
+  const aliases = [...aliasSet].sort();
+  if (aliases.length === 0) return { kind: "ok", value: [] };
+  const probeByAlias = new Map<string, RecordedProbe>(probes.map((p) => [p.hostAlias, p] as const));
+  const openByAlias = new Map<string, RegistryEntry>();
+  if (inputs.dashboard.registry.ok) {
+    for (const entry of inputs.dashboard.registry.value) {
+      if (entry.terminal !== null) continue;
+      const prev = openByAlias.get(entry.hostAlias);
+      if (prev === undefined || entry.startedAt > prev.startedAt)
+        openByAlias.set(entry.hostAlias, entry);
+    }
+  }
+  const workById = new Map<string, WorkItem>();
+  if (inputs.dashboard.workItems.ok) {
+    for (const item of inputs.dashboard.workItems.value) workById.set(item.id, item);
+  }
+  // results sorted newest first per host for lastFinished
+  const resultsOk = inputs.dashboard.results.ok ? inputs.dashboard.results.value : [];
+  // Map workItemId -> newest result for stage inference
+  const newestResultByWorkItem = new Map<string, (typeof resultsOk)[number]>();
+  for (const row of resultsOk) {
+    const prev = newestResultByWorkItem.get(row.workItemId);
+    if (prev === undefined || row.at > prev.at) newestResultByWorkItem.set(row.workItemId, row);
+  }
+  const ledgerRecords = inputs.dashboard.ledger.ok ? inputs.dashboard.ledger.value.records : [];
+  const utcDay = inputs.now.toISOString().slice(0, 10);
+  const cards: RealWorkCard[] = aliases.map((alias) => {
+    const probe = probeByAlias.get(alias) ?? null;
+    const registryEntry = openByAlias.get(alias) ?? null;
+    const probeAt = probe?.at ?? null;
+    const lastFinished = newestResultForHost(resultsOk, alias);
+    // today stats
+    let todayCount = 0;
+    let todayScaled = 0n;
+    let todayHasPriced = false;
+    if (inputs.dashboard.ledger.ok && inputs.dashboard.pricing.ok) {
+      for (const rec of ledgerRecords) {
+        if (rec.finishedAt.slice(0, 10) !== utcDay) continue;
+        if (!rec.sessionSeconds.some((s) => s.hostAlias === alias)) continue;
+        todayCount += 1;
+        for (const t of rec.tokens) {
+          if (t.inputTokens === null || t.outputTokens === null) continue;
+          const price = inputs.dashboard.pricing.value.get(t.provider);
+          if (price === undefined) continue;
+          todayHasPriced = true;
+          todayScaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
+          todayScaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+        }
+      }
+    }
+    let today: RealWorkCard["today"] = null;
+    if (inputs.dashboard.ledger.ok) {
+      let cost: LiveCell | null;
+      if (!inputs.dashboard.pricing.ok) cost = failureCell(inputs.dashboard.pricing.failure);
+      else if (todayScaled === 0n && !todayHasPriced) cost = { kind: "text", text: "$0.0000" };
+      else cost = { kind: "text", text: formatUsd(todayScaled) };
+      if (todayCount > 0 || probe !== null) today = { count: todayCount, cost };
+    }
+    if (registryEntry !== null) {
+      const work = workById.get(registryEntry.workItemId) ?? null;
+      // stage: open session => implement, unless newest result for this workItem is merged? But merged while session open should not happen; keep implement.
+      const stage: RealWorkCard["stage"] = "implement";
+      // model text = provider/model stripped? Show model + provider in (provider)
+      const modelText = stripProvider(registryEntry.model.model);
+      const auditorModelText: string | null = null;
+      const latest = inputs.meter.ok
+        ? sumMeterForWorkItem(
+            inputs.meter.value,
+            registryEntry.workItemId,
+            inputs.dashboard.pricing,
+          )
+        : { tokens: null, cost: null, latestCall: null };
+      const costCell: typeof latest.cost = !inputs.meter.ok
+        ? inputs.meter.failure.kind === "error"
+          ? { kind: "error", code: inputs.meter.failure.code }
+          : { kind: "no-data", reason: inputs.meter.failure.reason }
+        : latest.cost;
+      return {
+        alias,
+        stage,
+        workItemId: registryEntry.workItemId,
+        title: work?.title ?? registryEntry.workItemId,
+        issue: work?.issue ?? null,
+        pullNumber: work?.pullNumber ?? null,
+        repo: work?.repo ?? null,
+        branch: work?.branch ?? null,
+        modelText,
+        auditorModelText,
+        elapsed: formatElapsed(registryEntry.startedAt, inputs.now),
+        tokens: latest.tokens,
+        cost: costCell,
+        latestCall: latest.latestCall,
+        idleReason: null,
+        probeAt,
+        lastFinished:
+          lastFinished !== null
+            ? {
+                workItemId: lastFinished.workItemId,
+                at: lastFinished.at,
+                outcome: lastFinished.outcome,
+              }
+            : null,
+        today,
+      };
+    }
+    // No open session: could be audit/merge for last finished item that ran on this host
+    // Try to infer stage from newest result for any work that last ran on this host.
+    if (lastFinished !== null) {
+      const wid = lastFinished.workItemId;
+      const work = workById.get(wid) ?? null;
+      // Use registry's last closed entry for this work? Check if results outcome is merged => merge stage, else audit
+      const newest = newestResultByWorkItem.get(wid);
+      const outcomeStage: RealWorkCard["stage"] = newest?.outcome === "merged" ? "merge" : "audit";
+      // For merge cards hide elapsed/tokens but still show lastFinished/today
+      const modelEntry = newest?.model ? stripProvider(newest.model) : null;
+      // Try to get auditor from verdicts if audit stage
+      let auditorModelText: string | null = null;
+      if (outcomeStage === "audit") {
+        const verdicts = inputs.dashboard.verdicts.get(wid);
+        if (verdicts !== undefined && verdicts.ok && verdicts.value.length > 0) {
+          const lastV = verdicts.value[verdicts.value.length - 1];
+          if (lastV !== undefined) auditorModelText = stripProvider(lastV.auditorModel);
+        }
+      }
+      const meterInfo = inputs.meter.ok
+        ? sumMeterForWorkItem(inputs.meter.value, wid, inputs.dashboard.pricing)
+        : { tokens: null, cost: null, latestCall: null };
+      const costCell: typeof meterInfo.cost = !inputs.meter.ok
+        ? inputs.meter.failure.kind === "error"
+          ? { kind: "error", code: inputs.meter.failure.code }
+          : { kind: "no-data", reason: inputs.meter.failure.reason }
+        : meterInfo.cost;
+      // If outcome stage is merge/audit, show task link; if audit, also show tokens/cost/so far? The mock audit card shows tokens/cost for audit.
+      return {
+        alias,
+        stage: outcomeStage,
+        workItemId: wid,
+        title: work?.title ?? wid,
+        issue: work?.issue ?? null,
+        pullNumber: work?.pullNumber ?? null,
+        repo: work?.repo ?? null,
+        branch: work?.branch ?? null,
+        modelText: modelEntry,
+        auditorModelText,
+        elapsed: null,
+        tokens: meterInfo.tokens,
+        cost: costCell,
+        latestCall: null,
+        idleReason: null,
+        probeAt,
+        lastFinished,
+        today,
+      };
+    }
+    // Idle: no running work, no recent finished host work
+    return {
+      alias,
+      stage: "idle",
+      workItemId: null,
+      title: null,
+      issue: null,
+      pullNumber: null,
+      repo: null,
+      branch: null,
+      modelText: null,
+      auditorModelText: null,
+      elapsed: null,
+      tokens: null,
+      cost: null,
+      latestCall: null,
+      idleReason: probe !== null ? idleReasonFromProbe(probe) : null,
+      probeAt,
+      lastFinished,
+      today,
+    };
+  });
+  return { kind: "ok", value: cards };
 }
 
 function activityRows(
@@ -1410,6 +1859,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
             },
     },
   ];
+  const realWork: LiveSection<readonly RealWorkCard[]> = buildRealWorkSection(inputs);
+  const justFinished: LiveSection<readonly JustFinishedEntry[]> = buildJustFinishedSection(inputs);
   const simFleet: LiveSection<readonly LiveGroup[]> = !inputs.sim.ok
     ? section(inputs.sim)
     : (() => {
@@ -1487,6 +1938,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     refreshSeconds,
     nextMinute,
     counters,
+    realWork,
+    justFinished,
     realFleet: !inputs.probes.ok
       ? section(inputs.probes)
       : { kind: "ok", value: realTiles(inputs.probes.value, inputs.dashboard.registry) },

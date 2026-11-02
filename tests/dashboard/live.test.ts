@@ -128,6 +128,17 @@ function fixtureTrace(): string {
       batteryPercent: 40,
       maxAgents: 1,
     }),
+    hostLine({ alias: "desk-002" }),
+    hostLine({
+      alias: "desk-002",
+      atMinute: 40,
+      at: "2026-11-03T17:40:00.000Z",
+      state: "running",
+      running: 2,
+      maxAgents: 2,
+      eligible: false,
+      excludeReason: "excluded: at agent limit (2/2)",
+    }),
     hostLine({
       alias: "desk-142",
       state: "busy",
@@ -263,7 +274,7 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
     expect(page).toContain("REAL");
     expect(page).toContain("desktop");
     expect(page).toContain("placed sim-w-001 on desk-001 because desk-001 is idle");
-    expect(page).toContain("1 of 3");
+    expect(page).toContain("1 of 4");
     expect(page).toContain("desk-001: running");
     if (live.simFleet.kind !== "ok") {
       throw new Error("expected simulated fleet groups");
@@ -276,14 +287,21 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
     const runningCounter = live.counters.find(
       (counter) => counter.label === "Simulated work running",
     );
-    expect(runningCounter?.cell).toEqual({ kind: "text", text: "2" });
+    expect(runningCounter?.cell).toEqual({ kind: "text", text: "4" });
     const flaggedTile = live.simFleet.value
       .flatMap((group) => group.tiles)
       .find((tile) => tile.alias === "laptop-007");
     expect(flaggedTile?.state).toBe("running");
     expect(flaggedTile?.eligible).toBe(false);
+    expect(flaggedTile?.flagged).toBe(true);
+    const atLimitTile = live.simFleet.value
+      .flatMap((group) => group.tiles)
+      .find((tile) => tile.alias === "desk-002");
+    expect(atLimitTile?.state).toBe("running");
+    expect(atLimitTile?.running).toBe(2);
+    expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
-    expect(page).toContain("running, now excluded");
+    expect(page).toContain("running, now excluded for a reason other than its agent limit");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
 

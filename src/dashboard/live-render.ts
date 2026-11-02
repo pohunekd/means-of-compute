@@ -164,8 +164,7 @@ function renderRealTile(tile: LiveTile): SafeHtml {
 
 function renderSimTile(tile: LiveTile): SafeHtml {
   checkAlias(tile);
-  const flagged = tile.running > 0 && !tile.eligible;
-  const flagMark = flagged ? html`<span class="flag">!</span>` : "";
+  const flagMark = tile.flagged ? html`<span class="flag">!</span>` : "";
   const load =
     tile.maxAgents === null
       ? String(tile.running)
@@ -176,7 +175,7 @@ function renderSimTile(tile: LiveTile): SafeHtml {
       ? `${tile.alias}: ${tile.state}${battery}`
       : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
   return html`<div
-    class="sim-tile tile-${tile.state}${flagged ? " tile-flagged" : ""}"
+    class="sim-tile tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}"
     title="${title}"
   >
     <span class="load">${load}${flagMark}</span><span class="alias">${tile.alias}</span>
@@ -333,7 +332,7 @@ export function renderLive(model: LiveModel): string {
                 <span class="dot tile-busy"></span>busy
                 <span class="dot tile-offline"></span>offline · dashed outline and the SIMULATED
                 group tag mark simulated hosts · amber edge with <span class="flag">!</span>:
-                running, now excluded (reason in the title)
+                running, now excluded for a reason other than its agent limit (reason in the title)
               </p>
               <p class="cite">
                 source: real recorded probes and dispatcher registry; simulated fleet trace

@@ -495,8 +495,9 @@ the placement engine. Activity and ticker rows are one line each, clipped
 with an ellipsis and their full text in the row title, so the frame height
 never depends on event text; signage tiles are wide enough that no alias
 clips. A simulated tile that is running but whose last host line excludes
-it carries an amber edge and a `!` marker (the legend reads: running, now
-excluded), with the reason in the tile title.
+it carries an amber edge and a `!` marker when it is running, now excluded
+for a reason other than its agent limit (the legend reads the same), with
+the reason in the tile title.
 
 Failure rule, per section as on `/`: a missing input shows `no data`, an
 unreadable or invalid one shows an error code with details in the

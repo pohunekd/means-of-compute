@@ -89,6 +89,11 @@ export interface SimTrace {
 
 export type LiveTileState = SimTileState | "reported" | "unavailable";
 
+// The agent-limit exclusion text is the fixed template at src/placement/place.ts:144;
+// place() runs its other exclusion checks first, so a host excluded for another reason
+// while running never carries this prefix.
+const AGENT_LIMIT_REASON_PREFIX = "excluded: at agent limit (";
+
 export interface LiveTile {
   readonly alias: string;
   readonly hostKind: string;
@@ -96,6 +101,7 @@ export interface LiveTile {
   readonly simulated: boolean;
   readonly state: LiveTileState;
   readonly eligible: boolean;
+  readonly flagged: boolean;
   readonly running: number;
   readonly maxAgents: number | null;
   readonly batteryPercent: number | null;
@@ -516,6 +522,7 @@ function realTiles(
     simulated: false,
     state: probe.kind === "reported" ? "reported" : "unavailable",
     eligible: probe.kind === "reported",
+    flagged: false,
     running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
     maxAgents: null,
     batteryPercent: null,
@@ -700,6 +707,10 @@ export function buildLive(inputs: LiveInputs): LiveModel {
             simulated: true,
             state: host.state,
             eligible: host.eligible,
+            flagged:
+              host.running > 0 &&
+              !host.eligible &&
+              !(host.excludeReason?.startsWith(AGENT_LIMIT_REASON_PREFIX) ?? false),
             running: host.running,
             maxAgents: host.maxAgents,
             batteryPercent: host.batteryPercent,

@@ -342,11 +342,6 @@ fn split_js_ws_trimmed(s: &str) -> Vec<String> {
     re.split(trimmed).map(|p| p.to_string()).collect()
 }
 
-fn js_ws_split(s: &str) -> Vec<String> {
-    // For show_session props etc we need JS_WS handling; but for list parsing we use split_js_ws_trimmed.
-    split_js_ws_trimmed(s)
-}
-
 pub fn show_session_props(
     loginctl: &str,
     id: &str,
@@ -363,11 +358,9 @@ pub fn show_session_props(
     }
     let mut props = HashMap::new();
     for line in out.split('\n') {
-        if let Some(eq) = line.find('=') {
-            if eq > 0 {
-                let key = line[..eq].to_string();
-                let val = line[eq + 1..].to_string();
-                props.insert(key, val);
+        if let Some((key, val)) = line.split_once('=') {
+            if !key.is_empty() {
+                props.insert(key.to_string(), val.to_string());
             }
         }
     }
@@ -429,7 +422,7 @@ pub fn linux_seconds_since_input(loginctl: &str, now_ms: f64) -> Result<Option<f
 
     let mut session_ids: Vec<String> = Vec::new();
     for line in out.split('\n') {
-        let parts = js_ws_split(line);
+        let parts = split_js_ws_trimmed(line);
         // parts from split_js_ws_trimmed: check length >=2 and id non-empty
         let id = parts.first().cloned().unwrap_or_default();
         if parts.len() >= 2 && !id.is_empty() {
@@ -453,8 +446,11 @@ pub fn linux_seconds_since_input(loginctl: &str, now_ms: f64) -> Result<Option<f
                 "loginctl session {id} has no Class or Remote"
             )));
         }
-        let cls_str = cls.unwrap();
-        let remote_str = remote.unwrap();
+        let (Some(cls_str), Some(remote_str)) = (cls, remote) else {
+            return Err(ProbeError::Message(format!(
+                "loginctl session {id} has no Class or Remote"
+            )));
+        };
         if user_re.is_match(cls_str) && remote_str != "yes" {
             logged_in_ids.push(id.clone());
         }
@@ -504,9 +500,9 @@ pub fn linux_manager_idle_secs(loginctl: &str, now_ms: f64) -> Result<f64, Strin
     }
     let mut props = HashMap::new();
     for line in out.split('\n') {
-        if let Some(eq) = line.find('=') {
-            if eq > 0 {
-                props.insert(line[..eq].to_string(), line[eq + 1..].to_string());
+        if let Some((key, val)) = line.split_once('=') {
+            if !key.is_empty() {
+                props.insert(key.to_string(), val.to_string());
             }
         }
     }
@@ -516,17 +512,8 @@ pub fn linux_manager_idle_secs(loginctl: &str, now_ms: f64) -> Result<f64, Strin
         _ => f64::NAN,
     };
     if !since_us.is_finite() || since_us <= 0.0 {
-        let raw = since_raw.unwrap_or("missing");
-        // When key missing, TS reports "missing"; when present but empty, it would be "" then Number("") =>0 => fails and reports raw which is "" (empty string). We replicate: if prop missing => "missing", else raw value.
-        // The TS code: sinceRaw ?? "missing" where sinceRaw may be undefined or "". If undefined, "missing", else sinceRaw (which could be ""), so empty reports "".
-        // Our since_raw is Option<&str>; if None => "missing", else the string (even empty).
-        let display = match props.get("IdleSinceHint") {
-            Some(v) => v.as_str(),
-            None => "missing",
-        };
-        // Special case: if prop exists but empty string, display is "" - we already have that.
-        // Need to handle case where prop exists as "" => display "" not "missing"
-        let _ = raw; // keep for clarity
+        // TS prints sinceRaw ?? "missing": an empty value prints as empty.
+        let display = since_raw.unwrap_or("missing");
         return Err(format!("manager IdleSinceHint not above zero: {display}"));
     }
     let secs = (now_ms - since_us / 1000.0) / 1000.0;

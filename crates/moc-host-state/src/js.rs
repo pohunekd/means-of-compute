@@ -218,11 +218,6 @@ pub fn errno_name(e: &io::Error) -> String {
 
 pub fn spawn_error(program: &str, e: &io::Error) -> String {
     let errno = errno_name(e);
-    // Bun resolves a bare name to an executable regular file first; a PATH hit that is a
-    // directory or lacks +x is a PATH miss there, where execvp reports EACCES.
-    if !program.contains('/') && matches!(errno.as_str(), "ENOENT" | "EACCES") {
-        return format!("Executable not found in $PATH: \"{program}\"");
-    }
     let description = match errno.as_str() {
         "ENOENT" => "no such file or directory",
         "EACCES" => "permission denied",

@@ -1,5 +1,6 @@
 use moc_host_state::linux::{
-    ProbeError, linux_gpu, linux_power, linux_seconds_since_input, sessions_idle_secs,
+    ProbeError, linux_gpu, linux_manager_idle_secs, linux_power, linux_seconds_since_input,
+    sessions_idle_secs,
 };
 use std::path::PathBuf;
 
@@ -43,6 +44,17 @@ fn linux_sysfs_readers() {
     assert!(ac2);
     assert_eq!(batt2, None);
     let _ = std::fs::remove_dir_all(&tmp);
+
+    // battery present without mains
+    let tmp2 = std::env::temp_dir().join(format!("moc-linux-bat-no-mains-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp2);
+    std::fs::create_dir_all(tmp2.join("class/power_supply/BAT0")).unwrap();
+    std::fs::write(tmp2.join("class/power_supply/BAT0/type"), "Battery").unwrap();
+    std::fs::write(tmp2.join("class/power_supply/BAT0/capacity"), "50").unwrap();
+    let tmp2_str = tmp2.to_str().unwrap().to_string();
+    let err = linux_power(&tmp2_str).unwrap_err();
+    assert_eq!(err, "battery present without mains");
+    let _ = std::fs::remove_dir_all(&tmp2);
 }
 
 #[test]
@@ -83,4 +95,8 @@ fn linux_logind_readers() {
         "expected spawn error, got {}",
         err
     );
+
+    // tty-only manager IdleSinceHint path exits 2 -> manager failure
+    let mgr_err = linux_manager_idle_secs(&tty_loginctl, now_ms).unwrap_err();
+    assert_eq!(mgr_err, "loginctl show-session manager failed");
 }

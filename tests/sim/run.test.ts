@@ -168,41 +168,6 @@ describe("fleet simulator", () => {
         .update(stripped.map((r) => JSON.stringify(r)).join("\n") + "\n")
         .digest("hex"),
     ).toBe("0b465d78ad29f2be59d3a0717efa1f92733f881c818deaa25966ec00d2004cf9");
-    const runningByHost = new Map<
-      string,
-      { atMinute: number; task: { kind: string; title: string } }[]
-    >();
-    const workDuration = new Map<string, number>();
-    for (const workItemId of placements.map((p) => p["workItemId"] as string)) {
-      const prefix = Object.keys(tasksByPrefix).find((p) => workItemId.startsWith(p)) as string;
-      const duration = prefix === "sim-w-" ? 50 : 120;
-      workDuration.set(workItemId, duration);
-    }
-    for (const line of lines) {
-      if (line["kind"] === "placement") {
-        const chosen = line["chosenHostAlias"] as string | null;
-        if (chosen !== null) {
-          const list = runningByHost.get(chosen) ?? [];
-          list.push({
-            atMinute: line["atMinute"] as number,
-            task: line["task"] as { kind: string; title: string },
-          });
-          runningByHost.set(chosen, list);
-        }
-      } else if (line["kind"] === "work-end") {
-        const hostAlias = line["hostAlias"] as string;
-        const workItemId = line["workItemId"] as string;
-        const list = runningByHost.get(hostAlias);
-        if (list !== undefined) {
-          const idx = list.findIndex((entry) =>
-            entry.task.title.endsWith(workItemId.split("-").pop() as string),
-          );
-          if (idx !== -1) {
-            list.splice(idx, 1);
-          }
-        }
-      }
-    }
     // Direct check: find a host line with running >=2 where tasks differ, and verify earliest task
     let foundEarliest = false;
     const active = new Map<

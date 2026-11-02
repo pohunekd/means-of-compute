@@ -483,6 +483,42 @@ test("live renders real and simulated tiles with markers, keeps sim aliases out 
       } finally {
         rmSync(missingTask.dir, { recursive: true, force: true });
       }
+      const missingHostTask = makeFixture(
+        (() => {
+          const withoutTaskHost = hostLine({});
+          delete withoutTaskHost["task"];
+
+          return traceTextLabeled(
+            [withoutTaskHost, hostLine({ alias: "desk-002" })],
+            [
+              {
+                kind: "placement",
+                simulated: true,
+                atMinute: 40,
+                at: "2026-11-03T17:40:00.000Z",
+                workItemId: "sim-w-001",
+                chosenHostAlias: "desk-001",
+                reason: "desk-001 is idle",
+                task: { kind: "support", title: "Support queue triage 001" },
+                eligibleCount: 1,
+                candidates: 1,
+              },
+            ],
+          );
+        })(),
+      );
+      try {
+        const missingHostDashboard = await dashboardInputs(missingHostTask);
+        const missingHostLive = buildLive(
+          await gatherLiveInputs(missingHostTask.sources, missingHostDashboard, 60, () => {}),
+        );
+        expect(missingHostLive.simFleet.kind).toBe("error");
+        if (missingHostLive.simFleet.kind === "error") {
+          expect(missingHostLive.simFleet.code).toBe("sim-trace-invalid");
+        }
+      } finally {
+        rmSync(missingHostTask.dir, { recursive: true, force: true });
+      }
     } finally {
       rmSync(labeled.dir, { recursive: true, force: true });
     }

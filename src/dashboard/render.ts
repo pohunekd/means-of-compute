@@ -215,34 +215,7 @@ function renderPlacement(text: string): SafeHtml {
   </details>`;
 }
 
-function buildOverviewTaskHref(task: string, opts: DashboardViewOptions): string {
-  const params = new URLSearchParams();
-  params.set("view", "overview");
-  if (opts.t !== 0) params.set("t", String(opts.t));
-  if (opts.paused) params.set("pause", "1");
-  params.set("task", task);
-  return `/?${params.toString()}`;
-}
-
-function buildOverviewAuditHref(audit: string, opts: DashboardViewOptions): string {
-  const params = new URLSearchParams();
-  params.set("view", "overview");
-  if (opts.t !== 0) params.set("t", String(opts.t));
-  if (opts.paused) params.set("pause", "1");
-  params.set("audit", audit);
-  return `/?${params.toString()}`;
-}
-
-function renderCell(
-  cell: Cell,
-  panelId: PanelId,
-  column: string,
-  linkItems = false,
-  opts?: DashboardViewOptions,
-  knownWorkIds?: ReadonlySet<string>,
-  row?: readonly Cell[],
-  columns?: readonly string[],
-): SafeHtml {
+function renderCell(cell: Cell, panelId: PanelId, column: string, ctx?: RenderContext): SafeHtml {
   const numeric = NUMERIC_COLUMNS.has(column) ? " num" : "";
   const base = `${cellClass(cell)}${numeric}`;
   if (cell.kind === "aliases") {
@@ -275,69 +248,20 @@ function renderCell(
   }
   if (panelId === "work" && column === "item") {
     if (
-      linkItems &&
-      opts !== undefined &&
-      opts.liveAvailable &&
-      knownWorkIds !== undefined &&
-      knownWorkIds.has(text) &&
+      ctx !== undefined &&
+      ctx.linkItems &&
+      ctx.opts.liveAvailable &&
+      ctx.knownWorkIds.has(text) &&
       text.trim() !== ""
     ) {
-      const href = buildOverviewTaskHref(text, opts);
+      const baseHref = buildTabHref("overview", ctx.opts);
+      const sep = baseHref.includes("?") ? "&" : "?";
+      const href = `${baseHref}${sep}task=${encodeURIComponent(text)}`;
       return html`<td class="${base}">
         <span class="mono nowrap"><a href="${href}">${text}</a></span>
       </td>`;
     }
     return html`<td class="${base}"><span class="mono nowrap">${text}</span></td>`;
-  }
-  if (panelId === "autonomy" && column === "item") {
-    if (
-      linkItems &&
-      opts !== undefined &&
-      opts.liveAvailable &&
-      row !== undefined &&
-      columns !== undefined
-    ) {
-      const itemIdx = columns.indexOf("item");
-      const shaIdx = columns.indexOf("sha");
-      if (itemIdx !== -1 && shaIdx !== -1) {
-        const itemCell = row[itemIdx];
-        const shaCell = row[shaIdx];
-        if (itemCell?.kind === "text" && shaCell?.kind === "text") {
-          const auditKey = `${itemCell.text}@${shaCell.text}`;
-          const href = buildOverviewAuditHref(auditKey, opts);
-          return html`<td class="${base}">
-            <span class="mono nowrap"><a href="${href}">${text}</a></span>
-          </td>`;
-        }
-      }
-    }
-    return html`<td class="${base}"><span class="mono nowrap">${text}</span></td>`;
-  }
-  if (panelId === "autonomy" && column === "sha") {
-    const shown = text.length > 12 ? text.slice(0, 12) : text;
-    const display = shown === text ? html`${text}` : html`<span title="${text}">${shown}</span>`;
-    if (
-      linkItems &&
-      opts !== undefined &&
-      opts.liveAvailable &&
-      row !== undefined &&
-      columns !== undefined
-    ) {
-      const itemIdx = columns.indexOf("item");
-      const shaIdx = columns.indexOf("sha");
-      if (itemIdx !== -1 && shaIdx !== -1) {
-        const itemCell = row[itemIdx];
-        const shaCell = row[shaIdx];
-        if (itemCell?.kind === "text" && shaCell?.kind === "text") {
-          const auditKey = `${itemCell.text}@${shaCell.text}`;
-          const href = buildOverviewAuditHref(auditKey, opts);
-          return html`<td class="${base}">
-            <span class="mono nowrap"><a href="${href}">${display}</a></span>
-          </td>`;
-        }
-      }
-    }
-    return html`<td class="${base}"><span class="mono nowrap">${display}</span></td>`;
   }
   if (panelId === "work" && column === "verdicts") {
     return html`<td class="${base}"><span class="mono verdicts">${text}</span></td>`;
@@ -349,9 +273,7 @@ function renderTable(
   table: Table,
   panelId: PanelId,
   panelTitle: string,
-  linkItems = false,
-  opts?: DashboardViewOptions,
-  knownWorkIds?: ReadonlySet<string>,
+  ctx?: RenderContext,
 ): SafeHtml {
   const captionClass = table.caption === panelTitle ? "caption-same" : "";
   const heads = table.columns.map(
@@ -360,7 +282,7 @@ function renderTable(
   const rows = table.rows.map(
     (row) =>
       html`<tr>
-        ${row.map((cell, index) => renderCell(cell, panelId, table.columns[index] ?? "", linkItems, opts, knownWorkIds, row, table.columns))}
+        ${row.map((cell, index) => renderCell(cell, panelId, table.columns[index] ?? "", ctx))}
       </tr>`,
   );
   const cite = html`<p class="cite">source: ${table.source}</p>`;
@@ -383,6 +305,12 @@ function renderTable(
     ${cite}${note}`;
 }
 
+export interface RenderContext {
+  readonly linkItems: boolean;
+  readonly opts: DashboardViewOptions;
+  readonly knownWorkIds: ReadonlySet<string>;
+}
+
 function renderPanel(panel: Panel): SafeHtml {
   const figures =
     panel.figures.length === 0
@@ -390,9 +318,7 @@ function renderPanel(panel: Panel): SafeHtml {
       : html`<div class="figures">
           ${panel.figures.map((figure) => renderFigure(figure, "figure"))}
         </div>`;
-  const tables = panel.tables
-    .filter((table) => !(panel.id === "autonomy" && table.caption === "Verdicts"))
-    .map((table) => renderTable(table, panel.id, panel.title));
+  const tables = panel.tables.map((table) => renderTable(table, panel.id, panel.title));
   return html`<section id="${panel.id}">
     <h2>${panel.title}</h2>
     ${figures}${tables}
@@ -449,7 +375,7 @@ export interface DashboardViewOptions {
   readonly paused: boolean;
   readonly host: string | null;
   readonly liveAvailable: boolean;
-  readonly knownWorkIds?: ReadonlySet<string>;
+  readonly knownWorkIds: ReadonlySet<string>;
 }
 
 function buildTabHref(tab: string, opts: DashboardViewOptions): string {
@@ -477,20 +403,14 @@ function renderTabs(activeView: string, opts: DashboardViewOptions): SafeHtml {
   return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
 }
 
-function renderPanelTabbed(
-  panel: Panel,
-  opts: DashboardViewOptions,
-  knownWorkIds: ReadonlySet<string>,
-): SafeHtml {
+function renderPanelTabbed(panel: Panel, ctx: RenderContext): SafeHtml {
   const figures =
     panel.figures.length === 0
       ? constantHtml("")
       : html`<div class="figures">
           ${panel.figures.map((figure) => renderFigure(figure, "figure"))}
         </div>`;
-  const tables = panel.tables.map((table) =>
-    renderTable(table, panel.id, panel.title, true, opts, knownWorkIds),
-  );
+  const tables = panel.tables.map((table) => renderTable(table, panel.id, panel.title, ctx));
   return html`<section id="${panel.id}">
     <h2>${panel.title}</h2>
     ${figures}${tables}
@@ -499,28 +419,12 @@ function renderPanelTabbed(
 
 export function renderDashboardWithView(model: DashboardModel, opts: DashboardViewOptions): string {
   const activePanel = model.panels.find((panel) => panel.id === opts.view) ?? null;
-  let knownWorkIds: ReadonlySet<string>;
-  if (opts.knownWorkIds !== undefined) {
-    knownWorkIds = opts.knownWorkIds;
-  } else {
-    const fallback = new Set<string>();
-    for (const p of model.panels) {
-      if (p.id === "work") {
-        for (const table of p.tables) {
-          const itemIdx = table.columns.indexOf("item");
-          if (itemIdx !== -1) {
-            for (const row of table.rows) {
-              const cell = row[itemIdx];
-              if (cell?.kind === "text") fallback.add(cell.text);
-            }
-          }
-        }
-      }
-    }
-    knownWorkIds = fallback;
-  }
-  const section =
-    activePanel === null ? constantHtml("") : renderPanelTabbed(activePanel, opts, knownWorkIds);
+  const ctx: RenderContext = {
+    linkItems: true,
+    opts,
+    knownWorkIds: opts.knownWorkIds,
+  };
+  const section = activePanel === null ? constantHtml("") : renderPanelTabbed(activePanel, ctx);
   const tabs = renderTabs(opts.view, opts);
   const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
   const rendered = compactTime(model.renderedAt) ?? model.renderedAt;

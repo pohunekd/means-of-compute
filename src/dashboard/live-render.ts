@@ -755,28 +755,28 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
 
 function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { call: null });
-  const broken = panel.providerId === "-" && panel.hostAlias === null && panel.cost.kind !== "text";
-  if (broken) {
+  if (panel.detail.kind !== "ok") {
     const err =
-      panel.cost.kind === "error"
-        ? html`<p class="error">error (${panel.cost.code})</p>`
-        : html`<p class="nodata">no data (${panel.cost.reason})</p>`;
+      panel.detail.kind === "error"
+        ? html`<p class="error">error (${panel.detail.code})</p>`
+        : html`<p class="nodata">no data (${panel.detail.reason})</p>`;
     return html`<div class="host-panel" id="call-panel">
       <h3>Call ${panel.endedAt}</h3>
       ${err}
       <p><a href="${backHref}">back to live</a></p>
     </div>`;
   }
+  const detail = panel.detail.value;
   const costCell =
-    panel.cost.kind === "no-data"
-      ? html`<span class="nodata">no data (${panel.cost.reason})</span>`
-      : panel.cost.kind === "error"
-        ? html`<span class="error">error (${panel.cost.code})</span>`
-        : html`<span class="value">${panel.cost.text}</span>`;
+    detail.cost.kind === "no-data"
+      ? html`<span class="nodata">no data (${detail.cost.reason})</span>`
+      : detail.cost.kind === "error"
+        ? html`<span class="error">error (${detail.cost.code})</span>`
+        : html`<span class="value">${detail.cost.text}</span>`;
   const hostLink =
-    panel.hostAlias === null
+    detail.hostAlias === null
       ? "none"
-      : html`<a href="${buildHref(model, { host: panel.hostAlias })}">${panel.hostAlias}</a>`;
+      : html`<a href="${buildHref(model, { host: detail.hostAlias })}">${detail.hostAlias}</a>`;
   const taskLink =
     panel.workItemId === null
       ? "none"
@@ -784,15 +784,15 @@ function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
   return html`<div class="host-panel" id="call-panel">
     <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
     <p class="row">Ended at: ${panel.endedAt}</p>
-    <p class="row">Provider: ${panel.providerId}</p>
-    <p class="row">Model: ${panel.model} (${panel.providerId})</p>
-    <p class="row">Role: ${panel.role ?? "-"}</p>
+    <p class="row">Provider: ${detail.providerId}</p>
+    <p class="row">Model: ${detail.model} (${detail.providerId})</p>
+    <p class="row">Role: ${detail.role ?? "-"}</p>
     <p class="row">Task: ${taskLink}</p>
     <p class="row">Host: ${hostLink}</p>
     <p class="row">
-      Tokens: in ${panel.inputTokens === null ? "no data" : groupDigits(panel.inputTokens)} out
-      ${panel.outputTokens === null ? "no data" : groupDigits(panel.outputTokens)} ms
-      ${groupDigits(panel.ms)}
+      Tokens: in ${detail.inputTokens === null ? "no data" : groupDigits(detail.inputTokens)} out
+      ${detail.outputTokens === null ? "no data" : groupDigits(detail.outputTokens)} ms
+      ${groupDigits(detail.ms)}
     </p>
     <p class="row">Cost: ${costCell}</p>
     <p><a href="${backHref}">back to live</a></p>
@@ -824,14 +824,16 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
           const prLine =
             verdict.pullNumber === null
               ? html`<p class="row">PR: none</p>`
-              : panel.workItemRepo !== null && verdict.repo !== panel.workItemRepo
-                ? html`<p class="row">PR: #${String(verdict.pullNumber)} (repo differs)</p>`
-                : html`<p class="row">
+              : panel.workItemRepo !== null && verdict.repo === panel.workItemRepo
+                ? html`<p class="row">
                     PR:
                     <a href="https://github.com/${verdict.repo}/pull/${String(verdict.pullNumber)}"
                       >#${String(verdict.pullNumber)}</a
                     >
-                  </p>`;
+                  </p>`
+                : panel.workItemRepo !== null
+                  ? html`<p class="row">PR: #${String(verdict.pullNumber)} (repo differs)</p>`
+                  : html`<p class="row">PR: #${String(verdict.pullNumber)}</p>`;
           return html`<div>
             <p class="row">Head: ${verdict.headSha}</p>
             ${countsLine} ${repoLine} ${auditorLine} ${authorsLine}

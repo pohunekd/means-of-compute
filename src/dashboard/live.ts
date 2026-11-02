@@ -234,19 +234,23 @@ export interface TaskPanelReal {
 
 export type TaskPanel = TaskPanelSim | TaskPanelReal;
 
-export interface CallPanel {
-  readonly callId: string;
-  readonly endedAt: string;
+export interface CallDetail {
   readonly providerId: string;
   readonly model: string;
   readonly rawModel: string;
   readonly role: string | null;
-  readonly workItemId: string | null;
   readonly hostAlias: string | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly ms: number;
   readonly cost: LiveCell;
+}
+
+export interface CallPanel {
+  readonly callId: string;
+  readonly endedAt: string;
+  readonly workItemId: string | null;
+  readonly detail: LiveSection<CallDetail>;
 }
 
 export interface AuditPanel {
@@ -1235,23 +1239,15 @@ function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
   if (endedAt === "" || workItemId === "") return null;
   if (!isKnownWorkItemId(inputs, workItemId)) return null;
   if (!inputs.meter.ok) {
-    const cost: LiveCell =
+    const detail: LiveSection<CallDetail> =
       inputs.meter.failure.kind === "error"
         ? { kind: "error", code: inputs.meter.failure.code }
         : { kind: "no-data", reason: inputs.meter.failure.reason };
     return {
       callId: callKey,
       endedAt,
-      providerId: "-",
-      model: "-",
-      rawModel: "-",
-      role: null,
       workItemId,
-      hostAlias: null,
-      inputTokens: null,
-      outputTokens: null,
-      ms: 0,
-      cost,
+      detail,
     };
   }
   // Find matching call-end by at and workItemId via grant
@@ -1285,19 +1281,25 @@ function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
               ),
             };
     }
+    const detail: LiveSection<CallDetail> = {
+      kind: "ok",
+      value: {
+        providerId,
+        model,
+        rawModel,
+        role: "session",
+        hostAlias: grant.hostAlias,
+        inputTokens: end.inputTokens,
+        outputTokens: end.outputTokens,
+        ms: end.ms,
+        cost,
+      },
+    };
     return {
       callId: end.callId,
       endedAt: end.at,
-      providerId,
-      model,
-      rawModel,
-      role: "session",
       workItemId: grant.workItemId,
-      hostAlias: grant.hostAlias,
-      inputTokens: end.inputTokens,
-      outputTokens: end.outputTokens,
-      ms: end.ms,
-      cost,
+      detail,
     };
   }
   return null;

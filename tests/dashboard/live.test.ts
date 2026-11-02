@@ -844,10 +844,11 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       call: "2026-11-03T17:59:02.000Z|w1-demo",
     });
     if (callPriced.callPanel === null) throw new Error("expected call panel");
-    expect(callPriced.callPanel.model).toBe("muse-spark-open-1026");
-    expect(callPriced.callPanel.rawModel).toBe("meta-models/muse-spark-open-1026");
-    expect(callPriced.callPanel.providerId).toBe("meta-api");
-    expect(callPriced.callPanel.cost).toEqual({ kind: "text", text: "$0.0002" });
+    if (callPriced.callPanel.detail.kind !== "ok") throw new Error("expected ok detail");
+    expect(callPriced.callPanel.detail.value.model).toBe("muse-spark-open-1026");
+    expect(callPriced.callPanel.detail.value.rawModel).toBe("meta-models/muse-spark-open-1026");
+    expect(callPriced.callPanel.detail.value.providerId).toBe("meta-api");
+    expect(callPriced.callPanel.detail.value.cost).toEqual({ kind: "text", text: "$0.0002" });
     const callPage = renderLive(callPriced);
     expect(callPage).toContain("muse-spark-open-1026");
     expect(callPage).toContain("muse-spark-open-1026 (meta-api)");
@@ -863,11 +864,12 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       },
     );
     if (callUnmeasured.callPanel === null) throw new Error("expected unmeasured call panel");
-    expect(callUnmeasured.callPanel.cost).toEqual({
+    if (callUnmeasured.callPanel.detail.kind !== "ok") throw new Error("expected ok detail");
+    expect(callUnmeasured.callPanel.detail.value.cost).toEqual({
       kind: "no-data",
       reason: "usage not reported",
     });
-    expect(callUnmeasured.callPanel.inputTokens).toBeNull();
+    expect(callUnmeasured.callPanel.detail.value.inputTokens).toBeNull();
     const callUnmeasuredPage = renderLive(callUnmeasured);
     expect(callUnmeasuredPage).toContain("in no data");
     expect(callUnmeasuredPage).toContain("out");

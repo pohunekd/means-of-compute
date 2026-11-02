@@ -2,7 +2,7 @@
 // buildDashboard turns gathered Sourced inputs into panels; every figure
 // cites its ledger field and price entry, and a missing input shows
 // "no data" while an unreadable input shows an error code only.
-import type { AuditVerdict, UsageRecord } from "../../contracts/v1/types.js";
+import type { UsageRecord } from "../../contracts/v1/types.js";
 import { verdictCounts } from "../auditor/verdict.js";
 import {
   entriesOfProviders,
@@ -1239,22 +1239,7 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
   const success = records.filter((record) => record.result === "success").length;
   const blocked = records.filter((record) => record.result === "blocked").length;
   const modelRows = queryLedger(inputs.ledger.value, new Set(["model"])).byModel ?? [];
-  const verdictRows: readonly Cell[][] = (() => {
-    const rows: Cell[][] = [];
-    for (const sourced of inputs.verdicts.values()) {
-      if (!sourced.ok) continue;
-      for (const verdict of sourced.value) {
-        const counted = verdictCounts(verdict);
-        const countsText =
-          counted === "invalid"
-            ? "invalid (counts disagree)"
-            : `high ${String(counted.high)}, medium ${String(counted.medium)}, low ${String(counted.low)}`;
-        rows.push([textCell(verdict.workItemId), textCell(verdict.headSha), textCell(countsText)]);
-      }
-    }
-    return rows;
-  })();
-  const tables: Array<Panel["tables"][number]> = [
+  const tables: readonly Table[] = [
     {
       caption: "Sessions per model (finished tasks)",
       columns: ["model", "sessions", "ended ok"],
@@ -1268,15 +1253,6 @@ function buildAutonomyPanel(inputs: DashboardInputs): Panel {
       note: null,
     },
   ];
-  if (verdictRows.length > 0) {
-    tables.push({
-      caption: "Verdicts",
-      columns: ["item", "sha", "counts"],
-      rows: verdictRows,
-      source: "audit verdicts (verdictsPath)",
-      note: null,
-    });
-  }
   return {
     id: "autonomy",
     title: "Autonomy",
@@ -1363,12 +1339,6 @@ function buildModelsPanel(inputs: DashboardInputs): Panel {
     ],
   };
 }
-
-export function verdictCountsForPanel(verdict: AuditVerdict): ReturnType<typeof verdictCounts> {
-  return verdictCounts(verdict);
-}
-
-export { verdictCounts };
 
 export function buildDashboard(inputs: DashboardInputs): DashboardModel {
   const day = utcCalendarDay(inputs.now);

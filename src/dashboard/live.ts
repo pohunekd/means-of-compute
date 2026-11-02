@@ -1,4 +1,4 @@
-/* eslint-disable no-useless-assignment, no-dupe-else-if, @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable no-useless-assignment, no-dupe-else-if, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unused-vars */
 // Live view model: recorded real fleet, the real meter activity and a
 // simulated fleet replayed from a sim-trace-v1 file (docs/dashboard.md).
 // Pure: buildLive turns gathered Sourced inputs into the value the live
@@ -130,12 +130,6 @@ export interface LiveTile {
 export interface LiveGroup {
   readonly title: string;
   readonly tiles: readonly LiveTile[];
-}
-
-export interface LiveCounter {
-  readonly label: string;
-  readonly simulated: boolean;
-  readonly cell: LiveCell;
 }
 
 export interface LiveActivityRow {
@@ -314,10 +308,8 @@ export interface LiveModel {
   readonly durationMinutes: number | null;
   readonly refreshSeconds: number | null;
   readonly nextMinute: number | null;
-  readonly counters: readonly LiveCounter[];
   readonly realWork: LiveSection<readonly RealWorkCard[]>;
   readonly justFinished: LiveSection<readonly JustFinishedEntry[]>;
-  readonly realFleet: LiveSection<readonly LiveTile[]>;
   readonly simFleet: LiveSection<readonly LiveGroup[]>;
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
   readonly ticker: readonly LiveTickerRow[];
@@ -839,7 +831,7 @@ function formatElapsed(startedAt: string, now: Date): string | null {
   const startMs = Date.parse(startedAt);
   if (!Number.isFinite(startMs)) return null;
   const diffMs = now.getTime() - startMs;
-  if (diffMs < 0) return "0 min";
+  if (diffMs < 0) return "no data (clock skew)";
   const mins = Math.floor(diffMs / 60000);
   if (mins < 60) return `${String(mins)} min`;
   const hours = Math.floor(mins / 60);
@@ -1190,12 +1182,19 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
     // A merged result is considered finished and the host becomes idle with lastFinished info.
     {
       // Look for a pending audit result on this host: newest result with outcome != merged and no verdict yet.
-      let pending: (typeof resultsOk)[number] | null = null;
+      // Stage: newest result for this host determines audit vs idle
+      let newestForHost: (typeof resultsOk)[number] | null = null;
       for (const row of resultsOk) {
         if (row.hostAlias !== alias) continue;
-        if (row.outcome === "merged") continue;
-        if (row.outcome === "start-rejected") continue;
-        if (pending === null || row.at > pending.at) pending = row;
+        if (newestForHost === null || row.at > newestForHost.at) newestForHost = row;
+      }
+      let pending: (typeof resultsOk)[number] | null = null;
+      if (
+        newestForHost !== null &&
+        newestForHost.outcome !== "merged" &&
+        newestForHost.outcome !== "start-rejected"
+      ) {
+        pending = newestForHost;
       }
       if (pending !== null) {
         const verdicts = inputs.dashboard.verdicts.get(pending.workItemId);
@@ -1206,8 +1205,13 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
           const newest = newestResultByWorkItem.get(wid);
           const modelEntry = newest?.model ? stripProvider(newest.model) : null;
           const providerId = newest?.providerId ?? null;
-          const auditorModelText: string | null = null;
-          // Auditor known from verdict store only when verdict exists; pending audit has none.
+          let auditorModelText: string | null = "auditor: no data (verdict not written yet)";
+          const vForAuditor = inputs.dashboard.verdicts.get(wid);
+          if (vForAuditor !== undefined && vForAuditor.ok && vForAuditor.value.length > 0) {
+            const lastV = vForAuditor.value[vForAuditor.value.length - 1];
+            if (lastV !== undefined)
+              auditorModelText = `auditor: ${stripProvider(lastV.auditorModel)}`;
+          }
           const meterInfo = inputs.meter.ok
             ? sumMeterForWorkItem(inputs.meter.value, wid, inputs.dashboard.pricing)
             : { tokens: null, cost: null, latestCall: null };
@@ -1264,7 +1268,32 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       tokens: null,
       cost: null,
       latestCall: null,
-      idleReason: probe !== null ? idleReasonFromProbe(probe) : null,
+      idleReason: (() => {
+        if (!inputs.dashboard.results.ok)
+          return inputs.dashboard.results.failure.kind === "error"
+            ? `error (${inputs.dashboard.results.failure.code})`
+            : `no data (${inputs.dashboard.results.failure.reason})`;
+        if (!inputs.dashboard.workItems.ok)
+          return inputs.dashboard.workItems.failure.kind === "error"
+            ? `error (${inputs.dashboard.workItems.failure.code})`
+            : `no data (${inputs.dashboard.workItems.failure.reason})`;
+        if (probe !== null) {
+          if (probe.kind === "unavailable") {
+            if (probe.cause === "plugin-busy") return "person at the desk";
+            return probe.cause === null ? "unavailable" : probe.cause.replace(/-/g, " ");
+          }
+          // reported probe: check queue
+          if (inputs.dashboard.workItems.ok) {
+            const queued = inputs.dashboard.workItems.value.filter(
+              (w) => w.status === "queued",
+            ).length;
+            if (queued === 0) return "no work queued";
+            return `${String(queued)} queued, not placed`;
+          }
+          return "no work queued";
+        }
+        return null;
+      })(),
       probeAt,
       lastFinished,
       today,
@@ -1826,7 +1855,6 @@ function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | nul
 
 export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
   const nowIso = inputs.now.toISOString();
-  const utcDay = nowIso.slice(0, 10);
   const sim = inputs.sim.ok ? inputs.sim.value : null;
   const minute = inputs.minute;
   const tiles = sim === null ? [] : simTilesAt(sim, minute);
@@ -1836,67 +1864,6 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     nextMinute === null || sim === null
       ? null
       : Math.min(30, Math.max(2, Math.ceil((LIVE_STEP_MINUTES * 60) / sim.speed)));
-  const counters: LiveCounter[] = [
-    {
-      label: "Real hosts reporting",
-      simulated: false,
-      cell: liveCell(inputs.probes, (probes) =>
-        probes.length === 0
-          ? "0"
-          : `${groupDigits(probes.filter((probe) => probe.kind === "reported").length)} of ${groupDigits(probes.length)}`,
-      ),
-    },
-    {
-      label: "Sessions running",
-      simulated: false,
-      cell: sourcedCell(inputs.dashboard.registry, (entries) =>
-        groupDigits(entries.filter((entry) => entry.terminal === null).length),
-      ),
-    },
-    {
-      label: "Meter calls today",
-      simulated: false,
-      cell: liveCell(inputs.meter, (index) =>
-        groupDigits(
-          [...index.ends.values()].filter((end) => end.at.slice(0, 10) === utcDay).length,
-        ),
-      ),
-    },
-    {
-      label: "Simulated hosts eligible",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : {
-              kind: "text",
-              text: `${groupDigits(tiles.filter((tile) => tile.eligible).length)} of ${groupDigits(sim.hostCount)}`,
-            },
-    },
-    {
-      label: "Simulated work running",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : { kind: "text", text: groupDigits(tiles.reduce((sum, tile) => sum + tile.running, 0)) },
-    },
-    {
-      label: "Simulated placements",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : {
-              kind: "text",
-              text: groupDigits(
-                sim.placements.filter(
-                  (placement) => placement.atMinute <= minute && placement.chosenHostAlias !== null,
-                ).length,
-              ),
-            },
-    },
-  ];
   const realWork: LiveSection<readonly RealWorkCard[]> = buildRealWorkSection(inputs);
   const justFinished: LiveSection<readonly JustFinishedEntry[]> = buildJustFinishedSection(inputs);
   const simFleet: LiveSection<readonly LiveGroup[]> = !inputs.sim.ok
@@ -1975,12 +1942,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     durationMinutes: sim === null ? null : sim.durationMinutes,
     refreshSeconds,
     nextMinute,
-    counters,
     realWork,
     justFinished,
-    realFleet: !inputs.probes.ok
-      ? section(inputs.probes)
-      : { kind: "ok", value: realTiles(inputs.probes.value, inputs.dashboard.registry) },
     simFleet,
     activity: !inputs.meter.ok
       ? section(inputs.meter)

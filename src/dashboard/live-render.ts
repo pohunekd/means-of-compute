@@ -19,7 +19,6 @@ import type {
   JustFinishedEntry,
   LiveActivityRow,
   LiveCell,
-  LiveCounter,
   LiveGroup,
   LiveModel,
   LiveSection,
@@ -53,7 +52,7 @@ export const LIVE_CSS = [
   ".keycard .cite{font-size:0.42rem;margin:0.02rem 0 0;line-height:1}",
   ".keycard.live-simcard{border-top-style:dashed}",
   "section{padding:0.2rem 0.3rem 0.2rem;margin-top:0.2rem;border-radius:4px}",
-  "h2{font-size:0.7rem;margin:0 0 0.12rem}",
+  "h2{font-size:0.95rem;margin:0 0 0.12rem}",
   ".live-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,0.9fr);gap:0.3rem;align-items:start}",
   ".live-side{display:grid;gap:0.4rem}",
   ".live-side section{margin-top:0}",
@@ -71,7 +70,7 @@ export const LIVE_CSS = [
   ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
   ".tile-flagged .alias{color:var(--parked-text)}",
   ".flag{color:var(--parked-text);font-weight:700}",
-  ".chip{font-size:0.42rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
+  ".chip{font-size:15px;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
   ".chip-real{color:var(--accent)}",
   ".tile-eligible{background:var(--done-bg);color:var(--done-text)}",
   ".tile-running{background:var(--running-bg);color:var(--running-text)}",
@@ -163,18 +162,6 @@ function cellText(cell: LiveCell): string {
 
 function cellClass(cell: LiveCell): string {
   return cell.kind === "text" ? "value" : cell.kind === "no-data" ? "nodata" : "error";
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderCounter(counter: LiveCounter): SafeHtml {
-  const label = counter.simulated ? `${counter.label} (simulated)` : counter.label;
-  return html`<div class="keycard ${counter.simulated ? "live-simcard" : ""}">
-    <span class="label">${label}</span>
-    <span class="${cellClass(counter.cell)}">${cellText(counter.cell)}</span>
-    <p class="cite">
-      source: ${counter.simulated ? "simulated fleet trace" : "real factory inputs"}
-    </p>
-  </div>`;
 }
 
 function checkAlias(tile: LiveTile): void {
@@ -388,7 +375,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
           ${card.latestCall.inputTokens === null ? "—" : groupDigits(card.latestCall.inputTokens)}
           in /
           ${card.latestCall.outputTokens === null ? "—" : groupDigits(card.latestCall.outputTokens)}
-          out · ${groupDigits(card.latestCall.ms)} ms · ${card.latestCall.model}
+          out · ${groupDigits(card.latestCall.ms)} ms
         </p>`;
   const probeLine =
     card.stage !== "idle" || card.probeAt === null
@@ -443,7 +430,7 @@ function renderJustFinished(entry: JustFinishedEntry, model: LiveModel): SafeHtm
   const counts = entry.verdictCounts;
   const countsText: SafeHtml =
     counts === null
-      ? constantHtml("")
+      ? constantHtml("no data (no verdict)")
       : counts === "invalid"
         ? html`<span class="error">invalid verdict counts</span>`
         : auditHref === null

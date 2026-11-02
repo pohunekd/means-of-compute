@@ -629,7 +629,7 @@ function realTiles(
     eligible: probe.kind === "reported",
     flagged: false,
     running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
-    maxAgents: 2,
+    maxAgents: null,
     batteryPercent: null,
     detail:
       probe.kind === "reported"
@@ -638,11 +638,9 @@ function realTiles(
   }));
 }
 
-function stripProvider(model: string, providerId: string): string {
-  const prefix = `${providerId}/`;
-  if (model.startsWith(prefix)) {
-    return model.slice(prefix.length);
-  }
+function stripProvider(model: string): string {
+  const idx = model.lastIndexOf("/");
+  if (idx !== -1) return model.slice(idx + 1);
   return model;
 }
 
@@ -656,7 +654,7 @@ function activityRows(
     const grant = meter.grants.get(end.requestId)?.open;
     const providerId = start?.providerId ?? grant?.providerId ?? "unknown";
     const rawModel = start?.model ?? grant?.model ?? "unknown";
-    const model = stripProvider(rawModel, providerId);
+    const model = stripProvider(rawModel);
     let cost: LiveCell;
     if (end.inputTokens === null || end.outputTokens === null) {
       cost = { kind: "no-data", reason: "usage not reported" };

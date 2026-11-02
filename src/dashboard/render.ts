@@ -18,10 +18,6 @@ export const DASHBOARD_CSS = [
   "h1{font-size:2.2rem;line-height:1.15;margin:0}",
   ".tagline{font-size:1.15rem;color:var(--muted);margin:0.5rem 0 0}",
   ".meta{color:var(--muted);margin:0.75rem 0 0}",
-  ".tabs{display:flex;gap:0.45rem;flex-wrap:wrap;margin:1.1rem 0 0;padding-bottom:0.6rem;border-bottom:1px solid var(--border)}",
-  ".tab{padding:0.32rem 0.8rem;border-radius:999px;font-size:0.92rem;font-weight:600;text-decoration:none;color:var(--muted);border:1px solid transparent}",
-  ".tab.active{color:var(--text);background:var(--surface-2);border-color:var(--border)}",
-  ".tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}",
   ".keyfigures{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem;margin-top:1.25rem}",
   ".keycard{background:var(--surface);border:1px solid var(--border);border-top:4px solid var(--accent);border-radius:12px;padding:1rem 1.1rem}",
   "section{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 1px 3px rgb(0 0 0/0.08);margin-top:1.5rem;padding:1.25rem 1.5rem 1.5rem}",
@@ -304,6 +300,50 @@ function renderPanel(panel: Panel): SafeHtml {
   </section>`;
 }
 
+export function renderDashboard(model: DashboardModel): string {
+  const sections = model.panels.map(renderPanel);
+  const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
+  const rendered = compactTime(model.renderedAt) ?? model.renderedAt;
+  return (
+    "<!doctype html>\n" +
+    html`<html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Means of Compute dashboard</title>
+        ${STYLE_HTML}
+      </head>
+      <body>
+        <header>
+          <h1>Means of Compute</h1>
+          <p class="tagline">
+            An autonomous software factory on company-owned machines, running on Meta models.
+          </p>
+          <p class="meta">
+            Rendered
+            <time datetime="${model.renderedAt}" title="${model.renderedAt}">${rendered}</time>, UTC
+            day ${model.utcDay}. Every figure names its source. "no data" means an input is missing;
+            "error" means an input could not be read (details in ${model.logPath}).
+          </p>
+          <div class="keyfigures">${cards}</div>
+        </header>
+        <main>${sections}</main>
+      </body>
+    </html>`.value
+  );
+}
+
+export const TAB_CSS = [
+  ".tabs{display:flex;gap:0.45rem;flex-wrap:wrap;margin:1.1rem 0 0;padding-bottom:0.6rem;border-bottom:1px solid var(--border)}",
+  ".tab{padding:0.32rem 0.8rem;border-radius:999px;font-size:0.92rem;font-weight:600;text-decoration:none;color:var(--muted);border:1px solid transparent}",
+  ".tab.active{color:var(--text);background:var(--surface-2);border-color:var(--border)}",
+  ".tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}",
+].join("\n");
+
+export const TAB_CSS_HASH = `sha256-${createHash("sha256").update(`${DASHBOARD_CSS}\n${TAB_CSS}`, "utf8").digest("base64")}`;
+
+const TAB_STYLE_HTML = constantHtml("<style>" + DASHBOARD_CSS + "\n" + TAB_CSS + "</style>");
+
 export interface DashboardViewOptions {
   readonly view: string;
   readonly t: number;
@@ -337,44 +377,9 @@ function renderTabs(activeView: string, opts: DashboardViewOptions): SafeHtml {
   return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
 }
 
-export function renderDashboard(model: DashboardModel, opts?: DashboardViewOptions): string {
-  if (opts === undefined) {
-    const sections = model.panels.map(renderPanel);
-    const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
-    const rendered = compactTime(model.renderedAt) ?? model.renderedAt;
-    return (
-      "<!doctype html>\n" +
-      html`<html lang="en">
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Means of Compute dashboard</title>
-          ${STYLE_HTML}
-        </head>
-        <body>
-          <header>
-            <h1>Means of Compute</h1>
-            <p class="tagline">
-              An autonomous software factory on company-owned machines, running on Meta models.
-            </p>
-            <p class="meta">
-              Rendered
-              <time datetime="${model.renderedAt}" title="${model.renderedAt}">${rendered}</time>,
-              UTC day ${model.utcDay}. Every figure names its source. "no data" means an input is
-              missing; "error" means an input could not be read (details in ${model.logPath}).
-            </p>
-            <div class="keyfigures">${cards}</div>
-          </header>
-          <main>${sections}</main>
-        </body>
-      </html>`.value
-    );
-  }
-  // Filtered view with tabs.
+export function renderDashboardWithView(model: DashboardModel, opts: DashboardViewOptions): string {
   const activePanel = model.panels.find((panel) => panel.id === opts.view) ?? null;
   const section = activePanel === null ? constantHtml("") : renderPanel(activePanel);
-  // For fleet view, activePanel is fleet; for others, show that panel.
-  // If view mismatched, show empty but tabs still render.
   const tabs = renderTabs(opts.view, opts);
   const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
   const rendered = compactTime(model.renderedAt) ?? model.renderedAt;
@@ -385,7 +390,7 @@ export function renderDashboard(model: DashboardModel, opts?: DashboardViewOptio
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Means of Compute dashboard</title>
-        ${STYLE_HTML}
+        ${TAB_STYLE_HTML}
       </head>
       <body>
         <header>

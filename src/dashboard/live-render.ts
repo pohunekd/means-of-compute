@@ -57,7 +57,7 @@ export const LIVE_CSS = [
   ".tile-real{border:1px solid var(--border)}",
   ".tile-sim{border:1px dashed var(--border)}",
   ".tile .alias{font-family:var(--mono);font-size:0.48rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}",
-  ".tile .meta{font-size:0.44rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.1rem;line-height:1}",
+  ".tile .meta{font-size:0.44rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.1rem;line-height:1;min-width:0;overflow:hidden}",
   ".tile .load{font-variant-numeric:tabular-nums;font-weight:600}",
   ".tile .state{font-size:0.42rem;text-transform:uppercase;letter-spacing:0.02em}",
   ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
@@ -208,19 +208,20 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
       : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
-  const chip = tile.simulated ? constantHtml("") : html`<span class="chip chip-real">REAL</span>`;
+  const chip = html`<span class="chip chip-real">REAL</span>`;
   const stateWord = tile.state;
   const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
   const tileClass = tile.simulated ? "tile-sim" : "tile-real";
+  const secondLine = tile.simulated
+    ? html`<span class="load">${load}${flagMark}</span><span class="state">${stateWord}</span>`
+    : html`<span class="load">${load}${flagMark}</span>${chip}`;
   return html`<a
     href="${href}"
     class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}"
     title="${title}"
   >
-    <span class="meta"><span class="alias">${displayAlias}</span>${chip}</span>
-    <span class="meta"
-      ><span class="load">${load}${flagMark}</span><span class="state">${stateWord}</span></span
-    >
+    <span class="meta"><span class="alias">${displayAlias}</span></span>
+    <span class="meta">${secondLine}</span>
   </a>`;
 }
 
@@ -262,6 +263,7 @@ function renderActivityRow(row: LiveActivityRow): SafeHtml {
           : html`<span class="mono nowrap" title="${row.model}">${model}</span>`
       }
     </td>
+    <td>${row.providerId}</td>
     <td>${row.role ?? "-"}</td>
     <td class="num">${tokens(row.inputTokens)}</td>
     <td class="num">${tokens(row.outputTokens)}</td>
@@ -374,7 +376,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       ${task === "" ? constantHtml("") : html`<p class="row">Task: ${task}</p>`}
       <p class="row">Running tasks:</p>
       <ul>
-        ${panel.runningTasks.map((t) => html`<li><a href="/?view=work&t=${String(model.t)}">${t.workItemId}</a> at ${t.at}</li>`)}
+        ${panel.runningTasks.map((t) => html`<li>${t.workItemId} at ${t.at}</li>`)}
       </ul>
       <p class="row">Events (up to 6):</p>
       <ul>
@@ -453,6 +455,7 @@ export function renderLive(model: LiveModel): string {
               <tr>
                 <th>time</th>
                 <th>model</th>
+                <th>provider</th>
                 <th>role</th>
                 <th class="num">in</th>
                 <th class="num">out</th>

@@ -168,11 +168,17 @@ pub fn format_number(n: f64) -> String {
 /// Node `path.join` on POSIX: concatenate segments with `/` then lexically
 /// normalize (collapse `//`, drop `.`, resolve `..` against previous segment).
 pub fn path_join(segments: &[&str]) -> String {
-    let joined = segments.join("/");
+    let joined = segments
+        .iter()
+        .copied()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
     if joined.is_empty() {
         return ".".to_string();
     }
     let is_absolute = joined.starts_with('/');
+    let trailing = joined.ends_with('/');
     let mut parts: Vec<&str> = Vec::new();
     for seg in joined.split('/') {
         if seg.is_empty() || seg == "." {
@@ -193,16 +199,17 @@ pub fn path_join(segments: &[&str]) -> String {
             parts.push(seg);
         }
     }
+    let tail = if trailing { "/" } else { "" };
     if is_absolute {
         if parts.is_empty() {
             "/".to_string()
         } else {
-            format!("/{}", parts.join("/"))
+            format!("/{}{tail}", parts.join("/"))
         }
     } else if parts.is_empty() {
-        ".".to_string()
+        format!(".{tail}")
     } else {
-        parts.join("/")
+        format!("{}{tail}", parts.join("/"))
     }
 }
 
@@ -313,5 +320,8 @@ mod tests {
         // round-trip for epoch
         assert_eq!(format_timestamp(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(parse_timestamp("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(path_join(&["", "a"]), "a");
+        assert_eq!(path_join(&["", ""]), ".");
+        assert_eq!(path_join(&["a", "b/"]), "a/b/");
     }
 }

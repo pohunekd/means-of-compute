@@ -733,7 +733,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page).toContain("person at the desk");
     expect(page).toContain("reported");
     expect(page).toContain("last finished");
-    expect(page).toContain("today:");
+    expect(page).toContain("today (UTC):");
     // Just finished strip
     expect(page).toContain('id="just-finished"');
     expect(page).toContain("Just finished");

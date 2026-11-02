@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-assignment, no-dupe-else-if, @typescript-eslint/no-unnecessary-condition */
 // Live view model: recorded real fleet, the real meter activity and a
 // simulated fleet replayed from a sim-trace-v1 file (docs/dashboard.md).
 // Pure: buildLive turns gathered Sourced inputs into the value the live
@@ -9,6 +10,7 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { MeterLogError, replayUsageLog, type UsageIndex } from "../meter/usage-log.js";
 import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
+import { verdictCounts } from "../auditor/verdict.js";
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
 import type { DashboardInputs, InputFailure, Sourced } from "./inputs.js";
 import { openSessionCount } from "./sessions.js";
@@ -262,7 +264,7 @@ export interface AuditPanel {
 
 export interface RealWorkCard {
   readonly alias: string;
-  readonly stage: "implement" | "audit" | "merge" | "idle";
+  readonly stage: "implement" | "audit" | "idle";
   readonly workItemId: string | null;
   readonly title: string | null;
   readonly issue: number | null;
@@ -882,9 +884,9 @@ function sumMeterForWorkItem(
   let sumOut = 0;
   let scaledIn = 0n;
   let scaledOut = 0n;
-  let hasTokens = false;
+  let totalEntries = 0;
+  let pricedEntries = 0;
   let missingTokens = false;
-  let costUnknown = false;
   let latest: {
     at: string;
     inputTokens: number | null;
@@ -895,6 +897,7 @@ function sumMeterForWorkItem(
   for (const end of meter.ends.values()) {
     const grant = meter.grants.get(end.requestId)?.open;
     if (grant === undefined || grant.workItemId !== workItemId) continue;
+    totalEntries += 1;
     if (latest === null || end.at > latest.at) {
       const start = meter.starts.get(end.callId);
       const rawModel = start?.model ?? grant.model;
@@ -910,29 +913,47 @@ function sumMeterForWorkItem(
       missingTokens = true;
       continue;
     }
-    hasTokens = true;
     sumIn += end.inputTokens;
     sumOut += end.outputTokens;
     if (pricing.ok) {
       const price = pricing.value.get(grant.providerId);
-      if (price === undefined) costUnknown = true;
-      else {
+      if (price !== undefined) {
+        pricedEntries += 1;
         scaledIn += tokenCostScaled(end.inputTokens, price.inputNanoPer1M);
         scaledOut += tokenCostScaled(end.outputTokens, price.outputNanoPer1M);
       }
     }
   }
   if (latest === null) return { tokens: null, cost: null, latestCall: null };
-  const tokens = hasTokens ? { input: sumIn, output: sumOut } : null;
+  const tokens =
+    (totalEntries > 0 && !missingTokens) || sumIn !== 0 || sumOut !== 0
+      ? { input: sumIn, output: sumOut }
+      : null;
   let cost: LiveCell | null = null;
-  if (hasTokens) {
-    if (!pricing.ok) cost = failureCell(pricing.failure);
-    else if (costUnknown) cost = { kind: "no-data", reason: "no price found" };
-    else cost = { kind: "text", text: formatUsd(scaledIn + scaledOut) };
-  } else if (missingTokens) {
+  if (missingTokens && pricedEntries === 0) {
     cost = { kind: "no-data", reason: "usage not reported" };
+  } else if (!pricing.ok) {
+    cost = failureCell(pricing.failure);
+  } else if (totalEntries > pricedEntries) {
+    const unpriced = totalEntries - pricedEntries;
+    if (pricedEntries === 0) {
+      cost = {
+        kind: "no-data",
+        reason: `${String(unpriced)} of ${String(totalEntries)} entries unpriced`,
+      };
+    } else {
+      cost = {
+        kind: "text",
+        text: `at least ${formatUsd(scaledIn + scaledOut)} (${String(unpriced)} of ${String(totalEntries)} entries unpriced)`,
+      };
+    }
+  } else {
+    cost = { kind: "text", text: formatUsd(scaledIn + scaledOut) };
   }
-  return { tokens, cost, latestCall: latest };
+  // null tokens when all entries missing tokens
+  const finalTokens =
+    missingTokens && pricedEntries === 0 && sumIn === 0 && sumOut === 0 ? null : tokens;
+  return { tokens: finalTokens, cost, latestCall: latest };
 }
 
 function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly JustFinishedEntry[]> {
@@ -942,21 +963,10 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
       : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
   }
   const results = inputs.dashboard.results.value;
-  // Real results only: results filtered to those whose workItem host is real (ledger or work store).
-  // The previous live spec mixed simulated fleet but JustFinished is real-work only.
-  // Use ledger records to identify real work items? As fallback, use work store ids.
-  const realIds = new Set<string>();
-  if (inputs.dashboard.workItems.ok) {
-    for (const item of inputs.dashboard.workItems.value) realIds.add(item.id);
-  }
-  if (inputs.dashboard.ledger.ok) {
-    for (const record of inputs.dashboard.ledger.value.records) realIds.add(record.workItemId);
-  }
-  // If sets empty, fall back to all results.
-  const sorted = [...results]
-    .filter((r) => (realIds.size === 0 ? true : realIds.has(r.workItemId)))
-    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-    .slice(0, 3);
+  const filtered = results.filter(
+    (r) => r.outcome === "merged" || (r.outcome as string) === "parked",
+  );
+  const sorted = [...filtered].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, 3);
   if (sorted.length === 0) return { kind: "ok", value: [] };
   const workById = new Map<string, WorkItem>();
   if (inputs.dashboard.workItems.ok) {
@@ -965,36 +975,14 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
   const entries: JustFinishedEntry[] = sorted.map((row) => {
     const work = workById.get(row.workItemId);
     const title = work?.title ?? row.workItemId;
-    // verdict counts for this work's latest head - use newest verdict entry whose head matches? Without headSha in results we pick latest verdict's counts.
-    let verdictCounts: JustFinishedEntry["verdictCounts"] = null;
+    let countedVal: JustFinishedEntry["verdictCounts"] = null;
     const verdicts = inputs.dashboard.verdicts.get(row.workItemId);
     if (verdicts !== undefined && verdicts.ok && verdicts.value.length > 0) {
-      // pick newest verdict by position (store order)
-      const latestVerdict = verdicts.value[verdicts.value.length - 1];
-      if (latestVerdict !== undefined) {
-        // recount via same rule as dashboard: simple counts length by severity
-        const c = latestVerdict.counts as unknown;
-        // Use stored counts if valid shape, else derive from findings
-        if (
-          typeof c === "object" &&
-          c !== null &&
-          typeof (c as { high?: unknown }).high === "number" &&
-          typeof (c as { medium?: unknown }).medium === "number" &&
-          typeof (c as { low?: unknown }).low === "number"
-        ) {
-          const cc = c as { high: number; medium: number; low: number };
-          // Check mismatch: recount manually
-          let rh = 0;
-          let rm = 0;
-          let rl = 0;
-          for (const f of latestVerdict.findings as readonly { severity: string }[]) {
-            if (f.severity === "high") rh += 1;
-            else if (f.severity === "medium") rm += 1;
-            else if (f.severity === "low") rl += 1;
-          }
-          if (rh !== cc.high || rm !== cc.medium || rl !== cc.low) verdictCounts = "invalid";
-          else verdictCounts = { high: cc.high, medium: cc.medium, low: cc.low };
-        }
+      let chosen: AuditVerdict | null = null;
+      chosen = verdicts.value[verdicts.value.length - 1] ?? null;
+      if (chosen !== null) {
+        const c = verdictCounts(chosen);
+        countedVal = c;
       }
     }
     let cost: LiveCell | null;
@@ -1011,26 +999,40 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
       );
       if (rec !== undefined) {
         let scaled = 0n;
-        let unknown = false;
+        const total = rec.tokens.length;
+        let priced = 0;
+        let hasMissingTokens = false;
         for (const t of rec.tokens) {
           if (t.inputTokens === null || t.outputTokens === null) {
-            unknown = true;
+            hasMissingTokens = true;
             continue;
           }
           const price = inputs.dashboard.pricing.value.get(t.provider);
-          if (price === undefined) {
-            unknown = true;
-            continue;
-          }
+          if (price === undefined) continue;
+          priced += 1;
           scaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
           scaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
         }
-        cost =
-          unknown && scaled === 0n
-            ? { kind: "no-data", reason: "no price found" }
-            : { kind: "text", text: formatUsd(scaled) };
+        if (hasMissingTokens && priced === 0 && total > 0) {
+          cost = { kind: "no-data", reason: "usage not reported" };
+        } else if (total > priced) {
+          const unpriced = total - priced;
+          if (priced === 0) {
+            cost = {
+              kind: "no-data",
+              reason: `${String(unpriced)} of ${String(total)} entries unpriced`,
+            };
+          } else {
+            cost = {
+              kind: "text",
+              text: `at least ${formatUsd(scaled)} (${String(unpriced)} of ${String(total)} entries unpriced)`,
+            };
+          }
+        } else {
+          cost = { kind: "text", text: formatUsd(scaled) };
+        }
       } else {
-        cost = { kind: "text", text: "$0.0000" };
+        cost = { kind: "no-data", reason: "not in ledger yet" };
       }
     }
     let headSha: string | null = null;
@@ -1042,7 +1044,7 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
       workItemId: row.workItemId,
       title,
       hostAlias: row.hostAlias,
-      verdictCounts,
+      verdictCounts: countedVal,
       outcome: row.outcome,
       cost,
       at: row.at,
@@ -1064,7 +1066,6 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       : { kind: "no-data", reason: inputs.dashboard.registry.failure.reason };
   }
   const probes = inputs.probes.value;
-  // aliases: union of probes + open registry hostAliases
   const aliasSet = new Set<string>(probes.map((p) => p.hostAlias));
   for (const entry of inputs.dashboard.registry.value) {
     if (entry.terminal === null) aliasSet.add(entry.hostAlias);
@@ -1119,11 +1120,21 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
     }
     let today: RealWorkCard["today"] = null;
     if (inputs.dashboard.ledger.ok) {
-      let cost: LiveCell | null;
-      if (!inputs.dashboard.pricing.ok) cost = failureCell(inputs.dashboard.pricing.failure);
-      else if (todayScaled === 0n && !todayHasPriced) cost = { kind: "text", text: "$0.0000" };
+      let cost: LiveCell | null = null;
+      if (todayCount === 0) {
+        cost = null;
+      } else if (!inputs.dashboard.pricing.ok) cost = failureCell(inputs.dashboard.pricing.failure);
+      else if (todayScaled === 0n && !todayHasPriced) cost = null;
       else cost = { kind: "text", text: formatUsd(todayScaled) };
       if (todayCount > 0 || probe !== null) today = { count: todayCount, cost };
+      else if (probe !== null) today = { count: 0, cost: null };
+    } else if (!inputs.dashboard.ledger.ok) {
+      const failure = inputs.dashboard.ledger.failure;
+      const err: LiveCell =
+        failure.kind === "error"
+          ? { kind: "error", code: failure.code }
+          : { kind: "no-data", reason: failure.reason };
+      today = { count: 0, cost: err };
     }
     if (registryEntry !== null) {
       const work = workById.get(registryEntry.workItemId) ?? null;

@@ -110,7 +110,8 @@ export const LIVE_CSS = [
   ".rw .meta{font-size:15px;color:var(--muted);margin:2px 0;line-height:1.3}",
   ".rw .meta b{color:var(--text);font-weight:700}",
   ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px}",
-  ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:13px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+  ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+  ".chip{font-size:15px}",
   ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
   ".stage.merge{background:var(--done-bg);color:var(--done-text)}",
   ".fin{display:flex;gap:12px;margin:0 0 10px}",
@@ -323,16 +324,14 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   }
   const hostHref = buildHref(model, { host: card.alias });
   const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
-  const stageLabel = card.stage === "idle" ? "idle" : card.stage;
+  const stageLabel = card.stage === "idle" ? "" : card.stage;
   const stageClass =
-    card.stage === "implement"
-      ? "stage"
-      : card.stage === "audit"
-        ? "stage audit"
-        : card.stage === "merge"
-          ? "stage merge"
-          : "stage";
+    card.stage === "implement" ? "stage" : card.stage === "audit" ? "stage audit" : "stage";
   const idleCls = card.stage === "idle" ? " idle" : "";
+  const stageHtml =
+    card.stage === "idle"
+      ? constantHtml("")
+      : html`<span class="${stageClass}">${stageLabel}</span>`;
   const titleLine =
     card.stage === "idle"
       ? card.idleReason === null
@@ -404,22 +403,24 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
             <a href="${buildHref(model, { task: card.lastFinished.workItemId })}"
               >${card.lastFinished.workItemId}</a
             >
-            at ${clockTime(card.lastFinished.at)} (${card.lastFinished.outcome})
+            at ${card.lastFinished.at.slice(11, 16)} (${card.lastFinished.outcome})
           </p>`
         : constantHtml("");
   const todayLine =
     card.today === null
       ? constantHtml("")
-      : html`<p class="meta">
-          today: ${String(card.today.count)} tasks ·
-          <span class="${card.today.cost === null ? "" : cellClass(card.today.cost)}"
-            >${card.today.cost === null ? "—" : cellText(card.today.cost)}</span
-          >
-        </p>`;
+      : card.today.cost === null
+        ? html`<p class="meta">
+            today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
+          </p>`
+        : html`<p class="meta">
+            today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"} ·
+            <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
+          </p>`;
   return html`<div class="rw${idleCls}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
-      <span class="${stageClass}">${stageLabel}</span>
+      ${stageHtml}
     </div>
     ${titleLine}
     <p class="meta">${issueLine} ${prLine}</p>

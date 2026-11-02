@@ -49,6 +49,18 @@ jobs:
       - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
       - run: rustup default 1.99.1
       - run: bun run gates:rs
+      - run: bun install --frozen-lockfile
+      - run: cargo build --release --locked
+      - run: |
+          mkdir -p pkg/bin pkg/config
+          cp target/release/moc-host-state pkg/bin/moc-host-state
+          cp config/plugin.json pkg/config/plugin.json
+          cp config/probe.json pkg/config/probe.json
+      - run: echo '{"hostAlias":"desktop"}' > live-facts.json
+      - run: |
+          ./factory-probe --facts live-facts.json > ts.json
+          pkg/bin/moc-host-state --facts live-facts.json > rs.json
+      - run: bun run scripts/probe-live-compare.ts ts.json rs.json
 
   rust-macos:
     runs-on: macos-latest
@@ -61,3 +73,15 @@ jobs:
       - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
       - run: rustup default 1.99.1
       - run: bun run gates:rs
+      - run: bun install --frozen-lockfile
+      - run: cargo build --release --locked
+      - run: |
+          mkdir -p pkg/bin pkg/config
+          cp target/release/moc-host-state pkg/bin/moc-host-state
+          cp config/plugin.json pkg/config/plugin.json
+          cp config/probe.json pkg/config/probe.json
+      - run: echo '{"hostAlias":"desktop"}' > live-facts.json
+      - run: |
+          ./factory-probe --facts live-facts.json > ts.json
+          pkg/bin/moc-host-state --facts live-facts.json > rs.json
+      - run: bun run scripts/probe-live-compare.ts ts.json rs.json

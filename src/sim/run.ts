@@ -526,12 +526,9 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         const id = `${block.idPrefix}${String(n + 1).padStart(3, "0")}`;
         workSchedule.push({ atMinute, id });
         workDurationById.set(id, block.durationMinutes);
-        if (block.task !== null) {
-          const title = formatTaskTitle(block.task.title, n);
-          workTaskById.set(id, { kind: block.task.kind, title });
-        } else {
-          workTaskById.set(id, null);
-        }
+        const taskDef = block.tasks[n % block.tasks.length] as (typeof block.tasks)[number];
+        const title = formatTaskTitle(taskDef.title, n);
+        workTaskById.set(id, { kind: taskDef.kind, title });
       }
     }
   }

@@ -12,7 +12,10 @@
       "gpuPresent": false,
       "battery": "none",
       "maxConcurrentAgents": 2,
-      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "allowedWindow": {
+        "start": "00:00",
+        "end": "00:00"
+      },
       "startsIdle": false
     },
     "laptop": {
@@ -21,7 +24,10 @@
       "gpuPresent": false,
       "battery": "laptop",
       "maxConcurrentAgents": 1,
-      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "allowedWindow": {
+        "start": "00:00",
+        "end": "00:00"
+      },
       "startsIdle": false
     },
     "kiosk": {
@@ -30,7 +36,10 @@
       "gpuPresent": false,
       "battery": "none",
       "maxConcurrentAgents": 1,
-      "allowedWindow": { "start": "22:00", "end": "06:00" },
+      "allowedWindow": {
+        "start": "22:00",
+        "end": "06:00"
+      },
       "startsIdle": false
     },
     "meeting": {
@@ -39,7 +48,10 @@
       "gpuPresent": false,
       "battery": "none",
       "maxConcurrentAgents": 1,
-      "allowedWindow": { "start": "18:00", "end": "08:00" },
+      "allowedWindow": {
+        "start": "18:00",
+        "end": "08:00"
+      },
       "startsIdle": false
     },
     "signage": {
@@ -48,24 +60,87 @@
       "gpuPresent": false,
       "battery": "none",
       "maxConcurrentAgents": 1,
-      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "allowedWindow": {
+        "start": "00:00",
+        "end": "00:00"
+      },
       "startsIdle": false
     }
   },
   "generators": [
-    { "kind": "desk", "count": 90, "aliasPrefix": "desk-", "site": "hq-floor-2" },
-    { "kind": "desk", "count": 90, "aliasPrefix": "desk-", "site": "hq-floor-3" },
-    { "kind": "laptop", "count": 80, "aliasPrefix": "laptop-", "site": "hq-floor-2" },
-    { "kind": "kiosk", "count": 12, "aliasPrefix": "kiosk-lobby-", "site": "lobby" },
-    { "kind": "meeting", "count": 20, "aliasPrefix": "meeting-3b-", "site": "hq-floor-3" },
-    { "kind": "signage", "count": 8, "aliasPrefix": "signage-lobby-", "site": "lobby" }
+    {
+      "kind": "desk",
+      "count": 90,
+      "aliasPrefix": "desk-",
+      "site": "hq-floor-2"
+    },
+    {
+      "kind": "desk",
+      "count": 90,
+      "aliasPrefix": "desk-",
+      "site": "hq-floor-3"
+    },
+    {
+      "kind": "laptop",
+      "count": 80,
+      "aliasPrefix": "laptop-",
+      "site": "hq-floor-2"
+    },
+    {
+      "kind": "kiosk",
+      "count": 12,
+      "aliasPrefix": "kiosk-lobby-",
+      "site": "lobby"
+    },
+    {
+      "kind": "meeting",
+      "count": 20,
+      "aliasPrefix": "meeting-3b-",
+      "site": "hq-floor-3"
+    },
+    {
+      "kind": "signage",
+      "count": 8,
+      "aliasPrefix": "signage-lobby-",
+      "site": "lobby"
+    }
   ],
   "waves": [
-    { "atMinute": 10, "kind": "desk", "type": "leave", "fraction": 0.5, "staggerMinutes": 1 },
-    { "atMinute": 40, "kind": "desk", "type": "leave", "fraction": 0.5, "staggerMinutes": 1 },
-    { "atMinute": 20, "kind": "laptop", "type": "leave", "fraction": 0.6, "staggerMinutes": 1 },
-    { "atMinute": 35, "kind": "laptop", "type": "depart", "fraction": 0.4, "staggerMinutes": 1 },
-    { "atMinute": 70, "kind": "laptop", "type": "rejoin", "fraction": 0.4, "staggerMinutes": 2 },
+    {
+      "atMinute": 10,
+      "kind": "desk",
+      "type": "leave",
+      "fraction": 0.5,
+      "staggerMinutes": 1
+    },
+    {
+      "atMinute": 40,
+      "kind": "desk",
+      "type": "leave",
+      "fraction": 0.5,
+      "staggerMinutes": 1
+    },
+    {
+      "atMinute": 20,
+      "kind": "laptop",
+      "type": "leave",
+      "fraction": 0.6,
+      "staggerMinutes": 1
+    },
+    {
+      "atMinute": 35,
+      "kind": "laptop",
+      "type": "depart",
+      "fraction": 0.4,
+      "staggerMinutes": 1
+    },
+    {
+      "atMinute": 70,
+      "kind": "laptop",
+      "type": "rejoin",
+      "fraction": 0.4,
+      "staggerMinutes": 2
+    },
     {
       "atMinute": 120,
       "kind": "kiosk",
@@ -82,13 +157,50 @@
     }
   ],
   "events": [
-    { "atMinute": 94, "alias": "laptop-007", "type": "rejoin", "set": { "acPower": true } },
-    { "atMinute": 94, "alias": "laptop-007", "type": "leave" },
-    { "atMinute": 95, "alias": "laptop-007", "type": "battery", "set": { "batteryPercent": 40 } },
-    { "atMinute": 100, "alias": "desk-142", "type": "return" },
-    { "atMinute": 134, "alias": "laptop-021", "type": "rejoin", "set": { "acPower": true } },
-    { "atMinute": 134, "alias": "laptop-021", "type": "leave" },
-    { "atMinute": 135, "alias": "laptop-021", "type": "unplug" }
+    {
+      "atMinute": 94,
+      "alias": "laptop-007",
+      "type": "rejoin",
+      "set": {
+        "acPower": true
+      }
+    },
+    {
+      "atMinute": 94,
+      "alias": "laptop-007",
+      "type": "leave"
+    },
+    {
+      "atMinute": 95,
+      "alias": "laptop-007",
+      "type": "battery",
+      "set": {
+        "batteryPercent": 40
+      }
+    },
+    {
+      "atMinute": 100,
+      "alias": "desk-142",
+      "type": "return"
+    },
+    {
+      "atMinute": 134,
+      "alias": "laptop-021",
+      "type": "rejoin",
+      "set": {
+        "acPower": true
+      }
+    },
+    {
+      "atMinute": 134,
+      "alias": "laptop-021",
+      "type": "leave"
+    },
+    {
+      "atMinute": 135,
+      "alias": "laptop-021",
+      "type": "unplug"
+    }
   ],
   "work": [
     {
@@ -97,7 +209,24 @@
       "count": 25,
       "durationMinutes": 50,
       "idPrefix": "sim-w-",
-      "task": { "kind": "support", "title": "Support queue triage {n}" }
+      "tasks": [
+        {
+          "kind": "code",
+          "title": "Code change {n}"
+        },
+        {
+          "kind": "support",
+          "title": "Support queue triage {n}"
+        },
+        {
+          "kind": "research",
+          "title": "Supplier research {n}"
+        },
+        {
+          "kind": "support",
+          "title": "Support queue triage {n}"
+        }
+      ]
     },
     {
       "firstAtMinute": 50,
@@ -105,7 +234,24 @@
       "count": 100,
       "durationMinutes": 120,
       "idPrefix": "sim-x-",
-      "task": { "kind": "research", "title": "Supplier research {n}" }
+      "tasks": [
+        {
+          "kind": "research",
+          "title": "Supplier research {n}"
+        },
+        {
+          "kind": "code",
+          "title": "Code change {n}"
+        },
+        {
+          "kind": "research",
+          "title": "Supplier research {n}"
+        },
+        {
+          "kind": "support",
+          "title": "Support queue triage {n}"
+        }
+      ]
     },
     {
       "firstAtMinute": 65,
@@ -113,7 +259,24 @@
       "count": 100,
       "durationMinutes": 120,
       "idPrefix": "sim-y-",
-      "task": { "kind": "data-analysis", "title": "Sales data analysis {n}" }
+      "tasks": [
+        {
+          "kind": "data-analysis",
+          "title": "Sales data analysis {n}"
+        },
+        {
+          "kind": "code",
+          "title": "Code change {n}"
+        },
+        {
+          "kind": "data-analysis",
+          "title": "Sales data analysis {n}"
+        },
+        {
+          "kind": "support",
+          "title": "Support queue triage {n}"
+        }
+      ]
     },
     {
       "firstAtMinute": 80,
@@ -121,7 +284,24 @@
       "count": 90,
       "durationMinutes": 120,
       "idPrefix": "sim-z-",
-      "task": { "kind": "code", "title": "Code change {n}" }
+      "tasks": [
+        {
+          "kind": "data-analysis",
+          "title": "Sales data analysis {n}"
+        },
+        {
+          "kind": "code",
+          "title": "Code change {n}"
+        },
+        {
+          "kind": "support",
+          "title": "Support queue triage {n}"
+        },
+        {
+          "kind": "data-analysis",
+          "title": "Sales data analysis {n}"
+        }
+      ]
     }
   ]
 }

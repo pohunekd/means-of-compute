@@ -203,7 +203,7 @@ const TASK_KINDS = new Set([
 function hasControlChar(text: string): boolean {
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
-    if (code < 32 || code === 127) {
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
       return true;
     }
   }
@@ -317,7 +317,10 @@ function parseHostLine(
   if (batteryRaw !== null && (typeof batteryRaw !== "number" || !Number.isInteger(batteryRaw))) {
     fail(`${where}: invalid "batteryPercent"`);
   }
-  const task = parseTask(record["task"] ?? null, where);
+  if (!Object.hasOwn(record, "task")) {
+    fail(`${where}: invalid "task"`);
+  }
+  const task = parseTask(record["task"], where);
   return {
     atMinute: reqInt(record, "atMinute", where, 0, duration),
     at: reqIso(record, "at", where),
@@ -403,7 +406,10 @@ export function parseSimTrace(text: string): SimTrace {
         ) {
           fail(`${where}: invalid "chosenHostAlias"`);
         }
-        const task = parseTask(record["task"] ?? null, where);
+        if (!Object.hasOwn(record, "task")) {
+          fail(`${where}: invalid "task"`);
+        }
+        const task = parseTask(record["task"], where);
         placements.push({
           atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
           at: reqIso(record, "at", where),

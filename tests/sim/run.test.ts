@@ -19,7 +19,7 @@ describe("fleet simulator", () => {
     const b = linesB.map((l) => JSON.stringify(l)).join("\n") + "\n";
     expect(a).toBe(b);
     expect(createHash("sha256").update(a).digest("hex")).toBe(
-      "30d82a1ea98ce08cd536a573483037b59dad4b620a5ea39a0898cd07e53d06e2",
+      "934478698a2667061cf970e4a6678828b9a5ccc918b3f52e170f7ac86b361224",
     );
     const lines = linesA as unknown as Record<string, unknown>[];
     const header = lines[0] as Record<string, unknown>;
@@ -95,11 +95,31 @@ describe("fleet simulator", () => {
         expect(hostLine["running"]).toBe(expected);
       }
     }
-    const taskKindByPrefix: Record<string, string> = {
-      "sim-w-": "support",
-      "sim-x-": "research",
-      "sim-y-": "data-analysis",
-      "sim-z-": "code",
+    const tasksByPrefix: Record<string, readonly { kind: string; title: string }[]> = {
+      "sim-w-": [
+        { kind: "code", title: "Code change {n}" },
+        { kind: "support", title: "Support queue triage {n}" },
+        { kind: "research", title: "Supplier research {n}" },
+        { kind: "support", title: "Support queue triage {n}" },
+      ],
+      "sim-x-": [
+        { kind: "research", title: "Supplier research {n}" },
+        { kind: "code", title: "Code change {n}" },
+        { kind: "research", title: "Supplier research {n}" },
+        { kind: "support", title: "Support queue triage {n}" },
+      ],
+      "sim-y-": [
+        { kind: "data-analysis", title: "Sales data analysis {n}" },
+        { kind: "code", title: "Code change {n}" },
+        { kind: "data-analysis", title: "Sales data analysis {n}" },
+        { kind: "support", title: "Support queue triage {n}" },
+      ],
+      "sim-z-": [
+        { kind: "data-analysis", title: "Sales data analysis {n}" },
+        { kind: "code", title: "Code change {n}" },
+        { kind: "support", title: "Support queue triage {n}" },
+        { kind: "data-analysis", title: "Sales data analysis {n}" },
+      ],
     };
     const titlePrefixByKind: Record<string, string> = {
       support: "Support queue triage ",
@@ -109,14 +129,15 @@ describe("fleet simulator", () => {
     };
     for (const placement of placements) {
       const workItemId = placement["workItemId"] as string;
-      const prefix = Object.keys(taskKindByPrefix).find((p) => workItemId.startsWith(p));
+      const prefix = Object.keys(tasksByPrefix).find((p) => workItemId.startsWith(p));
       expect(prefix).toBeDefined();
-      const expectedKind = taskKindByPrefix[prefix as string] as string;
+      const num = Number(workItemId.split("-").pop());
+      const tasks = tasksByPrefix[prefix as string] as readonly { kind: string; title: string }[];
+      const expected = tasks[(num - 1) % tasks.length] as { kind: string; title: string };
       const task = placement["task"] as unknown as { kind: string; title: string } | null;
       expect(task).not.toBeNull();
-      expect(task?.kind).toBe(expectedKind);
-      const num = Number(workItemId.split("-").pop());
-      const prefixTitle = titlePrefixByKind[expectedKind] as string;
+      expect(task?.kind).toBe(expected.kind);
+      const prefixTitle = titlePrefixByKind[expected.kind] as string;
       const expectedTitle = `${prefixTitle}${String(num).padStart(3, "0")}`;
       expect(task?.title).toBe(expectedTitle);
       expect(task?.title.includes("{n}")).toBe(false);
@@ -142,6 +163,93 @@ describe("fleet simulator", () => {
       return rec;
     });
     expect(stripped.every((r) => !("task" in r))).toBe(true);
+    expect(
+      createHash("sha256")
+        .update(stripped.map((r) => JSON.stringify(r)).join("\n") + "\n")
+        .digest("hex"),
+    ).toBe("0b465d78ad29f2be59d3a0717efa1f92733f881c818deaa25966ec00d2004cf9");
+    const runningByHost = new Map<
+      string,
+      { atMinute: number; task: { kind: string; title: string } }[]
+    >();
+    const workDuration = new Map<string, number>();
+    for (const workItemId of placements.map((p) => p["workItemId"] as string)) {
+      const prefix = Object.keys(tasksByPrefix).find((p) => workItemId.startsWith(p)) as string;
+      const duration = prefix === "sim-w-" ? 50 : 120;
+      workDuration.set(workItemId, duration);
+    }
+    for (const line of lines) {
+      if (line["kind"] === "placement") {
+        const chosen = line["chosenHostAlias"] as string | null;
+        if (chosen !== null) {
+          const list = runningByHost.get(chosen) ?? [];
+          list.push({
+            atMinute: line["atMinute"] as number,
+            task: line["task"] as { kind: string; title: string },
+          });
+          runningByHost.set(chosen, list);
+        }
+      } else if (line["kind"] === "work-end") {
+        const hostAlias = line["hostAlias"] as string;
+        const workItemId = line["workItemId"] as string;
+        const list = runningByHost.get(hostAlias);
+        if (list !== undefined) {
+          const idx = list.findIndex((entry) =>
+            entry.task.title.endsWith(workItemId.split("-").pop() as string),
+          );
+          if (idx !== -1) {
+            list.splice(idx, 1);
+          }
+        }
+      }
+    }
+    // Direct check: find a host line with running >=2 where tasks differ, and verify earliest task
+    let foundEarliest = false;
+    const active = new Map<
+      string,
+      { atMinute: number; task: { kind: string; title: string }; workItemId: string }[]
+    >();
+    for (const line of lines) {
+      if (line["kind"] === "placement") {
+        const chosen = line["chosenHostAlias"] as string | null;
+        if (chosen !== null) {
+          const list = active.get(chosen) ?? [];
+          list.push({
+            atMinute: line["atMinute"] as number,
+            task: line["task"] as { kind: string; title: string },
+            workItemId: line["workItemId"] as string,
+          });
+          active.set(chosen, list);
+        }
+      } else if (line["kind"] === "work-end") {
+        const hostAlias = line["hostAlias"] as string;
+        const workItemId = line["workItemId"] as string;
+        const list = active.get(hostAlias);
+        if (list !== undefined) {
+          const idx = list.findIndex((entry) => entry.workItemId === workItemId);
+          if (idx !== -1) {
+            list.splice(idx, 1);
+          }
+        }
+      } else if (line["kind"] === "host" && (line["running"] as number) >= 2) {
+        const alias = String(line["alias"]);
+        const list = active.get(alias) ?? [];
+        if (list.length >= 2) {
+          const sorted = [...list].sort((a, b) => a.atMinute - b.atMinute);
+          if (sorted[0]?.task.kind !== sorted[1]?.task.kind) {
+            const hostTask = line["task"] as { kind: string; title: string } | null;
+            const firstTask = sorted[0] as (typeof sorted)[number] | undefined;
+            if (firstTask === undefined) {
+              continue;
+            }
+            expect(hostTask).toEqual(firstTask.task);
+            foundEarliest = true;
+            break;
+          }
+        }
+      }
+    }
+    expect(foundEarliest).toBe(true);
   });
 
   test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-142 ineligible at its minute", async () => {
@@ -231,23 +339,67 @@ describe("fleet simulator", () => {
         string,
         unknown
       >;
-      const withoutTask = structuredClone(base2) as Record<string, unknown>;
-      const workWithout = (withoutTask["work"] as Record<string, unknown>[])[0] as Record<
+      const withoutTasks = structuredClone(base2) as Record<string, unknown>;
+      const workWithout = (withoutTasks["work"] as Record<string, unknown>[])[0] as Record<
         string,
         unknown
       >;
-      delete workWithout["task"];
-      const withoutPath = join(dir, "without-task.json");
+      delete workWithout["tasks"];
+      const withoutPath = join(dir, "without-tasks.json");
       const outWithout = join(dir, "out-without.jsonl");
-      writeFileSync(withoutPath, JSON.stringify(withoutTask));
+      writeFileSync(withoutPath, JSON.stringify(withoutTasks));
       const procWithout = Bun.spawnSync(
         ["bun", "run", "src/sim/cli.ts", "--timeline", withoutPath, "--out", outWithout],
         { stdout: "pipe", stderr: "pipe" },
       );
-      expect(procWithout.exitCode).toBe(0);
+      expect(procWithout.exitCode).toBe(2);
+      expect(procWithout.stderr.toString()).toContain("work[0]");
+      expect(procWithout.stderr.toString()).toContain("tasks");
+      const longTitle: Record<string, unknown> = {
+        schemaVersion: "sim-v1",
+        name: "test-long",
+        seed: 1,
+        startAt: "2026-11-03T17:00:00.000Z",
+        durationMinutes: 1440,
+        speed: 60,
+        kinds: {
+          desk: {
+            cores: 8,
+            memoryTotalMb: 32768,
+            gpuPresent: false,
+            battery: "none",
+            maxConcurrentAgents: 2,
+            allowedWindow: { start: "00:00", end: "00:00" },
+            startsIdle: false,
+          },
+        },
+        generators: [{ kind: "desk", count: 1, aliasPrefix: "desk-", site: "hq-floor-2" }],
+        waves: [],
+        events: [],
+        work: [
+          {
+            firstAtMinute: 0,
+            everyMinutes: 1,
+            count: 1000,
+            durationMinutes: 50,
+            idPrefix: "sim-w-",
+            tasks: [{ kind: "code", title: `${"a".repeat(57)}{n}` }],
+          },
+        ],
+      };
+      const longPath = join(dir, "long-title.json");
+      const outLong = join(dir, "out-long.jsonl");
+      writeFileSync(longPath, JSON.stringify(longTitle));
+      const procLong = Bun.spawnSync(
+        ["bun", "run", "src/sim/cli.ts", "--timeline", longPath, "--out", outLong],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      expect(procLong.exitCode).toBe(2);
+      expect(procLong.stderr.toString()).toContain("work[0].tasks[0].title");
       const badKind = structuredClone(base2) as Record<string, unknown>;
       const workBad = (badKind["work"] as Record<string, unknown>[])[0] as Record<string, unknown>;
-      (workBad["task"] as Record<string, unknown>)["kind"] = "unknown-kind";
+      ((workBad["tasks"] as Record<string, unknown>[])[0] as Record<string, unknown>)["kind"] =
+        "unknown-kind";
       const badKindPath = join(dir, "bad-kind.json");
       const outBadKind = join(dir, "out-bad-kind.jsonl");
       writeFileSync(badKindPath, JSON.stringify(badKind));
@@ -256,7 +408,7 @@ describe("fleet simulator", () => {
         { stdout: "pipe", stderr: "pipe" },
       );
       expect(procBadKind.exitCode).toBe(2);
-      expect(procBadKind.stderr.toString()).toContain("work[0].task.kind");
+      expect(procBadKind.stderr.toString()).toContain("work[0].tasks[0].kind");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

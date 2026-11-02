@@ -225,10 +225,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           activeSelectionValue = rawAudit;
         }
 
-        // If any non-host selection is active, it names nothing known in PR1.
-        if (activeSelectionKey !== null && activeSelectionKey !== "host") {
-          return await respond(textResponse(404, "not found\n"), url.pathname);
-        }
+        // Non-host selections are validated later against the built live model; malformed already 404ed above.
 
         const liveAvailable = deps.live != null && deps.live.simTracePath !== null;
         // Without live sources, overview is not available.
@@ -299,6 +296,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             // Panel views render via dashboard model under same header/tab bar.
             if (PANEL_VIEW_IDS.has(effectiveView)) {
               if (activeSelectionValue !== null) {
+                if (activeSelectionKey !== "host") {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
                 const known = new Set<string>();
                 if (inputs.hosts.ok) {
                   const hv = inputs.hosts.value;
@@ -331,10 +331,20 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               view: effectiveView as "overview" | "fleet",
               t: liveMinute,
               paused,
-              host: activeSelectionValue,
+              host: activeSelectionKey === "host" ? activeSelectionValue : null,
+              task: activeSelectionKey === "task" ? activeSelectionValue : null,
+              call: activeSelectionKey === "call" ? activeSelectionValue : null,
+              audit: activeSelectionKey === "audit" ? activeSelectionValue : null,
             });
-            if (activeSelectionValue !== null && liveModel.hostPanel === null) {
-              return await respond(textResponse(404, "not found\n"), url.pathname);
+            if (activeSelectionKey !== null) {
+              const found =
+                (activeSelectionKey === "host" && liveModel.hostPanel !== null) ||
+                (activeSelectionKey === "task" && liveModel.taskPanel !== null) ||
+                (activeSelectionKey === "call" && liveModel.callPanel !== null) ||
+                (activeSelectionKey === "audit" && liveModel.auditPanel !== null);
+              if (!found) {
+                return await respond(textResponse(404, "not found\n"), url.pathname);
+              }
             }
             const livePage = renderLive(liveModel);
             const liveResponse = new Response(livePage, {
@@ -348,6 +358,9 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
           if (rawView !== null && VIEW_IDS.has(rawView)) {
             if (rawView === "fleet" || PANEL_VIEW_IDS.has(rawView)) {
               if (activeSelectionValue !== null) {
+                if (activeSelectionKey !== "host") {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
                 const known = new Set<string>();
                 if (inputs.hosts.ok) {
                   const hv = inputs.hosts.value;

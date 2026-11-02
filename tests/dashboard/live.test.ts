@@ -87,7 +87,7 @@ function traceText(hosts: readonly Record<string, unknown>[]): string {
       chosenHostAlias: "desk-001",
       reason:
         "desk-001 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
-      task: null,
+      task: { kind: "code", title: "Fix login" },
       eligibleCount: 1,
       candidates: hosts.length,
     },
@@ -385,6 +385,28 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       throw new Error("expected sim host panel for desk-001");
     }
     expect(liveWithHost.hostPanel.runningTasks).toHaveLength(0);
+    // Simulated task panel: kind/title/brief/host link/verbatim reason and eligible count.
+    const taskLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
+      view: "overview",
+      t: 45,
+      paused: false,
+      host: null,
+      task: "sim-w-001",
+    });
+    if (taskLive.taskPanel === null || taskLive.taskPanel.kind !== "sim") {
+      throw new Error("expected sim task panel for sim-w-001");
+    }
+    expect(taskLive.taskPanel.task.kind).toBe("code");
+    expect(taskLive.taskPanel.task.title).toBe("Fix login");
+    expect(taskLive.taskPanel.brief).toContain("Change the code");
+    expect(taskLive.taskPanel.hostAlias).toBe("desk-001");
+    expect(taskLive.taskPanel.reason).toBe(
+      "desk-001 is idle, on AC power, no battery, inside its policy window, 0/2 agents running",
+    );
+    expect(taskLive.taskPanel.eligibleCount).toBe(1);
+    const taskPage = renderLive(taskLive);
+    expect(taskPage).toContain("Fix login");
+    expect(taskPage).toContain('href="/?view=overview&amp;t=45&amp;host=desk-001"');
     // Sim aliases never leak into buildDashboard.
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("desk-001");
     expect(JSON.stringify(buildDashboard(dashboard))).not.toContain("sim-w-001");
@@ -472,6 +494,22 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     // Well-formed unknown host is 404.
     const unknownHost = await get("/?view=overview&host=unknown-host-xyz");
     expect(unknownHost.status).toBe(404);
+    // Unknown and malformed task/call/audit are 404 without echoing value.
+    const badTask = await get("/?view=overview&task=Bad_Task");
+    expect(badTask.status).toBe(404);
+    expect(await badTask.text()).not.toContain("Bad_Task");
+    const unknownTask = await get("/?view=overview&task=unknown-task-xyz");
+    expect(unknownTask.status).toBe(404);
+    const badCall = await get("/?view=overview&call=badcall");
+    expect(badCall.status).toBe(404);
+    const unknownCall = await get("/?view=overview&call=2026-11-03T17%3A59%3A02.000Z%7Cunknown-w");
+    expect(unknownCall.status).toBe(404);
+    const badAudit = await get("/?view=overview&audit=badaudit");
+    expect(badAudit.status).toBe(404);
+    const unknownAudit = await get(
+      "/?view=overview&audit=w1-demo%40aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(unknownAudit.status).toBe(404);
     // Registry failure shows error on tile and in panel (M11/M12).
     writeFileSync(join(fixture.dir, "registry.json"), "{ invalid json }");
     const dashBroken = await dashboardInputs(fixture);
@@ -576,6 +614,36 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(page).toContain("$0.0002");
     expect(page).toContain('title="usage not reported">no data</td>');
     expect(page).toContain("<td>meta-api</td>");
+    // Call panel: priced call shows model without provider namespace and provider in own column.
+    const callPriced = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+      view: "overview",
+      t: 60,
+      paused: false,
+      host: null,
+      call: "2026-11-03T17:59:02.000Z|w1-demo",
+    });
+    if (callPriced.callPanel === null) throw new Error("expected call panel");
+    expect(callPriced.callPanel.model).toBe("muse-spark-open-1026");
+    expect(callPriced.callPanel.providerId).toBe("meta-api");
+    expect(callPriced.callPanel.cost).toEqual({ kind: "text", text: "$0.0002" });
+    const callPage = renderLive(callPriced);
+    expect(callPage).toContain("muse-spark-open-1026");
+    // Unmeasured call renders no data for cost.
+    const callUnmeasured = buildLive(
+      await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+        call: "2026-11-03T17:59:04.000Z|w1-demo",
+      },
+    );
+    if (callUnmeasured.callPanel === null) throw new Error("expected unmeasured call panel");
+    expect(callUnmeasured.callPanel.cost).toEqual({
+      kind: "no-data",
+      reason: "usage not reported",
+    });
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

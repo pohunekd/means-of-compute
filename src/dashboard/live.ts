@@ -9,6 +9,7 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { MeterLogError, replayUsageLog, type UsageIndex } from "../meter/usage-log.js";
 import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
+import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
 import type { DashboardInputs, InputFailure, Sourced } from "./inputs.js";
 import { openSessionCount } from "./sessions.js";
 import { stat } from "node:fs/promises";
@@ -80,10 +81,12 @@ export interface SimPlacementLine {
   readonly chosenHostAlias: string | null;
   readonly reason: string;
   readonly task: SimTask | null;
+  readonly eligibleCount: number;
 }
 
 export interface SimWorkEnd {
   readonly atMinute: number;
+  readonly at: string;
   readonly workItemId: string;
 }
 
@@ -185,6 +188,71 @@ export interface HostPanelReal {
 
 export type HostPanel = HostPanelSim | HostPanelReal;
 
+export interface TaskPanelSim {
+  readonly kind: "sim";
+  readonly workItemId: string;
+  readonly task: SimTask;
+  readonly brief: string;
+  readonly hostAlias: string | null;
+  readonly placedAt: string;
+  readonly reason: string;
+  readonly eligibleCount: number;
+  readonly status: "running" | "ended";
+  readonly endedAt: string | null;
+}
+
+export interface TaskPanelReal {
+  readonly kind: "real";
+  readonly workItemId: string;
+  readonly workItem: LiveSection<WorkItem>;
+  readonly dod: LiveSection<readonly { id: string; text: string; done: boolean }[]>;
+  readonly rounds: LiveSection<
+    readonly { at: string; outcome: string; model: string; hostAlias: string | null }[]
+  >;
+  readonly verdicts: LiveSection<readonly AuditVerdict[]>;
+  readonly ledger: LiveSection<
+    readonly {
+      provider: string;
+      model: string;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      requests: number | null;
+      source: string;
+    }[]
+  >;
+  readonly ledgerSessions: LiveSection<
+    readonly { hostAlias: string; seconds: number; source: string }[]
+  >;
+  readonly ledgerMeta: LiveSection<{
+    result: string;
+    retries: number;
+    humanInterventions: number;
+  } | null>;
+}
+
+export type TaskPanel = TaskPanelSim | TaskPanelReal;
+
+export interface CallPanel {
+  readonly callId: string;
+  readonly endedAt: string;
+  readonly providerId: string;
+  readonly model: string;
+  readonly rawModel: string;
+  readonly role: string | null;
+  readonly workItemId: string | null;
+  readonly hostAlias: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly ms: number;
+  readonly cost: LiveCell;
+}
+
+export interface AuditPanel {
+  readonly workItemId: string;
+  readonly headSha: string;
+  readonly verdict: LiveSection<AuditVerdict>;
+}
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -202,6 +270,9 @@ export interface LiveModel {
   readonly t: number;
   readonly paused: boolean;
   readonly hostPanel: HostPanel | null;
+  readonly taskPanel: TaskPanel | null;
+  readonly callPanel: CallPanel | null;
+  readonly auditPanel: AuditPanel | null;
 }
 
 export interface LiveInputs {
@@ -218,6 +289,9 @@ export interface LiveOptions {
   readonly t: number;
   readonly paused: boolean;
   readonly host: string | null;
+  readonly task?: string | null;
+  readonly call?: string | null;
+  readonly audit?: string | null;
 }
 
 export class SimTraceError extends Error {
@@ -244,6 +318,37 @@ const TASK_KINDS = new Set([
   "support",
   "translation",
   "document",
+]);
+
+export const TASK_BRIEFS: ReadonlyMap<string, string> = new Map([
+  [
+    "code",
+    "Change the code as the ticket describes, run the project checks, and open a pull request for review.",
+  ],
+  [
+    "research",
+    "Read the listed sources, compare the options in a short table, and end with a recommendation.",
+  ],
+  [
+    "data-analysis",
+    "Load the dataset, check its quality, compute the requested aggregates, and chart the result.",
+  ],
+  [
+    "support",
+    "Read the ticket, classify it, draft the reply from the help-centre articles, and link the article used.",
+  ],
+  [
+    "translation",
+    "Translate the strings into the target language, keep placeholders and tone, and flag anything unclear.",
+  ],
+  [
+    "document",
+    "Draft the document from the outline and the source notes, in the house template, ready for review.",
+  ],
+  [
+    "report",
+    "Collect the figures for the period, compare them with the previous one, and write the summary.",
+  ],
 ]);
 
 function hasControlChar(text: string): boolean {
@@ -457,6 +562,14 @@ export function parseSimTrace(text: string): SimTrace {
           fail(`${where}: invalid "task"`);
         }
         const task = parseTask(record["task"], where);
+        const eligibleCountRaw = record["eligibleCount"];
+        let eligibleCount = 0;
+        if (typeof eligibleCountRaw === "number") {
+          if (!Number.isInteger(eligibleCountRaw) || eligibleCountRaw < 0) {
+            fail(`${where}: invalid "eligibleCount"`);
+          }
+          eligibleCount = eligibleCountRaw;
+        }
         placements.push({
           atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
           at: reqIso(record, "at", where),
@@ -464,12 +577,14 @@ export function parseSimTrace(text: string): SimTrace {
           chosenHostAlias: chosenRaw,
           reason: reqString(record, "reason", where),
           task,
+          eligibleCount,
         });
         break;
       }
       case "work-end": {
         workEnds.push({
           atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
+          at: reqIso(record, "at", where),
           workItemId: reqString(record, "workItemId", where),
         });
         break;
@@ -877,6 +992,310 @@ function buildHostPanel(
   };
 }
 
+function buildTaskPanelSim(
+  inputs: LiveInputs,
+  minute: number,
+  sim: SimTrace,
+  workItemId: string,
+): TaskPanelSim | null {
+  const placement = sim.placements.find((p) => p.workItemId === workItemId);
+  if (placement === undefined || placement.task === null) {
+    return null;
+  }
+  const brief = TASK_BRIEFS.get(placement.task.kind) ?? "";
+  let endedAt: string | null = null;
+  let status: "running" | "ended" = "running";
+  for (const end of sim.workEnds) {
+    if (end.workItemId === workItemId && end.atMinute <= minute) {
+      status = "ended";
+      endedAt = end.at;
+      break;
+    }
+    if (end.workItemId === workItemId && end.atMinute > minute) {
+      status = "running";
+    }
+  }
+  // If work-end exists after minute, still running; if before, ended
+  const hasEnd = sim.workEnds.some((e) => e.workItemId === workItemId && e.atMinute <= minute);
+  if (hasEnd) {
+    status = "ended";
+    const endRec = sim.workEnds.find((e) => e.workItemId === workItemId && e.atMinute <= minute);
+    endedAt = endRec?.at ?? null;
+  } else {
+    const futureEnd = sim.workEnds.find((e) => e.workItemId === workItemId);
+    if (futureEnd !== undefined) {
+      status = "running";
+      endedAt = null;
+    }
+  }
+  return {
+    kind: "sim",
+    workItemId,
+    task: placement.task,
+    brief,
+    hostAlias: placement.chosenHostAlias,
+    placedAt: placement.at,
+    reason: placement.reason,
+    eligibleCount: placement.eligibleCount,
+    status,
+    endedAt,
+  };
+}
+
+function buildTaskPanelReal(inputs: LiveInputs, workItemId: string): TaskPanelReal | null {
+  const workItemSectionNullable: LiveSection<WorkItem> | null = (() => {
+    if (!inputs.dashboard.workItems.ok) {
+      return inputs.dashboard.workItems.failure.kind === "error"
+        ? { kind: "error", code: inputs.dashboard.workItems.failure.code }
+        : { kind: "no-data", reason: inputs.dashboard.workItems.failure.reason };
+    }
+    const found = inputs.dashboard.workItems.value.find((w) => w.id === workItemId);
+    if (found === undefined) return null;
+    return { kind: "ok", value: found };
+  })();
+  if (workItemSectionNullable === null) return null;
+  const workItemSection: LiveSection<WorkItem> = workItemSectionNullable;
+  const dodSection: LiveSection<readonly { id: string; text: string; done: boolean }[]> = (() => {
+    if (workItemSection.kind !== "ok")
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      return workItemSection as unknown as LiveSection<
+        readonly { id: string; text: string; done: boolean }[]
+      >;
+    return { kind: "ok", value: workItemSection.value.dod };
+  })();
+  const resultsSection: LiveSection<
+    readonly { at: string; outcome: string; model: string; hostAlias: string | null }[]
+  > = (() => {
+    if (!inputs.dashboard.results.ok) {
+      return inputs.dashboard.results.failure.kind === "error"
+        ? { kind: "error", code: inputs.dashboard.results.failure.code }
+        : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
+    }
+    const filtered = inputs.dashboard.results.value
+      .filter((l) => l.workItemId === workItemId)
+      .map((l) => ({
+        at: l.at,
+        outcome: l.outcome,
+        model: stripProvider(l.model),
+        hostAlias: l.hostAlias,
+      }))
+      .sort((a, b) => (a.at < b.at ? 1 : -1));
+    return { kind: "ok", value: filtered };
+  })();
+  const verdictsSection: LiveSection<readonly AuditVerdict[]> = (() => {
+    const entry = inputs.dashboard.verdicts.get(workItemId);
+    if (entry === undefined) {
+      return { kind: "no-data", reason: "no verdict store" };
+    }
+    if (!entry.ok) {
+      return entry.failure.kind === "error"
+        ? { kind: "error", code: entry.failure.code }
+        : { kind: "no-data", reason: entry.failure.reason };
+    }
+    return { kind: "ok", value: entry.value };
+  })();
+  const ledgerTokensSection: LiveSection<
+    readonly {
+      provider: string;
+      model: string;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      requests: number | null;
+      source: string;
+    }[]
+  > = (() => {
+    if (!inputs.dashboard.ledger.ok) {
+      return inputs.dashboard.ledger.failure.kind === "error"
+        ? { kind: "error", code: inputs.dashboard.ledger.failure.code }
+        : { kind: "no-data", reason: inputs.dashboard.ledger.failure.reason };
+    }
+    const rec = inputs.dashboard.ledger.value.records.find((r) => r.workItemId === workItemId);
+    if (rec === undefined) {
+      // Pending may still have usage; check pending
+      const pend = inputs.dashboard.ledger.value.pending.filter((p) => p.workItemId === workItemId);
+      if (pend.length > 0) {
+        const tokens = pend.flatMap((p) =>
+          p.tokens.map((t) => ({
+            provider: t.provider,
+            model: stripProvider(t.model),
+            inputTokens: t.inputTokens,
+            outputTokens: t.outputTokens,
+            requests: t.requests,
+            source: t.source,
+          })),
+        );
+        return { kind: "ok", value: tokens };
+      }
+      return { kind: "ok", value: [] };
+    }
+    const tokens = rec.tokens.map((t) => ({
+      provider: t.provider,
+      model: stripProvider(t.model),
+      inputTokens: t.inputTokens,
+      outputTokens: t.outputTokens,
+      requests: t.requests,
+      source: t.source,
+    }));
+    return { kind: "ok", value: tokens };
+  })();
+  const ledgerSessionsSection: LiveSection<
+    readonly { hostAlias: string; seconds: number; source: string }[]
+  > = (() => {
+    if (!inputs.dashboard.ledger.ok) {
+      return inputs.dashboard.ledger.failure.kind === "error"
+        ? { kind: "error", code: inputs.dashboard.ledger.failure.code }
+        : { kind: "no-data", reason: inputs.dashboard.ledger.failure.reason };
+    }
+    const rec = inputs.dashboard.ledger.value.records.find((r) => r.workItemId === workItemId);
+    if (rec === undefined) {
+      const pend = inputs.dashboard.ledger.value.pending.filter(
+        (p) => p.workItemId === workItemId && p.session !== null,
+      );
+      if (pend.length > 0) {
+        const sessions = pend
+          .filter((p) => p.session !== null)
+          .map((p) => {
+            const s = p.session as NonNullable<typeof p.session>;
+            return { hostAlias: s.hostAlias, seconds: s.seconds, source: s.source };
+          });
+        return { kind: "ok", value: sessions };
+      }
+      return { kind: "ok", value: [] };
+    }
+    return { kind: "ok", value: rec.sessionSeconds };
+  })();
+  const ledgerMetaSection: LiveSection<{
+    result: string;
+    retries: number;
+    humanInterventions: number;
+  } | null> = (() => {
+    if (!inputs.dashboard.ledger.ok) {
+      return inputs.dashboard.ledger.failure.kind === "error"
+        ? { kind: "error", code: inputs.dashboard.ledger.failure.code }
+        : { kind: "no-data", reason: inputs.dashboard.ledger.failure.reason };
+    }
+    const rec = inputs.dashboard.ledger.value.records.find((r) => r.workItemId === workItemId);
+    if (rec === undefined) return { kind: "ok", value: null };
+    return {
+      kind: "ok",
+      value: {
+        result: rec.result,
+        retries: rec.retries,
+        humanInterventions: rec.humanInterventions,
+      },
+    };
+  })();
+  return {
+    kind: "real",
+    workItemId,
+    workItem: workItemSection,
+    dod: dodSection,
+    rounds: resultsSection,
+    verdicts: verdictsSection,
+    ledger: ledgerTokensSection,
+    ledgerSessions: ledgerSessionsSection,
+    ledgerMeta: ledgerMetaSection,
+  };
+}
+
+function buildTaskPanel(
+  inputs: LiveInputs,
+  minute: number,
+  sim: SimTrace | null,
+  workItemId: string,
+): TaskPanel | null {
+  if (sim !== null) {
+    const simPanel = buildTaskPanelSim(inputs, minute, sim, workItemId);
+    if (simPanel !== null) return simPanel;
+  }
+  const realPanel = buildTaskPanelReal(inputs, workItemId);
+  if (realPanel !== null) return realPanel;
+  return null;
+}
+
+function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
+  const sep = callKey.indexOf("|");
+  if (sep === -1) return null;
+  const endedAt = callKey.slice(0, sep);
+  const workItemId = callKey.slice(sep + 1);
+  if (!inputs.meter.ok) return null;
+  // Find matching call-end by at and workItemId via grant
+  for (const end of inputs.meter.value.ends.values()) {
+    if (end.at !== endedAt) continue;
+    const grant = inputs.meter.value.grants.get(end.requestId)?.open;
+    if (grant === undefined) continue;
+    if (grant.workItemId !== workItemId) continue;
+    const start = inputs.meter.value.starts.get(end.callId);
+    const providerId = start?.providerId ?? grant.providerId;
+    const rawModel = start?.model ?? grant.model;
+    const model = stripProvider(rawModel);
+    let cost: LiveCell;
+    if (end.inputTokens === null || end.outputTokens === null) {
+      cost = { kind: "no-data", reason: "usage not reported" };
+    } else if (!inputs.dashboard.pricing.ok) {
+      cost =
+        inputs.dashboard.pricing.failure.kind === "error"
+          ? { kind: "error", code: inputs.dashboard.pricing.failure.code }
+          : { kind: "no-data", reason: inputs.dashboard.pricing.failure.reason };
+    } else {
+      const price = inputs.dashboard.pricing.value.get(providerId);
+      cost =
+        price === undefined
+          ? { kind: "no-data", reason: "no price found" }
+          : {
+              kind: "text",
+              text: formatUsd(
+                tokenCostScaled(end.inputTokens, price.inputNanoPer1M) +
+                  tokenCostScaled(end.outputTokens, price.outputNanoPer1M),
+              ),
+            };
+    }
+    return {
+      callId: end.callId,
+      endedAt: end.at,
+      providerId,
+      model,
+      rawModel,
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      role: grant === undefined ? null : "session",
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      workItemId: grant.workItemId ?? null,
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      hostAlias: grant.hostAlias ?? null,
+      inputTokens: end.inputTokens,
+      outputTokens: end.outputTokens,
+      ms: end.ms,
+      cost,
+    };
+  }
+  return null;
+}
+
+function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | null {
+  const sep = auditKey.indexOf("@");
+  if (sep === -1) return null;
+  const workItemId = auditKey.slice(0, sep);
+  const headSha = auditKey.slice(sep + 1);
+  const entry = inputs.dashboard.verdicts.get(workItemId);
+  if (entry === undefined) {
+    // No verdict store entry means no data, not 404? But we treat as not found for 404
+    return null;
+  }
+  if (!entry.ok) {
+    return {
+      workItemId,
+      headSha,
+      verdict:
+        entry.failure.kind === "error"
+          ? { kind: "error", code: entry.failure.code }
+          : { kind: "no-data", reason: entry.failure.reason },
+    };
+  }
+  const found = entry.value.find((v) => v.headSha === headSha);
+  if (found === undefined) return null;
+  return { workItemId, headSha, verdict: { kind: "ok", value: found } };
+}
+
 export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
   const nowIso = inputs.now.toISOString();
   const utcDay = nowIso.slice(0, 10);
@@ -1002,10 +1421,23 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
             })),
         };
       })();
-  const hostPanel =
-    opts?.host !== undefined && opts.host !== null
-      ? buildHostPanel(inputs, minute, sim, opts.host)
-      : null;
+  let hostPanel: HostPanel | null = null;
+  let taskPanel: TaskPanel | null = null;
+  let callPanel: CallPanel | null = null;
+  let auditPanel: AuditPanel | null = null;
+  const rawHost = opts?.host ?? null;
+  const rawTask = opts?.task ?? null;
+  const rawCall = opts?.call ?? null;
+  const rawAudit = opts?.audit ?? null;
+  if (rawHost !== null) {
+    hostPanel = buildHostPanel(inputs, minute, sim, rawHost);
+  } else if (rawTask !== null) {
+    taskPanel = buildTaskPanel(inputs, minute, sim, rawTask);
+  } else if (rawCall !== null) {
+    callPanel = buildCallPanel(inputs, rawCall);
+  } else if (rawAudit !== null) {
+    auditPanel = buildAuditPanel(inputs, rawAudit);
+  }
   return {
     renderedAt: nowIso,
     simAt: sim === null ? null : new Date(Date.parse(sim.startAt) + minute * 60000).toISOString(),
@@ -1029,5 +1461,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     t: opts?.t ?? minute,
     paused: opts?.paused ?? false,
     hostPanel,
+    taskPanel,
+    callPanel,
+    auditPanel,
   };
 }

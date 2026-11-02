@@ -11,6 +11,8 @@ import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
 import { stripProvider } from "./live.js";
 import type {
+  AuditPanel,
+  CallPanel,
   HostPanel,
   LiveActivityRow,
   LiveCell,
@@ -19,6 +21,7 @@ import type {
   LiveModel,
   LiveSection,
   LiveTile,
+  TaskPanel,
 } from "./live.js";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -159,20 +162,67 @@ function checkAlias(tile: LiveTile): void {
   }
 }
 
-function buildHref(
-  model: LiveModel,
-  overrides: Partial<Record<string, string | number | null>>,
-): string {
+type LiveHrefOverrides = Partial<Record<string, string | number | boolean | null>>;
+
+function buildHref(model: LiveModel, overrides: LiveHrefOverrides): string {
   const params = new URLSearchParams();
   const view = overrides["view"] !== undefined ? (overrides["view"] as string | null) : model.view;
   const tVal: number | null =
     overrides["t"] !== undefined ? (overrides["t"] as number | null) : model.t;
   const paused =
     overrides["paused"] !== undefined ? (overrides["paused"] as boolean | null) : model.paused;
-  const host =
-    overrides["host"] !== undefined
-      ? (overrides["host"] as string | null)
-      : (model.hostPanel?.alias ?? null);
+  let host: string | null = null;
+  let task: string | null = null;
+  let call: string | null = null;
+  let audit: string | null = null;
+  if (overrides["host"] !== undefined) {
+    host = overrides["host"] as string | null;
+  } else if (overrides["task"] !== undefined) {
+    task = overrides["task"] as string | null;
+  } else if (overrides["call"] !== undefined) {
+    call = overrides["call"] as string | null;
+  } else if (overrides["audit"] !== undefined) {
+    audit = overrides["audit"] as string | null;
+  } else {
+    host = model.hostPanel?.alias ?? null;
+    task = model.taskPanel?.workItemId ?? null;
+    if (model.callPanel !== null) {
+      call = `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`;
+      task = null;
+    }
+    if (model.auditPanel !== null) {
+      audit = `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`;
+      task = null;
+      call = null;
+    }
+    if (host !== null) {
+      task = null;
+      call = null;
+      audit = null;
+    } else if (task !== null) {
+      call = null;
+      audit = null;
+    } else if (call !== null) {
+      audit = null;
+    }
+  }
+  if (overrides["host"] !== undefined) {
+    task = null;
+    call = null;
+    audit = null;
+  } else if (overrides["task"] !== undefined) {
+    host = null;
+    call = null;
+    audit = null;
+  } else if (overrides["call"] !== undefined) {
+    host = null;
+    task = null;
+    audit = null;
+  } else if (overrides["audit"] !== undefined) {
+    host = null;
+    task = null;
+    call = null;
+  }
   if (view !== null) {
     params.set("view", view);
   }
@@ -184,6 +234,12 @@ function buildHref(
   }
   if (host !== null) {
     params.set("host", host);
+  } else if (task !== null) {
+    params.set("task", task);
+  } else if (call !== null) {
+    params.set("call", call);
+  } else if (audit !== null) {
+    params.set("audit", audit);
   }
   const qs = params.toString();
   return qs.length > 0 ? `/?${qs}` : "/";
@@ -251,7 +307,7 @@ function sectionText<T>(section: LiveSection<T>): SafeHtml {
   return constantHtml("");
 }
 
-function renderActivityRow(row: LiveActivityRow): SafeHtml {
+function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml {
   const model = shortenMiddle(row.model, 30);
   const tokens = (value: number | null): string =>
     value === null ? "no data" : value.toLocaleString("en-US");
@@ -259,15 +315,17 @@ function renderActivityRow(row: LiveActivityRow): SafeHtml {
     row.cost.kind === "no-data"
       ? html`<td class="nodata" title="${row.cost.reason}">no data</td>`
       : html`<td class="${cellClass(row.cost)}">${cellText(row.cost)}</td>`;
+  const callKey = `${row.at}|${row.workItemId ?? ""}`;
+  const modelLink = html`<a
+    href="${buildHref(liveModel, { call: callKey })}"
+    class="mono nowrap"
+    title="${row.model}"
+    >${model === row.model ? row.model : model}</a
+  >`;
+  const modelCell = html`<td>${modelLink}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
-    <td>
-      ${
-        model === row.model
-          ? html`<span class="mono nowrap">${row.model}</span>`
-          : html`<span class="mono nowrap" title="${row.model}">${model}</span>`
-      }
-    </td>
+    ${modelCell}
     <td>${row.providerId}</td>
     <td>${row.role ?? "-"}</td>
     <td class="num">${tokens(row.inputTokens)}</td>
@@ -314,6 +372,17 @@ function renderTabs(model: LiveModel): SafeHtml {
 function renderReplay(model: LiveModel): SafeHtml {
   const jumpMinutes = [0, 60, 120, 180, 240];
   const duration = model.durationMinutes ?? 240;
+  const addSelection = (params: URLSearchParams): void => {
+    if (model.hostPanel !== null) {
+      params.set("host", model.hostPanel.alias);
+    } else if (model.taskPanel !== null) {
+      params.set("task", model.taskPanel.workItemId);
+    } else if (model.callPanel !== null) {
+      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
+    } else if (model.auditPanel !== null) {
+      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
+    }
+  };
   const jumps = jumpMinutes
     .filter((m) => m <= duration)
     .map((m) => {
@@ -323,9 +392,7 @@ function renderReplay(model: LiveModel): SafeHtml {
       if (model.paused) {
         params.set("pause", "1");
       }
-      if (model.hostPanel !== null) {
-        params.set("host", model.hostPanel.alias);
-      }
+      addSelection(params);
       return html`<a href="/?${params.toString()}">${String(m)}</a>`;
     });
   // Helper for controls that preserve view/host.
@@ -342,9 +409,7 @@ function renderReplay(model: LiveModel): SafeHtml {
         params.set("pause", "1");
       }
     }
-    if (model.hostPanel !== null) {
-      params.set("host", model.hostPanel.alias);
-    }
+    addSelection(params);
     const qs = params.toString();
     return qs.length > 0 ? `/?${qs}` : "/";
   };
@@ -384,7 +449,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       ${task === "" ? constantHtml("") : html`<p class="row">Task: ${task}</p>`}
       <p class="row">Running tasks:</p>
       <ul>
-        ${panel.runningTasks.map((t) => html`<li>${t.workItemId} at ${t.at}</li>`)}
+        ${panel.runningTasks.map((t) => html`<li><a href="${buildHref(model, { task: t.workItemId })}">${t.workItemId}</a> at ${t.at}</li>`)}
       </ul>
       <p class="row">Events (up to 6):</p>
       <ul>
@@ -392,7 +457,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       </ul>
       <p class="row">Placements (up to 6):</p>
       <ul>
-        ${panel.placements.map((p) => html`<li>${p.workItemId} -> ${p.chosenHostAlias ?? "none"}: ${p.reason}</li>`)}
+        ${panel.placements.map((p) => html`<li><a href="${buildHref(model, { task: p.workItemId })}">${p.workItemId}</a> -> ${p.chosenHostAlias ?? "none"}: ${p.reason}</li>`)}
       </ul>
       <p><a href="${backHref}">back to live</a></p>
     </div>`;
@@ -431,7 +496,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Recent results:</p>
           <ul>
-            ${panel.results.value.map((r) => html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`)}
+            ${panel.results.value.map((r) => html`<li><a href="${buildHref(model, { task: r.workItemId })}">${r.workItemId}</a> ${r.outcome} at ${r.at}</li>`)}
           </ul>
         </div>`;
   const meterBlock =
@@ -440,7 +505,7 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Recent meter calls:</p>
           <ul>
-            ${panel.meterCalls.value.map((c) => html`<li>${c.model} ${c.at}</li>`)}
+            ${panel.meterCalls.value.map((c) => html`<li><a href="${buildHref(model, { call: `${c.at}|${c.workItemId ?? ""}` })}">${c.model}</a> ${c.at}</li>`)}
           </ul>
         </div>`;
   return html`<div class="host-panel" id="host-panel">
@@ -448,6 +513,197 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
     ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
+}
+
+function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { task: null });
+  if (panel.kind === "sim") {
+    const hostLink =
+      panel.hostAlias === null
+        ? "none"
+        : html`<a href="${buildHref(model, { host: panel.hostAlias })}">${panel.hostAlias}</a>`;
+    return html`<div class="host-panel" id="task-panel">
+      <h3>${panel.workItemId} <span class="chip">SIMULATED</span></h3>
+      <p class="row">Kind: ${panel.task.kind}</p>
+      <p class="row">Title: ${panel.task.title}</p>
+      <p class="row">Brief: ${panel.brief}</p>
+      <p class="row">Placed at: ${panel.placedAt} on ${hostLink} because ${panel.reason}</p>
+      <p class="row">Eligible count: ${String(panel.eligibleCount)}</p>
+      <p class="row">
+        Status: ${panel.status}${panel.endedAt === null ? "" : ` ended at ${panel.endedAt}`}
+      </p>
+      <p><a href="${backHref}">back to live</a></p>
+    </div>`;
+  }
+  const goal =
+    panel.workItem.kind === "ok"
+      ? html`<p class="row">Goal: ${panel.workItem.value.goal}</p>`
+      : sectionText(panel.workItem);
+  const dodBlock =
+    panel.dod.kind !== "ok"
+      ? sectionText(panel.dod)
+      : html`<div>
+          <p class="row">DoD:</p>
+          <ul>
+            ${panel.dod.value.map((d) => html`<li>${d.id}: ${d.text} ${d.done ? "done" : "pending"}</li>`)}
+          </ul>
+        </div>`;
+  const roundsBlock =
+    panel.rounds.kind !== "ok"
+      ? sectionText(panel.rounds)
+      : html`<div>
+          <p class="row">Rounds:</p>
+          <ul>
+            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${r.model} on ${r.hostAlias ?? "no host"}</li>`)}
+          </ul>
+        </div>`;
+  const verdictsBlock =
+    panel.verdicts.kind !== "ok"
+      ? sectionText(panel.verdicts)
+      : html`<div>
+          <p class="row">Verdicts:</p>
+          <ul>
+            ${panel.verdicts.value.map((v) => html`<li><a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}">${v.headSha.slice(0, 7)} high ${String(v.counts.high)} medium ${String(v.counts.medium)} low ${String(v.counts.low)}</a></li>`)}
+          </ul>
+        </div>`;
+  const ledgerBlock =
+    panel.ledger.kind !== "ok"
+      ? sectionText(panel.ledger)
+      : html`<div>
+          <p class="row">Ledger tokens:</p>
+          <ul>
+            ${panel.ledger.value.map((t) => html`<li>${t.provider} ${t.model} in ${String(t.inputTokens ?? "no data")} out ${String(t.outputTokens ?? "no data")} req ${String(t.requests ?? "no data")} source ${t.source}</li>`)}
+          </ul>
+        </div>`;
+  const ledgerSessionsBlock =
+    panel.ledgerSessions.kind !== "ok"
+      ? sectionText(panel.ledgerSessions)
+      : html`<div>
+          <p class="row">Ledger sessions:</p>
+          <ul>
+            ${panel.ledgerSessions.value.map((s) => html`<li>${s.hostAlias} ${String(s.seconds)}s source ${s.source}</li>`)}
+          </ul>
+        </div>`;
+  const ledgerMetaBlock =
+    panel.ledgerMeta.kind !== "ok"
+      ? sectionText(panel.ledgerMeta)
+      : panel.ledgerMeta.value === null
+        ? html`<p class="row">Ledger meta: no data</p>`
+        : html`<p class="row">
+            Ledger meta: ${panel.ledgerMeta.value.result} retries
+            ${String(panel.ledgerMeta.value.retries)} human
+            ${String(panel.ledgerMeta.value.humanInterventions)}
+          </p>`;
+  const title = panel.workItem.kind === "ok" ? panel.workItem.value.id : panel.workItemId;
+  return html`<div class="host-panel" id="task-panel">
+    <h3>${title} <span class="chip chip-real">REAL</span></h3>
+    ${goal} ${dodBlock} ${roundsBlock} ${verdictsBlock} ${ledgerBlock} ${ledgerSessionsBlock}
+    ${ledgerMetaBlock}
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { call: null });
+  const costCell =
+    panel.cost.kind === "no-data"
+      ? html`<span class="nodata">no data (${panel.cost.reason})</span>`
+      : panel.cost.kind === "error"
+        ? html`<span class="error">error (${panel.cost.code})</span>`
+        : html`<span class="value">${panel.cost.text}</span>`;
+  const hostLink =
+    panel.hostAlias === null
+      ? "none"
+      : html`<a href="${buildHref(model, { host: panel.hostAlias })}">${panel.hostAlias}</a>`;
+  const taskLink =
+    panel.workItemId === null
+      ? "none"
+      : html`<a href="${buildHref(model, { task: panel.workItemId })}">${panel.workItemId}</a>`;
+  return html`<div class="host-panel" id="call-panel">
+    <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
+    <p class="row">Ended at: ${panel.endedAt}</p>
+    <p class="row">Provider: ${panel.providerId}</p>
+    <p class="row">Model: ${panel.model}</p>
+    <p class="row">Role: ${panel.role ?? "-"}</p>
+    <p class="row">Task: ${taskLink}</p>
+    <p class="row">Host: ${hostLink}</p>
+    <p class="row">
+      Tokens: in ${String(panel.inputTokens ?? "no data")} out
+      ${String(panel.outputTokens ?? "no data")} ms ${String(panel.ms)}
+    </p>
+    <p class="row">Cost: ${costCell}</p>
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
+  const backHref = buildHref(model, { audit: null });
+  const body =
+    panel.verdict.kind !== "ok"
+      ? sectionText(panel.verdict)
+      : html`<div>
+          <p class="row">Head: ${panel.verdict.value.headSha}</p>
+          <p class="row">
+            Counts: high ${String(panel.verdict.value.counts.high)} medium
+            ${String(panel.verdict.value.counts.medium)} low
+            ${String(panel.verdict.value.counts.low)}
+          </p>
+          <p class="row">Findings: ${String(panel.verdict.value.findings.length)}</p>
+          <p class="row">
+            Task:
+            <a href="${buildHref(model, { task: panel.verdict.value.workItemId })}"
+              >${panel.verdict.value.workItemId}</a
+            >
+          </p>
+        </div>`;
+  return html`<div class="host-panel" id="audit-panel">
+    <h3>Audit ${panel.workItemId}@${panel.headSha.slice(0, 7)}</h3>
+    ${body}
+    <p><a href="${backHref}">back to live</a></p>
+  </div>`;
+}
+
+function renderDetailBreadcrumb(model: LiveModel): SafeHtml {
+  const fleetLink = html`<a href="${buildHref(model, { host: null })}">Fleet</a>`;
+  if (model.hostPanel !== null) {
+    return html`<nav class="breadcrumb">
+      ${fleetLink} / ${model.hostPanel.alias}
+      <a href="${buildHref(model, { host: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.taskPanel !== null) {
+    const hostPart =
+      model.taskPanel.kind === "sim" && model.taskPanel.hostAlias !== null
+        ? html` /
+            <a href="${buildHref(model, { host: model.taskPanel.hostAlias })}"
+              >${model.taskPanel.hostAlias}</a
+            >`
+        : constantHtml("");
+    return html`<nav class="breadcrumb">
+      ${fleetLink}${hostPart} / ${model.taskPanel.workItemId} / audit
+      <a href="${buildHref(model, { task: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.callPanel !== null) {
+    const taskPart =
+      model.callPanel.workItemId !== null
+        ? html` /
+            <a href="${buildHref(model, { task: model.callPanel.workItemId })}"
+              >${model.callPanel.workItemId}</a
+            >`
+        : constantHtml("");
+    return html`<nav class="breadcrumb">
+      ${fleetLink}${taskPart} / ${model.callPanel.callId} / audit
+      <a href="${buildHref(model, { call: null })}">back to live</a>
+    </nav>`;
+  }
+  if (model.auditPanel !== null) {
+    return html`<nav class="breadcrumb">
+      ${fleetLink} / ${model.auditPanel.workItemId} / ${model.auditPanel.headSha.slice(0, 7)} /
+      audit <a href="${buildHref(model, { audit: null })}">back to live</a>
+    </nav>`;
+  }
+  return constantHtml("");
 }
 
 export function renderLive(model: LiveModel): string {
@@ -461,6 +717,12 @@ export function renderLive(model: LiveModel): string {
     params.set("t", String(nextMinute));
     if (model.hostPanel !== null) {
       params.set("host", model.hostPanel.alias);
+    } else if (model.taskPanel !== null) {
+      params.set("task", model.taskPanel.workItemId);
+    } else if (model.callPanel !== null) {
+      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
+    } else if (model.auditPanel !== null) {
+      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
     }
     return `/?${params.toString()}`;
   })();
@@ -503,7 +765,7 @@ export function renderLive(model: LiveModel): string {
               </tr>
             </thead>
             <tbody>
-              ${model.activity.value.map((row) => renderActivityRow(row))}
+              ${model.activity.value.map((row) => renderActivityRow(row, model))}
             </tbody>
           </table>
         </div>`
@@ -512,6 +774,25 @@ export function renderLive(model: LiveModel): string {
     model.tickerNote === null ? constantHtml("") : html`<p class="note">${model.tickerNote}</p>`;
   const hostPanel =
     model.hostPanel === null ? constantHtml("") : renderHostPanel(model.hostPanel, model);
+  const taskPanel =
+    model.taskPanel === null ? constantHtml("") : renderTaskPanel(model.taskPanel, model);
+  const callPanel =
+    model.callPanel === null ? constantHtml("") : renderCallPanel(model.callPanel, model);
+  const auditPanel =
+    model.auditPanel === null ? constantHtml("") : renderAuditPanel(model.auditPanel, model);
+  const detailPanel =
+    model.hostPanel !== null
+      ? hostPanel
+      : model.taskPanel !== null
+        ? taskPanel
+        : model.callPanel !== null
+          ? callPanel
+          : auditPanel;
+  const hasDetail =
+    model.hostPanel !== null ||
+    model.taskPanel !== null ||
+    model.callPanel !== null ||
+    model.auditPanel !== null;
   const fleetContent = html`<h2>Fleet</h2>
     ${realFleet} ${simFleet}
     <p class="live-legend">
@@ -525,23 +806,18 @@ export function renderLive(model: LiveModel): string {
     <p class="cite">
       source: real recorded probes and dispatcher registry; simulated fleet trace (sim-trace-v1)
     </p>`;
-  const sideContent =
-    model.hostPanel === null
-      ? html`<section id="live-activity">
-            <h2>Model activity (real)</h2>
-            ${activity}
-            <p class="cite">source: real meter call-end records from the meter usage log</p>
-          </section>
-          <section id="live-ticker" class="live-events">
-            <h2>Events</h2>
-            ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
-            <p class="cite">source: real loop results; simulated host and placement trace lines</p>
-          </section>`
-      : html`<nav class="breadcrumb">
-            <a href="${buildHref(model, { host: null })}">Fleet</a> / ${model.hostPanel.alias}
-            <a href="${buildHref(model, { host: null })}">back to live</a>
-          </nav>
-          ${hostPanel}`;
+  const sideContent = !hasDetail
+    ? html`<section id="live-activity">
+          <h2>Model activity (real)</h2>
+          ${activity}
+          <p class="cite">source: real meter call-end records from the meter usage log</p>
+        </section>
+        <section id="live-ticker" class="live-events">
+          <h2>Events</h2>
+          ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
+          <p class="cite">source: real loop results; simulated host and placement trace lines</p>
+        </section>`
+    : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
   return (
     "<!doctype html>\n" +
     html`<html lang="en">

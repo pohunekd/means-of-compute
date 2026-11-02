@@ -649,11 +649,24 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
             ${String(panel.verdict.value.counts.low)}
           </p>
           <p class="row">Findings: ${String(panel.verdict.value.findings.length)}</p>
+          <ul>
+            ${panel.verdict.value.findings.map(
+              (finding) =>
+                html`<li>
+                  ${finding.severity} ${finding.location}: ${finding.defect} — ${finding.scenario}
+                  -> ${finding.fixDirection}
+                </li>`,
+            )}
+          </ul>
           <p class="row">
             Task:
             <a href="${buildHref(model, { task: panel.verdict.value.workItemId })}"
               >${panel.verdict.value.workItemId}</a
             >
+          </p>
+          <p class="row">
+            PR:
+            ${panel.verdict.value.pullNumber === null ? "none" : String(panel.verdict.value.pullNumber)}
           </p>
         </div>`;
   return html`<div class="host-panel" id="audit-panel">
@@ -680,7 +693,7 @@ function renderDetailBreadcrumb(model: LiveModel): SafeHtml {
             >`
         : constantHtml("");
     return html`<nav class="breadcrumb">
-      ${fleetLink}${hostPart} / ${model.taskPanel.workItemId} / audit
+      ${fleetLink}${hostPart} / ${model.taskPanel.workItemId}
       <a href="${buildHref(model, { task: null })}">back to live</a>
     </nav>`;
   }
@@ -693,14 +706,14 @@ function renderDetailBreadcrumb(model: LiveModel): SafeHtml {
             >`
         : constantHtml("");
     return html`<nav class="breadcrumb">
-      ${fleetLink}${taskPart} / ${model.callPanel.callId} / audit
+      ${fleetLink}${taskPart} / ${model.callPanel.callId}
       <a href="${buildHref(model, { call: null })}">back to live</a>
     </nav>`;
   }
   if (model.auditPanel !== null) {
     return html`<nav class="breadcrumb">
-      ${fleetLink} / ${model.auditPanel.workItemId} / ${model.auditPanel.headSha.slice(0, 7)} /
-      audit <a href="${buildHref(model, { audit: null })}">back to live</a>
+      ${fleetLink} / ${model.auditPanel.workItemId} / ${model.auditPanel.headSha.slice(0, 7)}
+      <a href="${buildHref(model, { audit: null })}">back to live</a>
     </nav>`;
   }
   return constantHtml("");

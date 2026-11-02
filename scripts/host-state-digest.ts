@@ -1,8 +1,10 @@
 // Computes the host-state plugin source digest and compares it with the
-// committed config. Usage: bun run plugin:digest [--config <path>]
+// committed config. Inputs: Cargo.toml, Cargo.lock, crates/moc-host-state/Cargo.toml,
+// every file under crates/moc-host-state/src/ (recursive), config/plugin.json,
+// config/probe.json, config/scenarios/*.json. Usage: bun run plugin:digest [--config <path>]
 // (from the repo root; the default is config/host-state.json).
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { loadHostStateConfig } from "../src/hoststate/config.js";
 
@@ -19,30 +21,53 @@ if (configFlag !== -1) {
   configPath = isAbsolute(value) ? value : join(root, value);
 }
 
-async function digestInputs(): Promise<string[]> {
-  const result = await Bun.build({
-    entrypoints: [join(root, "src/probe/plugin-entry.ts")],
-    target: "bun",
-    metafile: true,
-  });
-  const inputs = Object.keys(result.metafile?.inputs ?? {}).filter(
-    (p) => !p.includes("node_modules/"),
-  );
-  const scenarioDir = join(root, "config", "scenarios");
-  const scenarios = readdirSync(scenarioDir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => join("config", "scenarios", f));
-  const extra = ["bun.lock", "config/plugin.json", "config/probe.json", ...scenarios];
-  return [...new Set([...inputs, ...extra])].sort();
+function collectRustSrcFiles(dir: string, base: string, out: string[]): void {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const rel = join(base, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      collectRustSrcFiles(full, rel, out);
+    } else if (st.isFile()) {
+      out.push(rel);
+    }
+  }
 }
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-const inputs = await digestInputs();
+const inputs: string[] = [];
+inputs.push("Cargo.toml");
+inputs.push("Cargo.lock");
+inputs.push(join("crates", "moc-host-state", "Cargo.toml"));
+const srcDir = join(root, "crates", "moc-host-state", "src");
+const srcBase = join("crates", "moc-host-state", "src");
+const srcFiles: string[] = [];
+collectRustSrcFiles(srcDir, srcBase, srcFiles);
+inputs.push(...srcFiles);
+inputs.push(join("config", "plugin.json"));
+inputs.push(join("config", "probe.json"));
+const scenarioDir = join(root, "config", "scenarios");
+for (const f of readdirSync(scenarioDir)) {
+  if (f.endsWith(".json")) {
+    inputs.push(join("config", "scenarios", f));
+  }
+}
+const sorted = [...new Set(inputs)].sort();
+
+for (const rel of sorted) {
+  const bytes = readFileSync(join(root, rel));
+  const text = bytes.toString("utf-8");
+  if (text.includes("include_str!") || text.includes("include_bytes!")) {
+    console.error(`plugin:digest: ${rel}: include_str!/include_bytes! is not allowed`);
+    process.exit(2);
+  }
+}
+
 let text = "";
-for (const rel of inputs) {
+for (const rel of sorted) {
   const bytes = readFileSync(join(root, rel));
   text += `${rel}\t${sha256Hex(bytes)}\n`;
 }

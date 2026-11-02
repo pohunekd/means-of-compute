@@ -177,7 +177,7 @@ section of [docs/loop.md](docs/loop.md), and [docs/meter.md](docs/meter.md) and
 [docs/dispatcher.md](docs/dispatcher.md). In short:
 
 - A Pohunek daemon 0.38.1 or later on every fleet machine, running the probe plugin
-  package built with `bun run plugin:build --out logs/plugin`. The output directory must
+  package built with `bun run plugin:build --out logs/plugin --target x86_64-unknown-linux-musl` (or `aarch64-apple-darwin` on macOS). The output directory must
   be absent or empty, and `logs/` is gitignored.
 - `cp config/hosts.example.json config/hosts.json`, then map each hostname to a
   display alias. `config/hosts.json` is gitignored.

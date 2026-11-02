@@ -14,16 +14,16 @@ output in parallel through `HostStatePort` and turns each reply into one
 
 ## Package contents
 
-`plugin:build` assembles one directory:
+`plugin:build` assembles one per-target directory:
 
 ```text
-moc-host-state-<version>/
+moc-host-state-<version>-<target>/
   runtime.toml                package manifest consumed by the host daemon
-  bin/moc-host-state          bundled plugin entry (src/probe/plugin-entry.ts)
+  bin/moc-host-state          Rust binary (crates/moc-host-state)
   config/plugin.json          fleet-wide host file path
   config/probe.json           fleet-wide probe policy and macOS tool paths
   config/scenarios/*.json     scenario inputs (tests and diagnosis only)
-  build.json                  { packageId, version, command, gitCommit, sourceDigest, bunVersion, binarySha256 }
+  build.json                  { packageId, version, command, gitCommit, sourceDigest, rustcVersion, cargoTarget, binarySha256 }
 ```
 
 `config/hosts.json` is never copied into the package: a digest-pinned package
@@ -34,20 +34,25 @@ hostname map would put private hostnames into a distributed artifact.
 
 ```sh
 bun run plugin:digest
-bun run plugin:build --out <dir>
+bun run plugin:build --out <dir> --target <triple>
 ```
 
-`--out` is the only argument. `--out` must be absent or an empty
-directory; the script never overwrites.
+`--out` and `--target` are required. `--out` must be absent or an empty
+directory; the script never overwrites. `--target` is `x86_64-unknown-linux-musl`
+or `aarch64-apple-darwin` and must match the build host OS (`linux` or `darwin`);
+otherwise the build exits 2 before running cargo.
 `plugin:build` refuses to build when `plugin:digest` does not match, so a stale
 digest cannot be built.
 
-The source digest pins the source inputs of the bundle: every repo file
-the bundle includes (from the `Bun.build` metafile, excluding `node_modules/`),
-plus `bun.lock`, `config/plugin.json`, `config/probe.json` and every `config/scenarios/*.json` file.
-The toolchain is recorded separately as `bunVersion` in `build.json`.
+The source digest pins the source inputs of the Rust crate: `Cargo.toml`,
+`Cargo.lock`, `crates/moc-host-state/Cargo.toml`, every file under
+`crates/moc-host-state/src/` (recursive), `config/plugin.json`, `config/probe.json`
+and every `config/scenarios/*.json` file. The toolchain is recorded separately as
+`rustcVersion` and `cargoTarget` in `build.json`.
 `plugin:digest` prints the digest and exits 0 only when it equals
-`package.sourceDigest` in `config/host-state.json`.
+`package.sourceDigest` in `config/host-state.json`. It exits 2 with
+`plugin:digest: <file>: include_str!/include_bytes! is not allowed` when a crate
+source file uses either macro.
 
 ## Version rule
 
@@ -79,8 +84,9 @@ The plugin reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
 
-The launch `PATH` the daemon gives the plugin must provide `bun`, because the
-bundle starts with `#!/usr/bin/env bun`.
+The launch `PATH` the daemon gives the plugin no longer needs `bun` for `0.6.0`,
+because the package ships a native binary; it still does for older versions
+whose bundle starts with `#!/usr/bin/env bun`.
 
 ## Idle detection and agent runtime
 
@@ -109,13 +115,31 @@ closes the connector; later `close()` calls return at once, and a later
 ## Artifacts
 
 Built packages are never committed (`dist/` is gitignored) and never published
-from this repository. The owner builds once per version and installs that one
-directory on every host with `pohunek plugin link`. Vouch first by digest: run
-`pohunek plugin link <dir>` without `--yes` on the first host, record the
-printed digest, and repeat the dry run on every other host to compare before
-running `--yes`. Copy the directory with modes preserved: `bin/moc-host-state`
-must keep `0755`, or the link fails. A rebuild
-is a new artifact with a new digest.
+from this repository. The owner builds each per-target package from the package
+workflow (`.github/workflows/host-state-package.yml`): trigger `workflow_dispatch`
+or open a pull request that touches the workflow or `scripts/host-state-build.ts`,
+then `gh run download` the artifacts. Extract on the host with `tar -xzf` (keeps `0755`).
+
+Install on each host locally (plugin commands are local only; `--host` is rejected):
+
+```sh
+pohunek plugin link <dir>
+# compare the printed digest with other hosts of the same target
+pohunek plugin link <dir> --yes
+pohunek plugin enable moc.host-state --version 0.6.0
+pohunek plugin select moc.host-state --version 0.6.0
+```
+
+Rollback is `pohunek plugin select moc.host-state --version <previous>` (for example `0.5.0`);
+hosts keep their installed TS versions as the rollback until a later retirement issue.
+
+Rebuilding the TS package: check out the first parent of
+
+```sh
+git log --reverse --format=%H -G'"version": "0.6.0"' -- config/host-state.json | head -1
+```
+
+and run `bun run plugin:build --out <dir>` there.
 
 ## Causes
 
@@ -202,4 +226,4 @@ excluded`, where `N` counts all candidates. Otherwise the `place()` reason
 
 ## Rust probe
 
-The Rust port lives in `crates/moc-host-state/` and is checked with `bun run gates:rs`. Parity rules with the TypeScript probe are documented in `crates/moc-host-state/src/lib.rs`. Packaging still uses the TypeScript bundle until the version bump.
+The Rust port lives in `crates/moc-host-state/` and is checked with `bun run gates:rs`. Parity rules with the TypeScript probe are documented in `crates/moc-host-state/src/lib.rs`. Packaging uses the Rust binary as `moc-host-state-0.6.0-<target>/` with `bin/moc-host-state` and `build.json` fields `rustcVersion`, `cargoTarget` and `binarySha256`.

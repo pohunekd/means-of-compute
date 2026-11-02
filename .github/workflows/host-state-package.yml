@@ -1,0 +1,70 @@
+name: host-state-package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/host-state-package.yml"
+      - "scripts/host-state-build.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - run: rustup default 1.99.1
+      - run: rustup target add ${{ matrix.target }}
+      - run: bun run plugin:build --out dist --target ${{ matrix.target }}
+      - name: check architecture (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          file dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "x86-64"
+          file dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "static"
+      - name: check architecture (macOS)
+        if: matrix.os == 'macos-latest'
+        run: lipo -archs dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "arm64"
+      - run: dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state --scenario desktop-mains | bun run scripts/contracts-check.ts host-capacity -
+      - name: check mode and binarySha256
+        run: |
+          node -e "
+            const fs=require('fs');
+            const crypto=require('crypto');
+            const bin='dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state';
+            const build='dist/moc-host-state-0.6.0-${{ matrix.target }}/build.json';
+            const mode=fs.statSync(bin).mode & 0o777;
+            if(mode!==0o755){ console.error('mode '+mode.toString(8)+' != 755'); process.exit(1); }
+            const sha=crypto.createHash('sha256').update(fs.readFileSync(bin)).digest('hex');
+            const bj=JSON.parse(fs.readFileSync(build,'utf8'));
+            if(bj.binarySha256!==sha){ console.error('binarySha256 mismatch '+bj.binarySha256+' vs '+sha); process.exit(1); }
+          "
+      - name: check reproducible binarySha256
+        run: |
+          bun run plugin:build --out dist2 --target ${{ matrix.target }}
+          node -e "
+            const fs=require('fs');
+            const a=JSON.parse(fs.readFileSync('dist/moc-host-state-0.6.0-${{ matrix.target }}/build.json','utf8')).binarySha256;
+            const b=JSON.parse(fs.readFileSync('dist2/moc-host-state-0.6.0-${{ matrix.target }}/build.json','utf8')).binarySha256;
+            if(a!==b){ console.error('binarySha256 changed '+a+' vs '+b); process.exit(1); }
+          "
+      - run: tar -C dist -czf moc-host-state-0.6.0-${{ matrix.target }}.tar.gz moc-host-state-0.6.0-${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: moc-host-state-0.6.0-${{ matrix.target }}
+          path: moc-host-state-0.6.0-${{ matrix.target }}.tar.gz

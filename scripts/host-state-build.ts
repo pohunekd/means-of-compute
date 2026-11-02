@@ -1,5 +1,5 @@
 // Builds the host-state plugin package directory.
-// Usage: bun run plugin:build --out <dir>
+// Usage: bun run plugin:build --out <dir> --target <triple>
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -21,29 +21,46 @@ function usageError(message: string): never {
   process.exit(2);
 }
 
-function parseArgs(args: readonly string[]): { out: string } {
+function parseArgs(args: readonly string[]): { out: string; target: string } {
   let out: string | undefined;
+  let target: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--out" && args[i + 1] !== undefined) {
       out = args[i + 1];
       i++;
+    } else if (arg === "--target" && args[i + 1] !== undefined) {
+      target = args[i + 1];
+      i++;
     } else {
       usageError(`unknown argument ${arg ?? "(missing value)"}`);
     }
   }
-  if (out === undefined) {
-    usageError("usage: bun run plugin:build --out <dir>");
+  if (out === undefined || target === undefined) {
+    usageError("usage: bun run plugin:build --out <dir> --target <triple>");
   }
-  return { out };
+  return { out, target };
 }
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-const { out } = parseArgs(Bun.argv.slice(2));
+const { out, target } = parseArgs(Bun.argv.slice(2));
 const outDir = isAbsolute(out) ? out : join(root, out);
+
+const allowedTargets = new Set(["x86_64-unknown-linux-musl", "aarch64-apple-darwin"]);
+if (!allowedTargets.has(target)) {
+  usageError(`unknown target ${target}`);
+}
+
+const platformForTarget: Record<string, NodeJS.Platform> = {
+  "x86_64-unknown-linux-musl": "linux",
+  "aarch64-apple-darwin": "darwin",
+};
+if (platformForTarget[target] !== process.platform) {
+  usageError(`target ${target} cannot be built on ${process.platform}`);
+}
 
 // The digest script compares the computed digest with the committed one and
 // exits 2 on mismatch, so a stale digest cannot be built.
@@ -95,18 +112,38 @@ if (gitCommitRc !== 0) {
   process.exit(2);
 }
 const gitCommit = gitCommitOut.trim();
-const bunVersion = Bun.version;
 
-const dir = join(outDir, `moc-host-state-${version}`);
-const binDir = join(dir, "bin");
-mkdirSync(binDir, { recursive: true });
-const binPath = join(binDir, "moc-host-state");
-const buildArgs = ["build", "--target=bun", "src/probe/plugin-entry.ts", "--outfile", binPath];
-const build = Bun.spawn(["bun", ...buildArgs], {
+const rustcProc = Bun.spawn(["rustc", "--version"], {
   cwd: root,
   stdout: "pipe",
   stderr: "pipe",
 });
+const [rustcOut, rustcErr, rustcRc] = await Promise.all([
+  new Response(rustcProc.stdout).text(),
+  new Response(rustcProc.stderr).text(),
+  rustcProc.exited,
+]);
+if (rustcRc !== 0) {
+  process.stderr.write(rustcErr);
+  process.exit(2);
+}
+const rustcVersion = rustcOut.trim();
+
+const cargoHome =
+  process.env.CARGO_HOME ??
+  (process.env.HOME !== undefined ? join(process.env.HOME, ".cargo") : join(root, ".cargo"));
+
+const rflags = `--remap-path-prefix=${root}=. --remap-path-prefix=${cargoHome}=cargo`;
+
+const build = Bun.spawn(
+  ["cargo", "build", "--release", "--locked", "--target", target, "-p", "moc-host-state"],
+  {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, RUSTFLAGS: rflags },
+  },
+);
 const [buildOut, buildErr, buildRc] = await Promise.all([
   new Response(build.stdout).text(),
   new Response(build.stderr).text(),
@@ -117,6 +154,13 @@ process.stderr.write(buildErr);
 if (buildRc !== 0) {
   process.exit(2);
 }
+
+const dir = join(outDir, `moc-host-state-${version}-${target}`);
+const binDir = join(dir, "bin");
+mkdirSync(binDir, { recursive: true });
+const builtBinary = join(root, "target", target, "release", "moc-host-state");
+const binPath = join(binDir, "moc-host-state");
+cpSync(builtBinary, binPath);
 chmodSync(binPath, 0o755);
 mkdirSync(join(dir, "config", "scenarios"), { recursive: true });
 cpSync(join(root, "config", "plugin.json"), join(dir, "config", "plugin.json"));
@@ -133,7 +177,8 @@ const buildJson = {
   command: config.package.command,
   gitCommit,
   sourceDigest,
-  bunVersion,
+  rustcVersion,
+  cargoTarget: target,
   binarySha256,
 };
 writeFileSync(join(dir, "build.json"), `${JSON.stringify(buildJson, null, 2)}\n`);

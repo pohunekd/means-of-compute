@@ -270,6 +270,7 @@ export interface RealWorkCard {
   readonly repo: string | null;
   readonly branch: string | null;
   readonly modelText: string | null;
+  readonly providerId: string | null;
   readonly auditorModelText: string | null;
   readonly elapsed: string | null;
   readonly tokens: { readonly input: number; readonly output: number } | null;
@@ -301,6 +302,7 @@ export interface JustFinishedEntry {
   readonly outcome: string;
   readonly cost: LiveCell | null;
   readonly at: string;
+  readonly headSha: string | null;
 }
 
 export interface LiveModel {
@@ -1029,6 +1031,11 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
         cost = { kind: "text", text: "$0.0000" };
       }
     }
+    let headSha: string | null = null;
+    if (verdicts !== undefined && verdicts.ok && verdicts.value.length > 0) {
+      const latestVerdict = verdicts.value[verdicts.value.length - 1];
+      if (latestVerdict !== undefined) headSha = latestVerdict.headSha;
+    }
     return {
       workItemId: row.workItemId,
       title,
@@ -1037,6 +1044,7 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
       outcome: row.outcome,
       cost,
       at: row.at,
+      headSha,
     };
   });
   return { kind: "ok", value: entries };
@@ -1048,25 +1056,26 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       ? { kind: "error", code: inputs.probes.failure.code }
       : { kind: "no-data", reason: inputs.probes.failure.reason };
   }
+  if (!inputs.dashboard.registry.ok) {
+    return inputs.dashboard.registry.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.registry.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.registry.failure.reason };
+  }
   const probes = inputs.probes.value;
   // aliases: union of probes + open registry hostAliases
   const aliasSet = new Set<string>(probes.map((p) => p.hostAlias));
-  if (inputs.dashboard.registry.ok) {
-    for (const entry of inputs.dashboard.registry.value) {
-      if (entry.terminal === null) aliasSet.add(entry.hostAlias);
-    }
+  for (const entry of inputs.dashboard.registry.value) {
+    if (entry.terminal === null) aliasSet.add(entry.hostAlias);
   }
   const aliases = [...aliasSet].sort();
   if (aliases.length === 0) return { kind: "ok", value: [] };
   const probeByAlias = new Map<string, RecordedProbe>(probes.map((p) => [p.hostAlias, p] as const));
   const openByAlias = new Map<string, RegistryEntry>();
-  if (inputs.dashboard.registry.ok) {
-    for (const entry of inputs.dashboard.registry.value) {
-      if (entry.terminal !== null) continue;
-      const prev = openByAlias.get(entry.hostAlias);
-      if (prev === undefined || entry.startedAt > prev.startedAt)
-        openByAlias.set(entry.hostAlias, entry);
-    }
+  for (const entry of inputs.dashboard.registry.value) {
+    if (entry.terminal !== null) continue;
+    const prev = openByAlias.get(entry.hostAlias);
+    if (prev === undefined || entry.startedAt > prev.startedAt)
+      openByAlias.set(entry.hostAlias, entry);
   }
   const workById = new Map<string, WorkItem>();
   if (inputs.dashboard.workItems.ok) {
@@ -1120,6 +1129,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       const stage: RealWorkCard["stage"] = "implement";
       // model text = provider/model stripped? Show model + provider in (provider)
       const modelText = stripProvider(registryEntry.model.model);
+      const providerId = registryEntry.model.providerId;
       const auditorModelText: string | null = null;
       const latest = inputs.meter.ok
         ? sumMeterForWorkItem(
@@ -1143,6 +1153,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
         repo: work?.repo ?? null,
         branch: work?.branch ?? null,
         modelText,
+        providerId,
         auditorModelText,
         elapsed: formatElapsed(registryEntry.startedAt, inputs.now),
         tokens: latest.tokens,
@@ -1161,54 +1172,63 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
         today,
       };
     }
-    // No open session: could be audit/merge for last finished item that ran on this host
-    // Try to infer stage from newest result for any work that last ran on this host.
+    // No open session: check for pending audit work on this host.
+    // The pending audit is the newest non-merged result for the host whose verdict is still missing.
+    // A merged result is considered finished and the host becomes idle with lastFinished info.
     if (lastFinished !== null) {
-      const wid = lastFinished.workItemId;
-      const work = workById.get(wid) ?? null;
-      // Use registry's last closed entry for this work? Check if results outcome is merged => merge stage, else audit
-      const newest = newestResultByWorkItem.get(wid);
-      const outcomeStage: RealWorkCard["stage"] = newest?.outcome === "merged" ? "merge" : "audit";
-      // For merge cards hide elapsed/tokens but still show lastFinished/today
-      const modelEntry = newest?.model ? stripProvider(newest.model) : null;
-      // Try to get auditor from verdicts if audit stage
-      let auditorModelText: string | null = null;
-      if (outcomeStage === "audit") {
-        const verdicts = inputs.dashboard.verdicts.get(wid);
-        if (verdicts !== undefined && verdicts.ok && verdicts.value.length > 0) {
-          const lastV = verdicts.value[verdicts.value.length - 1];
-          if (lastV !== undefined) auditorModelText = stripProvider(lastV.auditorModel);
+      // Look for a pending audit result on this host: newest result with outcome != merged and no verdict yet.
+      let pending: (typeof resultsOk)[number] | null = null;
+      for (const row of resultsOk) {
+        if (row.hostAlias !== alias) continue;
+        if (row.outcome === "merged") continue;
+        if (pending === null || row.at > pending.at) pending = row;
+      }
+      if (pending !== null) {
+        const verdicts = inputs.dashboard.verdicts.get(pending.workItemId);
+        const hasVerdict = verdicts !== undefined && verdicts.ok && verdicts.value.length > 0;
+        if (!hasVerdict) {
+          const wid = pending.workItemId;
+          const work = workById.get(wid) ?? null;
+          const newest = newestResultByWorkItem.get(wid);
+          const modelEntry = newest?.model ? stripProvider(newest.model) : null;
+          const providerId = newest?.providerId ?? null;
+          const auditorModelText: string | null = null;
+          // Auditor known from verdict store only when verdict exists; pending audit has none.
+          const meterInfo = inputs.meter.ok
+            ? sumMeterForWorkItem(inputs.meter.value, wid, inputs.dashboard.pricing)
+            : { tokens: null, cost: null, latestCall: null };
+          const costCell: typeof meterInfo.cost = !inputs.meter.ok
+            ? inputs.meter.failure.kind === "error"
+              ? { kind: "error", code: inputs.meter.failure.code }
+              : { kind: "no-data", reason: inputs.meter.failure.reason }
+            : meterInfo.cost;
+          return {
+            alias,
+            stage: "audit" as const,
+            workItemId: wid,
+            title: work?.title ?? wid,
+            issue: work?.issue ?? null,
+            pullNumber: work?.pullNumber ?? null,
+            repo: work?.repo ?? null,
+            branch: work?.branch ?? null,
+            modelText: modelEntry,
+            providerId,
+            auditorModelText,
+            elapsed: null,
+            tokens: meterInfo.tokens,
+            cost: costCell,
+            latestCall: null,
+            idleReason: null,
+            probeAt,
+            lastFinished: {
+              workItemId: lastFinished.workItemId,
+              at: lastFinished.at,
+              outcome: lastFinished.outcome,
+            },
+            today,
+          };
         }
       }
-      const meterInfo = inputs.meter.ok
-        ? sumMeterForWorkItem(inputs.meter.value, wid, inputs.dashboard.pricing)
-        : { tokens: null, cost: null, latestCall: null };
-      const costCell: typeof meterInfo.cost = !inputs.meter.ok
-        ? inputs.meter.failure.kind === "error"
-          ? { kind: "error", code: inputs.meter.failure.code }
-          : { kind: "no-data", reason: inputs.meter.failure.reason }
-        : meterInfo.cost;
-      // If outcome stage is merge/audit, show task link; if audit, also show tokens/cost/so far? The mock audit card shows tokens/cost for audit.
-      return {
-        alias,
-        stage: outcomeStage,
-        workItemId: wid,
-        title: work?.title ?? wid,
-        issue: work?.issue ?? null,
-        pullNumber: work?.pullNumber ?? null,
-        repo: work?.repo ?? null,
-        branch: work?.branch ?? null,
-        modelText: modelEntry,
-        auditorModelText,
-        elapsed: null,
-        tokens: meterInfo.tokens,
-        cost: costCell,
-        latestCall: null,
-        idleReason: null,
-        probeAt,
-        lastFinished,
-        today,
-      };
     }
     // Idle: no running work, no recent finished host work
     return {
@@ -1221,6 +1241,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       repo: null,
       branch: null,
       modelText: null,
+      providerId: null,
       auditorModelText: null,
       elapsed: null,
       tokens: null,

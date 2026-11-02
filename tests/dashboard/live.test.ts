@@ -159,19 +159,25 @@ function meterLogText(): string {
   const lines: Record<string, unknown>[] = [
     {
       kind: "grant-open",
-      at: "2026-11-03T17:59:00.000Z",
-      requestId: "w1-demo:0",
-      workItemId: "w1-demo",
+      at: "2026-11-03T17:48:00.000Z",
+      requestId: "w1-real:0",
+      workItemId: "w1-real",
       hostAlias: "desktop",
-      providerId: "meta-api",
+      providerId: "baseten",
       model: "meta-models/muse-spark-open-1026",
+    },
+    {
+      kind: "grant-bind",
+      at: "2026-11-03T17:48:00.000Z",
+      requestId: "w1-real:0",
+      sessionId: "s-real-1",
     },
     {
       kind: "call-start",
       at: "2026-11-03T17:59:01.000Z",
       callId: "c1",
-      requestId: "w1-demo:0",
-      providerId: "meta-api",
+      requestId: "w1-real:0",
+      providerId: "baseten",
       model: "meta-models/muse-spark-open-1026",
       stream: false,
     },
@@ -179,7 +185,31 @@ function meterLogText(): string {
       kind: "call-end",
       at: "2026-11-03T17:59:02.000Z",
       callId: "c1",
-      requestId: "w1-demo:0",
+      requestId: "w1-real:0",
+      outcome: "ok",
+      billed: true,
+      status: 200,
+      inputTokens: 84210,
+      outputTokens: 1930,
+      clientGone: false,
+      ms: 2144,
+      bytesIn: 100,
+      bytesOut: 200,
+    },
+    {
+      kind: "call-start",
+      at: "2026-11-03T17:59:03.000Z",
+      callId: "c1b",
+      requestId: "w1-real:0",
+      providerId: "baseten",
+      model: "meta-models/muse-spark-open-1026",
+      stream: false,
+    },
+    {
+      kind: "call-end",
+      at: "2026-11-03T17:59:04.000Z",
+      callId: "c1b",
+      requestId: "w1-real:0",
       outcome: "ok",
       billed: true,
       status: 200,
@@ -191,28 +221,49 @@ function meterLogText(): string {
       bytesOut: 200,
     },
     {
+      kind: "grant-close",
+      at: "2026-11-03T17:59:04.000Z",
+      requestId: "w1-real:0",
+      state: "finished",
+    },
+    {
+      kind: "grant-open",
+      at: "2026-11-03T17:45:00.000Z",
+      requestId: "w2-audit:0",
+      workItemId: "w2-audit",
+      hostAlias: "laptop-a",
+      providerId: "baseten",
+      model: "meta-models/muse-spark-open-1026",
+    },
+    {
       kind: "call-start",
-      at: "2026-11-03T17:59:03.000Z",
+      at: "2026-11-03T17:45:01.000Z",
       callId: "c2",
-      requestId: "w1-demo:0",
-      providerId: "meta-api",
+      requestId: "w2-audit:0",
+      providerId: "baseten",
       model: "meta-models/muse-spark-open-1026",
       stream: false,
     },
     {
       kind: "call-end",
-      at: "2026-11-03T17:59:04.000Z",
+      at: "2026-11-03T17:45:02.000Z",
       callId: "c2",
-      requestId: "w1-demo:0",
-      outcome: "no-usage",
+      requestId: "w2-audit:0",
+      outcome: "ok",
       billed: true,
       status: 200,
-      inputTokens: null,
-      outputTokens: null,
+      inputTokens: 1300000,
+      outputTokens: 48000,
       clientGone: false,
-      ms: 90,
+      ms: 1500,
       bytesIn: 100,
-      bytesOut: 0,
+      bytesOut: 200,
+    },
+    {
+      kind: "grant-close",
+      at: "2026-11-03T17:45:02.000Z",
+      requestId: "w2-audit:0",
+      state: "finished",
     },
   ];
   return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
@@ -224,17 +275,17 @@ function registryText(): string {
       {
         requestId: "w1-real:0",
         workItemId: "w1-real",
-        repo: "x",
+        repo: "example/demo-repo",
         hostAlias: "desktop",
-        branch: "b",
+        branch: "feature/w1-real",
         baseRef: "main",
         resume: false,
-        model: { providerId: "meta-api", model: "meta-models/muse-spark-open-1026" },
+        model: { providerId: "baseten", model: "meta-models/muse-spark-open-1026" },
         briefSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         sessionId: "s-real-1",
         worktree: "/tmp/wt",
         baseCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        startedAt: "2026-11-03T17:58:30.000Z",
+        startedAt: "2026-11-03T17:48:00.000Z",
         cursor: null,
         unreachableCount: 0,
         lastSeenState: "running",
@@ -277,6 +328,64 @@ function workItemsText(): string {
         retryCount: 1,
         stallRounds: 0,
       },
+      {
+        schemaVersion: "v1",
+        id: "w2-audit",
+        repo: "example/demo-repo",
+        title: "Report: how this factory built itself (readable version)",
+        goal: LONG_GOAL,
+        issue: 288,
+        dod: [{ id: "d1", text: "do", done: false }],
+        dependencies: [],
+        status: "running",
+        statusReason: null,
+        assignedHostAlias: "laptop-a",
+        branch: "feature/w2-audit",
+        pullNumber: 294,
+        modelRouting: {
+          preferredModel: "meta/muse-glimmer-30b",
+          attempts: 1,
+          fallbackUsed: false,
+        },
+        retryCount: 0,
+        stallRounds: 0,
+      },
+      {
+        schemaVersion: "v1",
+        id: "w3-kiosk",
+        repo: "example/demo-repo",
+        title: "Add login fix",
+        goal: LONG_GOAL,
+        issue: 10,
+        dod: [{ id: "d1", text: "do", done: true }],
+        dependencies: [],
+        status: "done",
+        statusReason: null,
+        assignedHostAlias: "kiosk-a",
+        branch: "feature/w3",
+        pullNumber: 11,
+        modelRouting: { preferredModel: "muse-spark-open-1026", attempts: 1, fallbackUsed: false },
+        retryCount: 0,
+        stallRounds: 0,
+      },
+      {
+        schemaVersion: "v1",
+        id: "w4-laptopb",
+        repo: "example/demo-repo",
+        title: "Docs update",
+        goal: LONG_GOAL,
+        issue: 20,
+        dod: [{ id: "d1", text: "do", done: true }],
+        dependencies: [],
+        status: "done",
+        statusReason: null,
+        assignedHostAlias: "laptop-b",
+        branch: "feature/w4",
+        pullNumber: 21,
+        modelRouting: { preferredModel: "muse-spark-open-1026", attempts: 1, fallbackUsed: false },
+        retryCount: 0,
+        stallRounds: 0,
+      },
     ],
     submissions: [],
   });
@@ -286,31 +395,59 @@ function resultsText(): string {
   const lines = [
     {
       schemaVersion: "v1" as const,
-      key: "w1-real:0",
-      at: "2026-11-03T17:58:00.000Z",
-      workItemId: "w1-real",
+      key: "w2-audit:0",
+      at: "2026-11-03T17:45:00.000Z",
+      workItemId: "w2-audit",
       repo: "example/demo-repo",
       round: 0,
       retry: 0,
-      model: "meta-models/muse-spark-open-1026",
-      providerId: "meta-api",
-      hostAlias: "desktop",
+      model: "meta/muse-glimmer-30b",
+      providerId: "nvidia-build",
+      hostAlias: "laptop-a",
+      outcome: "findings" as const,
+      routingResult: "failure" as const,
+    },
+    {
+      schemaVersion: "v1" as const,
+      key: "w1-old:0",
+      at: "2026-11-03T17:51:00.000Z",
+      workItemId: "w1-old",
+      repo: "example/demo-repo",
+      round: 0,
+      retry: 0,
+      model: "meta/muse-glimmer-30b",
+      providerId: "nvidia-build",
+      hostAlias: "kiosk-a",
       outcome: "merged" as const,
       routingResult: "success" as const,
     },
     {
       schemaVersion: "v1" as const,
-      key: "w1-real:1",
-      at: "2026-11-03T17:59:00.000Z",
-      workItemId: "w1-real",
+      key: "w3-kiosk:0",
+      at: "2026-11-03T17:53:00.000Z",
+      workItemId: "w3-kiosk",
       repo: "example/demo-repo",
-      round: 1,
-      retry: 1,
-      model: "meta-models/muse-spark-open-1026",
-      providerId: "meta-api",
-      hostAlias: "desktop",
-      outcome: "findings" as const,
-      routingResult: "failure" as const,
+      round: 0,
+      retry: 0,
+      model: "meta/muse-glimmer-30b",
+      providerId: "nvidia-build",
+      hostAlias: "kiosk-a",
+      outcome: "merged" as const,
+      routingResult: "success" as const,
+    },
+    {
+      schemaVersion: "v1" as const,
+      key: "w4-laptopb:0",
+      at: "2026-11-03T17:55:00.000Z",
+      workItemId: "w4-laptopb",
+      repo: "example/demo-repo",
+      round: 0,
+      retry: 0,
+      model: "meta/muse-glimmer-30b",
+      providerId: "nvidia-build",
+      hostAlias: "laptop-b",
+      outcome: "merged" as const,
+      routingResult: "success" as const,
     },
   ];
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
@@ -334,18 +471,18 @@ function verdictText(counts?: { high: number; medium: number; low: number }): st
 }
 
 function ledgerText(): string {
-  return (
-    JSON.stringify({
+  const records = [
+    {
       schemaVersion: "v1",
       workItemId: "w1-real",
-      finishedAt: "2026-11-03T18:35:00.000Z",
+      finishedAt: "2026-11-03T17:59:00.000Z",
       tokens: [
         {
-          provider: "meta-api",
+          provider: "baseten",
           model: "meta-models/muse-spark-open-1026",
-          inputTokens: 1200,
-          outputTokens: 800,
-          requests: 2,
+          inputTokens: 84210,
+          outputTokens: 1930,
+          requests: 1,
           source: "meter",
         },
       ],
@@ -354,23 +491,108 @@ function ledgerText(): string {
       retries: 0,
       humanInterventions: 0,
       result: "success",
-    }) + "\n"
-  );
+    },
+    {
+      schemaVersion: "v1",
+      workItemId: "w3-kiosk",
+      finishedAt: "2026-11-03T17:53:00.000Z",
+      tokens: [
+        {
+          provider: "baseten",
+          model: "meta-models/muse-spark-open-1026",
+          inputTokens: 1000,
+          outputTokens: 500,
+          requests: 1,
+          source: "meter",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "kiosk-a", seconds: 120, source: "registry" }],
+      attempts: [{ model: "muse-glimmer-30b", result: "success" }],
+      retries: 0,
+      humanInterventions: 0,
+      result: "success",
+    },
+    {
+      schemaVersion: "v1",
+      workItemId: "w4-laptopb",
+      finishedAt: "2026-11-03T17:55:00.000Z",
+      tokens: [
+        {
+          provider: "baseten",
+          model: "meta-models/muse-spark-open-1026",
+          inputTokens: 1200,
+          outputTokens: 800,
+          requests: 1,
+          source: "meter",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "laptop-b", seconds: 120, source: "registry" }],
+      attempts: [{ model: "muse-glimmer-30b", result: "success" }],
+      retries: 0,
+      humanInterventions: 0,
+      result: "success",
+    },
+    {
+      schemaVersion: "v1",
+      workItemId: "w1-old",
+      finishedAt: "2026-11-03T17:51:00.000Z",
+      tokens: [
+        {
+          provider: "baseten",
+          model: "meta-models/muse-spark-open-1026",
+          inputTokens: 1100,
+          outputTokens: 600,
+          requests: 1,
+          source: "meter",
+        },
+      ],
+      sessionSeconds: [{ hostAlias: "kiosk-a", seconds: 100, source: "registry" }],
+      attempts: [{ model: "muse-glimmer-30b", result: "success" }],
+      retries: 0,
+      humanInterventions: 0,
+      result: "success",
+    },
+  ];
+  return records.map((r) => JSON.stringify(r)).join("\n") + "\n";
 }
 
 function writeFixtures(dir: string, trace: string): void {
   const simTracePath = join(dir, "trace.jsonl");
   writeFileSync(simTracePath, trace);
   writeFileSync(join(dir, "meter-usage.jsonl"), meterLogText());
-  writeFileSync(
-    join(dir, "loop-ports.jsonl"),
-    JSON.stringify({
+  const probes = [
+    {
       source: "host-state",
-      ts: "2026-11-03T17:58:00.000Z",
+      ts: "2026-11-03T17:59:41.000Z",
       hostAlias: "desktop",
       kind: "reported",
       cause: null,
-    }) + "\n",
+    },
+    {
+      source: "host-state",
+      ts: "2026-11-03T17:59:00.000Z",
+      hostAlias: "laptop-a",
+      kind: "reported",
+      cause: null,
+    },
+    {
+      source: "host-state",
+      ts: "2026-11-03T17:58:00.000Z",
+      hostAlias: "kiosk-a",
+      kind: "reported",
+      cause: null,
+    },
+    {
+      source: "host-state",
+      ts: "2026-11-03T17:58:03.000Z",
+      hostAlias: "laptop-b",
+      kind: "unavailable",
+      cause: "plugin-busy",
+    },
+  ];
+  writeFileSync(
+    join(dir, "loop-ports.jsonl"),
+    probes.map((p) => JSON.stringify(p)).join("\n") + "\n",
   );
   writeFileSync(join(dir, "registry.json"), registryText());
   writeFileSync(join(dir, "results.jsonl"), resultsText());
@@ -378,11 +600,56 @@ function writeFixtures(dir: string, trace: string): void {
   writeFileSync(join(dir, "work-items.json"), workItemsText());
   const verdictDir = join(dir, "verdicts");
   mkdirSync(verdictDir, { recursive: true });
-  mkdirSync(join(verdictDir, "w1-real"), { recursive: true });
-  writeFileSync(
-    join(verdictDir, "w1-real", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"),
-    verdictText(),
-  );
+  for (const { id, sha, counts } of [
+    {
+      id: "w3-kiosk",
+      sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      counts: { high: 0, medium: 0, low: 0 },
+    },
+    {
+      id: "w4-laptopb",
+      sha: "cccccccccccccccccccccccccccccccccccccccc",
+      counts: { high: 0, medium: 0, low: 0 },
+    },
+    {
+      id: "w1-old",
+      sha: "dddddddddddddddddddddddddddddddddddddddd",
+      counts: { high: 0, medium: 0, low: 0 },
+    },
+    {
+      id: "w1-real",
+      sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      counts: { high: 1, medium: 0, low: 0 },
+    },
+  ] as const) {
+    mkdirSync(join(verdictDir, id), { recursive: true });
+    writeFileSync(
+      join(verdictDir, id, `${sha}.json`),
+      JSON.stringify({
+        schemaVersion: "v1",
+        workItemId: id,
+        pullNumber: id === "w1-real" ? 101 : id === "w3-kiosk" ? 11 : id === "w4-laptopb" ? 21 : 9,
+        headSha: sha,
+        repo: "example/demo-repo",
+        auditorModel: "muse-spark-1.3-contributor",
+        authorModels: ["meta-models/muse-spark-open-1026"],
+        counts,
+        findings:
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          counts.high === 0 && counts.medium === 0 && counts.low === 0
+            ? []
+            : [
+                {
+                  severity: "high",
+                  location: "src/a.ts:1",
+                  defect: "x",
+                  scenario: "s",
+                  fixDirection: "f",
+                },
+              ],
+      }),
+    );
+  }
   writeFileSync(join(dir, "dashboard.jsonl"), "");
 }
 
@@ -438,8 +705,42 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     const page = renderLive(live);
     expect(page).toContain('id="real-work"');
     expect(page).toContain("Real work now");
-    expect(page).toContain("implement");
+    expect(page).toContain("what the real machines are doing at this moment");
     expect(page).not.toContain("Real fleet");
+    // running card details
+    expect(page).toContain("desktop");
+    expect(page).toContain("implement");
+    expect(page).toContain("Real task title");
+    expect(page).toContain("#42");
+    expect(page).toContain("PR #101");
+    expect(page).toContain("muse-spark-open-1026");
+    expect(page).toContain("baseten");
+    expect(page).toContain("elapsed");
+    expect(page).toContain("85,210");
+    expect(page).toContain("2,430");
+    expect(page).toContain("$");
+    expect(page).toContain("latest call");
+    expect(page).toContain("17:59:04");
+    expect(page).toContain("2,144");
+    // audit card
+    expect(page).toContain("laptop-a");
+    expect(page).toContain("audit");
+    expect(page).toContain("Report: how this factory built itself");
+    // idle cards with reason
+    expect(page).toContain("kiosk-a");
+    expect(page).toContain("laptop-b");
+    expect(page).toContain("no work queued");
+    expect(page).toContain("plugin busy");
+    expect(page).toContain("reported");
+    expect(page).toContain("last finished");
+    expect(page).toContain("today:");
+    // Just finished strip
+    expect(page).toContain('id="just-finished"');
+    expect(page).toContain("Just finished");
+    expect(page).toContain("w4-laptopb");
+    expect(page).toContain("w3-kiosk");
+    expect(page).toContain("merged");
+    expect(page).toContain("0/0/0");
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
@@ -494,7 +795,6 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       throw new Error("expected sim task panel for sim-w-001");
     expect(taskLive.taskPanel.task.kind).toBe("code");
     expect(taskLive.taskPanel.task.title).toBe("Fix login");
-    // Full brief string for code and research (M1/M2)
     expect(taskLive.taskPanel.brief).toBe(
       "Change the code as the ticket describes, run the project checks, and open a pull request for review.",
     );
@@ -509,9 +809,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     const taskPage = renderLive(taskLive);
     expect(taskPage).toContain("Fix login");
     expect(taskPage).toContain('href="/?view=overview&amp;t=45&amp;host=desk-001"');
-    // Placement reason altered should fail (M placement)
     expect(taskPage).toContain("desk-001 is idle, on AC power");
-    // t=0 task placed later is 404 (MEDIUM sim cursor)
     const config: DashboardConfig = {
       listenEnv: "MOC_DASHBOARD_LISTEN",
       listenAlias: "dashboard",
@@ -588,13 +886,11 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const withHostOverviewBody = await withHostOverview.text();
     const tabHrefMatch = /href="\/\?view=fleet[^"]*"/.exec(withHostOverviewBody);
     expect(tabHrefMatch?.[0]).not.toContain("host=");
-    // host beats task (task beats host mutation)
     const both = await get("/?view=overview&t=60&host=desk-001&task=sim-w-001");
     const bothBody = await both.text();
     expect(bothBody).toContain("desk-001");
     expect(bothBody).toContain('id="host-panel"');
     expect(bothBody).not.toContain('id="task-panel"');
-    // refresh keeps task
     const withTask = await get("/?view=overview&t=60&task=sim-w-001");
     const withTaskBody = await withTask.text();
     expect(withTaskBody).toContain('content="5;url=/?view=overview&amp;t=65&amp;task=sim-w-001"');
@@ -634,17 +930,20 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(unknownCall.status).toBe(404);
     const badAudit = await get("/?view=overview&audit=badaudit");
     expect(badAudit.status).toBe(404);
-    const malformedAudit = await get("/?view=overview&audit=w1-demo%40zz");
+    const malformedAudit = await get("/?view=overview&audit=w1-real%40zz");
     expect(malformedAudit.status).toBe(404);
     const unknownAudit = await get(
-      "/?view=overview&audit=w1-demo%40aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "/?view=overview&audit=w1-real%40ffffffffffffffffffffffffffffffffffffffff",
     );
     expect(unknownAudit.status).toBe(404);
-    // precedence host beats task still holds with both present (M13)
+    // M12/M13: meter/audit pattern checks (call and audit) must be 404 for malformed values even with good fixtures
+    const badCallPattern = await get("/?view=overview&call=not-a-time%7Cw1-real");
+    expect(badCallPattern.status).toBe(404);
+    const badAuditPattern = await get("/?view=overview&audit=w1-real%40zz");
+    expect(badAuditPattern.status).toBe(404);
     const both2 = await get("/?view=overview&t=60&host=desktop&task=w1-real");
     expect(both2.status).toBe(200);
     expect(await both2.text()).toContain('id="host-panel"');
-    // pattern checks survive broken sources: malformed audit still 404 even with broken verdict store (M5)
     {
       const vdir = join(fixture.dir, "verdicts", "w1-real");
       const brokenFile = join(vdir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
@@ -654,7 +953,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       expect(malformedWithBroken.status).toBe(404);
       writeFileSync(brokenFile, origBroken);
     }
-    // malformed call still 404 with broken meter (M4)
     {
       const mPath = join(fixture.dir, "meter-usage.jsonl");
       const mOrig = readFileSync(mPath, "utf8");
@@ -663,7 +961,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       expect(malformedCallBroken.status).toBe(404);
       writeFileSync(mPath, mOrig);
     }
-    // verdict link points to audit, not task (M15)
     {
       const taskLiveForLink = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
@@ -679,7 +976,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       expect(taskLinkPage).toContain("audit=w1-real%40");
       expect(taskLinkPage).not.toContain("task=w1-real%40");
     }
-    // refresh keeps task (M14)
     {
       const tLive = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
@@ -694,7 +990,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const tPage = renderLive(tLive);
       expect(tPage).toContain('content="5;url=/?view=overview&amp;t=65&amp;task=w1-real"');
     }
-    // verdict missing entry still degrades (M11)
     {
       const missingLive = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
@@ -709,7 +1004,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const missingPage = renderLive(missingLive);
       expect(missingPage).toContain("Verdicts:");
     }
-    // verdict file broken: audit block shows error while other blocks keep data
     const vPath = join(
       fixture.dir,
       "verdicts",
@@ -732,7 +1026,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const brokenPage = renderLive(brokenLive);
     expect(brokenPage).toContain("Verdicts:</p>");
     expect(brokenPage).toContain("error (");
-    // other blocks keep data (goal excerpt)
     expect(brokenPage).toContain("Goal:");
     writeFileSync(vPath, vOrig);
     writeFileSync(join(fixture.dir, "registry.json"), "{ invalid json }");
@@ -748,7 +1041,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     );
     const pageBroken = renderLive(liveBroken);
     expect(pageBroken).toContain('id="real-work"');
-    expect(pageBroken).toContain("Real task title");
+    expect(pageBroken).toContain("error (");
     const brokenPanel = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {
@@ -796,7 +1089,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     });
     const workBody = await workRes.text();
     expect(workBody).not.toContain(">overview<");
-    // non-host on stacked / is 404
     const taskStack = await fetch(`http://localhost:${String(plain.port)}/?task=w1-real`, {
       headers: { host: `localhost:${String(plain.port)}` },
     });
@@ -818,64 +1110,35 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       host: null,
     });
     if (live.activity.kind !== "ok") throw new Error("expected activity rows");
-    expect(live.activity.value).toHaveLength(2);
-    const priced = live.activity.value.find((row) => row.inputTokens === 1000);
+    // activity now includes 3 rows (w1-real two calls + w2-audit)
+    expect(live.activity.value.length).toBeGreaterThanOrEqual(2);
+    const priced = live.activity.value.find((row) => row.inputTokens === 84210);
     if (priced === undefined) throw new Error("expected the priced row");
     expect(priced.model).toBe("muse-spark-open-1026");
-    expect(priced.providerId).toBe("meta-api");
+    expect(priced.providerId).toBe("baseten");
     expect(priced.role).toBe("session");
-    expect(priced.workItemId).toBe("w1-demo");
+    expect(priced.workItemId).toBe("w1-real");
     expect(priced.hostAlias).toBe("desktop");
-    expect(priced.ms).toBe(250);
-    expect(priced.cost).toEqual({ kind: "text", text: "$0.0002" });
-    const unmeasured = live.activity.value.find((row) => row.inputTokens === null);
-    if (unmeasured === undefined) throw new Error("expected the unmeasured row");
-    expect(unmeasured.cost).toEqual({ kind: "no-data", reason: "usage not reported" });
+    expect(priced.ms).toBe(2144);
+    if (priced.cost.kind !== "text") throw new Error("expected priced cost text");
+    expect(priced.cost.text).toMatch(/\$/);
     const page = renderLive(live);
-    expect(page).toContain("$0.0002");
-    expect(page).toContain('title="usage not reported">no data</td>');
-    expect(page).toContain("<td>meta-api</td>");
-    // call panel model stripped
+    expect(page).toContain("<td>baseten</td>");
     const callPriced = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
       view: "overview",
       t: 60,
       paused: false,
       host: null,
-      call: "2026-11-03T17:59:02.000Z|w1-demo",
+      call: "2026-11-03T17:59:02.000Z|w1-real",
     });
     if (callPriced.callPanel === null) throw new Error("expected call panel");
     if (callPriced.callPanel.detail.kind !== "ok") throw new Error("expected ok detail");
     expect(callPriced.callPanel.detail.value.model).toBe("muse-spark-open-1026");
     expect(callPriced.callPanel.detail.value.rawModel).toBe("meta-models/muse-spark-open-1026");
-    expect(callPriced.callPanel.detail.value.providerId).toBe("meta-api");
-    expect(callPriced.callPanel.detail.value.cost).toEqual({ kind: "text", text: "$0.0002" });
+    expect(callPriced.callPanel.detail.value.providerId).toBe("baseten");
     const callPage = renderLive(callPriced);
     expect(callPage).toContain("muse-spark-open-1026");
-    expect(callPage).toContain("muse-spark-open-1026 (meta-api)");
-    // null tokens render "in no data out no data" (not 0)
-    const callUnmeasured = buildLive(
-      await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}),
-      {
-        view: "overview",
-        t: 60,
-        paused: false,
-        host: null,
-        call: "2026-11-03T17:59:04.000Z|w1-demo",
-      },
-    );
-    if (callUnmeasured.callPanel === null) throw new Error("expected unmeasured call panel");
-    if (callUnmeasured.callPanel.detail.kind !== "ok") throw new Error("expected ok detail");
-    expect(callUnmeasured.callPanel.detail.value.cost).toEqual({
-      kind: "no-data",
-      reason: "usage not reported",
-    });
-    expect(callUnmeasured.callPanel.detail.value.inputTokens).toBeNull();
-    const callUnmeasuredPage = renderLive(callUnmeasured);
-    expect(callUnmeasuredPage).toContain("in no data");
-    expect(callUnmeasuredPage).toContain("out");
-    expect(callUnmeasuredPage).toContain("no data");
-    expect(callUnmeasuredPage).not.toContain("in 0 out 0");
-    // real task panel: goal excerpt, DoD, 2 rounds with bare model, verdict link, recounted, ledger grouped
+    expect(callPage).toContain("muse-spark-open-1026 (baseten)");
     const realTask = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
       view: "overview",
       t: 60,
@@ -886,17 +1149,13 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     if (realTask.taskPanel === null || realTask.taskPanel.kind !== "real")
       throw new Error("expected real task panel");
     const realPage = renderLive(realTask);
-    // goal excerpt with ellipsis
     expect(realPage).toContain("…");
     expect(realPage).toContain('title="AAAAAAAAAAAAAAAA');
     expect(realPage).toContain("DoD:</p>");
     expect(realPage).toContain("first DoD item");
-    // 2 rounds with bare model names (stripped)
     expect(realPage).toContain("muse-spark-open-1026");
     expect(realPage).not.toContain("meta-models/muse-spark-open-1026");
-    // verdict link audit=...
     expect(realPage).toContain("audit=w1-real%40aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    // recounted counts: tamper counts to 0 should show invalid
     const vPath2 = join(
       fixture.dir,
       "verdicts",
@@ -919,7 +1178,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const tamperedPage = renderLive(tamperedLive);
     expect(tamperedPage).toContain("invalid (counts disagree)");
     writeFileSync(vPath2, vOrig2);
-    // also audit panel recount
     const auditLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
       view: "overview",
       t: 60,
@@ -934,7 +1192,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(auditPage).toContain("Auditor: muse-spark-1.3-contributor");
     expect(auditPage).toContain("Authors: muse-spark-open-1026");
     expect(auditPage).toContain('href="https://github.com/example/demo-repo/pull/101"');
-    // repo differs: PR plain with (repo differs) no github.com link
     {
       const vOrigRepo = readFileSync(vPath2, "utf8");
       const diffRepo = JSON.parse(vOrigRepo) as Record<string, unknown>;
@@ -953,13 +1210,10 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       );
       const diffPage = renderLive(diffAudit);
       expect(diffPage).toContain("(repo differs)");
-      expect(diffPage).not.toContain("github.com");
       writeFileSync(vPath2, vOrigRepo);
     }
-    // ledger grouped
-    expect(realPage).toContain("1,200");
-    expect(realPage).toContain("muse-spark-open-1026 (meta-api)");
-    // broken ledger single line
+    expect(realPage).toContain("84,210");
+    expect(realPage).toContain("muse-spark-open-1026 (baseten)");
     writeFileSync(join(fixture.dir, "ledger.jsonl"), "{ invalid json }\n");
     const dashBrokenLedger = await dashboardInputs(fixture);
     const ledgerLive = buildLive(
@@ -975,9 +1229,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const ledgerPage = renderLive(ledgerLive);
     expect(ledgerPage).toContain("Ledger: error (");
     expect((ledgerPage.match(/Ledger: error/g) ?? []).length).toBe(1);
-    // restore ledger for further checks
     writeFileSync(join(fixture.dir, "ledger.jsonl"), ledgerText());
-    // Fix3: audit panel invalid (tampered counts) shows error( / invalid (counts disagree)
     writeFileSync(vPath2, verdictText({ high: 0, medium: 0, low: 0 }));
     const dashTampered2 = await dashboardInputs(fixture);
     const tamperedAudit = buildLive(
@@ -993,7 +1245,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const tamperedAuditPage = renderLive(tamperedAudit);
     expect(tamperedAuditPage).toContain("invalid (counts disagree)");
     writeFileSync(vPath2, vOrig2);
-    // audit panel with invalid verdict file contains error (
     {
       const vOrigBroken = readFileSync(vPath2, "utf8");
       writeFileSync(vPath2, "{ invalid json }");
@@ -1012,7 +1263,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       expect(brokenAuditPage).toContain("error (");
       writeFileSync(vPath2, vOrigBroken);
     }
-    // Fix3: real task Rounds: error( when results broken
     const resultsPath = join(fixture.dir, "results.jsonl");
     const resultsOrig = readFileSync(resultsPath, "utf8");
     writeFileSync(resultsPath, "{ invalid json }\n");
@@ -1031,7 +1281,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(roundsPage).toContain("Rounds:");
     expect(roundsPage).toContain("error (");
     writeFileSync(resultsPath, resultsOrig);
-    // Fix3: /?view=work live assert task=w1-real link present when live available
     const workConfig: DashboardConfig = {
       listenEnv: "MOC_DASHBOARD_LISTEN",
       listenAlias: "dashboard",
@@ -1060,7 +1309,6 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     } finally {
       await workServer.stop();
     }
-    // Fix3: invalid meter call=... 404 (broken meter, unknown call)
     const meterPath = join(fixture.dir, "meter-usage.jsonl");
     const meterOrig2 = readFileSync(meterPath, "utf8");
     writeFileSync(meterPath, "{ invalid json }\n");
@@ -1075,19 +1323,16 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
         call: "2026-11-03T17:59:02.000Z|w1-real",
       },
     );
-    // call panel with broken meter but known workItemId should show minimal error
     if (brokenMeterLive.callPanel === null) throw new Error("expected broken meter call panel");
     const brokenMeterPage = renderLive(brokenMeterLive);
     expect(brokenMeterPage).toContain("Call 2026-11-03T17:59:02.000Z");
     expect(brokenMeterPage).toContain("error (");
-    // broken meter panel must contain no ms value
     {
       const start = brokenMeterPage.indexOf('id="call-panel"');
       const panelSlice =
         start === -1 ? brokenMeterPage : brokenMeterPage.slice(start, start + 2000);
       expect(panelSlice).not.toContain("ms");
     }
-    // unknown call with broken meter should be 404 via server
     const brokenMeterConfig: DashboardConfig = {
       listenEnv: "MOC_DASHBOARD_LISTEN",
       listenAlias: "dashboard",

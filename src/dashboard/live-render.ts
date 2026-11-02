@@ -338,13 +338,35 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
         ? html`<p class="task">${card.title}</p>`
         : html`<p class="task"><a href="${taskHref}">${card.title}</a></p>`;
   const issueLine =
-    card.issue === null ? constantHtml("") : html`<span>#${String(card.issue)}</span>`;
+    card.issue === null
+      ? constantHtml("")
+      : card.repo === null
+        ? html`<span>#${String(card.issue)}</span>`
+        : html`<a href="https://github.com/${card.repo}/issues/${String(card.issue)}"
+            >#${String(card.issue)}</a
+          >`;
   const prLine =
-    card.pullNumber === null ? constantHtml("") : html`<span>PR #${String(card.pullNumber)}</span>`;
+    card.pullNumber !== null
+      ? card.repo === null
+        ? html`<span>PR #${String(card.pullNumber)}</span>`
+        : html`<a href="https://github.com/${card.repo}/pull/${String(card.pullNumber)}"
+            >PR #${String(card.pullNumber)}</a
+          >`
+      : card.workItemId !== null && card.stage !== "idle"
+        ? html`<span class="nodata">PR not opened yet</span>`
+        : constantHtml("");
   const elapsedLine =
     card.elapsed === null
       ? constantHtml("")
       : html`<p class="meta">elapsed <b>${card.elapsed}</b></p>`;
+  const modelLine =
+    card.modelText === null
+      ? constantHtml("")
+      : card.auditorModelText !== null
+        ? html`<p class="meta">author ${card.modelText} · auditor ${card.auditorModelText}</p>`
+        : card.providerId === null
+          ? html`<p class="meta">${card.modelText}</p>`
+          : html`<p class="meta">${card.modelText} (${card.providerId})</p>`;
   const tokensLine =
     card.tokens === null
       ? constantHtml("")
@@ -357,12 +379,57 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
       : html`<p class="meta">
           cost <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
         </p>`;
+  const tokensCostSoFar =
+    card.tokens === null || card.cost === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          this task so far ${groupDigits(card.tokens.input)} / ${groupDigits(card.tokens.output)}
+          tokens ·
+          <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
+        </p>`;
   const callLine =
     card.latestCall === null
       ? constantHtml("")
       : html`<p class="meta">
-          last call ${clockTime(card.latestCall.at)} ${groupDigits(card.latestCall.ms)}ms
+          latest call ${clockTime(card.latestCall.at)} ·
+          ${card.latestCall.inputTokens === null ? "—" : groupDigits(card.latestCall.inputTokens)}
+          in /
+          ${card.latestCall.outputTokens === null ? "—" : groupDigits(card.latestCall.outputTokens)}
+          out · ${groupDigits(card.latestCall.ms)} ms · ${card.latestCall.model}
         </p>`;
+  const probeLine =
+    card.probeAt === null
+      ? constantHtml("")
+      : card.stage === "idle"
+        ? html`<p class="meta">
+            reported ${clockTime(card.probeAt)} · ${card.idleReason ?? "idle"}
+          </p>`
+        : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
+  const lastFinishedLine =
+    card.lastFinished === null
+      ? constantHtml("")
+      : card.stage === "idle"
+        ? html`<p class="meta">
+            last finished
+            <a href="${buildHref(model, { task: card.lastFinished.workItemId })}"
+              >${card.lastFinished.workItemId}</a
+            >
+            at ${clockTime(card.lastFinished.at)} (${card.lastFinished.outcome})
+          </p>`
+        : constantHtml("");
+  const todayLine =
+    card.today === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          today: ${String(card.today.count)} tasks ·
+          <span class="${card.today.cost === null ? "" : cellClass(card.today.cost)}"
+            >${card.today.cost === null ? "—" : cellText(card.today.cost)}</span
+          >
+        </p>`;
+  const idleReasonLine =
+    card.stage === "idle" && card.idleReason !== null
+      ? html`<p class="meta">Idle — ${card.idleReason}</p>`
+      : constantHtml("");
   return html`<div class="rw${idleCls}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
@@ -370,19 +437,37 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     </div>
     ${titleLine}
     <p class="meta">${issueLine} ${prLine}</p>
-    ${elapsedLine} ${tokensLine} ${costLine} ${callLine}
+    ${idleReasonLine} ${modelLine} ${elapsedLine} ${tokensLine} ${tokensCostSoFar} ${costLine}
+    ${callLine} ${probeLine} ${lastFinishedLine} ${todayLine}
   </div>`;
 }
 
 function renderJustFinished(entry: JustFinishedEntry, model: LiveModel): SafeHtml {
   const taskHref = buildHref(model, { task: entry.workItemId });
+  const auditHref =
+    entry.headSha === null
+      ? null
+      : buildHref(model, { audit: `${entry.workItemId}@${entry.headSha}` });
   const costText =
     entry.cost === null
       ? constantHtml("no cost")
       : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
   const title = entry.title ?? entry.workItemId;
+  const counts = entry.verdictCounts;
+  const countsText: SafeHtml =
+    counts === null
+      ? constantHtml("")
+      : counts === "invalid"
+        ? html`<span class="error">invalid verdict counts</span>`
+        : auditHref === null
+          ? constantHtml(`${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}`)
+          : html`<a href="${auditHref}"
+              >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
+            >`;
+  const hostBadge = entry.hostAlias === null ? constantHtml("") : html` · ${entry.hostAlias}`;
   return html`<div class="fi">
-    <a href="${taskHref}">${title}</a> ${entry.outcome} · ${costText} · ${clockTime(entry.at)}
+    <a href="${taskHref}">${title}</a>${hostBadge} · ${entry.outcome} · ${countsText} · ${costText}
+    · ${clockTime(entry.at)}
   </div>`;
 }
 
@@ -1026,7 +1111,8 @@ export function renderLive(model: LiveModel): string {
     ? html`<span class="paused-badge">paused</span>`
     : constantHtml("");
   const realWorkBlock = (() => {
-    if (model.realWork.kind !== "ok") return sectionText(model.realWork);
+    if (model.realWork.kind !== "ok")
+      return html`<div id="real-work">${sectionText(model.realWork)}</div>`;
     if (model.realWork.value.length === 0) return html`<p class="nodata">no real machines</p>`;
     return html`<div id="real-work" class="realwork">
       ${model.realWork.value.map((card) => renderRealWorkCard(card, model))}

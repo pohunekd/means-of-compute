@@ -12,7 +12,7 @@ import {
   type InputErrorCode,
 } from "./inputs.js";
 import { buildDashboard } from "./model.js";
-import { CSS_HASH, renderDashboard } from "./render.js";
+import { CSS_HASH, renderDashboard, renderDashboardWithView, TAB_CSS_HASH } from "./render.js";
 import { buildLive, gatherLiveInputs, type LiveInputCode, type LiveSources } from "./live.js";
 import { LIVE_CSS_HASH, renderLive } from "./live-render.js";
 
@@ -59,6 +59,11 @@ const HTML_HEADERS = {
   "x-frame-options": "DENY",
 } as const;
 
+const TAB_HTML_HEADERS = {
+  ...HTML_HEADERS,
+  "content-security-policy": `default-src 'none'; style-src '${TAB_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+} as const;
+
 const LIVE_HTML_HEADERS = {
   ...HTML_HEADERS,
   "content-security-policy": `default-src 'none'; style-src '${LIVE_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
@@ -69,6 +74,14 @@ const TEXT_HEADERS = {
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
 } as const;
+
+const VIEW_IDS = new Set(["overview", "fleet", "work", "usage", "savings", "autonomy", "models"]);
+const PANEL_VIEW_IDS = new Set(["work", "usage", "savings", "autonomy", "models"]);
+const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const TASK_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const CALL_PATTERN = /^[^|]+\|[^|]+$/;
+const AUDIT_PATTERN = /^[^@]+@[^@]+$/;
+const GRAMMAR_KEYS = ["view", "t", "pause", "host", "task", "call", "audit"] as const;
 
 function allowlist(host: string, port: number): Set<string> {
   if (host === "::1") {
@@ -137,27 +150,92 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             // request never had (mutation: fixed / fallback path).
             pathname = "(unparsed)";
           }
-          return respond(textResponse(421, "misdirected request\n"), pathname);
+          return await respond(textResponse(421, "misdirected request\n"), pathname);
         }
         const url = new URL(req.url);
         if (req.method !== "GET") {
-          return respond(textResponse(405, "method not allowed\n", true), url.pathname);
+          return await respond(textResponse(405, "method not allowed\n", true), url.pathname);
         }
-        const liveSources = url.pathname === "/live" ? (deps.live ?? null) : null;
-        const isLive = liveSources !== null;
-        if (url.pathname !== "/" && !isLive) {
-          return respond(textResponse(404, "not found\n"), url.pathname);
+        if (url.pathname !== "/" && url.pathname !== "/live") {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
         }
-        let liveMinute = 0;
-        if (isLive) {
-          const rawMinute = url.searchParams.get("t");
-          if (rawMinute !== null) {
-            if (!/^\d+$/.test(rawMinute)) {
-              return respond(textResponse(404, "not found\n"), url.pathname);
-            }
-            liveMinute = Number(rawMinute);
+        // Repeated keys 404 for any grammar key.
+        for (const k of GRAMMAR_KEYS) {
+          if (url.searchParams.getAll(k).length > 1) {
+            return await respond(textResponse(404, "not found\n"), url.pathname);
           }
         }
+        const isLivePath = url.pathname === "/live";
+        const isRootPath = url.pathname === "/";
+        if (!isLivePath && !isRootPath) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        const rawView = url.searchParams.get("view");
+        const rawMinute = url.searchParams.get("t");
+        const rawPause = url.searchParams.get("pause");
+        const rawHostSel = url.searchParams.get("host");
+        const rawTask = url.searchParams.get("task");
+        const rawCall = url.searchParams.get("call");
+        const rawAudit = url.searchParams.get("audit");
+
+        // Validate view.
+        if (rawView !== null && !VIEW_IDS.has(rawView)) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        // Validate t.
+        let liveMinute = 0;
+        if (rawMinute !== null) {
+          if (!/^\d+$/.test(rawMinute)) {
+            return await respond(textResponse(404, "not found\n"), url.pathname);
+          }
+          liveMinute = Number(rawMinute);
+        }
+        // Validate pause.
+        if (rawPause !== null && rawPause !== "1") {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        const paused = rawPause === "1";
+        // Validate selection patterns - every present selection validated, not just winner.
+        if (rawHostSel !== null && !ALIAS_PATTERN.test(rawHostSel)) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawTask !== null && !TASK_PATTERN.test(rawTask)) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawCall !== null && !CALL_PATTERN.test(rawCall)) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        if (rawAudit !== null && !AUDIT_PATTERN.test(rawAudit)) {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+        // Selection precedence: host, task, call, audit - at most one honoured.
+        let activeSelectionKey: "host" | "task" | "call" | "audit" | null = null;
+        let activeSelectionValue: string | null = null;
+        if (rawHostSel !== null) {
+          activeSelectionKey = "host";
+          activeSelectionValue = rawHostSel;
+        } else if (rawTask !== null) {
+          activeSelectionKey = "task";
+          activeSelectionValue = rawTask;
+        } else if (rawCall !== null) {
+          activeSelectionKey = "call";
+          activeSelectionValue = rawCall;
+        } else if (rawAudit !== null) {
+          activeSelectionKey = "audit";
+          activeSelectionValue = rawAudit;
+        }
+
+        // If any non-host selection is active, it names nothing known in PR1.
+        if (activeSelectionKey !== null && activeSelectionKey !== "host") {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+
+        const liveAvailable = deps.live != null && deps.live.simTracePath !== null;
+        // Without live sources, overview is not available.
+        if (!liveAvailable && rawView === "overview") {
+          return await respond(textResponse(404, "not found\n"), url.pathname);
+        }
+
         try {
           const inputs = await gatherInputs(deps.sources, deps.fixed, deps.now(), (entry) => {
             deps.log({
@@ -168,7 +246,42 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               message: entry.message,
             });
           });
-          if (isLive) {
+
+          // Handle /live redirect with duration check.
+          if (isLivePath) {
+            if (liveAvailable) {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+              const liveSources = deps.live as LiveSources;
+              const liveInputs = await gatherLiveInputs(
+                liveSources,
+                inputs,
+                liveMinute,
+                (entry) => {
+                  deps.log({
+                    level: "error",
+                    event: "input-error",
+                    input: entry.input,
+                    code: entry.code,
+                    message: entry.message,
+                  });
+                },
+              );
+              if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
+                return await respond(textResponse(404, "not found\n"), url.pathname);
+              }
+            } else if (rawMinute !== null && !/^\d+$/.test(rawMinute)) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
+            const target = rawMinute === null ? "/" : `/?t=${rawMinute}`;
+            const headers: Record<string, string> = { ...TEXT_HEADERS, location: target };
+            return await respond(
+              new Response("redirect\n", { status: 301, headers }),
+              url.pathname,
+            );
+          }
+          if (liveAvailable) {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+            const liveSources = deps.live as LiveSources;
             const liveInputs = await gatherLiveInputs(liveSources, inputs, liveMinute, (entry) => {
               deps.log({
                 level: "error",
@@ -181,13 +294,89 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
               return await respond(textResponse(404, "not found\n"), url.pathname);
             }
-            const livePage = renderLive(buildLive(liveInputs));
+
+            const effectiveView = rawView ?? "overview";
+            // Panel views render via dashboard model under same header/tab bar.
+            if (PANEL_VIEW_IDS.has(effectiveView)) {
+              if (activeSelectionValue !== null) {
+                const known = new Set<string>();
+                if (inputs.hosts.ok) {
+                  const hv = inputs.hosts.value;
+                  if (hv.kind === "recorded") {
+                    for (const p of hv.probes) known.add(p.hostAlias);
+                  } else {
+                    for (const o of hv.observations) known.add(o.hostAlias);
+                  }
+                }
+                if (!known.has(activeSelectionValue)) {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
+              }
+              const dashboard = buildDashboard(inputs);
+              const page = renderDashboardWithView(dashboard, {
+                view: effectiveView,
+                t: liveMinute,
+                paused,
+                host: activeSelectionValue,
+                liveAvailable: true,
+              });
+              const response = new Response(page, {
+                status: 200,
+                headers: { ...TAB_HTML_HEADERS },
+              });
+              return await respond(response, url.pathname);
+            }
+            // Overview and fleet are live views.
+            const liveModel = buildLive(liveInputs, {
+              view: effectiveView as "overview" | "fleet",
+              t: liveMinute,
+              paused,
+              host: activeSelectionValue,
+            });
+            if (activeSelectionValue !== null && liveModel.hostPanel === null) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
+            const livePage = renderLive(liveModel);
             const liveResponse = new Response(livePage, {
               status: 200,
               headers: { ...LIVE_HTML_HEADERS },
             });
             return await respond(liveResponse, url.pathname);
           }
+
+          // No live sources.
+          if (rawView !== null && VIEW_IDS.has(rawView)) {
+            if (rawView === "fleet" || PANEL_VIEW_IDS.has(rawView)) {
+              if (activeSelectionValue !== null) {
+                const known = new Set<string>();
+                if (inputs.hosts.ok) {
+                  const hv = inputs.hosts.value;
+                  if (hv.kind === "recorded") {
+                    for (const p of hv.probes) known.add(p.hostAlias);
+                  } else {
+                    for (const o of hv.observations) known.add(o.hostAlias);
+                  }
+                }
+                if (!known.has(activeSelectionValue)) {
+                  return await respond(textResponse(404, "not found\n"), url.pathname);
+                }
+              }
+              const dashboard = buildDashboard(inputs);
+              const page = renderDashboardWithView(dashboard, {
+                view: rawView,
+                t: liveMinute,
+                paused,
+                host: activeSelectionValue,
+                liveAvailable: false,
+              });
+              const response = new Response(page, {
+                status: 200,
+                headers: { ...TAB_HTML_HEADERS },
+              });
+              return await respond(response, url.pathname);
+            }
+          }
+          // Without view and without live, render as today (stacked, no tabs) to keep snapshot untouched.
           const page = renderDashboard(buildDashboard(inputs));
           const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
           return await respond(response, url.pathname);
@@ -197,7 +386,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
             event: "render-error",
             message: error instanceof Error ? error.message : String(error),
           });
-          return respond(textResponse(500, "dashboard error\n"), url.pathname);
+          return await respond(textResponse(500, "dashboard error\n"), url.pathname);
         }
       },
     });

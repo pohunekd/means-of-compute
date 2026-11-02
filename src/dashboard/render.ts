@@ -332,3 +332,83 @@ export function renderDashboard(model: DashboardModel): string {
     </html>`.value
   );
 }
+
+export const TAB_CSS = [
+  ".tabs{display:flex;gap:0.45rem;flex-wrap:wrap;margin:1.1rem 0 0;padding-bottom:0.6rem;border-bottom:1px solid var(--border)}",
+  ".tab{padding:0.32rem 0.8rem;border-radius:999px;font-size:0.92rem;font-weight:600;text-decoration:none;color:var(--muted);border:1px solid transparent}",
+  ".tab.active{color:var(--text);background:var(--surface-2);border-color:var(--border)}",
+  ".tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}",
+].join("\n");
+
+export const TAB_CSS_HASH = `sha256-${createHash("sha256").update(`${DASHBOARD_CSS}\n${TAB_CSS}`, "utf8").digest("base64")}`;
+
+const TAB_STYLE_HTML = constantHtml("<style>" + DASHBOARD_CSS + "\n" + TAB_CSS + "</style>");
+
+export interface DashboardViewOptions {
+  readonly view: string;
+  readonly t: number;
+  readonly paused: boolean;
+  readonly host: string | null;
+  readonly liveAvailable: boolean;
+}
+
+function buildTabHref(tab: string, opts: DashboardViewOptions): string {
+  const params = new URLSearchParams();
+  params.set("view", tab);
+  if (opts.t !== 0) {
+    params.set("t", String(opts.t));
+  }
+  if (opts.paused) {
+    params.set("pause", "1");
+  }
+  return `/?${params.toString()}`;
+}
+
+function renderTabs(activeView: string, opts: DashboardViewOptions): SafeHtml {
+  const allTabs = opts.liveAvailable
+    ? ["overview", "fleet", "work", "usage", "savings", "autonomy", "models"]
+    : ["fleet", "work", "usage", "savings", "autonomy", "models"];
+  const links = allTabs.map((tab) => {
+    const href = buildTabHref(tab, opts);
+    const active = tab === activeView ? " active" : "";
+    const aria = tab === activeView ? ' aria-current="page"' : "";
+    return html`<a class="tab${active}" href="${href}" ${constantHtml(aria)}>${tab}</a>`;
+  });
+  return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
+}
+
+export function renderDashboardWithView(model: DashboardModel, opts: DashboardViewOptions): string {
+  const activePanel = model.panels.find((panel) => panel.id === opts.view) ?? null;
+  const section = activePanel === null ? constantHtml("") : renderPanel(activePanel);
+  const tabs = renderTabs(opts.view, opts);
+  const cards = keyFigures(model).map((figure) => renderFigure(figure, "keycard"));
+  const rendered = compactTime(model.renderedAt) ?? model.renderedAt;
+  return (
+    "<!doctype html>\n" +
+    html`<html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Means of Compute dashboard</title>
+        ${TAB_STYLE_HTML}
+      </head>
+      <body>
+        <header>
+          <h1>Means of Compute</h1>
+          <p class="tagline">
+            An autonomous software factory on company-owned machines, running on Meta models.
+          </p>
+          <p class="meta">
+            Rendered
+            <time datetime="${model.renderedAt}" title="${model.renderedAt}">${rendered}</time>, UTC
+            day ${model.utcDay}. Every figure names its source. "no data" means an input is missing;
+            "error" means an input could not be read (details in ${model.logPath}).
+          </p>
+          ${tabs}
+          <div class="keyfigures">${cards}</div>
+        </header>
+        <main>${section}</main>
+      </body>
+    </html>`.value
+  );
+}

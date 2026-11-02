@@ -82,6 +82,11 @@ export interface SimPlacementLine {
   readonly task: SimTask | null;
 }
 
+export interface SimWorkEnd {
+  readonly atMinute: number;
+  readonly workItemId: string;
+}
+
 export interface SimTrace {
   readonly timeline: string;
   readonly startAt: string;
@@ -92,6 +97,7 @@ export interface SimTrace {
   readonly hosts: readonly SimHostLine[];
   readonly events: readonly SimEventLine[];
   readonly placements: readonly SimPlacementLine[];
+  readonly workEnds: readonly SimWorkEnd[];
 }
 
 export type LiveTileState = SimTileState | "reported" | "unavailable";
@@ -109,7 +115,8 @@ export interface LiveTile {
   readonly state: LiveTileState;
   readonly eligible: boolean;
   readonly flagged: boolean;
-  readonly running: number;
+  readonly running: number | null;
+  readonly runningError: string | null;
   readonly maxAgents: number | null;
   readonly batteryPercent: number | null;
   readonly detail: string;
@@ -150,6 +157,34 @@ export type LiveSection<T> =
   | { readonly kind: "no-data"; readonly reason: string }
   | { readonly kind: "error"; readonly code: string };
 
+export interface HostPanelSim {
+  readonly kind: "sim";
+  readonly alias: string;
+  readonly site: string;
+  readonly hostKind: string;
+  readonly state: SimTileState;
+  readonly eligible: boolean;
+  readonly excludeReason: string | null;
+  readonly batteryPercent: number | null;
+  readonly running: number;
+  readonly maxAgents: number;
+  readonly task: SimTask | null;
+  readonly runningTasks: readonly { readonly workItemId: string; readonly at: string }[];
+  readonly events: readonly SimEventLine[];
+  readonly placements: readonly SimPlacementLine[];
+}
+
+export interface HostPanelReal {
+  readonly kind: "real";
+  readonly alias: string;
+  readonly probe: LiveSection<RecordedProbe | null>;
+  readonly registry: LiveSection<readonly RegistryEntry[]>;
+  readonly results: LiveSection<readonly { at: string; outcome: string; workItemId: string }[]>;
+  readonly meterCalls: LiveSection<readonly LiveActivityRow[]>;
+}
+
+export type HostPanel = HostPanelSim | HostPanelReal;
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -163,6 +198,10 @@ export interface LiveModel {
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
   readonly ticker: readonly LiveTickerRow[];
   readonly tickerNote: string | null;
+  readonly view: "overview" | "fleet";
+  readonly t: number;
+  readonly paused: boolean;
+  readonly hostPanel: HostPanel | null;
 }
 
 export interface LiveInputs {
@@ -172,6 +211,13 @@ export interface LiveInputs {
   readonly sim: LiveSourced<SimTrace>;
   readonly meter: LiveSourced<UsageIndex>;
   readonly probes: LiveSourced<readonly RecordedProbe[]>;
+}
+
+export interface LiveOptions {
+  readonly view: "overview" | "fleet";
+  readonly t: number;
+  readonly paused: boolean;
+  readonly host: string | null;
 }
 
 export class SimTraceError extends Error {
@@ -378,6 +424,7 @@ export function parseSimTrace(text: string): SimTrace {
   const hosts: SimHostLine[] = [];
   const events: SimEventLine[] = [];
   const placements: SimPlacementLine[] = [];
+  const workEnds: SimWorkEnd[] = [];
   lines.slice(1).forEach((record, offset) => {
     const where = `line ${String(offset + 2)}`;
     if (record["simulated"] !== true) {
@@ -420,7 +467,13 @@ export function parseSimTrace(text: string): SimTrace {
         });
         break;
       }
-      case "work-end":
+      case "work-end": {
+        workEnds.push({
+          atMinute: reqInt(record, "atMinute", where, 0, durationMinutes),
+          workItemId: reqString(record, "workItemId", where),
+        });
+        break;
+      }
       case "summary": {
         break;
       }
@@ -443,6 +496,7 @@ export function parseSimTrace(text: string): SimTrace {
     hosts,
     events,
     placements,
+    workEnds,
   };
 }
 
@@ -588,7 +642,12 @@ function realTiles(
     state: probe.kind === "reported" ? "reported" : "unavailable",
     eligible: probe.kind === "reported",
     flagged: false,
-    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
+    running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : null,
+    runningError: registry.ok
+      ? null
+      : registry.failure.kind === "error"
+        ? registry.failure.code
+        : registry.failure.reason,
     maxAgents: null,
     batteryPercent: null,
     detail:
@@ -596,6 +655,12 @@ function realTiles(
         ? "last probe: reported"
         : `last probe: unavailable: ${(probe.cause ?? "unknown").replace(/-/g, " ")}`,
   }));
+}
+
+export function stripProvider(model: string): string {
+  const idx = model.lastIndexOf("/");
+  if (idx !== -1) return model.slice(idx + 1);
+  return model;
 }
 
 function activityRows(
@@ -607,7 +672,8 @@ function activityRows(
     const start = meter.starts.get(end.callId);
     const grant = meter.grants.get(end.requestId)?.open;
     const providerId = start?.providerId ?? grant?.providerId ?? "unknown";
-    const model = start?.model ?? grant?.model ?? "unknown";
+    const rawModel = start?.model ?? grant?.model ?? "unknown";
+    const model = stripProvider(rawModel);
     let cost: LiveCell;
     if (end.inputTokens === null || end.outputTokens === null) {
       cost = { kind: "no-data", reason: "usage not reported" };
@@ -690,7 +756,128 @@ function tickerRows(inputs: LiveInputs, minute: number, simOk: SimTrace | null):
   return rows.slice(0, 16);
 }
 
-export function buildLive(inputs: LiveInputs): LiveModel {
+function buildHostPanel(
+  inputs: LiveInputs,
+  minute: number,
+  sim: SimTrace | null,
+  hostAlias: string,
+): HostPanel | null {
+  // Try simulated first.
+  if (sim !== null) {
+    const hostLine = simTilesAt(sim, minute).find((host) => host.alias === hostAlias);
+    if (hostLine !== undefined) {
+      const events = sim.events
+        .filter((event) => event.alias === hostAlias && event.atMinute <= minute)
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, 6);
+      const placements = sim.placements
+        .filter(
+          (placement) => placement.chosenHostAlias === hostAlias && placement.atMinute <= minute,
+        )
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, 6);
+      const workEndById = new Map<string, number>();
+      for (const end of sim.workEnds) {
+        if (end.atMinute <= minute) {
+          const prev = workEndById.get(end.workItemId);
+          if (prev === undefined || end.atMinute < prev)
+            workEndById.set(end.workItemId, end.atMinute);
+        }
+      }
+      const allHostPlacements = sim.placements.filter(
+        (p) => p.chosenHostAlias === hostAlias && p.atMinute <= minute,
+      );
+      const runningTasks = allHostPlacements
+        .filter((p) => !workEndById.has(p.workItemId))
+        .map((p) => ({ workItemId: p.workItemId, at: p.at }));
+      return {
+        kind: "sim",
+        alias: hostLine.alias,
+        site: hostLine.site,
+        hostKind: hostLine.hostKind,
+        state: hostLine.state,
+        eligible: hostLine.eligible,
+        excludeReason: hostLine.excludeReason,
+        batteryPercent: hostLine.batteryPercent,
+        running: hostLine.running,
+        maxAgents: hostLine.maxAgents,
+        task: hostLine.task,
+        runningTasks,
+        events,
+        placements,
+      };
+    }
+  }
+  // A real panel exists when the probes, registry, results or meter usage name the alias; each block degrades on its own source.
+  const probeSection: LiveSection<RecordedProbe | null> = inputs.probes.ok
+    ? { kind: "ok", value: inputs.probes.value.find((p) => p.hostAlias === hostAlias) ?? null }
+    : inputs.probes.failure.kind === "error"
+      ? { kind: "error", code: inputs.probes.failure.code }
+      : { kind: "no-data", reason: inputs.probes.failure.reason };
+  // Registry block: open sessions on this host
+  const registrySection: LiveSection<readonly RegistryEntry[]> = inputs.dashboard.registry.ok
+    ? {
+        kind: "ok",
+        value: inputs.dashboard.registry.value.filter(
+          (entry: RegistryEntry) => entry.hostAlias === hostAlias && entry.terminal === null,
+        ),
+      }
+    : inputs.dashboard.registry.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.registry.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.registry.failure.reason };
+  const resultsSection: LiveSection<
+    readonly { at: string; outcome: string; workItemId: string }[]
+  > = inputs.dashboard.results.ok
+    ? {
+        kind: "ok",
+        value: inputs.dashboard.results.value
+          .filter((line) => line.hostAlias === hostAlias)
+          .map((line) => ({ at: line.at, outcome: line.outcome, workItemId: line.workItemId }))
+          .sort((a, b) => (a.at < b.at ? 1 : -1))
+          .slice(0, 6),
+      }
+    : inputs.dashboard.results.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.results.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
+  const meterSection: LiveSection<readonly LiveActivityRow[]> = inputs.meter.ok
+    ? {
+        kind: "ok",
+        value: activityRows(inputs.meter.value, inputs.dashboard.pricing)
+          .filter((row) => row.hostAlias === hostAlias)
+          .slice(0, 6),
+      }
+    : inputs.meter.failure.kind === "error"
+      ? { kind: "error", code: inputs.meter.failure.code }
+      : { kind: "no-data", reason: inputs.meter.failure.reason };
+  const probeFound = probeSection.kind === "ok" && probeSection.value !== null;
+  const anyRegistryHost =
+    inputs.dashboard.registry.ok &&
+    inputs.dashboard.registry.value.some((e) => e.hostAlias === hostAlias);
+  const anyResultsHost =
+    inputs.dashboard.results.ok &&
+    inputs.dashboard.results.value.some((l) => l.hostAlias === hostAlias);
+  const anyMeterHost = (() => {
+    if (!inputs.meter.ok) return false;
+    const meter = inputs.meter.value;
+    return [...meter.ends.values()].some((end) => {
+      const grant = meter.grants.get(end.requestId)?.open;
+      return grant?.hostAlias === hostAlias;
+    });
+  })();
+  if (!probeFound && !anyRegistryHost && !anyResultsHost && !anyMeterHost) {
+    return null;
+  }
+  return {
+    kind: "real",
+    alias: hostAlias,
+    probe: probeSection,
+    registry: registrySection,
+    results: resultsSection,
+    meterCalls: meterSection,
+  };
+}
+
+export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
   const nowIso = inputs.now.toISOString();
   const utcDay = nowIso.slice(0, 10);
   const sim = inputs.sim.ok ? inputs.sim.value : null;
@@ -793,6 +980,7 @@ export function buildLive(inputs: LiveInputs): LiveModel {
               !host.eligible &&
               !(host.excludeReason?.startsWith(AGENT_LIMIT_REASON_PREFIX) ?? false),
             running: host.running,
+            runningError: null,
             maxAgents: host.maxAgents,
             batteryPercent: host.batteryPercent,
             detail,
@@ -814,6 +1002,10 @@ export function buildLive(inputs: LiveInputs): LiveModel {
             })),
         };
       })();
+  const hostPanel =
+    opts?.host !== undefined && opts.host !== null
+      ? buildHostPanel(inputs, minute, sim, opts.host)
+      : null;
   return {
     renderedAt: nowIso,
     simAt: sim === null ? null : new Date(Date.parse(sim.startAt) + minute * 60000).toISOString(),
@@ -833,5 +1025,9 @@ export function buildLive(inputs: LiveInputs): LiveModel {
     tickerNote: inputs.dashboard.results.ok
       ? null
       : `real events: ${inputs.dashboard.results.failure.kind === "error" ? `error (${inputs.dashboard.results.failure.code})` : `no data (${inputs.dashboard.results.failure.reason})`}`,
+    view: opts?.view ?? "overview",
+    t: opts?.t ?? minute,
+    paused: opts?.paused ?? false,
+    hostPanel,
   };
 }

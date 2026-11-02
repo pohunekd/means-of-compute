@@ -199,3 +199,7 @@ unavailable (<cause>)", excluded: true }`.
 excluded`, where `N` counts all candidates. Otherwise the `place()` reason
    is kept.
 5. The result is validated with `isPlacementDecision` and returned.
+
+## Rust probe
+
+The Rust port lives in `crates/moc-host-state/` and is checked with `bun run gates:rs`. Parity rules with the TypeScript probe are documented in `crates/moc-host-state/src/lib.rs`. Packaging still uses the TypeScript bundle until the version bump.

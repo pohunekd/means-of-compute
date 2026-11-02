@@ -11,7 +11,7 @@ import { constantHtml, html, SafeHtml } from "./html.js";
 import { DASHBOARD_CSS } from "./render.js";
 import { groupDigits } from "./money.js";
 import { stripProvider } from "./live.js";
-import { recount } from "../auditor/verdict.js";
+import { verdictCounts } from "../auditor/verdict.js";
 import type {
   AuditPanel,
   CallPanel,
@@ -619,23 +619,20 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
           <p class="row">Verdicts:</p>
           <ul>
             ${panel.verdicts.value.map((v) => {
-              const rec = recount(v.findings);
-              const mismatched =
-                rec.high !== v.counts.high ||
-                rec.medium !== v.counts.medium ||
-                rec.low !== v.counts.low;
-              return mismatched
-                ? html`<li>
-                    <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
-                      >${v.headSha.slice(0, 7)}: invalid (counts disagree)</a
-                    >
-                  </li>`
-                : html`<li>
-                    <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
-                      >${v.headSha.slice(0, 7)} high ${String(rec.high)} medium
-                      ${String(rec.medium)} low ${String(rec.low)}</a
-                    >
-                  </li>`;
+              const counted = verdictCounts(v);
+              if (counted === "invalid") {
+                return html`<li>
+                  <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                    >${v.headSha.slice(0, 7)}: invalid (counts disagree)</a
+                  >
+                </li>`;
+              }
+              const t = `high ${String(counted.high)} medium ${String(counted.medium)} low ${String(counted.low)}`;
+              return html`<li>
+                <a href="${buildHref(model, { audit: `${v.workItemId}@${v.headSha}` })}"
+                  >${v.headSha.slice(0, 7)} ${t}</a
+                >
+              </li>`;
             })}
           </ul>
         </div>`;
@@ -758,6 +755,18 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
 
 function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { call: null });
+  const broken = panel.providerId === "-" && panel.hostAlias === null && panel.cost.kind !== "text";
+  if (broken) {
+    const err =
+      panel.cost.kind === "error"
+        ? html`<p class="error">error (${panel.cost.code})</p>`
+        : html`<p class="nodata">no data (${panel.cost.reason})</p>`;
+    return html`<div class="host-panel" id="call-panel">
+      <h3>Call ${panel.endedAt}</h3>
+      ${err}
+      <p><a href="${backHref}">back to live</a></p>
+    </div>`;
+  }
   const costCell =
     panel.cost.kind === "no-data"
       ? html`<span class="nodata">no data (${panel.cost.reason})</span>`
@@ -799,16 +808,12 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
         </p>`
       : (() => {
           const verdict = panel.verdict.value;
-          const rec = recount(verdict.findings);
-          const mismatched =
-            rec.high !== verdict.counts.high ||
-            rec.medium !== verdict.counts.medium ||
-            rec.low !== verdict.counts.low;
-          const countsLine = mismatched
-            ? html`<p class="row">Counts: invalid (counts disagree)</p>`
-            : html`<p class="row">
-                Counts: high ${String(rec.high)} medium ${String(rec.medium)} low ${String(rec.low)}
-              </p>`;
+          const counted = verdictCounts(verdict);
+          const c =
+            counted === "invalid"
+              ? "invalid (counts disagree)"
+              : `high ${String(counted.high)} medium ${String(counted.medium)} low ${String(counted.low)}`;
+          const countsLine = html`<p class="row">Counts: ${c}</p>`;
           const repoLine = html`<p class="row">Repo: ${verdict.repo}</p>`;
           const auditorLine = html`<p class="row">
             Auditor: ${stripProvider(verdict.auditorModel)}
@@ -819,12 +824,14 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
           const prLine =
             verdict.pullNumber === null
               ? html`<p class="row">PR: none</p>`
-              : html`<p class="row">
-                  PR:
-                  <a href="https://github.com/${verdict.repo}/pull/${String(verdict.pullNumber)}"
-                    >#${String(verdict.pullNumber)}</a
-                  >
-                </p>`;
+              : panel.workItemRepo !== null && verdict.repo !== panel.workItemRepo
+                ? html`<p class="row">PR: #${String(verdict.pullNumber)} (repo differs)</p>`
+                : html`<p class="row">
+                    PR:
+                    <a href="https://github.com/${verdict.repo}/pull/${String(verdict.pullNumber)}"
+                      >#${String(verdict.pullNumber)}</a
+                    >
+                  </p>`;
           return html`<div>
             <p class="row">Head: ${verdict.headSha}</p>
             ${countsLine} ${repoLine} ${auditorLine} ${authorsLine}

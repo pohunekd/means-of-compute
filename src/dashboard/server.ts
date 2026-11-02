@@ -313,12 +313,16 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 }
               }
               const dashboard = buildDashboard(inputs);
+              const knownWorkIds = inputs.workItems.ok
+                ? new Set(inputs.workItems.value.map((w) => w.id))
+                : new Set<string>();
               const page = renderDashboardWithView(dashboard, {
                 view: effectiveView,
                 t: liveMinute,
                 paused,
                 host: activeSelectionValue,
                 liveAvailable: true,
+                knownWorkIds,
               });
               const response = new Response(page, {
                 status: 200,
@@ -375,12 +379,16 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 }
               }
               const dashboard = buildDashboard(inputs);
+              const knownWorkIds = inputs.workItems.ok
+                ? new Set(inputs.workItems.value.map((w) => w.id))
+                : new Set<string>();
               const page = renderDashboardWithView(dashboard, {
                 view: rawView,
                 t: liveMinute,
                 paused,
                 host: activeSelectionValue,
                 liveAvailable: false,
+                knownWorkIds,
               });
               const response = new Response(page, {
                 status: 200,

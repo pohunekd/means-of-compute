@@ -253,6 +253,7 @@ export interface AuditPanel {
   readonly workItemId: string;
   readonly headSha: string;
   readonly verdict: LiveSection<AuditVerdict>;
+  readonly workItemRepo: string | null;
 }
 
 export interface LiveModel {
@@ -1202,11 +1203,37 @@ function buildTaskPanel(
   return null;
 }
 
+function isKnownWorkItemId(inputs: LiveInputs, workItemId: string): boolean {
+  if (inputs.dashboard.workItems.ok) {
+    if (inputs.dashboard.workItems.value.some((w) => w.id === workItemId)) return true;
+  }
+  if (inputs.meter.ok) {
+    for (const grant of inputs.meter.value.grants.values()) {
+      if (grant.open.workItemId === workItemId) return true;
+    }
+    for (const end of inputs.meter.value.ends.values()) {
+      const g = inputs.meter.value.grants.get(end.requestId);
+      if (g !== undefined && g.open.workItemId === workItemId) return true;
+    }
+  }
+  if (inputs.dashboard.results.ok) {
+    if (inputs.dashboard.results.value.some((r) => r.workItemId === workItemId)) return true;
+  }
+  const sim = inputs.sim.ok ? inputs.sim.value : null;
+  if (sim !== null) {
+    if (sim.placements.some((p) => p.workItemId === workItemId)) return true;
+    if (sim.workEnds.some((e) => e.workItemId === workItemId)) return true;
+  }
+  return false;
+}
+
 function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
   const sep = callKey.indexOf("|");
   if (sep === -1) return null;
   const endedAt = callKey.slice(0, sep);
   const workItemId = callKey.slice(sep + 1);
+  if (endedAt === "" || workItemId === "") return null;
+  if (!isKnownWorkItemId(inputs, workItemId)) return null;
   if (!inputs.meter.ok) {
     const cost: LiveCell =
       inputs.meter.failure.kind === "error"
@@ -1286,10 +1313,17 @@ function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | nul
     // No verdict store entry for this id.
     return null;
   }
+  // Determine work item repo for PR link equality check (Fix2).
+  let workItemRepo: string | null = null;
+  if (inputs.dashboard.workItems.ok) {
+    const w = inputs.dashboard.workItems.value.find((item) => item.id === workItemId);
+    if (w !== undefined) workItemRepo = w.repo;
+  }
   if (!entry.ok) {
     return {
       workItemId,
       headSha,
+      workItemRepo,
       verdict:
         entry.failure.kind === "error"
           ? { kind: "error", code: entry.failure.code }
@@ -1298,7 +1332,7 @@ function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | nul
   }
   const found = entry.value.find((v) => v.headSha === headSha);
   if (found === undefined) return null;
-  return { workItemId, headSha, verdict: { kind: "ok", value: found } };
+  return { workItemId, headSha, workItemRepo, verdict: { kind: "ok", value: found } };
 }
 
 export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {

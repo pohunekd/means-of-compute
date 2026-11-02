@@ -882,6 +882,127 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const ledgerPage = renderLive(ledgerLive);
     expect(ledgerPage).toContain("Ledger: error (");
     expect((ledgerPage.match(/Ledger: error/g) ?? []).length).toBe(1);
+    // restore ledger for further checks
+    writeFileSync(join(fixture.dir, "ledger.jsonl"), ledgerText());
+    // Fix3: audit panel invalid (tampered counts) shows error( / invalid (counts disagree)
+    writeFileSync(vPath2, verdictText({ high: 0, medium: 0, low: 0 }));
+    const dashTampered2 = await dashboardInputs(fixture);
+    const tamperedAudit = buildLive(
+      await gatherLiveInputs(fixture.sources, dashTampered2, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+        audit: "w1-real@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    );
+    const tamperedAuditPage = renderLive(tamperedAudit);
+    expect(tamperedAuditPage).toContain("invalid (counts disagree)");
+    writeFileSync(vPath2, vOrig2);
+    // Fix3: real task Rounds: error( when results broken
+    const resultsPath = join(fixture.dir, "results.jsonl");
+    const resultsOrig = readFileSync(resultsPath, "utf8");
+    writeFileSync(resultsPath, "{ invalid json }\n");
+    const dashBrokenResults = await dashboardInputs(fixture);
+    const roundsBroken = buildLive(
+      await gatherLiveInputs(fixture.sources, dashBrokenResults, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+        task: "w1-real",
+      },
+    );
+    const roundsPage = renderLive(roundsBroken);
+    expect(roundsPage).toContain("Rounds:");
+    expect(roundsPage).toContain("error (");
+    writeFileSync(resultsPath, resultsOrig);
+    // Fix3: /?view=work live assert task=w1-real link present when live available
+    const workConfig: DashboardConfig = {
+      listenEnv: "MOC_DASHBOARD_LISTEN",
+      listenAlias: "dashboard",
+      logPath: join(fixture.dir, "dashboard.jsonl"),
+      maxRequestBytes: 1024,
+      idleTimeoutSec: 10,
+      workRowLimit: 50,
+      baselines: BASELINES,
+    };
+    const workServer = await startDashboard({
+      config: workConfig,
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: fixture.fixed,
+      sources: fixture.dashboardSources,
+      live: fixture.sources,
+      now: () => NOW,
+      log: () => {},
+    });
+    try {
+      const workRes = await fetch(`http://localhost:${String(workServer.port)}/?view=work`, {
+        headers: { host: `localhost:${String(workServer.port)}` },
+      });
+      const workBody = await workRes.text();
+      expect(workBody).toContain("task=w1-real");
+      expect(workBody).toContain("/?view=overview");
+    } finally {
+      await workServer.stop();
+    }
+    // Fix3: invalid meter call=... 404 (broken meter, unknown call)
+    const meterPath = join(fixture.dir, "meter-usage.jsonl");
+    const meterOrig2 = readFileSync(meterPath, "utf8");
+    writeFileSync(meterPath, "{ invalid json }\n");
+    const dashBrokenMeter = await dashboardInputs(fixture);
+    const brokenMeterLive = buildLive(
+      await gatherLiveInputs(fixture.sources, dashBrokenMeter, 60, () => {}),
+      {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+        call: "2026-11-03T17:59:02.000Z|w1-real",
+      },
+    );
+    // call panel with broken meter but known workItemId should show minimal error
+    if (brokenMeterLive.callPanel === null) throw new Error("expected broken meter call panel");
+    const brokenMeterPage = renderLive(brokenMeterLive);
+    expect(brokenMeterPage).toContain("Call 2026-11-03T17:59:02.000Z");
+    expect(brokenMeterPage).toContain("error (");
+    expect(brokenMeterPage).not.toContain("ms 0");
+    // unknown call with broken meter should be 404 via server
+    const brokenMeterConfig: DashboardConfig = {
+      listenEnv: "MOC_DASHBOARD_LISTEN",
+      listenAlias: "dashboard",
+      logPath: join(fixture.dir, "dashboard.jsonl"),
+      maxRequestBytes: 1024,
+      idleTimeoutSec: 10,
+      workRowLimit: 50,
+      baselines: BASELINES,
+    };
+    const brokenMeterServer = await startDashboard({
+      config: brokenMeterConfig,
+      listen: { host: "127.0.0.1", port: 0 },
+      fixed: fixture.fixed,
+      sources: fixture.dashboardSources,
+      live: fixture.sources,
+      now: () => NOW,
+      log: () => {},
+    });
+    try {
+      const badCall2 = await fetch(
+        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=2026-11-03T18%3A00%3A00.000Z%7Cnosuch`,
+        { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
+      );
+      expect(badCall2.status).toBe(404);
+      const pipeCall = await fetch(
+        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=%7Cnosuch`,
+        { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
+      );
+      expect(pipeCall.status).toBe(404);
+    } finally {
+      await brokenMeterServer.stop();
+    }
+    writeFileSync(meterPath, meterOrig2);
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

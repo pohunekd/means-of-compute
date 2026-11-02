@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "sim-v1",
+  "name": "evening-300",
+  "seed": 20261103,
+  "startAt": "2026-11-03T17:00:00.000Z",
+  "durationMinutes": 240,
+  "speed": 60,
+  "kinds": {
+    "desk": {
+      "cores": 8,
+      "memoryTotalMb": 32768,
+      "gpuPresent": false,
+      "battery": "none",
+      "maxConcurrentAgents": 2,
+      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "startsIdle": false
+    },
+    "laptop": {
+      "cores": 8,
+      "memoryTotalMb": 16384,
+      "gpuPresent": false,
+      "battery": "laptop",
+      "maxConcurrentAgents": 1,
+      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "startsIdle": false
+    },
+    "kiosk": {
+      "cores": 4,
+      "memoryTotalMb": 8192,
+      "gpuPresent": false,
+      "battery": "none",
+      "maxConcurrentAgents": 1,
+      "allowedWindow": { "start": "22:00", "end": "06:00" },
+      "startsIdle": false
+    },
+    "meeting": {
+      "cores": 4,
+      "memoryTotalMb": 16384,
+      "gpuPresent": false,
+      "battery": "none",
+      "maxConcurrentAgents": 1,
+      "allowedWindow": { "start": "18:00", "end": "08:00" },
+      "startsIdle": false
+    },
+    "signage": {
+      "cores": 2,
+      "memoryTotalMb": 4096,
+      "gpuPresent": false,
+      "battery": "none",
+      "maxConcurrentAgents": 1,
+      "allowedWindow": { "start": "00:00", "end": "00:00" },
+      "startsIdle": false
+    }
+  },
+  "generators": [
+    { "kind": "desk", "count": 90, "aliasPrefix": "desk-", "site": "hq-floor-2" },
+    { "kind": "desk", "count": 90, "aliasPrefix": "desk-", "site": "hq-floor-3" },
+    { "kind": "laptop", "count": 80, "aliasPrefix": "laptop-", "site": "hq-floor-2" },
+    { "kind": "kiosk", "count": 12, "aliasPrefix": "kiosk-lobby-", "site": "lobby" },
+    { "kind": "meeting", "count": 20, "aliasPrefix": "meeting-3b-", "site": "hq-floor-3" },
+    { "kind": "signage", "count": 8, "aliasPrefix": "signage-lobby-", "site": "lobby" }
+  ],
+  "waves": [
+    { "atMinute": 10, "kind": "desk", "type": "leave", "fraction": 0.5, "staggerMinutes": 1 },
+    { "atMinute": 40, "kind": "desk", "type": "leave", "fraction": 0.5, "staggerMinutes": 1 },
+    { "atMinute": 20, "kind": "laptop", "type": "leave", "fraction": 0.6, "staggerMinutes": 1 },
+    { "atMinute": 35, "kind": "laptop", "type": "depart", "fraction": 0.4, "staggerMinutes": 1 },
+    { "atMinute": 70, "kind": "laptop", "type": "rejoin", "fraction": 0.4, "staggerMinutes": 2 },
+    {
+      "atMinute": 120,
+      "kind": "kiosk",
+      "type": "window-enter",
+      "fraction": 1,
+      "staggerMinutes": 0
+    },
+    {
+      "atMinute": 15,
+      "kind": "meeting",
+      "type": "window-enter",
+      "fraction": 1,
+      "staggerMinutes": 0
+    }
+  ],
+  "events": [
+    { "atMinute": 94, "alias": "laptop-007", "type": "rejoin", "set": { "acPower": true } },
+    { "atMinute": 94, "alias": "laptop-007", "type": "leave" },
+    { "atMinute": 95, "alias": "laptop-007", "type": "battery", "set": { "batteryPercent": 40 } },
+    { "atMinute": 100, "alias": "desk-142", "type": "return" },
+    { "atMinute": 134, "alias": "laptop-021", "type": "rejoin", "set": { "acPower": true } },
+    { "atMinute": 134, "alias": "laptop-021", "type": "leave" },
+    { "atMinute": 135, "alias": "laptop-021", "type": "unplug" }
+  ],
+  "work": [
+    {
+      "firstAtMinute": 15,
+      "everyMinutes": 2,
+      "count": 25,
+      "durationMinutes": 50,
+      "idPrefix": "sim-w-"
+    },
+    {
+      "firstAtMinute": 50,
+      "everyMinutes": 1,
+      "count": 100,
+      "durationMinutes": 120,
+      "idPrefix": "sim-x-"
+    },
+    {
+      "firstAtMinute": 65,
+      "everyMinutes": 1,
+      "count": 100,
+      "durationMinutes": 120,
+      "idPrefix": "sim-y-"
+    },
+    {
+      "firstAtMinute": 80,
+      "everyMinutes": 1,
+      "count": 90,
+      "durationMinutes": 120,
+      "idPrefix": "sim-z-"
+    }
+  ]
+}

@@ -165,6 +165,47 @@ pub fn format_number(n: f64) -> String {
     buf.format(n).to_string()
 }
 
+/// Node `path.join` on POSIX: concatenate segments with `/` then lexically
+/// normalize (collapse `//`, drop `.`, resolve `..` against previous segment).
+pub fn path_join(segments: &[&str]) -> String {
+    let joined = segments.join("/");
+    if joined.is_empty() {
+        return ".".to_string();
+    }
+    let is_absolute = joined.starts_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in joined.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            if let Some(last) = parts.last() {
+                if *last != ".." {
+                    parts.pop();
+                    continue;
+                }
+            }
+            if is_absolute {
+                continue;
+            }
+            parts.push("..");
+        } else {
+            parts.push(seg);
+        }
+    }
+    if is_absolute {
+        if parts.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", parts.join("/"))
+        }
+    } else if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    }
+}
+
 pub fn errno_name(e: &io::Error) -> String {
     let code = match e.raw_os_error() {
         Some(c) => c,

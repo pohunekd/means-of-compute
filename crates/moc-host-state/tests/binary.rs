@@ -147,6 +147,52 @@ fn binary_runs_in_package_layout() {
     let stdout2 = String::from_utf8(out2.stdout).unwrap();
     assert_eq!(stdout2, expected, "facts win mismatch");
 
+    // -- --scenario desktop-mains (leading -- dropped, Bun argv parity)
+    let out3 = run_bin(&bin, &["--", "--scenario", "desktop-mains"]);
+    assert_eq!(
+        out3.status.code(),
+        Some(0),
+        "leading -- exit 0, stderr: {}",
+        String::from_utf8_lossy(&out3.stderr)
+    );
+    assert_eq!(out3.stderr.len(), 0);
+    let stdout3 = String::from_utf8(out3.stdout).unwrap();
+    assert_eq!(stdout3, expected, "leading -- scenario mismatch");
+
+    // --scenario x/../desktop-mains (path.join lexical normalization)
+    let out4 = run_bin(&bin, &["--scenario", "x/../desktop-mains"]);
+    assert_eq!(
+        out4.status.code(),
+        Some(0),
+        "x/../ exit 0, stderr: {}",
+        String::from_utf8_lossy(&out4.stderr)
+    );
+    assert_eq!(out4.stderr.len(), 0);
+    let stdout4 = String::from_utf8(out4.stdout).unwrap();
+    assert_eq!(stdout4, expected, "x/../desktop-mains mismatch");
+
+    // last-wins and empty-as-absent: --facts "" --scenario login-active --scenario desktop-mains
+    let out5 = run_bin(
+        &bin,
+        &[
+            "--facts",
+            "",
+            "--scenario",
+            "login-active",
+            "--scenario",
+            "desktop-mains",
+        ],
+    );
+    assert_eq!(
+        out5.status.code(),
+        Some(0),
+        "last-wins exit 0, stderr: {}",
+        String::from_utf8_lossy(&out5.stderr)
+    );
+    assert_eq!(out5.stderr.len(), 0);
+    let stdout5 = String::from_utf8(out5.stdout).unwrap();
+    assert_eq!(stdout5, expected, "last-wins mismatch");
+
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -219,6 +265,15 @@ fn binary_exit_codes() {
     );
     assert_eq!(out.stdout.len(), 0);
     assert!(!out.stderr.is_empty());
+
+    // --facts --scenario (flag takes next argument whatever it is)
+    let out = run_bin(&bin, &["--facts", "--scenario"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(out.stdout.len(), 0);
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "--scenario: ENOENT\n"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }

@@ -18,6 +18,11 @@ fn main() {
         .skip(1)
         .map(|os| os.to_string_lossy().into_owned())
         .collect();
+    let args = if args.first().is_some_and(|a| a == "--") {
+        args[1..].to_vec()
+    } else {
+        args
+    };
 
     let mut facts_path: Option<String> = None;
     let mut scenario: Option<String> = None;
@@ -51,16 +56,21 @@ fn main() {
 
     let config_dir = match std::env::current_exe() {
         Ok(exe) => {
+            let exe = match std::fs::canonicalize(&exe) {
+                Ok(c) => c,
+                Err(e) => {
+                    let msg = format!("{e}\n");
+                    let _ = std::io::stderr().write_all(msg.as_bytes());
+                    std::process::exit(1);
+                }
+            };
             let parent = exe
                 .parent()
                 .and_then(|p| p.parent())
                 .map(|p| p.to_path_buf());
             match parent {
                 Some(base) => base.join("config"),
-                None => {
-                    let _ = std::io::stderr().write_all(b"config dir unavailable\n");
-                    std::process::exit(1);
-                }
+                None => PathBuf::from("/").join("config"),
             }
         }
         Err(e) => {
@@ -95,7 +105,14 @@ fn main() {
     match moc_host_state::probe::run_probe(&opts, &env, &resolve_host) {
         Ok(output) => {
             let line = to_json_line(&output);
-            let _ = std::io::stdout().write_all(line.as_bytes());
+            let mut stdout = std::io::stdout();
+            if let Err(e) = stdout
+                .write_all(line.as_bytes())
+                .and_then(|_| stdout.flush())
+            {
+                let _ = std::io::stderr().write_all(format!("{e}\n").as_bytes());
+                std::process::exit(1);
+            }
             std::process::exit(0);
         }
         Err(msg) => {

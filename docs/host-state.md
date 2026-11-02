@@ -1,6 +1,6 @@
 # Host state plugin
 
-The host probe (`src/probe/`) ships to fleet hosts as a bundled plugin package.
+The host probe from `crates/moc-host-state` ships to fleet hosts as a Rust `moc-host-state` binary (0.6.0) bundled as a plugin package.
 A Pohunek daemon from 0.38.1 on runs the plugin as a package command
 (`package-commands-v1`) on each host and carries its `HostCapacity` output back
 to the coordinator, where the collector validates it before placement sees it.
@@ -14,16 +14,16 @@ output in parallel through `HostStatePort` and turns each reply into one
 
 ## Package contents
 
-`plugin:build` assembles one directory:
+`plugin:build` assembles one per-target directory:
 
 ```text
-moc-host-state-<version>/
+moc-host-state-<version>-<target>/
   runtime.toml                package manifest consumed by the host daemon
-  bin/moc-host-state          bundled plugin entry (src/probe/plugin-entry.ts)
+  bin/moc-host-state          Rust binary (crates/moc-host-state)
   config/plugin.json          fleet-wide host file path
   config/probe.json           fleet-wide probe policy and macOS tool paths
   config/scenarios/*.json     scenario inputs (tests and diagnosis only)
-  build.json                  { packageId, version, command, gitCommit, sourceDigest, bunVersion, binarySha256 }
+  build.json                  { packageId, version, command, gitCommit, sourceDigest, rustcVersion, cargoTarget, binarySha256 }
 ```
 
 `config/hosts.json` is never copied into the package: a digest-pinned package
@@ -34,20 +34,44 @@ hostname map would put private hostnames into a distributed artifact.
 
 ```sh
 bun run plugin:digest
-bun run plugin:build --out <dir>
+bun run plugin:build --out <dir> --target <triple>
 ```
 
-`--out` is the only argument. `--out` must be absent or an empty
-directory; the script never overwrites.
+`--out` and `--target` are required. `--out` must be absent or an empty
+directory; the script never overwrites. `--target` is `x86_64-unknown-linux-musl`
+or `aarch64-apple-darwin` and must match the build host OS (`linux` or `darwin`);
+otherwise the build exits 2 before running cargo.
 `plugin:build` refuses to build when `plugin:digest` does not match, so a stale
 digest cannot be built.
 
-The source digest pins the source inputs of the bundle: every repo file
-the bundle includes (from the `Bun.build` metafile, excluding `node_modules/`),
-plus `bun.lock`, `config/plugin.json`, `config/probe.json` and every `config/scenarios/*.json` file.
-The toolchain is recorded separately as `bunVersion` in `build.json`.
+The source digest pins the source inputs of the Rust crate: `Cargo.toml`,
+`Cargo.lock`, `crates/moc-host-state/Cargo.toml`, every file under
+`crates/moc-host-state/src/` (recursive), `config/plugin.json`, `config/probe.json`
+and every `config/scenarios/*.json` file. The toolchain is recorded separately as
+`rustcVersion` and `cargoTarget` in `build.json`.
 `plugin:digest` prints the digest and exits 0 only when it equals
-`package.sourceDigest` in `config/host-state.json`.
+`package.sourceDigest` in `config/host-state.json`. It exits 2 with
+`plugin:digest: <file>: include_str!/include_bytes! is not allowed` when a crate
+source file matches `/\binclude_(str|bytes)\b/`, and as a fast early check with
+`plugin:digest: <file>: include!/#[path] is not allowed` when a crate source file
+matches `/\binclude\b/`, `/\bcfg_attr\b/` or `/#\s*!?\s*\[\s*path\b/` (text regexes cannot cover every Rust
+token spelling, so the authoritative guard is the compiler's dep-info in
+`plugin:build`). It also exits 2 with `plugin:digest: <file>: <key> is not allowed`
+when `crates/moc-host-state/Cargo.toml` or `Cargo.toml` parsed with `Bun.TOML.parse`
+has `package.build` not `false`, `lib.path` or `bin[].path` not under `src/` or containing a `..` segment, any
+`dependencies`/`dev-dependencies`/`build-dependencies` (including `target.*` and
+`workspace.dependencies` in the root manifest) entry with a `path` key, or the root
+manifest has `patch` or `replace`, and exits 2 with `plugin:digest: <file>: cannot parse manifest` when `Bun.TOML.parse` fails. It also exits 2 with
+`plugin:digest: <path> is not allowed (it changes the build outside the digest inputs)`
+when any of `crates/moc-host-state/build.rs`, `.cargo/config.toml`, `.cargo/config`,
+`rust-toolchain` or `rust-toolchain.toml` exists.
+`plugin:build` is the authoritative guard: after a successful cargo build it reads
+`<root>/target/<triple>/release/moc-host-state.d`, ignores empty and `#` lines,
+takes the rule whose target is the built binary (first line with an unescaped `:` after
+the target path), splits prerequisites on unescaped whitespace handling `\ `, and exits
+2 with `plugin:build: <file> is not a digest input` for any prerequisite not in the
+digest inputs or under `<cargoHome>/registry/src/`; a missing `.d` file exits 2 with
+`plugin:build: <path>: dep-info not found` and exits 2 with `plugin:build: <path>: no rule for <builtBinary>` when no rule's target matches the built binary.
 
 ## Version rule
 
@@ -79,14 +103,15 @@ The plugin reads this file for a live run (never the hostname, never
 `config/hosts.json`). A missing file or an invalid alias fails the plugin run,
 which the collector reports as `plugin-failed`.
 
-The launch `PATH` the daemon gives the plugin must provide `bun`, because the
-bundle starts with `#!/usr/bin/env bun`.
+The launch `PATH` the daemon gives the plugin no longer needs `bun` for `0.6.0`,
+because the package ships a native binary; it still does for older versions
+whose bundle starts with `#!/usr/bin/env bun`.
 
 ## Idle detection and agent runtime
 
 - On Linux the probe reads the logind `IdleHint` and `IdleSinceHint` of the active local graphical session. A compositor that never sets the hint (such as sway) makes the host report recent input forever, so it is never idle. Run an idle daemon that sets the hint, for example swayidle with `idlehint 60`. `secondsSinceInput` then counts from the moment the hint was set, so the host turns idle `idleMinutes` (`config/probe.json`) plus the `idlehint` timeout after the last input: 16 minutes with `idleMinutes: 15` and `idlehint 60`.
 - A local login without an active graphical session, such as a TTY-only login, reports activity unknown and is never idle. Inside a host's `unattended` window, such a login is judged by its logind idle hint instead, and the reason names the window. Remote (SSH) sessions are ignored: a host with only SSH sessions counts as logged out and can be reported idle.
-- The Pohunek daemon resolves agent programs (`pi`, and `node` for the `pi` shebang) on its own process `PATH`, like the `bun` the plugin needs (see "Host precondition"). That `PATH` is fixed when the Pohunek service is installed (the launchd job on macOS, the systemd user manager environment on Linux). Place the agent where that `PATH` already looks, or reinstall the service after installing the agent: editing `search_path` in the service config takes effect only at a version-changing service upgrade or a reinstall.
+- The Pohunek daemon resolves agent programs (`pi`, and `node` for the `pi` shebang) on its own process `PATH`, like the `bun` that versions before 0.6.0 need (see "Host precondition"). That `PATH` is fixed when the Pohunek service is installed (the launchd job on macOS, the systemd user manager environment on Linux). Place the agent where that `PATH` already looks, or reinstall the service after installing the agent: editing `search_path` in the service config takes effect only at a version-changing service upgrade or a reinstall.
 - The daemon's version probe runs the agent with a minimal environment, so an agent wrapper script must use absolute paths instead of `$HOME`.
 - Check a host with `pohunek host inspect <host> --json`: the agent's runtime entry must show `available: true`, `supported: true` and a version.
 
@@ -109,13 +134,34 @@ closes the connector; later `close()` calls return at once, and a later
 ## Artifacts
 
 Built packages are never committed (`dist/` is gitignored) and never published
-from this repository. The owner builds once per version and installs that one
-directory on every host with `pohunek plugin link`. Vouch first by digest: run
-`pohunek plugin link <dir>` without `--yes` on the first host, record the
-printed digest, and repeat the dry run on every other host to compare before
-running `--yes`. Copy the directory with modes preserved: `bin/moc-host-state`
-must keep `0755`, or the link fails. A rebuild
-is a new artifact with a new digest.
+from this repository. The owner builds each per-target package from the package
+workflow (`.github/workflows/host-state-package.yml`) via `workflow_dispatch`; only
+a `workflow_dispatch` run uploads the tarballs (`actions/upload-artifact@v4` with
+`if: github.event_name == 'workflow_dispatch'`). A pull request that touches the
+workflow or `scripts/host-state-build.ts` only checks the build (no upload). Download
+artifacts from a `workflow_dispatch` run with `gh run download`, then extract on the
+host with `tar -xzf` (keeps `0755`).
+
+Install on each host locally (plugin commands are local only; `--host` is rejected):
+
+```sh
+pohunek plugin link <dir>
+# compare the printed digest with other hosts of the same target
+pohunek plugin link <dir> --yes
+pohunek plugin enable moc.host-state --version 0.6.0
+pohunek plugin select moc.host-state --version 0.6.0
+```
+
+Rollback is `pohunek plugin select moc.host-state --version <previous>` (for example `0.5.0`);
+hosts keep their installed TS versions as the rollback until a later retirement issue.
+
+Rebuilding the TS package: check out the first parent of
+
+```sh
+git log --reverse --format=%H -G'"version": "0.6.0"' -- config/host-state.json | head -1
+```
+
+and run `bun run plugin:build --out <dir>` there.
 
 ## Causes
 
@@ -202,4 +248,4 @@ excluded`, where `N` counts all candidates. Otherwise the `place()` reason
 
 ## Rust probe
 
-The Rust port lives in `crates/moc-host-state/` and is checked with `bun run gates:rs`. Parity rules with the TypeScript probe are documented in `crates/moc-host-state/src/lib.rs`. Packaging still uses the TypeScript bundle until the version bump.
+The Rust port lives in `crates/moc-host-state/` and is checked with `bun run gates:rs`. Parity rules with the TypeScript probe are documented in `crates/moc-host-state/src/lib.rs`. Packaging uses the Rust binary as `moc-host-state-0.6.0-<target>/` with `bin/moc-host-state` and `build.json` fields `rustcVersion`, `cargoTarget` and `binarySha256`.

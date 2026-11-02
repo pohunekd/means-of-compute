@@ -14,6 +14,9 @@ jobs:
   package:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         include:
@@ -34,11 +37,11 @@ jobs:
       - name: check architecture (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          file dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "x86-64"
-          file dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "static"
+          file -b dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "x86-64"
+          file -b dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "static"
       - name: check architecture (macOS)
         if: matrix.os == 'macos-latest'
-        run: lipo -archs dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state | grep -q "arm64"
+        run: test "$(lipo -archs dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state)" = arm64
       - run: dist/moc-host-state-0.6.0-${{ matrix.target }}/bin/moc-host-state --scenario desktop-mains | bun run scripts/contracts-check.ts host-capacity -
       - name: check mode and binarySha256
         run: |
@@ -55,11 +58,14 @@ jobs:
           "
       - name: check reproducible binarySha256
         run: |
+          rm -rf target
           bun run plugin:build --out dist2 --target ${{ matrix.target }}
           node -e "
             const fs=require('fs');
             const a=JSON.parse(fs.readFileSync('dist/moc-host-state-0.6.0-${{ matrix.target }}/build.json','utf8')).binarySha256;
             const b=JSON.parse(fs.readFileSync('dist2/moc-host-state-0.6.0-${{ matrix.target }}/build.json','utf8')).binarySha256;
+            console.log('sha dist:'+a);
+            console.log('sha dist2:'+b);
             if(a!==b){ console.error('binarySha256 changed '+a+' vs '+b); process.exit(1); }
           "
       - run: tar -C dist -czf moc-host-state-0.6.0-${{ matrix.target }}.tar.gz moc-host-state-0.6.0-${{ matrix.target }}

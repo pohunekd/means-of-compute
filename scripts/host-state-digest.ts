@@ -1,9 +1,18 @@
 // Computes the host-state plugin source digest and compares it with the
 // committed config. Inputs: Cargo.toml, Cargo.lock, crates/moc-host-state/Cargo.toml,
 // every file under crates/moc-host-state/src/ (recursive), config/plugin.json,
-// config/probe.json, config/scenarios/*.json. Usage: bun run plugin:digest [--config <path>]
-// (from the repo root; the default is config/host-state.json).
+// config/probe.json, config/scenarios/*.json. Rejects crate source files that
+// contain include_str!/include_bytes! (matched as /\binclude_(str|bytes)\b/)
+// with "include_str!/include_bytes! is not allowed", and rejects crate source
+// files that contain include! or #[path] (matched as /\binclude\s*!/,
+// /\binclude\s+as\b/ or /#\s*!?\s*\[\s*path\s*=/ ) with "include!/#[path] is not
+// allowed". Also rejects the existence of crates/moc-host-state/build.rs,
+// .cargo/config.toml, .cargo/config, rust-toolchain and rust-toolchain.toml with
+// "<path> is not allowed (it changes the build outside the digest inputs)".
+// Usage: bun run plugin:digest [--config <path>] (from the repo root; the
+// default is config/host-state.json).
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { loadHostStateConfig } from "../src/hoststate/config.js";
@@ -38,6 +47,22 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+const forbiddenPaths = [
+  join("crates", "moc-host-state", "build.rs"),
+  join(".cargo", "config.toml"),
+  join(".cargo", "config"),
+  "rust-toolchain",
+  "rust-toolchain.toml",
+];
+for (const rel of forbiddenPaths) {
+  if (existsSync(join(root, rel))) {
+    console.error(
+      `plugin:digest: ${rel} is not allowed (it changes the build outside the digest inputs)`,
+    );
+    process.exit(2);
+  }
+}
+
 const inputs: string[] = [];
 inputs.push("Cargo.toml");
 inputs.push("Cargo.lock");
@@ -58,10 +83,19 @@ for (const f of readdirSync(scenarioDir)) {
 const sorted = [...new Set(inputs)].sort();
 
 for (const rel of sorted) {
+  if (!rel.startsWith(srcBase)) continue;
   const bytes = readFileSync(join(root, rel));
   const text = bytes.toString("utf-8");
-  if (text.includes("include_str!") || text.includes("include_bytes!")) {
+  if (/\binclude_(str|bytes)\b/.test(text)) {
     console.error(`plugin:digest: ${rel}: include_str!/include_bytes! is not allowed`);
+    process.exit(2);
+  }
+  if (
+    /\binclude\s*!/.test(text) ||
+    /\binclude\s+as\b/.test(text) ||
+    /#\s*!?\s*\[\s*path\s*=/.test(text)
+  ) {
+    console.error(`plugin:digest: ${rel}: include!/#[path] is not allowed`);
     process.exit(2);
   }
 }

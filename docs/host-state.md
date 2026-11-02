@@ -1,6 +1,6 @@
 # Host state plugin
 
-The host probe (`src/probe/`) ships to fleet hosts as a bundled plugin package.
+The host probe from `crates/moc-host-state` ships to fleet hosts as a Rust `moc-host-state` binary (0.6.0) bundled as a plugin package.
 A Pohunek daemon from 0.38.1 on runs the plugin as a package command
 (`package-commands-v1`) on each host and carries its `HostCapacity` output back
 to the coordinator, where the collector validates it before placement sees it.
@@ -52,7 +52,13 @@ and every `config/scenarios/*.json` file. The toolchain is recorded separately a
 `plugin:digest` prints the digest and exits 0 only when it equals
 `package.sourceDigest` in `config/host-state.json`. It exits 2 with
 `plugin:digest: <file>: include_str!/include_bytes! is not allowed` when a crate
-source file uses either macro.
+source file matches `/\binclude_(str|bytes)\b/`, and with
+`plugin:digest: <file>: include!/#[path] is not allowed` when a crate source file
+matches `/\binclude\s*!/`, `/\binclude\s+as\b/` or `/#\s*!?\s*\[\s*path\s*=/`.
+It also exits 2 with `plugin:digest: <path> is not allowed (it changes the build
+outside the digest inputs)` when any of `crates/moc-host-state/build.rs`,
+`.cargo/config.toml`, `.cargo/config`, `rust-toolchain` or `rust-toolchain.toml`
+exists.
 
 ## Version rule
 
@@ -92,7 +98,7 @@ whose bundle starts with `#!/usr/bin/env bun`.
 
 - On Linux the probe reads the logind `IdleHint` and `IdleSinceHint` of the active local graphical session. A compositor that never sets the hint (such as sway) makes the host report recent input forever, so it is never idle. Run an idle daemon that sets the hint, for example swayidle with `idlehint 60`. `secondsSinceInput` then counts from the moment the hint was set, so the host turns idle `idleMinutes` (`config/probe.json`) plus the `idlehint` timeout after the last input: 16 minutes with `idleMinutes: 15` and `idlehint 60`.
 - A local login without an active graphical session, such as a TTY-only login, reports activity unknown and is never idle. Inside a host's `unattended` window, such a login is judged by its logind idle hint instead, and the reason names the window. Remote (SSH) sessions are ignored: a host with only SSH sessions counts as logged out and can be reported idle.
-- The Pohunek daemon resolves agent programs (`pi`, and `node` for the `pi` shebang) on its own process `PATH`, like the `bun` the plugin needs (see "Host precondition"). That `PATH` is fixed when the Pohunek service is installed (the launchd job on macOS, the systemd user manager environment on Linux). Place the agent where that `PATH` already looks, or reinstall the service after installing the agent: editing `search_path` in the service config takes effect only at a version-changing service upgrade or a reinstall.
+- The Pohunek daemon resolves agent programs (`pi`, and `node` for the `pi` shebang) on its own process `PATH`, like the `bun` that versions before 0.6.0 need (see "Host precondition"). That `PATH` is fixed when the Pohunek service is installed (the launchd job on macOS, the systemd user manager environment on Linux). Place the agent where that `PATH` already looks, or reinstall the service after installing the agent: editing `search_path` in the service config takes effect only at a version-changing service upgrade or a reinstall.
 - The daemon's version probe runs the agent with a minimal environment, so an agent wrapper script must use absolute paths instead of `$HOME`.
 - Check a host with `pohunek host inspect <host> --json`: the agent's runtime entry must show `available: true`, `supported: true` and a version.
 
@@ -116,9 +122,12 @@ closes the connector; later `close()` calls return at once, and a later
 
 Built packages are never committed (`dist/` is gitignored) and never published
 from this repository. The owner builds each per-target package from the package
-workflow (`.github/workflows/host-state-package.yml`): trigger `workflow_dispatch`
-or open a pull request that touches the workflow or `scripts/host-state-build.ts`,
-then `gh run download` the artifacts. Extract on the host with `tar -xzf` (keeps `0755`).
+workflow (`.github/workflows/host-state-package.yml`) via `workflow_dispatch`; only
+a `workflow_dispatch` run uploads the tarballs (`actions/upload-artifact@v4` with
+`if: github.event_name == 'workflow_dispatch'`). A pull request that touches the
+workflow or `scripts/host-state-build.ts` only checks the build (no upload). Download
+artifacts from a `workflow_dispatch` run with `gh run download`, then extract on the
+host with `tar -xzf` (keeps `0755`).
 
 Install on each host locally (plugin commands are local only; `--host` is rejected):
 

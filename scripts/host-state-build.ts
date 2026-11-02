@@ -113,7 +113,7 @@ if (gitCommitRc !== 0) {
 }
 const gitCommit = gitCommitOut.trim();
 
-const rustcProc = Bun.spawn(["rustc", "--version"], {
+const rustcProc = Bun.spawn([process.env.RUSTC ?? "rustc", "--version"], {
   cwd: root,
   stdout: "pipe",
   stderr: "pipe",
@@ -129,19 +129,40 @@ if (rustcRc !== 0) {
 }
 const rustcVersion = rustcOut.trim();
 
-const cargoHome =
-  process.env.CARGO_HOME ??
-  (process.env.HOME !== undefined ? join(process.env.HOME, ".cargo") : join(root, ".cargo"));
+let cargoHome: string;
+if (process.env.CARGO_HOME !== undefined) {
+  cargoHome = process.env.CARGO_HOME;
+} else if (process.env.HOME !== undefined) {
+  cargoHome = join(process.env.HOME, ".cargo");
+} else {
+  usageError("CARGO_HOME or HOME must be set");
+}
 
-const rflags = `--remap-path-prefix=${root}=. --remap-path-prefix=${cargoHome}=cargo`;
+const remapFlags = [`--remap-path-prefix=${root}=.`, `--remap-path-prefix=${cargoHome}=cargo`];
+const cargoEncodedRustflags = remapFlags.join("\x1f");
+
+const restEnv: Record<string, string | undefined> = { ...process.env };
+delete restEnv.RUSTFLAGS;
+delete restEnv.CARGO_ENCODED_RUSTFLAGS;
 
 const build = Bun.spawn(
-  ["cargo", "build", "--release", "--locked", "--target", target, "-p", "moc-host-state"],
+  [
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+    "--target",
+    target,
+    "--target-dir",
+    join(root, "target"),
+    "-p",
+    "moc-host-state",
+  ],
   {
     cwd: root,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, RUSTFLAGS: rflags },
+    env: { ...restEnv, CARGO_ENCODED_RUSTFLAGS: cargoEncodedRustflags },
   },
 );
 const [buildOut, buildErr, buildRc] = await Promise.all([

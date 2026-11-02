@@ -1,12 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-/// Query local models from base_url, mirroring src/probe/probe.ts queryLocalModels.
-///
-/// Empty base returns (false, []) without any socket. A single trailing `/` is stripped,
-/// then GET `<base>/v1/models` is issued with a global timeout of `timeout_ms`.
-/// Any error, non-2xx, unreadable body, non-JSON, or missing `data` array gives (false, []).
-/// IDs are deduplicated in order; only non-empty string `id` values are kept.
+/// Query local models from the given base URL.
 pub fn query_local_models(base_url: &str, timeout_ms: f64) -> (bool, Vec<String>) {
     if base_url.is_empty() {
         return (false, Vec::new());
@@ -14,44 +9,38 @@ pub fn query_local_models(base_url: &str, timeout_ms: f64) -> (bool, Vec<String>
     let base_trimmed = base_url.strip_suffix('/').unwrap_or(base_url);
     let url = format!("{base_trimmed}/v1/models");
 
-    // Build timeout duration from timeout_ms. The TS value is a finite number
-    // validated by config; convert via millis, clamped and handling non-finite.
-    let timeout = if !timeout_ms.is_finite() || timeout_ms <= 0.0 {
-        Duration::from_millis(0)
+    let ms = if (1.0..=2147483647.0).contains(&timeout_ms) {
+        timeout_ms
     } else {
-        // Use from_millis with truncation; for fractional values use from_secs_f64
-        // but to keep simple, use duration from millis with rounding.
-        let millis = timeout_ms.round().max(0.0) as u64;
-        Duration::from_millis(millis)
+        1.0
     };
+    let timeout = Duration::from_secs_f64(ms / 1000.0);
 
-    // Create ureq agent with global timeout. No TLS feature is enabled, so https
-    // URLs will error and be mapped to (false, []).
-    let agent = match build_agent(timeout) {
-        Some(a) => a,
-        None => return (false, Vec::new()),
-    };
+    let agent = build_agent(timeout);
 
     let resp = match agent.get(&url).call() {
         Ok(r) => r,
         Err(_) => return (false, Vec::new()),
     };
 
-    // Check non-2xx: ureq's call() returns Ok even for 4xx? Need to check status.
-    // In ureq 3, call() returns error for non-2xx if http_status_as_error is true (default).
-    // But to be safe, check status code ourselves.
     let status = resp.status();
     if !(200..300).contains(&status.as_u16()) {
         return (false, Vec::new());
     }
 
-    // Read body; unreadable gives (false, []).
-    let body = match resp.into_body().read_to_string() {
-        Ok(s) => s,
+    let bytes = match resp
+        .into_body()
+        .with_config()
+        .limit(10 * 1024 * 1024)
+        .read_to_vec()
+    {
+        Ok(b) => b,
         Err(_) => return (false, Vec::new()),
     };
+    let text = String::from_utf8_lossy(&bytes);
+    let body = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
 
-    let data: serde_json::Value = match serde_json::from_str(&body) {
+    let data: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(_) => return (false, Vec::new()),
     };
@@ -89,12 +78,11 @@ pub fn query_local_models(base_url: &str, timeout_ms: f64) -> (bool, Vec<String>
     (true, models)
 }
 
-fn build_agent(timeout: Duration) -> Option<ureq::Agent> {
-    // `timeout_global` expects Option<Duration>. When timeout is 0, we still set
-    // Some(0) which will cause immediate timeout; alternatively we could set None
-    // but spec says global timeout is timeout_ms.
+fn build_agent(timeout: Duration) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
+        .proxy(None)
+        .max_redirects(126)
         .build();
-    Some(config.new_agent())
+    config.new_agent()
 }

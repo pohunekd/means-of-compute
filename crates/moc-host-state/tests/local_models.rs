@@ -5,12 +5,11 @@ use std::thread;
 
 #[test]
 fn local_models_query() {
-    // Start a TcpListener on 127.0.0.1:0 that answers 200 then 404.
+    // Start a TcpListener on 127.0.0.1:0 that answers 200 then 404 then BOM 200.
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind should succeed");
     let addr = listener.local_addr().unwrap();
     let handle = thread::spawn(move || {
-        // First request: 200 with payload containing duplicates and invalid entries.
-        for i in 0..2 {
+        for i in 0..3 {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = [0u8; 4096];
                 let _ = stream.read(&mut buf);
@@ -24,10 +23,24 @@ fn local_models_query() {
                     );
                     let _ = stream.write_all(resp.as_bytes());
                     let _ = stream.flush();
-                } else {
+                } else if i == 1 {
                     let resp =
                         "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
                     let _ = stream.write_all(resp.as_bytes());
+                    let _ = stream.flush();
+                } else {
+                    let inner_body =
+                        r#"{"data":[{"id":"m1"},{"id":"m1"},{"id":""},{"id":2},"x",{"id":"m2"}]}"#;
+                    let bom: &[u8] = &[0xEF, 0xBB, 0xBF];
+                    let mut body_bytes = Vec::new();
+                    body_bytes.extend_from_slice(bom);
+                    body_bytes.extend_from_slice(inner_body.as_bytes());
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+                        body_bytes.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes());
+                    let _ = stream.write_all(&body_bytes);
                     let _ = stream.flush();
                 }
             }
@@ -52,6 +65,11 @@ fn local_models_query() {
     let (ok3, models3) = query_local_models("", 2000.0);
     assert!(!ok3);
     assert!(models3.is_empty());
+
+    // Third request with BOM prefix should still parse
+    let (ok4, models4) = query_local_models(&base_with_slash, 2000.0);
+    assert!(ok4, "expected reachable true for BOM body");
+    assert_eq!(models4, vec!["m1".to_string(), "m2".to_string()]);
 
     let _ = handle.join();
 }

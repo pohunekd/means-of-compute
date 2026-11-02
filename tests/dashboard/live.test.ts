@@ -641,6 +641,75 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       "/?view=overview&audit=w1-demo%40aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
     expect(unknownAudit.status).toBe(404);
+    // precedence host beats task still holds with both present (M13)
+    const both2 = await get("/?view=overview&t=60&host=desktop&task=w1-real");
+    expect(both2.status).toBe(200);
+    expect(await both2.text()).toContain('id="host-panel"');
+    // pattern checks survive broken sources: malformed audit still 404 even with broken verdict store (M5)
+    {
+      const vdir = join(fixture.dir, "verdicts", "w1-real");
+      const brokenFile = join(vdir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
+      const origBroken = readFileSync(brokenFile, "utf8");
+      writeFileSync(brokenFile, "{ invalid }");
+      const malformedWithBroken = await get("/?view=overview&audit=badaudit");
+      expect(malformedWithBroken.status).toBe(404);
+      writeFileSync(brokenFile, origBroken);
+    }
+    // malformed call still 404 with broken meter (M4)
+    {
+      const mPath = join(fixture.dir, "meter-usage.jsonl");
+      const mOrig = readFileSync(mPath, "utf8");
+      writeFileSync(mPath, "{ invalid }");
+      const malformedCallBroken = await get("/?view=overview&call=badcall");
+      expect(malformedCallBroken.status).toBe(404);
+      writeFileSync(mPath, mOrig);
+    }
+    // verdict link points to audit, not task (M15)
+    {
+      const taskLiveForLink = buildLive(
+        await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
+        {
+          view: "overview",
+          t: 60,
+          paused: false,
+          host: null,
+          task: "w1-real",
+        },
+      );
+      const taskLinkPage = renderLive(taskLiveForLink);
+      expect(taskLinkPage).toContain("audit=w1-real%40");
+      expect(taskLinkPage).not.toContain("task=w1-real%40");
+    }
+    // refresh keeps task (M14)
+    {
+      const tLive = buildLive(
+        await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
+        {
+          view: "overview",
+          t: 60,
+          paused: false,
+          host: null,
+          task: "w1-real",
+        },
+      );
+      const tPage = renderLive(tLive);
+      expect(tPage).toContain('content="5;url=/?view=overview&amp;t=65&amp;task=w1-real"');
+    }
+    // verdict missing entry still degrades (M11)
+    {
+      const missingLive = buildLive(
+        await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
+        {
+          view: "overview",
+          t: 60,
+          paused: false,
+          host: null,
+          task: "w1-real",
+        },
+      );
+      const missingPage = renderLive(missingLive);
+      expect(missingPage).toContain("Verdicts:");
+    }
     // verdict file broken: audit block shows error while other blocks keep data
     const vPath = join(
       fixture.dir,

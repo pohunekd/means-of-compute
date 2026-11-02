@@ -52,13 +52,6 @@ pub fn macos_gpu(system_profiler: &str) -> Result<Gpu, String> {
             Value::Array(arr) => arr,
             _ => return Err(format!("{} is not an array", "SPDisplaysDataType")),
         };
-        if cards.is_empty() {
-            return Ok(Gpu {
-                present: false,
-                name: None,
-                freeMb: None,
-            });
-        }
         let Some(first) = cards.first() else {
             return Ok(Gpu {
                 present: false,

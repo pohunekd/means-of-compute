@@ -24,7 +24,7 @@ pub fn query_local_models(base_url: &str, timeout_ms: f64) -> (bool, Vec<String>
     };
 
     let status = resp.status();
-    if !(200..300).contains(&status.as_u16()) {
+    if !(200..300).contains(&status.as_u16()) || status.as_u16() == 205 {
         return (false, Vec::new());
     }
 

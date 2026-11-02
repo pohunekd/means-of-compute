@@ -188,6 +188,13 @@ function buildHref(
   return qs.length > 0 ? `/?${qs}` : "/";
 }
 
+function shortenAlias(alias: string): string {
+  if (alias.length <= 9) {
+    return alias;
+  }
+  return `${alias.slice(0, 3)}...${alias.slice(-3)}`;
+}
+
 function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
@@ -196,6 +203,7 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
       ? String(tile.running)
       : `${String(tile.running)}/${String(tile.maxAgents)}`;
   const battery = tile.batteryPercent === null ? "" : ` bat ${String(tile.batteryPercent)}%`;
+  const displayAlias = shortenAlias(tile.alias);
   const title =
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
@@ -209,7 +217,7 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
     class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}"
     title="${title}"
   >
-    <span class="meta"><span class="alias">${tile.alias}</span>${chip}</span>
+    <span class="meta"><span class="alias">${displayAlias}</span>${chip}</span>
     <span class="meta"
       ><span class="load">${load}${flagMark}</span><span class="state">${stateWord}</span></span
     >
@@ -355,7 +363,7 @@ function renderReplay(model: LiveModel): SafeHtml {
 function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { host: null });
   if (panel.kind === "sim") {
-    const status = panel.eligible ? "eligible" : `excluded: ${panel.excludeReason ?? ""}`;
+    const status = panel.eligible ? "eligible" : (panel.excludeReason ?? "excluded");
     const battery = panel.batteryPercent === null ? "" : `battery ${String(panel.batteryPercent)}%`;
     const task = panel.task === null ? "" : `${panel.task.kind}: ${panel.task.title}`;
     return html`<div class="host-panel" id="host-panel">
@@ -462,6 +470,36 @@ export function renderLive(model: LiveModel): string {
     model.tickerNote === null ? constantHtml("") : html`<p class="note">${model.tickerNote}</p>`;
   const hostPanel =
     model.hostPanel === null ? constantHtml("") : renderHostPanel(model.hostPanel, model);
+  const fleetContent = html`<h2>Fleet</h2>
+    ${realFleet} ${simFleet}
+    <p class="live-legend">
+      <span class="dot tile-eligible"></span>eligible <span class="dot tile-running"></span>running
+      <span class="dot tile-blocked"></span>blocked (reason in the title)
+      <span class="dot tile-busy"></span>busy <span class="dot tile-offline"></span>offline · dashed
+      outline and the SIMULATED group tag mark simulated hosts · amber edge with
+      <span class="flag">!</span>: running, now excluded for a reason other than its agent limit
+      (reason in the title)
+    </p>
+    <p class="cite">
+      source: real recorded probes and dispatcher registry; simulated fleet trace (sim-trace-v1)
+    </p>`;
+  const sideContent =
+    model.hostPanel === null
+      ? html`<section id="live-activity">
+            <h2>Model activity (real)</h2>
+            ${activity}
+            <p class="cite">source: real meter call-end records from the meter usage log</p>
+          </section>
+          <section id="live-ticker" class="live-events">
+            <h2>Events</h2>
+            ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
+            <p class="cite">source: real loop results; simulated host and placement trace lines</p>
+          </section>`
+      : html`<nav class="breadcrumb">
+            <a href="${buildHref(model, { host: null })}">Fleet</a> / ${model.hostPanel.alias}
+            <a href="${buildHref(model, { host: null })}">back to live</a>
+          </nav>
+          ${hostPanel}`;
   return (
     "<!doctype html>\n" +
     html`<html lang="en">
@@ -489,38 +527,8 @@ export function renderLive(model: LiveModel): string {
         </header>
         <main>
           <div class="live-layout">
-            <section id="live-fleet">
-              <h2>Fleet</h2>
-              ${realFleet} ${simFleet}
-              <p class="live-legend">
-                <span class="dot tile-eligible"></span>eligible
-                <span class="dot tile-running"></span>running
-                <span class="dot tile-blocked"></span>blocked (reason in the tile title)
-                <span class="dot tile-busy"></span>busy
-                <span class="dot tile-offline"></span>offline · dashed outline and the SIMULATED
-                group tag mark simulated hosts · amber edge with <span class="flag">!</span>:
-                running, now excluded for a reason other than its agent limit (reason in the title)
-              </p>
-              <p class="cite">
-                source: real recorded probes and dispatcher registry; simulated fleet trace
-                (sim-trace-v1)
-              </p>
-              ${hostPanel}
-            </section>
-            <div class="live-side">
-              <section id="live-activity">
-                <h2>Model activity (real)</h2>
-                ${activity}
-                <p class="cite">source: real meter call-end records from the meter usage log</p>
-              </section>
-              <section id="live-ticker" class="live-events">
-                <h2>Events</h2>
-                ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
-                <p class="cite">
-                  source: real loop results; simulated host and placement trace lines
-                </p>
-              </section>
-            </div>
+            <section id="live-fleet">${fleetContent}</section>
+            <div class="live-side">${sideContent}</div>
           </div>
         </main>
       </body>

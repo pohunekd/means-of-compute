@@ -629,7 +629,7 @@ function realTiles(
     eligible: probe.kind === "reported",
     flagged: false,
     running: registry.ok ? openSessionCount(registry.value, probe.hostAlias) : 0,
-    maxAgents: null,
+    maxAgents: 2,
     batteryPercent: null,
     detail:
       probe.kind === "reported"

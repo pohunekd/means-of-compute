@@ -81,7 +81,7 @@ export interface Timeline {
   readonly generators: readonly GeneratorDef[];
   readonly waves: readonly WaveDef[];
   readonly events: readonly EventDef[];
-  readonly work: WorkDef;
+  readonly work: readonly WorkDef[];
 }
 
 const TOP_KEYS = new Set([
@@ -272,7 +272,7 @@ function validateGenerators(raw: unknown, kinds: Record<string, KindDef>): Gener
     const count = rec["count"];
     const aliasPrefix = rec["aliasPrefix"];
     const site = rec["site"];
-    if (typeof kind !== "string" || !(kind in kinds)) {
+    if (typeof kind !== "string" || !Object.hasOwn(kinds, kind)) {
       throw new Error(`Timeline generators[${String(i)}].kind: unknown kind "${String(kind)}"`);
     }
     if (!isInteger(count) || (count as number) < 1) {
@@ -281,8 +281,6 @@ function validateGenerators(raw: unknown, kinds: Record<string, KindDef>): Gener
     if (typeof aliasPrefix !== "string" || aliasPrefix.length === 0) {
       throw new Error(`Timeline generators[${String(i)}].aliasPrefix: must be non-empty string`);
     }
-    // Validate that prefix + 3-digit suffix forms a valid alias for each host in this generator,
-    // with continuation per prefix to avoid duplicates.
     const startIndex = aliasPrefixCounts.get(aliasPrefix) ?? 1;
     const countNum = count as number;
     for (let n = 0; n < countNum; n += 1) {
@@ -315,11 +313,18 @@ function validateGenerators(raw: unknown, kinds: Record<string, KindDef>): Gener
 function validateWaves(
   raw: unknown,
   kinds: Record<string, KindDef>,
+  generators: readonly GeneratorDef[],
   durationMinutes: number,
 ): WaveDef[] {
   if (!Array.isArray(raw)) {
     throw new Error(`Timeline waves: must be an array`);
   }
+  const kindCounts = new Map<string, number>();
+  for (const g of generators) {
+    kindCounts.set(g.kind, (kindCounts.get(g.kind) ?? 0) + g.count);
+  }
+  const pointerByKind = new Map<string, number>();
+  const departByKind = new Map<string, number>();
   const out: WaveDef[] = [];
   for (let i = 0; i < raw.length; i += 1) {
     const entry = raw[i];
@@ -340,12 +345,17 @@ function validateWaves(
     ) {
       throw new Error(`Timeline waves[${String(i)}].atMinute: must be integer 0..durationMinutes`);
     }
-    if (typeof kind !== "string" || !(kind in kinds)) {
+    if (typeof kind !== "string" || !Object.hasOwn(kinds, kind)) {
       throw new Error(`Timeline waves[${String(i)}].kind: unknown kind`);
     }
     if (typeof type !== "string" || !(EVENT_TYPES as readonly string[]).includes(type)) {
       throw new Error(
         `Timeline waves[${String(i)}].type: must be one of ${EVENT_TYPES.join(", ")}`,
+      );
+    }
+    if ((type as string) === "battery") {
+      throw new Error(
+        `Timeline waves[${String(i)}].type: battery needs a per-host batteryPercent; use an event`,
       );
     }
     if (
@@ -359,9 +369,42 @@ function validateWaves(
     if (!isInteger(staggerMinutes) || (staggerMinutes as number) < 0) {
       throw new Error(`Timeline waves[${String(i)}].staggerMinutes: must be integer >=0`);
     }
+    const kindStr = kind as string;
+    const count = Math.ceil((fraction as number) * (kindCounts.get(kindStr) ?? 0));
+    const lastMinute = (atMinute as number) + Math.max(0, count - 1) * (staggerMinutes as number);
+    if (lastMinute > durationMinutes) {
+      throw new Error(
+        `Timeline waves[${String(i)}].staggerMinutes: wave runs past durationMinutes`,
+      );
+    }
+    if (type === "rejoin") {
+      const departSize = departByKind.get(kindStr);
+      if (departSize !== undefined && departSize !== count) {
+        // rejoin should match depart size; but we enforce pointer not wrap instead
+      }
+    } else if (type === "depart") {
+      const pointer = pointerByKind.get(kindStr) ?? 0;
+      if (pointer + count > (kindCounts.get(kindStr) ?? 0)) {
+        throw new Error(
+          `Timeline waves[${String(i)}].fraction: wave would wrap and re-select hosts`,
+        );
+      }
+      pointerByKind.set(kindStr, pointer + count);
+      departByKind.set(kindStr, count);
+    } else {
+      const pointer = pointerByKind.get(kindStr) ?? 0;
+      if (type !== "rejoin") {
+        if (pointer + count > (kindCounts.get(kindStr) ?? 0)) {
+          throw new Error(
+            `Timeline waves[${String(i)}].fraction: wave would wrap and re-select hosts`,
+          );
+        }
+        pointerByKind.set(kindStr, pointer + count);
+      }
+    }
     out.push({
       atMinute: atMinute as number,
-      kind: kind as string,
+      kind: kindStr,
       type: type as EventType,
       fraction: fraction as number,
       staggerMinutes: staggerMinutes as number,
@@ -414,13 +457,14 @@ function validateSetForType(
     }
     return rec;
   }
-  // For other types, set is forbidden; caller ensures no set.
   return undefined;
 }
 
 function validateEvents(
   raw: unknown,
   allAliases: Set<string>,
+  aliasToKind: Map<string, string>,
+  kinds: Record<string, KindDef>,
   durationMinutes: number,
 ): EventDef[] {
   if (!Array.isArray(raw)) {
@@ -448,8 +492,8 @@ function validateEvents(
     if (typeof alias !== "string" || !ALIAS_PATTERN.test(alias)) {
       throw new Error(`Timeline events[${String(i)}].alias: invalid alias`);
     }
-    if (!allAliases.has(alias)) {
-      throw new Error(`Timeline events[${String(i)}].alias: unknown alias "${alias}"`);
+    if (!allAliases.has(alias as string)) {
+      throw new Error(`Timeline events[${String(i)}].alias: unknown alias "${alias as string}"`);
     }
     if (typeof type !== "string" || !(EVENT_TYPES as readonly string[]).includes(type)) {
       throw new Error(
@@ -457,6 +501,14 @@ function validateEvents(
       );
     }
     const eventType = type as EventType;
+    const kindName = aliasToKind.get(alias as string);
+    const kindDef = kindName !== undefined ? kinds[kindName] : undefined;
+    if (
+      (eventType === "battery" || eventType === "unplug" || eventType === "plug-in") &&
+      kindDef?.battery === "none"
+    ) {
+      throw new Error(`Timeline events[${String(i)}].type: ${eventType} on battery:none kind`);
+    }
     if (setValue !== undefined) {
       if (eventType !== "rejoin" && eventType !== "battery") {
         throw new Error(
@@ -485,54 +537,80 @@ function validateEvents(
   return out;
 }
 
-function validateWork(raw: unknown): WorkDef {
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error(`Timeline work: must be an object`);
+function validateWork(raw: unknown, durationMinutes: number): readonly WorkDef[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`Timeline work: must be an array of one or more blocks`);
   }
-  const rec = raw as Record<string, unknown>;
-  assertExactKeys(rec, WORK_KEYS, "work");
-  const firstAtMinute = rec["firstAtMinute"];
-  const everyMinutes = rec["everyMinutes"];
-  const count = rec["count"];
-  const durationMinutes = rec["durationMinutes"];
-  const idPrefix = rec["idPrefix"];
-  if (!isInteger(firstAtMinute) || (firstAtMinute as number) < 0) {
-    throw new Error(`Timeline work.firstAtMinute: must be integer >=0`);
+  if (raw.length === 0) {
+    throw new Error(`Timeline work: must have at least one block`);
   }
-  if (!isInteger(everyMinutes) || (everyMinutes as number) < 1) {
-    throw new Error(`Timeline work.everyMinutes: must be integer >=1`);
+  const seenPrefix = new Set<string>();
+  const out: WorkDef[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const entry = raw[i];
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`Timeline work[${String(i)}]: must be an object`);
+    }
+    const rec = entry as Record<string, unknown>;
+    assertExactKeys(rec, WORK_KEYS, `work[${String(i)}]`);
+    const firstAtMinute = rec["firstAtMinute"];
+    const everyMinutes = rec["everyMinutes"];
+    const count = rec["count"];
+    const duration = rec["durationMinutes"];
+    const idPrefix = rec["idPrefix"];
+    if (!isInteger(firstAtMinute) || (firstAtMinute as number) < 0) {
+      throw new Error(`Timeline work[${String(i)}].firstAtMinute: must be integer >=0`);
+    }
+    if (!isInteger(everyMinutes) || (everyMinutes as number) < 1) {
+      throw new Error(`Timeline work[${String(i)}].everyMinutes: must be integer >=1`);
+    }
+    if (!isInteger(count) || (count as number) < 1) {
+      throw new Error(`Timeline work[${String(i)}].count: must be integer >=1`);
+    }
+    if (!isInteger(duration) || (duration as number) < 1) {
+      throw new Error(`Timeline work[${String(i)}].durationMinutes: must be integer >=1`);
+    }
+    if (typeof idPrefix !== "string" || idPrefix.length === 0) {
+      throw new Error(`Timeline work[${String(i)}].idPrefix: must be non-empty string`);
+    }
+    const prefixStr = idPrefix as string;
+    if (seenPrefix.has(prefixStr)) {
+      throw new Error(`Timeline work: duplicate idPrefix "${prefixStr}"`);
+    }
+    seenPrefix.add(prefixStr);
+    const lastAt = (firstAtMinute as number) + ((count as number) - 1) * (everyMinutes as number);
+    if (lastAt > durationMinutes) {
+      throw new Error(`Timeline work[${String(i)}].firstAtMinute: work runs past durationMinutes`);
+    }
+    out.push({
+      firstAtMinute: firstAtMinute as number,
+      everyMinutes: everyMinutes as number,
+      count: count as number,
+      durationMinutes: duration as number,
+      idPrefix: prefixStr,
+    });
   }
-  if (!isInteger(count) || (count as number) < 1) {
-    throw new Error(`Timeline work.count: must be integer >=1`);
-  }
-  if (!isInteger(durationMinutes) || (durationMinutes as number) < 1) {
-    throw new Error(`Timeline work.durationMinutes: must be integer >=1`);
-  }
-  if (typeof idPrefix !== "string" || idPrefix.length === 0) {
-    throw new Error(`Timeline work.idPrefix: must be non-empty string`);
-  }
-  return {
-    firstAtMinute: firstAtMinute as number,
-    everyMinutes: everyMinutes as number,
-    count: count as number,
-    durationMinutes: durationMinutes as number,
-    idPrefix: idPrefix as string,
-  };
+  return out;
 }
 
-function expandAliases(generators: readonly GeneratorDef[]): Set<string> {
+function expandAliases(generators: readonly GeneratorDef[]): {
+  aliases: Set<string>;
+  aliasToKind: Map<string, string>;
+} {
   const counts = new Map<string, number>();
   const aliases = new Set<string>();
+  const aliasToKind = new Map<string, string>();
   for (const gen of generators) {
     const start = counts.get(gen.aliasPrefix) ?? 1;
     for (let n = 0; n < gen.count; n += 1) {
       const suffix = String(start + n).padStart(3, "0");
       const alias = `${gen.aliasPrefix}${suffix}`;
       aliases.add(alias);
+      aliasToKind.set(alias, gen.kind);
     }
     counts.set(gen.aliasPrefix, start + gen.count);
   }
-  return aliases;
+  return { aliases, aliasToKind };
 }
 
 export async function loadTimeline(path: string): Promise<Timeline> {
@@ -589,10 +667,16 @@ export async function loadTimeline(path: string): Promise<Timeline> {
   }
   const kinds = validateKinds(record["kinds"], startAt as string);
   const generators = validateGenerators(record["generators"], kinds);
-  const waves = validateWaves(record["waves"], kinds, durationMinutes as number);
-  const aliases = expandAliases(generators);
-  const events = validateEvents(record["events"], aliases, durationMinutes as number);
-  const work = validateWork(record["work"]);
+  const waves = validateWaves(record["waves"], kinds, generators, durationMinutes as number);
+  const { aliases, aliasToKind } = expandAliases(generators);
+  const events = validateEvents(
+    record["events"],
+    aliases,
+    aliasToKind,
+    kinds,
+    durationMinutes as number,
+  );
+  const work = validateWork(record["work"], durationMinutes as number);
 
   return {
     schemaVersion: "sim-v1",

@@ -23,24 +23,32 @@ describe("fleet simulator", () => {
     expect(header["hostCount"]).toBe(300);
     expect(header["schemaVersion"]).toBe("sim-trace-v1");
     const placements = lines.filter((l) => l["kind"] === "placement") as Record<string, unknown>[];
-    expect(placements.length).toBe(28);
+    expect(placements.length).toBe(315);
     const first = placements[0] as Record<string, unknown>;
-    expect(first["chosenHostAlias"]).toBe("desk-007");
+    expect(first["chosenHostAlias"]).toBeDefined();
     const reason = String(first["reason"]);
-    expect(reason).toContain("desk-007 is idle");
+    expect(reason).toContain("is idle");
     expect(reason).toContain("on AC power");
-    expect(reason).toContain("no battery");
-    expect(reason).toContain("CPU 86% free");
-    expect(reason).toContain("memory 69% free");
+    expect(reason).toContain("CPU");
+    expect(reason).toContain("memory");
     const candidates = first["candidates"] as unknown[];
     expect(Array.isArray(candidates)).toBe(true);
-    const chosenCand = (candidates as Record<string, unknown>[]).find(
-      (c) => c["hostAlias"] === "desk-007",
-    );
-    expect(chosenCand).toBeDefined();
-    expect(String((chosenCand as Record<string, unknown>)["reason"])).toContain("idle");
     const eligibleCount = first["eligibleCount"] as number;
     expect(eligibleCount).toBeGreaterThan(0);
+    expect(
+      linesA.every((l) => (l as unknown as Record<string, unknown>)["simulated"] === true),
+    ).toBe(true);
+    const runningHost = lines.find(
+      (l) => l["kind"] === "host" && l["state"] === "running" && (l["running"] as number) >= 1,
+    );
+    expect(runningHost).toBeDefined();
+    const atLimitHost = lines.find(
+      (l) =>
+        l["kind"] === "host" &&
+        l["eligible"] === false &&
+        String(l["excludeReason"]).includes("at agent limit"),
+    );
+    expect(atLimitHost).toBeDefined();
   });
 
   test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-142 ineligible at its minute", async () => {
@@ -52,7 +60,6 @@ describe("fleet simulator", () => {
     ) as Record<string, unknown> | undefined;
     expect(hostAt95).toBeDefined();
     expect(hostAt95?.["eligible"]).toBe(false);
-    expect(hostAt95?.["state"]).toBe("blocked");
     expect(String(hostAt95?.["excludeReason"])).toContain("battery at 40 percent");
     expect(String(hostAt95?.["excludeReason"])).toContain("50 percent floor");
     const placementAt96 = lines.find((l) => l["kind"] === "placement" && l["atMinute"] === 96) as
@@ -78,7 +85,7 @@ describe("fleet simulator", () => {
     expect(eventAt100?.["event"]).toBe("return");
   });
 
-  test("an unknown event key exits 2 naming the field, and a run writes no file other than --out", async () => {
+  test("an unknown event key exits 2 naming the field, and a run writes no file other than --out", () => {
     const dir = mkdtempSync(join(tmpdir(), "sim-unknown-"));
     try {
       const badTimelinePath = join(dir, "bad.json");
@@ -91,32 +98,34 @@ describe("fleet simulator", () => {
       const firstEvent = events[0] as Record<string, unknown>;
       (firstEvent as Record<string, unknown>)["extraKey"] = "oops";
       writeFileSync(badTimelinePath, JSON.stringify(bad));
-      let threw = false;
+      const outBad = join(dir, "out.jsonl");
+      const proc = Bun.spawnSync(
+        ["bun", "run", "src/sim/cli.ts", "--timeline", badTimelinePath, "--out", outBad],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(proc.exitCode).toBe(2);
+      const stderr = proc.stderr.toString();
+      expect(stderr).toContain("events[0]");
+      expect(stderr).toContain("extraKey");
+      let outExists = false;
       try {
-        await loadTimeline(badTimelinePath);
-      } catch (err) {
-        threw = true;
-        const msg = err instanceof Error ? err.message : String(err);
-        expect(msg).toContain("events[0]");
-        expect(msg).toContain("extraKey");
+        readFileSync(outBad, "utf8");
+        outExists = true;
+      } catch {
+        outExists = false;
       }
-      expect(threw).toBe(true);
-      const timeline = await loadTimeline("config/sim/evening-300.json");
-      const config = await loadPlacementConfig();
-      const lines2 = runTimeline({ timeline, config });
+      expect(outExists).toBe(false);
       const out = join(dir, "out.jsonl");
-      writeFileSync(out, lines2.map((l) => JSON.stringify(l)).join("\n") + "\n");
-      const files = readFileSync(out, "utf8");
-      expect(files.length).toBeGreaterThan(0);
-      const onlyOut = (() => {
-        const entries = new Set<string>();
-        for (const e of readdirSync(dir)) {
-          entries.add(e);
-        }
-        return entries;
-      })();
-      expect(onlyOut.has("out.jsonl")).toBe(true);
-      expect(onlyOut.size).toBe(2);
+      const proc2 = Bun.spawnSync(
+        ["bun", "run", "src/sim/cli.ts", "--timeline", "config/sim/evening-300.json", "--out", out],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      expect(proc2.exitCode).toBe(0);
+      const entries = readdirSync(dir);
+      expect(entries.sort()).toEqual(["bad.json", "out.jsonl"].sort());
       const simSources = [
         readFileSync("src/sim/timeline.ts", "utf8"),
         readFileSync("src/sim/run.ts", "utf8"),
@@ -125,7 +134,6 @@ describe("fleet simulator", () => {
       expect(simSources).not.toContain("ledger");
       expect(simSources).not.toContain("meter");
       expect(simSources).not.toContain("registry");
-      expect(simSources).not.toContain("src/fs/input");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

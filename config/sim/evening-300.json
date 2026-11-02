@@ -82,15 +82,42 @@
     }
   ],
   "events": [
+    { "atMinute": 94, "alias": "laptop-007", "type": "rejoin", "set": { "acPower": true } },
+    { "atMinute": 94, "alias": "laptop-007", "type": "leave" },
     { "atMinute": 95, "alias": "laptop-007", "type": "battery", "set": { "batteryPercent": 40 } },
     { "atMinute": 100, "alias": "desk-142", "type": "return" },
-    { "atMinute": 130, "alias": "laptop-021", "type": "unplug" }
+    { "atMinute": 134, "alias": "laptop-021", "type": "rejoin", "set": { "acPower": true } },
+    { "atMinute": 134, "alias": "laptop-021", "type": "leave" },
+    { "atMinute": 135, "alias": "laptop-021", "type": "unplug" }
   ],
-  "work": {
-    "firstAtMinute": 12,
-    "everyMinutes": 6,
-    "count": 28,
-    "durationMinutes": 25,
-    "idPrefix": "sim-w-"
-  }
+  "work": [
+    {
+      "firstAtMinute": 15,
+      "everyMinutes": 2,
+      "count": 25,
+      "durationMinutes": 50,
+      "idPrefix": "sim-w-"
+    },
+    {
+      "firstAtMinute": 50,
+      "everyMinutes": 1,
+      "count": 100,
+      "durationMinutes": 120,
+      "idPrefix": "sim-x-"
+    },
+    {
+      "firstAtMinute": 65,
+      "everyMinutes": 1,
+      "count": 100,
+      "durationMinutes": 120,
+      "idPrefix": "sim-y-"
+    },
+    {
+      "firstAtMinute": 80,
+      "everyMinutes": 1,
+      "count": 90,
+      "durationMinutes": 120,
+      "idPrefix": "sim-z-"
+    }
+  ]
 }

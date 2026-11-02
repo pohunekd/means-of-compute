@@ -182,37 +182,31 @@ function createQueuedWorkItem(id: string): WorkItem {
 
 function eventText(alias: string, type: string, set: Record<string, unknown> | undefined): string {
   switch (type) {
-    case "leave": {
+    case "leave":
       return `${alias} became idle`;
-    }
-    case "return": {
+    case "return":
       return `${alias} returned`;
-    }
-    case "depart": {
+    case "depart":
       return `${alias} left the site network`;
-    }
-    case "rejoin": {
+    case "rejoin":
       return `${alias} rejoined the site network`;
-    }
-    case "window-enter": {
+    case "window-enter":
       return `${alias} window entered`;
-    }
-    case "window-exit": {
+    case "window-exit":
       return `${alias} window exited`;
-    }
     case "battery": {
       const bp = set?.["batteryPercent"];
+      if (typeof bp !== "number") {
+        throw new Error(`battery event for ${alias}: missing batteryPercent`);
+      }
       return `${alias} battery at ${String(bp)} percent`;
     }
-    case "unplug": {
+    case "unplug":
       return `${alias} unplugged`;
-    }
-    case "plug-in": {
+    case "plug-in":
       return `${alias} plugged in`;
-    }
-    default: {
+    default:
       return `${alias} ${type}`;
-    }
   }
 }
 
@@ -220,8 +214,7 @@ function expandGenerators(timeline: Timeline): Map<string, HostState> {
   const rng = mulberry32(timeline.seed);
   const hosts = new Map<string, HostState>();
   const prefixCounts = new Map<string, number>();
-  // First collect alias lists per generator for deterministic order
-  const generatorAliases: { alias: string; kind: string; site: string }[] = [];
+  // Draw per generator row in file order, per host in alias order: cpu.load1m [0.2,2.4], memory.freeMb [40%,75%]
   for (const gen of timeline.generators) {
     const kindDef = timeline.kinds[gen.kind];
     if (kindDef === undefined) {
@@ -231,40 +224,15 @@ function expandGenerators(timeline: Timeline): Map<string, HostState> {
     for (let n = 0; n < gen.count; n += 1) {
       const suffix = String(start + n).padStart(3, "0");
       const alias = `${gen.aliasPrefix}${suffix}`;
-      generatorAliases.push({ alias, kind: gen.kind, site: gen.site });
-    }
-    prefixCounts.set(gen.aliasPrefix, start + gen.count);
-  }
-  // For each generator row in file order, per host in alias order draw cpu and memory
-  // Our generatorAliases is already in generator order, which matches alias order per row because suffix increases.
-  // But to follow spec "per generator row in file order, per host in alias order" we need to iterate generators in order
-  // and within each generator, iterate hosts in alias order (which is suffix order).
-  let aliasIndex = 0;
-  for (const gen of timeline.generators) {
-    const kindDef = timeline.kinds[gen.kind];
-    if (kindDef === undefined) {
-      throw new Error(`Unknown kind ${gen.kind}`);
-    }
-    // We already have counts, but we need to know which aliases belong to this generator row.
-    // Instead recompute: find aliases for this row by suffix.
-    // Simpler: iterate over generatorAliases grouped by generator
-    const rowCount = gen.count;
-    for (let n = 0; n < rowCount; n += 1) {
-      const entry = generatorAliases[aliasIndex];
-      if (entry === undefined) {
-        throw new Error("Generator expansion mismatch");
-      }
-      aliasIndex += 1;
       const cpuLoad = 0.2 + rng() * 2.2;
       const memFreeRatio = 0.4 + rng() * 0.35;
       const freeMb = Math.floor(kindDef.memoryTotalMb * memFreeRatio);
       const batteryPercent = kindDef.battery === "laptop" ? 100 : null;
       const idle = kindDef.startsIdle;
-      const timestamp = timeline.startAt;
       const host: HostCapacity = {
         schemaVersion: "v1",
-        hostAlias: entry.alias,
-        timestamp,
+        hostAlias: alias,
+        timestamp: timeline.startAt,
         idle,
         idleReason: idle ? "no user input for 30 minutes, on AC power" : "user input 0 seconds ago",
         secondsSinceInput: idle ? 1800 : 0,
@@ -281,15 +249,16 @@ function expandGenerators(timeline: Timeline): Map<string, HostState> {
         },
       };
       if (!isHostCapacity(host)) {
-        throw new Error(`Initial host ${entry.alias}: invalid HostCapacity`);
+        throw new Error(`Initial host ${alias}: invalid HostCapacity`);
       }
-      hosts.set(entry.alias, {
+      hosts.set(alias, {
         hostCapacity: host,
         offline: false,
-        hostKind: entry.kind,
-        site: entry.site,
+        hostKind: gen.kind,
+        site: gen.site,
       });
     }
+    prefixCounts.set(gen.aliasPrefix, start + gen.count);
   }
   return hosts;
 }
@@ -311,7 +280,6 @@ function expandWaves(
   hosts: Map<string, HostState>,
 ): { atMinute: number; alias: string; type: string; set?: Record<string, unknown> }[] {
   const singleRng = mulberry32(timeline.seed);
-  // Replay generator draws to advance RNG to correct position
   for (const gen of timeline.generators) {
     for (let n = 0; n < gen.count; n += 1) {
       singleRng();
@@ -324,7 +292,6 @@ function expandWaves(
     type: string;
     set?: Record<string, unknown>;
   }[] = [];
-  // Build kind -> aliases map for shuffling
   const kindAliases = new Map<string, string[]>();
   for (const [alias, state] of hosts) {
     const arr = kindAliases.get(state.hostKind) ?? [];
@@ -347,14 +314,8 @@ function expandWaves(
     if (aliases === undefined) {
       continue;
     }
-    let shuffled: string[];
-    if (wave.kind === "laptop") {
-      shuffled = [...aliases];
-      // Keep sorted order for laptop waves to ensure deterministic story coverage (battery event on laptop-007)
-    } else {
-      shuffled = [...aliases];
-      shuffleInPlace(shuffled, singleRng);
-    }
+    const shuffled = [...aliases];
+    shuffleInPlace(shuffled, singleRng);
     shuffledByKind.set(wave.kind, shuffled);
     pointerByKind.set(wave.kind, 0);
   }
@@ -488,7 +449,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
   const { timeline, config } = options;
   const hostMap = expandGenerators(timeline);
   const waveEvents = expandWaves(timeline, hostMap);
-  // Combine wave events and explicit events
   const allEvents: {
     atMinute: number;
     alias: string;
@@ -506,8 +466,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       set: ev.set as Record<string, unknown> | undefined,
     });
   }
-  // Group events by minute, waves first then explicit events in file order (waveEvents already in wave file order)
-  // For deterministic, sort by atMinute, but preserve insertion order for same minute
   const eventsByMinute = new Map<number, typeof allEvents>();
   for (const ev of allEvents) {
     const list = eventsByMinute.get(ev.atMinute) ?? [];
@@ -515,7 +473,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
     eventsByMinute.set(ev.atMinute, list);
   }
 
-  // Prepare trace
   const lines: TraceLine[] = [];
   const kindCounts = new Map<string, number>();
   for (const state of hostMap.values()) {
@@ -537,17 +494,19 @@ export function runTimeline(options: RunOptions): TraceLine[] {
     simulated: true,
   });
 
-  // Work schedule
+  const workDurationById = new Map<string, number>();
   const workSchedule: { atMinute: number; id: string }[] = [];
-  for (let n = 0; n < timeline.work.count; n += 1) {
-    const atMinute = timeline.work.firstAtMinute + n * timeline.work.everyMinutes;
-    if (atMinute <= timeline.durationMinutes) {
-      workSchedule.push({
-        atMinute,
-        id: `${timeline.work.idPrefix}${String(n + 1).padStart(3, "0")}`,
-      });
+  for (const block of timeline.work) {
+    for (let n = 0; n < block.count; n += 1) {
+      const atMinute = block.firstAtMinute + n * block.everyMinutes;
+      if (atMinute <= timeline.durationMinutes) {
+        const id = `${block.idPrefix}${String(n + 1).padStart(3, "0")}`;
+        workSchedule.push({ atMinute, id });
+        workDurationById.set(id, block.durationMinutes);
+      }
     }
   }
+  workSchedule.sort((a, b) => a.atMinute - b.atMinute);
   const workByMinute = new Map<number, string[]>();
   for (const w of workSchedule) {
     const list = workByMinute.get(w.atMinute) ?? [];
@@ -562,7 +521,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
   let workEnds = 0;
   let hostChanges = 0;
 
-  // Initial eligibility and host snapshot at minute 0
   let eligibility = refreshEligibility(hostMap, [], config);
   const initialAliases = [...hostMap.keys()].sort();
   for (const alias of initialAliases) {
@@ -590,13 +548,11 @@ export function runTimeline(options: RunOptions): TraceLine[] {
     });
   }
 
-  // Minutes 0..durationMinutes inclusive
   for (let atMinute = 0; atMinute <= timeline.durationMinutes; atMinute += 1) {
     const at = isoAtMinute(timeline.startAt, atMinute);
     let hostChangedThisMinute = false;
     const changedAliases = new Set<string>();
 
-    // (a) apply waves and events at this minute
     const eventsNow = eventsByMinute.get(atMinute) ?? [];
     for (const ev of eventsNow) {
       const hostState = hostMap.get(ev.alias);
@@ -607,7 +563,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       const beforeOffline = hostState.offline;
       let afterCapacity = hostState.hostCapacity;
       let afterOffline = hostState.offline;
-      // Apply event
       switch (ev.type) {
         case "leave": {
           afterCapacity = {
@@ -694,11 +649,9 @@ export function runTimeline(options: RunOptions): TraceLine[] {
           afterCapacity = { ...afterCapacity, acPower: true, timestamp: at };
           break;
         }
-        default: {
+        default:
           break;
-        }
       }
-      // Validate HostCapacity
       if (!isHostCapacity(afterCapacity)) {
         throw new Error(
           `Timeline event at ${String(atMinute)} for ${ev.alias}: invalid HostCapacity`,
@@ -717,7 +670,6 @@ export function runTimeline(options: RunOptions): TraceLine[] {
           hostChangedThisMinute = true;
         }
       }
-      // Emit event trace line
       const text = eventText(ev.alias, ev.type, ev.set as Record<string, unknown> | undefined);
       lines.push({
         kind: "event",
@@ -730,17 +682,8 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       });
     }
 
-    // Emit host lines for changed hosts (one per changed host)
-    if (changedAliases.size > 0) {
-      // Refresh eligibility before emitting host lines so eligible field is current?
-      // But spec says after batch of host changes engine calls place(probe) once and reads each host's candidate.
-      // We should refresh eligibility now to compute host line eligibility.
-      // However we also need to do work-end handling before refresh per spec order: (a) host changes, (b) work-end, (c) refresh if any host changed or work ended.
-      // So we should not refresh yet until after work ends.
-    }
-
-    // (b) end simulated work whose end minute is reached
     let workEndedThisMinute = false;
+    const workEndAliases: string[] = [];
     const remainingRunning: RunningEntry[] = [];
     for (const entry of running) {
       if (entry.endMinute === atMinute) {
@@ -754,6 +697,7 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         });
         workEnds += 1;
         workEndedThisMinute = true;
+        workEndAliases.push(entry.hostAlias);
       } else {
         remainingRunning.push(entry);
       }
@@ -762,56 +706,20 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       running = remainingRunning;
     }
 
-    // We have host changes and work ends, emit host lines now before refresh? But we need refreshed eligibility for host lines.
-    // According spec, host change is recorded as trace host line per changed host, with eligible field from probe candidate.
-    // That suggests host lines should reflect eligibility after refresh.
-    // So we should collect changed aliases, then after handling work ends, refresh eligibility if needed, then emit host lines.
-
     if (hostChangedThisMinute || workEndedThisMinute) {
       const runningItemsForEligibility = running.map((r) => r.workItem);
       eligibility = refreshEligibility(hostMap, runningItemsForEligibility, config);
     }
 
-    if (changedAliases.size > 0) {
-      const sortedChanged = [...changedAliases].sort();
-      for (const alias of sortedChanged) {
-        const state = hostMap.get(alias);
-        if (state === undefined) {
-          continue;
-        }
-        const elig = eligibility.get(alias) ?? { eligible: false, excludeReason: "offline" };
-        const runningCount = countRunningForHost(running, alias);
-        const computedState = computeState(state.hostCapacity, state.offline, runningCount, elig);
-        lines.push({
-          kind: "host",
-          atMinute,
-          at,
-          alias,
-          hostKind: state.hostKind,
-          site: state.site,
-          state: computedState,
-          eligible: elig.eligible,
-          excludeReason: elig.excludeReason,
-          running: runningCount,
-          maxAgents: state.hostCapacity.policy.maxConcurrentAgents,
-          batteryPercent: state.hostCapacity.batteryPercent,
-          simulated: true,
-        });
-        hostChanges += 1;
-      }
-    }
-
-    // (d) add work items arriving this minute to queue, then drain queue
     const arriving = workByMinute.get(atMinute) ?? [];
     for (const workId of arriving) {
       queued.push(createQueuedWorkItem(workId));
     }
+    const placedAliases: string[] = [];
     if (queued.length > 0) {
-      // Need hosts for placement
       const snapshotQueue = [...queued];
       const newQueued: WorkItem[] = [];
       let placementsThisMinuteNeedRefresh = false;
-      // We need online hosts array for placement
       const getOnlineHosts = (): HostCapacity[] => {
         const online: HostCapacity[] = [];
         for (const state of hostMap.values()) {
@@ -842,10 +750,12 @@ export function runTimeline(options: RunOptions): TraceLine[] {
         if (decision.chosenHostAlias !== null) {
           chosen += 1;
           const hostAlias = decision.chosenHostAlias;
-          const endMinute = atMinute + timeline.work.durationMinutes;
+          const duration = workDurationById.get(item.id) ?? 25;
+          const endMinute = atMinute + duration;
           const runningItem = createWorkItem(item.id, hostAlias);
           running.push({ workItem: runningItem, hostAlias, endMinute });
           placementsThisMinuteNeedRefresh = true;
+          placedAliases.push(hostAlias);
         } else {
           newQueued.push(item);
         }
@@ -854,6 +764,42 @@ export function runTimeline(options: RunOptions): TraceLine[] {
       if (placementsThisMinuteNeedRefresh) {
         const runningItemsForEligibility = running.map((r) => r.workItem);
         eligibility = refreshEligibility(hostMap, runningItemsForEligibility, config);
+      }
+    }
+
+    for (const alias of placedAliases) {
+      changedAliases.add(alias);
+    }
+    for (const alias of workEndAliases) {
+      changedAliases.add(alias);
+    }
+
+    if (changedAliases.size > 0) {
+      const sortedChanged = [...changedAliases].sort();
+      for (const alias of sortedChanged) {
+        const state = hostMap.get(alias);
+        if (state === undefined) {
+          continue;
+        }
+        const elig = eligibility.get(alias) ?? { eligible: false, excludeReason: "offline" };
+        const runningCount = countRunningForHost(running, alias);
+        const computedState = computeState(state.hostCapacity, state.offline, runningCount, elig);
+        lines.push({
+          kind: "host",
+          atMinute,
+          at,
+          alias,
+          hostKind: state.hostKind,
+          site: state.site,
+          state: computedState,
+          eligible: elig.eligible,
+          excludeReason: elig.excludeReason,
+          running: runningCount,
+          maxAgents: state.hostCapacity.policy.maxConcurrentAgents,
+          batteryPercent: state.hostCapacity.batteryPercent,
+          simulated: true,
+        });
+        hostChanges += 1;
       }
     }
   }

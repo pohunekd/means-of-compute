@@ -360,6 +360,9 @@ async function recordUsage(
         outputTokens: usage?.outputTokens ?? null,
         requests: 1,
         source: AUDITOR_USAGE_SOURCE,
+        ...(usage?.cachedInputTokens !== undefined
+          ? { cachedInputTokens: usage.cachedInputTokens }
+          : {}),
       },
     ],
     session: null,
@@ -414,6 +417,7 @@ async function askModel(
   await recordUsage(ctx, c.sourceId, call.model, {
     inputTokens: call.inputTokens,
     outputTokens: call.outputTokens,
+    ...(call.cachedInputTokens !== undefined ? { cachedInputTokens: call.cachedInputTokens } : {}),
   });
   const reply = parseTriageReply(call.content, ctx.triage.maxTextChars);
   if (reply === null) {

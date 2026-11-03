@@ -1259,16 +1259,16 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         ["Total savings", "simulated", "synthetic", 'class="controls"'],
       ],
       [
-        "savings",
-        "Savings",
-        "what the same work would have cost at frontier prices, what it cost here, and the budget cap. All real, from the ledger.",
-        ["Finished tasks", "simulated", "synthetic", 'class="controls"'],
+        "cost",
+        "Cost",
+        "what the factory spent, against its budget caps.",
+        ["Finished tasks", "simulated", "synthetic", 'class="controls"', "card good"],
       ],
     ];
     for (const [view, label, subtitle, foreign] of tabs) {
       const body = await (await get(`/?view=${view}&t=60`)).text();
       const tabList = [...body.matchAll(/<a class="tab[^"]*" href="\/\?view=(\w+)&amp;t=60"/g)];
-      expect(tabList.map((match) => match[1])).toEqual(["live", "work", "models", "savings"]);
+      expect(tabList.map((match) => match[1])).toEqual(["live", "work", "models", "cost"]);
       expect(/<p class="sub">[\s\S]*?<\/p>/.exec(body)?.[0]).toBe(
         `<p class="sub"><b>${label}</b> - ${subtitle}</p>`,
       );
@@ -1279,9 +1279,18 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       if (view === "work") {
         expect(body).toContain("muse-spark-open-1026 (baseten)");
       }
-      if (view === "savings") {
+      if (view === "cost") {
         // A pool row without both dollar values says so in the bar column.
         expect(body).toContain('<td class="meterwrap"><span class="nodata">no data</span></td>');
+        // Budget caps lead, then the spend cards, then the frontier comparison
+        // with its assumptions line directly under the table.
+        const order = ["Budget caps", ">Actual token cost<", "Frontier list price comparison"].map(
+          (marker) => body.indexOf(marker),
+        );
+        expect(order.every((at, i) => at > 0 && (i === 0 || at > (order[i - 1] ?? 0)))).toBe(true);
+        expect(body).toMatch(
+          /<\/table>\s*<\/div>\s*<p class="note assume">Assumptions: the NVIDIA Build free tier is priced at \$0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted\.<\/p>/,
+        );
       }
     }
     // Zero spend is data: each budget bar carries its share of the cap as text,
@@ -1292,7 +1301,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         ["meta", "every provider", spent, "$12.0000", spent, "$140.0000", "admitted"].map(
           (text) => ({ kind: "text" as const, text }),
         );
-      const savingsPage = renderTabPage("savings", {
+      const savingsPage = renderTabPage("cost", {
         model: {
           ...model,
           panels: model.panels.map((panel) =>
@@ -1319,7 +1328,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
           ),
         },
         chrome: {
-          view: "savings",
+          view: "cost",
           liveAvailable: true,
           renderedAt: NOW.toISOString(),
           t: 0,
@@ -1344,6 +1353,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       ["overview", "live"],
       ["autonomy", "work"],
       ["usage", "models"],
+      ["savings", "cost"],
     ] as const) {
       const moved = await get(`/?view=${old}&t=60&pause=1`, { redirect: "manual" });
       expect(moved.status).toBe(301);

@@ -1,7 +1,7 @@
 // Dashboard visual system and page renderers. One stylesheet (DASHBOARD_CSS,
 // hashed as CSS_HASH for the CSP) and one set of components (header, tab
 // bar, subtitle, cards, boxes, tables, pills, chips) serve every page: the
-// stacked snapshot page, the Work, Models and Savings tabs, and the Live tab
+// stacked snapshot page, the Work, Models and Cost tabs, and the Live tab
 // in live-render.ts. Renderers are pure; aliases are checked against the
 // host-alias pattern and a failure throws without the value (a 500 in the
 // server). Error messages, paths other than the log path, and the forbidden
@@ -47,9 +47,6 @@ export const DASHBOARD_CSS = [
   ".card>.label{display:block;font-size:15px;letter-spacing:0.04em;color:var(--dim);text-transform:uppercase}",
   ".card>.value{display:block;font-size:31px;font-weight:650;line-height:1.2;margin:2px 0}",
   ".card>.nodata,.card>.error{display:block;font-size:17px;margin:4px 0}",
-  ".big .card>.value{font-size:42px}",
-  ".card.good{border-top-color:var(--run)}",
-  ".card.good>.value{color:var(--run)}",
   "section,.panel{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 10px;min-width:0}",
   "h2{font-size:19px;margin:0 0 4px;font-weight:650}",
   "h2 .cnt{color:var(--dim);font-weight:500;font-size:16px}",
@@ -61,7 +58,7 @@ export const DASHBOARD_CSS = [
   ".cite{font-size:12.5px;color:var(--faint);margin:4px 0 0;overflow-wrap:anywhere}",
   ".shown{font-size:15px;color:var(--dim);margin:6px 0 0}",
   ".frame .card .note,.frame section .note{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}",
-  ".frame .card .cite,.frame .big .card .note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+  ".frame .card .cite,.frame .oneline .card .note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
   ".chip{display:inline-block;font-size:15px;font-weight:700;letter-spacing:0.04em;border-radius:5px;padding:0 7px;line-height:1.35;vertical-align:1px;white-space:nowrap}",
   ".chip-real{background:var(--real);color:var(--on-strong)}",
   ".simtag{display:inline-block;font-size:15px;font-weight:700;letter-spacing:0.04em;border-radius:5px;padding:0 7px;line-height:1.3;vertical-align:1px;white-space:nowrap;border:1.5px dashed var(--dim);color:var(--dim)}",
@@ -192,22 +189,22 @@ const TIME_COLUMNS = new Set(["observed", "last activity"]);
 const SOURCE_COLUMNS = new Set(["sources"]);
 
 // Key cards reuse figures the panels already compute, with their sources;
-// the renderer derives no new number for the strip.
+// the renderer derives no new number for the strip. The strip leads with
+// spend; the frontier comparison stays in its own section.
 const KEY_FIGURES: readonly { readonly panel: PanelId; readonly label: string }[] = [
-  { panel: "savings", label: "Total savings" },
   { panel: "usage", label: "Spent total" },
   { panel: "usage", label: "Spent today" },
   { panel: "autonomy", label: "Finished tasks" },
   { panel: "autonomy", label: "Parked tasks" },
 ];
 
-export type TabId = "live" | "work" | "models" | "savings";
+export type TabId = "live" | "work" | "models" | "cost";
 
 export const TAB_LABELS: Readonly<Record<TabId, string>> = {
   live: "Live",
   work: "Work",
   models: "Models",
-  savings: "Savings",
+  cost: "Cost",
 };
 
 export const TAB_SUBTITLES: Readonly<Record<TabId, string>> = {
@@ -215,9 +212,14 @@ export const TAB_SUBTITLES: Readonly<Record<TabId, string>> = {
   work: "every task the factory has taken: its status, its machine, its model and its audit verdict. All real.",
   models:
     "every real model call the factory made: which model, which provider, how many tokens, what it cost.",
-  savings:
-    "what the same work would have cost at frontier prices, what it cost here, and the budget cap. All real, from the ledger.",
+  cost: "what the factory spent, against its budget caps.",
 };
+
+// The Savings panel's figures compare the factory's cost with the same tokens
+// and hours at a frontier list price; these are the assumptions behind them.
+const FRONTIER_HEADING = "Frontier list price comparison";
+const FRONTIER_ASSUMPTIONS =
+  "Assumptions: the NVIDIA Build free tier is priced at $0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted.";
 
 const LIVE_TAGLINE =
   "Real placement engine, synthetic fleet; the four real machines and the model calls are live.";
@@ -537,6 +539,14 @@ function renderPanel(panel: Panel): SafeHtml {
           ${panel.figures.map((figure) => renderFigure(figure, "card"))}
         </div>`;
   const tables = panel.tables.map((table) => renderTable(table, panel.id, panel.title));
+  if (panel.id === "savings") {
+    return html`<section id="${panel.id}">
+      <h2>${FRONTIER_HEADING}</h2>
+      ${figures}
+      <p class="note">${FRONTIER_ASSUMPTIONS}</p>
+      ${tables}
+    </section>`;
+  }
   return html`<section id="${panel.id}">
     <h2>${panel.title}</h2>
     ${figures}${tables}
@@ -610,9 +620,7 @@ export function pageHref(
 }
 
 function tabsOf(chrome: PageChrome): readonly TabId[] {
-  return chrome.liveAvailable
-    ? ["live", "work", "models", "savings"]
-    : ["work", "models", "savings"];
+  return chrome.liveAvailable ? ["live", "work", "models", "cost"] : ["work", "models", "cost"];
 }
 
 function renderClock(chrome: PageChrome): SafeHtml {
@@ -930,15 +938,16 @@ function capMeter(columns: readonly string[]): ExtraColumn {
   };
 }
 
-function renderSavingsTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
+// Cost: the budget caps first, then the spend figures the Savings panel
+// computes, then every Savings figure as one frontier comparison table with
+// its assumptions directly under it.
+function renderCostTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
   const savings = panelOf(inputs.model, "savings");
   const usage = panelOf(inputs.model, "usage");
   const figures = savings?.figures ?? [];
-  const big = ["Frontier-token baseline", "Actual token cost", "Token savings"].flatMap((label) => {
+  const spend = ["Actual token cost", "Owned compute cost"].flatMap((label) => {
     const figure = figures.find((candidate) => candidate.label === label);
-    return figure === undefined
-      ? []
-      : [renderFigure(figure, label === "Token savings" ? "card good" : "card")];
+    return figure === undefined ? [] : [renderFigure(figure, "card")];
   });
   const pools = tableOf(usage, "Budget pools");
   const poolsBox =
@@ -965,12 +974,12 @@ function renderSavingsTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
       <td class="figsrc">source: ${figure.source}</td>
     </tr>`;
   });
-  return html`<div class="cards big">${big}</div>
-    ${poolsBox}
+  return html`${poolsBox}
+    <div class="cards oneline">${spend}</div>
     <section class="box">
-      <h2>Where the saving comes from <span class="cnt">· every figure names its source</span></h2>
+      <h2>${FRONTIER_HEADING} <span class="cnt">· every figure names its source</span></h2>
       <div class="tablewrap">
-        <table class="table-savings" aria-label="Savings figures">
+        <table class="table-savings" aria-label="${FRONTIER_HEADING}">
           <thead>
             <tr>
               <th class="c-label">figure</th>
@@ -984,13 +993,13 @@ function renderSavingsTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
           </tbody>
         </table>
       </div>
-      <p class="cite">All figures real, from the ledger.</p>
+      <p class="note assume">${FRONTIER_ASSUMPTIONS}</p>
     </section>`;
 }
 
-// Work, Models or Savings in the shared frame. Every figure and cell comes
+// Work, Models or Cost in the shared frame. Every figure and cell comes
 // from the panels buildDashboard computed; nothing here derives a number.
-export function renderTabPage(view: "work" | "models" | "savings", inputs: TabPageInputs): string {
+export function renderTabPage(view: "work" | "models" | "cost", inputs: TabPageInputs): string {
   const ctx: RenderContext = {
     linkItems: true,
     frame: true,
@@ -1002,6 +1011,6 @@ export function renderTabPage(view: "work" | "models" | "savings", inputs: TabPa
       ? renderWorkTab(inputs, ctx)
       : view === "models"
         ? renderModelsTab(inputs, ctx)
-        : renderSavingsTab(inputs, ctx);
+        : renderCostTab(inputs, ctx);
   return renderFramedPage(inputs.chrome, main);
 }

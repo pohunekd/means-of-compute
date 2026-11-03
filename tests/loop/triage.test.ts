@@ -343,3 +343,40 @@ test("the daily cap, the chain guard, an edit during the call and a hold send ea
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a triage call with cached input tokens records them in the pending ledger entry", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "loop-triage-"));
+  try {
+    const reply = JSON.stringify({
+      decision: "hold",
+      reason: "Needs design.",
+    });
+    const fx = setup(dir, [reply], 3);
+    const baseCall = fx.ctx.auditor.call;
+    const ctx: TriageContext = {
+      ...fx.ctx,
+      auditor: {
+        ...fx.ctx.auditor,
+        call: (providerId: string, request: ModelRequest) =>
+          baseCall(providerId, request).then((result) => ({ ...result, cachedInputTokens: 540 })),
+      },
+    };
+    const [filed] = await fx.merged(workItem("gh-demo-7", 7), "a".repeat(40), [
+      low("src/add.ts:2", "The note pings @octocat"),
+    ]);
+    await fx.persist();
+    if (filed === undefined) {
+      throw new Error("no follow-up filed");
+    }
+
+    await runTriage(ctx, () => false);
+    const ledger = await readLedger("test", ctx.ledgerPath);
+    expect(ledger.pending).toHaveLength(1);
+    const token = ledger.pending[0]?.tokens[0];
+    expect(token?.inputTokens).toBe(900);
+    expect(token?.outputTokens).toBe(80);
+    expect(token?.cachedInputTokens).toBe(540);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

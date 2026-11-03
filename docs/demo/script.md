@@ -158,9 +158,10 @@ Narration (said once): "Real placement engine, synthetic fleet; the four real
 machines and the model calls are live."
 
 expected: the page advances on its own every 5 seconds, 5 sim-minutes per
-frame. The four real machines lead as Real work now cards; below them the
-one-line fleet tiles under the SIMULATED group headings change their left
-border colour as desks go idle,
+frame. One fleet grid: the four real machines are the first group (`real
+(4)`, REAL chip) and their open sessions lead the rail as the Real work now
+table; below them the one-line fleet tiles under the SIMULATED group headings
+change their left border colour as desks go idle,
 laptops leave and rejoin from home, and the lobby kiosks enter their
 unattended window. Battery beat: at simulated 18:35 (minute 95) `laptop-007
 battery at 40 percent` appears in `Simulated events (sim clock)`; the
@@ -173,7 +174,7 @@ because ...` rows with the placement engine's own reasons; real rounds sit
 in the separate `Real events` block above it, and the Model activity table
 lands real meter call-end rows while the factory works. The fleet heading
 carries the simulated counters, labelled `(simulated)`; no simulated count
-enters the cards or the Work, Models and Cost tabs. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; Work,
+enters the real tiles, the Real work now table or the Work, Models and Cost tabs. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; Work,
 Models and Cost are one click away in the tab bar, in the same design.
 
 ## Multi-host run (W3.1)

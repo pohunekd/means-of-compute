@@ -506,7 +506,8 @@ MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/e
 - `--loop-log <path>` defaults to `logPath` of `config/loop.json`. It is read
   read-only on every request; only `placement` events are used (shape in
   `docs/loop.md`), newest per real host alias at or before the page clock, and
-  an unterminated last line is ignored. A missing log reads `no data (no loop
+  an unterminated last line is ignored. Each request reads the whole loop log, which is about
+  1 MB on 2026-11-03 and grows with the loop's events. A missing log reads `no data (no loop
 log)`; an unreadable one `error (loop-log-unreadable)`; a line that is not a
   JSON object or a `placement` event with a bad `ts`, `workItemId`,
   `chosenHostAlias` or candidate `error (loop-log-invalid)`. The real tiles

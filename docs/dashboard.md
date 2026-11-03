@@ -1,9 +1,11 @@
 # Dashboard
 
-One page served by the factory process. It reads the ledger file, verdict
-store, prices and host state, and renders server-side; there is no client
-JavaScript, no auto-refresh and no external resource. The operator reloads
-the page. Every figure names its source; for money, the config price entry.
+Four tabs served by the factory process: Live, Work, Models and Savings. They
+read the ledger file, verdict store, prices, host state and, for Live, the
+meter usage log and a simulated trace, and render server-side; there is no
+client JavaScript and no external resource. While the replay runs, a tab
+advances through a meta refresh (see Live view); the static snapshot is one
+stacked page. Every figure names its source; for money, the config price entry.
 No estimated numbers: a missing input shows "no data", and an unreadable
 one shows an error code with details in `logs/dashboard.jsonl`.
 
@@ -48,7 +50,7 @@ the bound host with the bound port, or `localhost:<port>`: for an IPv4
 bind `{<host>:<p>, localhost:<p>}` where `<host>` is the configured
 listen host, for a `::1` bind `{[::1]:<p>, localhost:<p>}`; anything
 else, including a missing header, gets 421. Method must be `GET` (405) and
-the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `overview,fleet,work,usage,savings,autonomy,models` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. Without `view`, `view=overview` when live sources are wired else the stacked fleet page (no tabs) for snapshot. Every live view carries a tab bar (active marked) and replay controls (pause/resume, step ±5, restart t=0, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view,host`. Tab links keep `view,t,pause` dropping selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
+the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `live,work,models,savings` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. The old view names redirect (301) to the tab that holds their content, keeping `t` and `pause` and dropping any selection: `fleet` and `overview` → `live`, `autonomy` → `work`, `usage` → `models`; without live sources a redirect to `live` goes to `work`. Without `view`, `/` is `live` when live sources are wired (a `--sim-trace` is given) and `work` otherwise; without live sources there is no Live tab (`view=live` →404) and no page carries simulated text. Work, Models and Savings accept a known host selection and ignore it; any other selection on them →404. Every tab carries the same header, tab bar (active marked) and, with live sources, the replay controls (pause/resume, restart t=0, step ±5, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view` and, on Live, the open panel. Tab links keep `t,pause` and drop the selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
 
 ## Config keys (`config/dashboard.json`)
 
@@ -82,23 +84,55 @@ baselines.<key>`.
 
 ## Layout
 
-The header carries the product name, one line saying what the page is (an
-autonomous software factory on company-owned machines, running on Meta
-models) and the rendered time in a compact UTC form (`2026-11-01 13:03:54
-UTC`) with the full ISO value in the `time` element's `datetime` and `title`.
-Below it, a strip of key figure cards reuses figures the panels already
-compute, in this order: `Total savings`, `Spent total`, `Spent today`,
-`Finished tasks`, `Parked tasks`. Each card shows the figure's value, its
-note when it has one, and its source line, small and muted; no card derives a
-new number. The same figures still render in their panels below.
+One visual system serves every page: one stylesheet (`DASHBOARD_CSS` in
+`src/dashboard/render.ts`, covered by the CSP `CSS_HASH`), one header, one
+tab bar, one card, one boxed section with a heading, one table style, one
+pill and chip style, one type scale and one colour token set, light by
+default and dark under `prefers-color-scheme: dark`, on a system font stack
+with no web fonts. Base text is 16 px; everything a viewer reads is at least
+15 px, and only source cites, the long `sources` cells and the tile legend
+are smaller. There is no `style` attribute, no script and no external asset.
 
-Sections render as cards with clear headings. Colours are CSS custom
-properties, light by default and dark under `prefers-color-scheme: dark`, on
-a system font stack with no web fonts. Tables use one light style (row lines
-and zebra rows, no heavy grid), tabular numerals, and right-aligned numeric
-columns. On a narrow screen a wide table scrolls inside its card, so the
-page itself never scrolls sideways. There is still no script and no external
-asset; the inline style stays covered by the CSP `CSS_HASH`.
+The header carries the product name, the real clock in a compact UTC form
+(`2026-11-01 13:03:54 UTC`, the full ISO value in the `time` element's
+`datetime` and `title`), with live sources the simulated clock and a paused
+badge, and one honesty tagline. The tab bar lists Live (only with live
+sources), Work, Models and Savings, with the replay controls on the right.
+Under it each tab carries its one-line subtitle:
+
+| Tab     | Subtitle                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Live    | the real machines and their work first; below, the simulated company evening replayed through the real placement engine. |
+| Work    | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                    |
+| Models  | every real model call the factory made: which model, which provider, how many tokens, what it cost.                      |
+| Savings | what the same work would have cost at frontier prices, what it cost here, and the budget cap. All real, from the ledger. |
+
+Each tab fills exactly one 1920x1080 frame and shows only its own figures,
+all computed by `buildDashboard` and its panels; the renderer derives no
+number:
+
+- **Work**: the Autonomy figures (`Finished tasks`, `Parked tasks`, `Human
+interventions`, `Retries`) as cards, then the Work table, newest first,
+  with its first 17 rows and `showing N of M items` over every work item.
+- **Models**: the Usage figures as cards, then the Models table, the
+  Autonomy `Sessions per model (finished tasks)` table and, with live
+  sources, the newest real meter calls (as on Live, linked to the call
+  panel), beside the Usage `Tokens by provider` and `Session hours by host`
+  tables. A table shows at most 6 rows and says `showing N of M rows` when
+  it leaves rows out.
+- **Savings**: `Frontier-token baseline`, `Actual token cost` and `Token
+savings` as large cards; `Budget caps`, the Usage budget pools table with
+  a bar of each pool's spent total against its total cap (read from the
+  row's own cells); and every Savings figure with its note and full source.
+
+On a framed tab a card's note is cut to two lines and its source to one,
+each with the full text in the card's `title`; the stacked snapshot shows
+them in full. The stacked page (the snapshot) carries the same header with
+the rendered time and UTC day, a line on what "no data" and "error" mean, a
+strip of key figure cards (`Total savings`, `Spent total`, `Spent today`,
+`Finished tasks`, `Parked tasks`, reused from the panels), then every panel
+in order. On a narrow screen a wide table scrolls inside its box and the
+frame grows with its content.
 
 ## Panels
 
@@ -430,19 +464,19 @@ Classification config `config/demo-numbers.json` must contain exactly `localProv
 
 ## Live view (`/live`)
 
-`GET /live` on the same loopback listener is a second, script-free page for
-watching the fleet at scale: a tile grid of the real recorded fleet plus a
-simulated fleet replayed from a simulator trace, the real meter activity
-feed, an event ticker and headline counters. It is built by `buildLive`
-(`src/dashboard/live.ts`) and rendered by `renderLive`
-(`src/dashboard/live-render.ts`); the dashboard panels of `/` are not
-involved, and simulated data never enters their inputs, the ledger,
-Savings or `demo:numbers`.
+The Live tab (`/?view=live`; `GET /live` redirects to it) is the script-free
+page for watching the factory at scale: Real work now cards for the real
+machines, the Just finished strip, a simulated fleet replayed from a
+simulator trace, the real meter activity feed and an event ticker. It is
+built by `buildLive` (`src/dashboard/live.ts`) and rendered by `renderLive`
+(`src/dashboard/live-render.ts`) in the shared frame; the dashboard panels
+are not involved, and simulated data never enters their inputs, the ledger,
+Work, Models, Savings or `demo:numbers`.
 
 Run it through `factory:serve` with three extra flags, each at most once:
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-300.jsonl
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-100.jsonl
 ```
 
 - `--sim-trace <path>` has no default. Without it the simulated groups show
@@ -460,25 +494,36 @@ process keyed by its path, size and modification time, so a refresh never
 reparses an unchanged file. Each frame
 advances 5 sim-minutes and carries a meta refresh of
 `ceil(5 * 60 / speed)` seconds (clamped to 2..30; 5 seconds at the trace
-speed 60) plus a plain `next frame` link to the same address, so the page
+speed 60); the `+5` control is the plain next-frame link, so the page
 works even where a refresh does not fire. The final frame carries no
-refresh. There is no script and no external resource: the CSP is the
-dashboard's value with the live style hash (`LIVE_CSS_HASH` over the
-dashboard stylesheet plus the live rules). A meta refresh is a navigation,
-not a resource load, so `default-src 'none'` does not block it.
+refresh. The same refresh runs on Work, Models and Savings, so the header
+clock reads the same on every tab. There is no script and no external
+resource: every page carries the one stylesheet under the CSP `CSS_HASH`. A
+meta refresh is a navigation, not a resource load, so `default-src 'none'`
+does not block it.
 
-Overview fits one 1920x1080 frame without scrolling (with a host selection the page may scroll). Live leads with Real work now, then Just finished, then the fleet.
+Live fits one 1920x1080 frame, with or without a panel open: Real work now,
+then Just finished, then the fleet beside the right rail. The rail holds
+Model activity (the newest 3 rows) over Events, or the open panel, which
+scrolls inside the rail when it is longer than the frame.
 
-Real work now: one card per real machine (desktop, laptop-a, laptop-b, kiosk-a) with alias and REAL chip, stage pill (`implement`, `audit`, `merge`), task title link to the task panel, issue and PR links (PR shows `no data (PR not opened yet)` when null), model in use (`name (provider)`), elapsed time from registry `startedAt`, tokens and cost so far priced by `tokenCostScaled`, latest model call (time, in/out, ms). An idle card shows why in probe terms (`Idle — no work queued`, `Idle — person at the desk`) plus last finished item and today totals. Sources: dispatcher registry, recorded probes (`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and verdict store for stage, meter usage log for tokens/cost/latest call, ledger for today totals.
+Real work now: one card per real machine (desktop, laptop-a, laptop-b, kiosk-a) with alias and REAL chip, stage pill (`implement`, `audit`, `merge`), task title link to the task panel, issue and PR links (PR shows `no data (PR not opened yet)` when null), model in use (`name (provider)`), elapsed time from registry `startedAt`, tokens and cost so far priced by `tokenCostScaled`, latest model call (time, in/out, ms). An idle card shows why in probe terms (`Idle — no work queued`, `Idle — person at the desk`) plus last finished item and today totals. When the host's newest round is not a merge, the card names it (`last round: <outcome>`); a findings round reads `(verdict missing)` when the verdict store holds no verdict for the item and `(verdicts: error (<code>))` or `(verdicts: no data (<reason>))` when the store cannot be read. Sources: dispatcher registry, recorded probes (`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and verdict store for stage, meter usage log for tokens/cost/latest call, ledger for today totals.
 
 Just finished: the newest 3 real results with item link, title, machine, audit counts (recounted via `verdictCounts`) and `merged`/`parked` outcome, cost. Sources: `loop-results.jsonl` newest 3, work store title, verdict store counts, ledger cost.
 
-The unified tile renderer uses one size for every host (alias, load `running/maxAgents`, state colour): real tiles carry a solid border and a `REAL` chip, simulated tiles a dashed border and a `SIMULATED` group tag; the group heading carries the site/kind count. The grid groups tiles
-by site and kind; the fleet box no longer carries a Real fleet row because the cards are the real fleet. Simulated tiles are compact blocks under a group heading with a `SIMULATED` tag: the alias, load and state word are on the tile face, the tile outline is dashed.
-States: `eligible` (can take work now), `running`, `blocked` (idle
-but excluded; the placement reason is in the tile title), `busy` (user
+The fleet heading carries the simulated counters from the trace at the
+cursor minute, labelled: `Fleet · simulated evening: <eligible> of <hosts>
+eligible · <n> work running · <n> placements (simulated)`. The real figures
+live inside the cards; there is no Real fleet row, because the cards are the
+real fleet. Tiles are grouped by site and kind, in group order; each group
+heading carries its name with the host count, the `SIMULATED` chip and the
+per-state counts (`19 running · 11 eligible`). A tile is one line: the full
+alias at 15 px and the load `running/maxAgents`; the state is the tile's left
+border colour, with the legend under the grid, and every tile links to its
+host panel. States: `eligible` (can take work now), `running`, `blocked`
+(idle but excluded; the placement reason is in the tile title), `busy` (user
 present), `offline` (left the site network), and for real hosts `reported`
-or `unavailable`. The former counters strip is removed from Live; its real values live inside the cards and its simulated values in the fleet heading when present.
+or `unavailable`.
 
 Model activity is real only: the newest 12 meter `call-end` records, each
 joined to its `call-start` for provider and model and to its grant for the
@@ -487,24 +532,24 @@ and auditor calls are not metered, so they never appear). Cost is priced
 with the dashboard's own arithmetic; a null token count shows `no data`
 with the reason in the cell title, never 0. The ticker keeps the two clocks
 apart: a Real events block and a Simulated events block, each newest first
-with the newest 6 rows shown; a simulated placement reads
+with the newest 3 rows shown on Live; a simulated placement reads
 `placed <item> on <host> because <reason>` with the reason verbatim from
-the placement engine, or `<kind>: <title> placed on <host> because <reason>` when the placement carries a `task` (e.g. `research: Supplier research 012 placed on desk-121 because desk-121 is idle, ...`). A running simulated tile's title is `<alias>: running - <kind>: <title>` followed by the existing exclusion or idle detail, so `desk-121: running - data-analysis: Sales data analysis 033`; the tile face stays compact so the 1080p layout is unchanged. Activity and ticker rows are one line each, clipped
+the placement engine, or `<kind>: <title> placed on <host> because <reason>` when the placement carries a `task` (e.g. `research: Supplier research 012 placed on desk-121 because desk-121 is idle, ...`). A running simulated tile's title is `<alias>: running - <kind>: <title>` followed by the existing exclusion or idle detail, so `desk-121: running - data-analysis: Sales data analysis 033`; the tile face stays one line. Ticker rows are one line each, clipped
 with an ellipsis and their full text in the row title, so the frame height
-never depends on event text; signage tiles are wide enough that no alias
+never depends on event text; a tile is as wide as its alias, so no alias
 clips. A simulated tile that is running but whose last host line excludes
 it carries an amber edge and a `!` marker when it is running, now excluded
 for a reason other than its agent limit (the legend reads the same), with
 the reason in the tile title.
 
-The detail rail lives in the right rail (the fleet column does not move): a breadcrumb reads `Fleet / <host> / <task> / <audit>` with `back to live`; precedence is host → task → call → audit, well-formed unknown or malformed selection →404 without echoing the value. Work rows link as `/?view=overview&task=<id>` only in the tabbed views (no figure changes); the stacked view and snapshot have no such links. Links exist only when the server has live sources and the id is known (a known work item or simulated task); otherwise the cell is plain text at the base. They are built with `buildTabHref` param `view=overview` plus `t`, `pause`, `task`, never wrapping model-written verdict text. The audit PR link is shown only when `panel.workItemRepo !== null && verdict.repo === panel.workItemRepo`; otherwise it is plain `#<n>` with `(repo differs)` when both repos are known. A call with a broken meter shows only breadcrumb, `Call <endedAt>` and one `error (<code>)` line, no `ms 0` or `-` fillers, and `|nosuch` is rejected with 404. Each panel keeps one block per source: a simulated host shows site, kind, state, running/max load, battery, task, running tasks, events and placements; a real host shows its probe (kind, time and cause), open sessions (each linked to its task), recent results and recent meter calls; a simulated task shows kind, title, brief, placed at sim clock with verbatim placement reason and eligible count, host link and status running/ended via work-end clock; a real task shows title, status, repo, issue/PR links, branch, host link, preferred model, retry count, goal excerpt (first 280 chars with ellipsis and full goal in title), DoD, rounds (with provider-stripped model), verdicts (recounted), ledger tokens and sessions as one block; a call shows provider, model as `name (provider)`, role, work item and host links, grouped tokens, ms and priced cost or no-data; an audit shows head SHA, recounted counts (`invalid (counts disagree)` on mismatch), repo, auditor, authors, findings and PR link when the repos match; each block keeps its own source with its heading, so a failed ledger renders one `Ledger: error (<code>)` line and other blocks keep data.
+The detail rail lives in the right rail (the fleet column does not move): a breadcrumb reads `Fleet / <host> / <task> / <audit>` with `back to live`; precedence is host → task → call → audit, well-formed unknown or malformed selection →404 without echoing the value. Work rows link as `/?view=live&task=<id>` only on the Work tab (no figure changes); the stacked snapshot has no such links. Links exist only when the server has live sources and the id is known (a known work item); otherwise the cell is plain text. They are built with `pageHref` from `view=live` plus `t`, `pause`, `task`, never wrapping model-written verdict text. The audit PR link is shown only when `panel.workItemRepo !== null && verdict.repo === panel.workItemRepo`; otherwise it is plain `#<n>` with `(repo differs)` when both repos are known. A call with a broken meter shows only breadcrumb, `Call <endedAt>` and one `error (<code>)` line, no `ms 0` or `-` fillers, and `|nosuch` is rejected with 404. Each panel keeps one block per source: a simulated host shows site, kind, state, running/max load, battery, task, running tasks, events and placements; a real host shows its probe (kind, time and cause), open sessions (each linked to its task), recent results and recent meter calls; a simulated task shows kind, title, brief, placed at sim clock with verbatim placement reason and eligible count, host link and status running/ended via work-end clock; a real task shows title, status, repo, issue/PR links, branch, host link, preferred model, retry count, goal excerpt (first 280 chars with ellipsis and full goal in title), DoD, rounds (with provider-stripped model), verdicts (recounted), ledger tokens and sessions as one block; a call shows provider, model as `name (provider)`, role, work item and host links, grouped tokens, ms and priced cost or no-data; an audit shows head SHA, recounted counts (`invalid (counts disagree)` on mismatch), repo, auditor, authors, findings and PR link when the repos match; each block keeps its own source with its heading, so a failed ledger renders one `Ledger: error (<code>)` line and other blocks keep data.
 
 Failure rule, per section as on `/`: a missing input shows `no data`, an
 unreadable or invalid one shows an error code with details in the
 dashboard log. One invalid alias fails the whole simulated source with
 `error (sim-trace-invalid)` and the real sections still render. Every
 alias is checked against `^[a-z][a-z0-9-]{0,31}$` before it can reach the
-page, and every value is escaped as on `/`. The tabbed view reuses one `renderCell`/`renderTable` with a `RenderContext` and the `verdictCounts` helper used by the model and both panel sites, with links built only through `buildTabHref`; the stacked `renderDashboard` remains byte-identical to the snapshot via `docs/demo/dashboard.html`.
+page, and every value is escaped as on `/`. Every page reuses one `renderCell` with a `RenderContext` and the `verdictCounts` helper used by the model and both panel sites, with links built only through `pageHref`; `dashboard:snapshot` renders the stacked page through `renderDashboard` (`docs/demo/dashboard.html`).
 
 ## Static snapshot (dashboard:snapshot)
 

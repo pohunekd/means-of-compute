@@ -742,7 +742,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
   try {
     const dashboard = await dashboardInputs(fixture);
     const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
-      view: "overview",
+      view: "live",
       t: 60,
       paused: false,
       host: null,
@@ -777,6 +777,22 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(auditCard).toContain("last round: findings (verdict missing)");
     expect(auditCard).not.toContain("stage audit");
     expect(auditCard).not.toContain("auditor:");
+    // An unreadable verdict store names its failure, never a missing verdict.
+    {
+      const vdir = join(fixture.dir, "verdicts", "w2-audit");
+      mkdirSync(vdir, { recursive: true });
+      writeFileSync(join(vdir, "cccccccccccccccccccccccccccccccccccccccc.json"), "{ invalid }");
+      const liveUnreadable = buildLive(
+        await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
+        { view: "live", t: 60, paused: false, host: null },
+      );
+      const unreadableCard = cardSlice(renderLive(liveUnreadable), "laptop-a");
+      expect(unreadableCard).toContain(
+        "last round: findings (verdicts: error (verdicts-unreadable))",
+      );
+      expect(unreadableCard).not.toContain("verdict missing");
+      rmSync(vdir, { recursive: true, force: true });
+    }
     // idle cards with reason, scoped per card
     // A queued work item flips the probe tail on every idle card with history.
     const kioskCard = cardSlice(page, "kiosk-a");
@@ -807,7 +823,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       const dashYesterday = await dashboardInputs(fixture);
       const liveYesterday = buildLive(
         await gatherLiveInputs(fixture.sources, dashYesterday, 60, () => {}),
-        { view: "overview", t: 60, paused: false, host: null },
+        { view: "live", t: 60, paused: false, host: null },
       );
       const kioskYesterday = cardSlice(renderLive(liveYesterday), "kiosk-a").replace(/\s+/g, " ");
       expect(kioskYesterday).toContain("today (UTC): 1 task");
@@ -855,7 +871,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         60,
         () => {},
       ),
-      { view: "overview", t: 60, paused: false, host: null },
+      { view: "live", t: 60, paused: false, host: null },
     );
     const rejectedKiosk = cardSlice(renderLive(liveRejected), "kiosk-a");
     expect(rejectedKiosk).toContain("Idle: 1 queued, not placed");
@@ -875,7 +891,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         60,
         () => {},
       ),
-      { view: "overview", t: 60, paused: false, host: null },
+      { view: "live", t: 60, paused: false, host: null },
     );
     const noRepoDesktop = cardSlice(renderLive(liveNoRepo), "desktop");
     expect(noRepoDesktop).toContain("<span>#42</span>");
@@ -892,7 +908,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         60,
         () => {},
       ),
-      { view: "overview", t: 60, paused: false, host: null },
+      { view: "live", t: 60, paused: false, host: null },
     );
     const badSpecsPage = renderLive(liveBadSpecs);
     const badSpecsDesktop = cardSlice(badSpecsPage, "desktop");
@@ -963,7 +979,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       );
       const dashTwo = await dashboardInputs(fixture);
       const liveTwo = buildLive(await gatherLiveInputs(fixture.sources, dashTwo, 60, () => {}), {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -998,7 +1014,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       const dashTamperedStrip = await dashboardInputs(fixture);
       const liveTamperedStrip = buildLive(
         await gatherLiveInputs(fixture.sources, dashTamperedStrip, 60, () => {}),
-        { view: "overview", t: 60, paused: false, host: null },
+        { view: "live", t: 60, paused: false, host: null },
       );
       const stripTampered = stripSlice(renderLive(liveTamperedStrip)).replace(/\s+/g, " ");
       expect(stripTampered).toContain("invalid verdict counts");
@@ -1038,7 +1054,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         60,
         () => {},
       ),
-      { view: "overview", t: 60, paused: false, host: null },
+      { view: "live", t: 60, paused: false, host: null },
     );
     expect(stripSliceCount(renderLive(liveFinding))).toBe(3);
     // The findings entry renders as an audit card on its host, never in the merged strip.
@@ -1066,7 +1082,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       const dashNoLedger = await dashboardInputs(fixture);
       const liveNoLedger = buildLive(
         await gatherLiveInputs(fixture.sources, dashNoLedger, 60, () => {}),
-        { view: "overview", t: 60, paused: false, host: null },
+        { view: "live", t: 60, paused: false, host: null },
       );
       const stripNoLedger = stripSlice(renderLive(liveNoLedger)).replace(/\s+/g, " ");
       expect(stripNoLedger).toContain("not in ledger yet");
@@ -1077,7 +1093,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
     const live95 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 95, () => {}), {
-      view: "overview",
+      view: "live",
       t: 95,
       paused: false,
       host: null,
@@ -1095,7 +1111,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
     const live45 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
-      view: "overview",
+      view: "live",
       t: 45,
       paused: false,
       host: "desk-001",
@@ -1107,7 +1123,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     const liveWithHost = buildLive(
       await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: "desk-001",
@@ -1117,7 +1133,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       throw new Error("expected sim host panel for desk-001");
     expect(liveWithHost.hostPanel.runningTasks).toHaveLength(0);
     const taskLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
-      view: "overview",
+      view: "live",
       t: 45,
       paused: false,
       host: null,
@@ -1140,7 +1156,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(taskLive.taskPanel.eligibleCount).toBe(1);
     const taskPage = renderLive(taskLive);
     expect(taskPage).toContain("Fix login");
-    expect(taskPage).toContain('href="/?view=overview&amp;t=45&amp;host=desk-001"');
+    expect(taskPage).toContain('href="/?view=live&amp;t=45&amp;host=desk-001"');
     expect(taskPage).toContain("desk-001 is idle, on AC power");
     const config: DashboardConfig = {
       listenEnv: "MOC_DASHBOARD_LISTEN",
@@ -1165,7 +1181,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         fetch(`http://localhost:${String(server.port)}${path}`, {
           headers: { host: `localhost:${String(server.port)}` },
         });
-      const t0 = await get("/?view=overview&t=0&task=sim-w-001");
+      const t0 = await get("/?view=live&t=0&task=sim-w-001");
       expect(t0.status).toBe(404);
     } finally {
       await server.stop();
@@ -1208,33 +1224,60 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         redirect: opts?.redirect ?? "follow",
       });
     };
-    const overview = await get("/?view=overview&t=60");
+    const overview = await get("/?view=live&t=60");
     const overviewBody = await overview.text();
     expect(overviewBody).toContain('class="tab active"');
-    expect(overviewBody).toContain('href="/?view=overview&amp;t=60"');
-    expect(overviewBody).toContain('href="/?view=fleet&amp;t=60"');
     expect(overviewBody).toContain("host=desk-001");
-    const withHostOverview = await get("/?view=overview&t=60&host=desk-001");
+    // Four tabs, each page with its subtitle and only its own figures: the
+    // old five-card strip (keyfigures) never returns on a tab page.
+    const tabs: readonly (readonly [string, string, string, readonly string[]])[] = [
+      ["live", "Live", "the real machines and their work first", ["Total savings"]],
+      ["work", "Work", "every task the factory has taken", ["Total savings", "Spent total"]],
+      ["models", "Models", "every real model call the factory made", ["Total savings"]],
+      ["savings", "Savings", "what the same work would have cost", ["Finished tasks"]],
+    ];
+    for (const [view, label, subtitle, foreign] of tabs) {
+      const body = await (await get(`/?view=${view}&t=60`)).text();
+      const tabList = [...body.matchAll(/<a class="tab[^"]*" href="\/\?view=(\w+)&amp;t=60"/g)];
+      expect(tabList.map((match) => match[1])).toEqual(["live", "work", "models", "savings"]);
+      expect(body).toContain(`<p class="sub"><b>${label}</b> - ${subtitle}`);
+      expect(body).not.toContain("keyfigures");
+      for (const other of foreign) {
+        expect(body).not.toContain(other);
+      }
+    }
+    // Old views redirect to the tab that holds them, keeping t and pause.
+    for (const [old, target] of [
+      ["fleet", "live"],
+      ["overview", "live"],
+      ["autonomy", "work"],
+      ["usage", "models"],
+    ] as const) {
+      const moved = await get(`/?view=${old}&t=60&pause=1`, { redirect: "manual" });
+      expect(moved.status).toBe(301);
+      expect(moved.headers.get("location")).toBe(`/?view=${target}&t=60&pause=1`);
+    }
+    const withHostOverview = await get("/?view=live&t=60&host=desk-001");
     const withHostOverviewBody = await withHostOverview.text();
-    const tabHrefMatch = /href="\/\?view=fleet[^"]*"/.exec(withHostOverviewBody);
+    const tabHrefMatch = /href="\/\?view=work[^"]*"/.exec(withHostOverviewBody);
     expect(tabHrefMatch?.[0]).not.toContain("host=");
-    const both = await get("/?view=overview&t=60&host=desk-001&task=sim-w-001");
+    const both = await get("/?view=live&t=60&host=desk-001&task=sim-w-001");
     const bothBody = await both.text();
     expect(bothBody).toContain("desk-001");
     expect(bothBody).toContain('id="host-panel"');
     expect(bothBody).not.toContain('id="task-panel"');
-    const withTask = await get("/?view=overview&t=60&task=sim-w-001");
+    const withTask = await get("/?view=live&t=60&task=sim-w-001");
     const withTaskBody = await withTask.text();
-    expect(withTaskBody).toContain('content="5;url=/?view=overview&amp;t=65&amp;task=sim-w-001"');
+    expect(withTaskBody).toContain('content="5;url=/?view=live&amp;t=65&amp;task=sim-w-001"');
     expect(withHostOverviewBody).toContain(
-      'content="5;url=/?view=overview&amp;t=65&amp;host=desk-001"',
+      'content="5;url=/?view=live&amp;t=65&amp;host=desk-001"',
     );
-    const paused = await get("/?view=overview&t=60&pause=1");
+    const paused = await get("/?view=live&t=60&pause=1");
     const pausedBody = await paused.text();
     expect(pausedBody).not.toContain('http-equiv="refresh"');
     expect(pausedBody).toContain("paused");
-    expect(pausedBody).toContain('href="/?view=overview&amp;t=60">resume');
-    const withHost = await get("/?view=overview&t=60&host=desk-001");
+    expect(pausedBody).toContain('href="/?view=live&amp;t=60">resume');
+    const withHost = await get("/?view=live&t=60&host=desk-001");
     const withHostBody = await withHost.text();
     expect(withHostBody).toContain('http-equiv="refresh"');
     expect(withHostBody).toContain("host=desk-001");
@@ -1243,37 +1286,37 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(liveRedirect.headers.get("location")).toBe("/?t=60");
     const bad = await get("/live?t=abc", { redirect: "manual" });
     expect(bad.status).toBe(404);
-    const past = await get("/?view=overview&t=241");
+    const past = await get("/?view=live&t=241");
     expect(past.status).toBe(404);
     const unknown = await get("/?view=unknown");
     expect(unknown.status).toBe(404);
-    const badHost = await get("/?view=overview&host=Bad_Alias");
+    const badHost = await get("/?view=live&host=Bad_Alias");
     expect(badHost.status).toBe(404);
-    const unknownHost = await get("/?view=overview&host=unknown-host-xyz");
+    const unknownHost = await get("/?view=live&host=unknown-host-xyz");
     expect(unknownHost.status).toBe(404);
-    const badTask = await get("/?view=overview&task=Bad_Task");
+    const badTask = await get("/?view=live&task=Bad_Task");
     expect(badTask.status).toBe(404);
     expect(await badTask.text()).not.toContain("Bad_Task");
-    const unknownTask = await get("/?view=overview&task=unknown-task-xyz");
+    const unknownTask = await get("/?view=live&task=unknown-task-xyz");
     expect(unknownTask.status).toBe(404);
-    const badCall = await get("/?view=overview&call=badcall");
+    const badCall = await get("/?view=live&call=badcall");
     expect(badCall.status).toBe(404);
-    const unknownCall = await get("/?view=overview&call=2026-11-03T17%3A59%3A02.000Z%7Cunknown-w");
+    const unknownCall = await get("/?view=live&call=2026-11-03T17%3A59%3A02.000Z%7Cunknown-w");
     expect(unknownCall.status).toBe(404);
-    const badAudit = await get("/?view=overview&audit=badaudit");
+    const badAudit = await get("/?view=live&audit=badaudit");
     expect(badAudit.status).toBe(404);
-    const malformedAudit = await get("/?view=overview&audit=w1-real%40zz");
+    const malformedAudit = await get("/?view=live&audit=w1-real%40zz");
     expect(malformedAudit.status).toBe(404);
     const unknownAudit = await get(
-      "/?view=overview&audit=w1-real%40ffffffffffffffffffffffffffffffffffffffff",
+      "/?view=live&audit=w1-real%40ffffffffffffffffffffffffffffffffffffffff",
     );
     expect(unknownAudit.status).toBe(404);
     // M12/M13: meter/audit pattern checks (call and audit) must be 404 for malformed values even with good fixtures
-    const badCallPattern = await get("/?view=overview&call=not-a-time%7Cw1-real");
+    const badCallPattern = await get("/?view=live&call=not-a-time%7Cw1-real");
     expect(badCallPattern.status).toBe(404);
-    const badAuditPattern = await get("/?view=overview&audit=w1-real%40zz");
+    const badAuditPattern = await get("/?view=live&audit=w1-real%40zz");
     expect(badAuditPattern.status).toBe(404);
-    const both2 = await get("/?view=overview&t=60&host=desktop&task=w1-real");
+    const both2 = await get("/?view=live&t=60&host=desktop&task=w1-real");
     expect(both2.status).toBe(200);
     expect(await both2.text()).toContain('id="host-panel"');
     {
@@ -1281,7 +1324,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const mOrig = readFileSync(mPath, "utf8");
       writeFileSync(mPath, "{ invalid }");
       const badCallBrokenMeter = await get(
-        "/?view=overview&call=2026-11-03T00%3A00%3A00.000Z%7Cw1-real",
+        "/?view=live&call=2026-11-03T00%3A00%3A00.000Z%7Cw1-real",
       );
       expect(badCallBrokenMeter.status).toBe(404);
       writeFileSync(mPath, mOrig);
@@ -1291,10 +1334,10 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const brokenFile = join(vdir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
       const origBroken = readFileSync(brokenFile, "utf8");
       writeFileSync(brokenFile, "{ invalid }");
-      const malformedWithBroken = await get("/?view=overview&audit=badaudit");
+      const malformedWithBroken = await get("/?view=live&audit=badaudit");
       expect(malformedWithBroken.status).toBe(404);
       const auditBrokenStore = await get(
-        "/?view=overview&audit=w1-real%40bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "/?view=live&audit=w1-real%40bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       );
       expect(auditBrokenStore.status).toBe(200);
       expect(await auditBrokenStore.text()).toContain("error (verdicts-unreadable)");
@@ -1304,7 +1347,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const taskLiveForLink = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
         {
-          view: "overview",
+          view: "live",
           t: 60,
           paused: false,
           host: null,
@@ -1319,7 +1362,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const tLive = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
         {
-          view: "overview",
+          view: "live",
           t: 60,
           paused: false,
           host: null,
@@ -1327,13 +1370,13 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         },
       );
       const tPage = renderLive(tLive);
-      expect(tPage).toContain('content="5;url=/?view=overview&amp;t=65&amp;task=w1-real"');
+      expect(tPage).toContain('content="5;url=/?view=live&amp;t=65&amp;task=w1-real"');
     }
     {
       const missingLive = buildLive(
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
         {
-          view: "overview",
+          view: "live",
           t: 60,
           paused: false,
           host: null,
@@ -1355,7 +1398,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const brokenLive = buildLive(
       await gatherLiveInputs(fixture.sources, brokenDash, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1372,7 +1415,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const dashMeterBad = await dashboardInputs(fixture);
     const liveMeterBad = buildLive(
       await gatherLiveInputs(fixture.sources, dashMeterBad, 60, () => {}),
-      { view: "overview", t: 60, paused: false, host: null },
+      { view: "live", t: 60, paused: false, host: null },
     );
     const meterBadDesktop = cardSlice(renderLive(liveMeterBad), "desktop");
     expect(meterBadDesktop).toContain("latest call:");
@@ -1386,7 +1429,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const liveBroken = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1407,7 +1450,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const noStoreLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: "desktop",
@@ -1444,7 +1487,9 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       headers: { host: `localhost:${String(plain.port)}` },
     });
     const body = await res.text();
-    expect(body).not.toContain(">overview<");
+    // Without live sources `/` is the Work tab with no simulated text.
+    expect(body).toContain('<a class="tab active" href="/?view=work" aria-current="page">Work</a>');
+    expect(body).not.toContain(">Live<");
     expect(body).not.toContain("simulated");
     const workRes = await fetch(`http://localhost:${String(plain.port)}/?view=work`, {
       headers: { host: `localhost:${String(plain.port)}` },
@@ -1466,7 +1511,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
   try {
     const dashboard = await dashboardInputs(fixture);
     const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
-      view: "overview",
+      view: "live",
       t: 60,
       paused: false,
       host: null,
@@ -1487,7 +1532,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const page = renderLive(live);
     expect(page).toContain("<td>baseten</td>");
     const callPriced = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
-      view: "overview",
+      view: "live",
       t: 60,
       paused: false,
       host: null,
@@ -1502,7 +1547,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(callPage).toContain("muse-spark-open-1026");
     expect(callPage).toContain("muse-spark-open-1026 (baseten)");
     const realTask = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
-      view: "overview",
+      view: "live",
       t: 60,
       paused: false,
       host: null,
@@ -1530,7 +1575,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const tamperedLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashTampered, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1541,7 +1586,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     expect(tamperedPage).toContain("invalid (counts disagree)");
     writeFileSync(vPath2, vOrig2);
     const auditLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
-      view: "overview",
+      view: "live",
       t: 60,
       paused: false,
       host: null,
@@ -1563,7 +1608,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       const diffAudit = buildLive(
         await gatherLiveInputs(fixture.sources, dashDiffRepo, 60, () => {}),
         {
-          view: "overview",
+          view: "live",
           t: 60,
           paused: false,
           host: null,
@@ -1581,7 +1626,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const ledgerLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashBrokenLedger, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1597,7 +1642,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const tamperedAudit = buildLive(
       await gatherLiveInputs(fixture.sources, dashTampered2, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1614,7 +1659,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       const brokenAudit = buildLive(
         await gatherLiveInputs(fixture.sources, dashBrokenVerdict, 60, () => {}),
         {
-          view: "overview",
+          view: "live",
           t: 60,
           paused: false,
           host: null,
@@ -1632,7 +1677,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const roundsBroken = buildLive(
       await gatherLiveInputs(fixture.sources, dashBrokenResults, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1667,7 +1712,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       });
       const workBody = await workRes.text();
       expect(workBody).toContain("task=w1-real");
-      expect(workBody).toContain("/?view=overview");
+      expect(workBody).toContain("/?view=live");
     } finally {
       await workServer.stop();
     }
@@ -1678,7 +1723,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     const brokenMeterLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashBrokenMeter, 60, () => {}),
       {
-        view: "overview",
+        view: "live",
         t: 60,
         paused: false,
         host: null,
@@ -1715,24 +1760,24 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
     });
     try {
       const badCall2 = await fetch(
-        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=2026-11-03T18%3A00%3A00.000Z%7Cnosuch`,
+        `http://localhost:${String(brokenMeterServer.port)}/?view=live&call=2026-11-03T18%3A00%3A00.000Z%7Cnosuch`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(badCall2.status).toBe(404);
       const badIdCall = await fetch(
-        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=2026-11-03T17%3A59%3A02.000Z%7CBad_ID`,
+        `http://localhost:${String(brokenMeterServer.port)}/?view=live&call=2026-11-03T17%3A59%3A02.000Z%7CBad_ID`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(badIdCall.status).toBe(404);
       const pipeCall = await fetch(
-        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=%7Cnosuch`,
+        `http://localhost:${String(brokenMeterServer.port)}/?view=live&call=%7Cnosuch`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(pipeCall.status).toBe(404);
       // M12: a malformed call timestamp 404s on the broken-meter server too;
       // pattern checks stay on when the source is bad.
       const brokenPatternCall = await fetch(
-        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=not-a-time%7Cw1-real`,
+        `http://localhost:${String(brokenMeterServer.port)}/?view=live&call=not-a-time%7Cw1-real`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(brokenPatternCall.status).toBe(404);
@@ -1743,7 +1788,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       const origBroken2 = readFileSync(brokenFile2, "utf8");
       writeFileSync(brokenFile2, "{ invalid }");
       const brokenPatternAudit = await fetch(
-        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&audit=w1-real%40zz`,
+        `http://localhost:${String(brokenMeterServer.port)}/?view=live&audit=w1-real%40zz`,
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(brokenPatternAudit.status).toBe(404);

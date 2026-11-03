@@ -93,14 +93,15 @@ Narration: "One loopback page shows work, verdicts and spend against the caps."
 
 command:
 `MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --ledger logs/loop-demo/ledger.jsonl --verdicts logs/loop-demo/verdicts --registry logs/loop-demo-registry.json --results logs/loop-demo/loop-results.jsonl --work logs/loop-demo/work-items.json`,
-then open `http://localhost:8080/`
+then open `http://localhost:8080/`, the Work tab (there is no Live tab without a
+simulated trace)
 
 expected: the line `factory: dashboard listening (dashboard) port 8080`. Work
 lists `demo-a`, `demo-b` and `demo-c` as `done`; `demo-a` shows two verdicts by
 `muse-spark-1.3-contributor`, high 1 at the first head and clean at the second.
-Usage shows spent today $0.0001 against the day cap $12.0000 and the total cap
-$140.0000, and NVIDIA Build requests 4 of 1,000. Fleet shows "no data (host state
-not wired)", which is expected in the stub. Stop the server with Ctrl-C.
+Models shows spent today $0.0001 and NVIDIA Build requests 4 of 1,000; Savings
+shows the day cap $12.0000 and the total cap $140.0000 under Budget caps. Stop
+the server with Ctrl-C.
 
 ### 6. Benchmark numbers
 
@@ -157,21 +158,23 @@ Narration (said once): "Real placement engine, synthetic fleet; the four real
 machines and the model calls are live."
 
 expected: the page advances on its own every 5 seconds, 5 sim-minutes per
-frame. Dashed tiles under the SIMULATED group tags fill in as desks go idle,
+frame. The four real machines lead as Real work now cards; below them the
+one-line fleet tiles under the SIMULATED group headings change their left
+border colour as desks go idle,
 laptops leave and rejoin from home, and the lobby kiosks enter their
 unattended window. Battery beat: at simulated 18:35 (minute 95) `laptop-007
 battery at 40 percent` appears in `Simulated events (sim clock)`; the
 `laptop-007` tile keeps running with an amber edge and a `!` (running, now
-excluded - the battery reason is in its title) and turns amber (blocked)
-from minute 215, when its work ends. `desk-058 returned` appears at 18:40
+excluded - the battery reason is in its title) and turns blocked from
+minute 200, when its work ends. `desk-058 returned` appears at 18:40
 and `laptop-021 unplugged` at 19:15, each with its reason in the tile title.
 The `Simulated events (sim clock)` block shows `placed sim-... on ...
 because ...` rows with the placement engine's own reasons; real rounds sit
-in the separate `Real events` block above it, real tiles are tagged REAL,
-and the Model activity table lands real meter call-end rows while the
-factory works. The counters keep the simulated counts beside the real ones,
-never inside them. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; the full dashboard
-stays one click away at `/`.
+in the separate `Real events` block above it, and the Model activity table
+lands real meter call-end rows while the factory works. The fleet heading
+carries the simulated counters, labelled `(simulated)`; no simulated count
+enters the cards or the Work, Models and Savings tabs. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; Work,
+Models and Savings are one click away in the tab bar, in the same design.
 
 ## Multi-host run (W3.1)
 

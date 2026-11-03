@@ -21,6 +21,7 @@ import { providerDescriptorExists } from "../providers/config.js";
 import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
 import { loadWorkConfig } from "../work/config.js";
+import { loadFactorySpecs } from "../work/specs.js";
 import { loadMeterConfig } from "../meter/config.js";
 import { portsLogPath } from "../loop/config.js";
 
@@ -228,6 +229,7 @@ async function serve(): Promise<number> {
   };
   let resultsPath: string;
   let workStorePath: string;
+  let repoSet: ReadonlySet<string>;
   let meterUsagePath: string;
   let portsPath: string;
   try {
@@ -249,7 +251,14 @@ async function serve(): Promise<number> {
       return loopConfig;
     };
     resultsPath = flags.results ?? (await loopConfigOnce()).resultsPath;
-    workStorePath = flags.work ?? (await loadWorkConfig()).storePath;
+    const workConfig = await loadWorkConfig();
+    workStorePath = flags.work ?? workConfig.storePath;
+    try {
+      const specs = await loadFactorySpecs(workConfig.factorySpecsPath);
+      repoSet = new Set(specs.map((spec) => spec.repo));
+    } catch {
+      repoSet = new Set();
+    }
     meterUsagePath = flags.meterUsage ?? (await loadMeterConfig()).usageLogPath;
     portsPath = flags.ports ?? portsLogPath((await loopConfigOnce()).logPath);
     fixed = {
@@ -277,7 +286,7 @@ async function serve(): Promise<number> {
         resultsPath,
         workStorePath,
       },
-      live: { simTracePath: flags.simTrace, meterUsagePath, portsPath },
+      live: { simTracePath: flags.simTrace, meterUsagePath, portsPath, repoSet },
       now: pinned === null ? () => new Date() : () => pinned,
       log,
     });

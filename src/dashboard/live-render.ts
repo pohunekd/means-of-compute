@@ -16,8 +16,8 @@ import type {
   AuditPanel,
   CallPanel,
   HostPanel,
-  JustFinishedEntry,
   LiveActivityRow,
+  LiveFailure,
   LiveCell,
   LiveGroup,
   LiveModel,
@@ -110,10 +110,9 @@ export const LIVE_CSS = [
   ".rw .meta b{color:var(--text);font-weight:700}",
   ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px}",
   ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
-  ".chip{font-size:15px}",
   ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
-  ".stage.merge{background:var(--done-bg);color:var(--done-text)}",
-  ".fin{display:flex;gap:12px;margin:0 0 10px}",
+  ".fin{display:flex;gap:12px;margin:0 0 10px;align-items:baseline}",
+  ".fin .fi.fin-label{flex:0 0 auto;background:none;border:none;padding:6px 0;font-size:15px;font-weight:700}",
   ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:15px;line-height:1.3}",
   ".fin .fi b{font-size:16px}",
   "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}.realwork{grid-template-columns:repeat(2,1fr)}.fin{flex-wrap:wrap}}",
@@ -134,6 +133,29 @@ function compactTime(iso: string): string {
 
 function clockTime(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(iso) ? iso.slice(11, 19) : iso;
+}
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+function monthDay(iso: string): string {
+  const month = Number(iso.slice(5, 7));
+  const day = Number(iso.slice(8, 10));
+  if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
+    return iso.slice(0, 10);
+  return `${MONTHS[month - 1] as string} ${String(day)}`;
 }
 
 function shortenMiddle(text: string, limit: number): string {
@@ -274,7 +296,7 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   const baseTitle =
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
-      : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
+      : `${tile.alias}: ${tile.state}, ${tile.detail}${battery}`;
   const title =
     tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
   const chip = html`<span class="chip chip-real">REAL</span>`;
@@ -311,6 +333,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   }
   const hostHref = buildHref(model, { host: card.alias });
   const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
+  const repos = model.repos;
+  const repoAllowed = card.repo !== null && repos.has(card.repo);
   const stageLabel = card.stage === "idle" ? "" : card.stage;
   const stageClass =
     card.stage === "implement" ? "stage" : card.stage === "audit" ? "stage audit" : "stage";
@@ -323,64 +347,110 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     card.stage === "idle"
       ? card.idleReason === null
         ? constantHtml("")
-        : html`<p class="task idle-task">Idle — ${card.idleReason}</p>`
+        : html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
       : card.title === null
         ? html`<p class="task"><span class="nodata">no work</span></p>`
-        : taskHref === null
-          ? html`<p class="task">${card.title}</p>`
-          : html`<p class="task"><a href="${taskHref}">${card.title}</a></p>`;
+        : card.title.kind === "error"
+          ? html`<p class="task"><span class="error">title: error (${card.title.code})</span></p>`
+          : card.title.kind === "no-data"
+            ? html`<p class="task">
+                <span class="nodata">title: no data (${card.title.reason})</span>
+              </p>`
+            : taskHref === null
+              ? html`<p class="task">${card.title.text}</p>`
+              : html`<p class="task"><a href="${taskHref}">${card.title.text}</a></p>`;
   const issueLine =
     card.issue === null
       ? constantHtml("")
-      : card.repo === null
-        ? html`<span>#${String(card.issue)}</span>`
-        : html`<a href="https://github.com/${card.repo}/issues/${String(card.issue)}"
-            >#${String(card.issue)}</a
-          >`;
+      : card.issue.kind === "error"
+        ? html`<span class="error">issue: error (${card.issue.code})</span>`
+        : card.issue.kind === "text"
+          ? repoAllowed
+            ? html`<a href="https://github.com/${card.repo}/issues/${card.issue.text}"
+                >#${card.issue.text}</a
+              >`
+            : html`<span>#${card.issue.text}</span>`
+          : card.issue.reason === "no issue linked"
+            ? constantHtml("")
+            : html`<span class="nodata">issue: no data (${card.issue.reason})</span>`;
   const prLine =
-    card.pullNumber !== null
-      ? card.repo === null
-        ? html`<span>PR #${String(card.pullNumber)}</span>`
-        : html`<a href="https://github.com/${card.repo}/pull/${String(card.pullNumber)}"
-            >PR #${String(card.pullNumber)}</a
-          >`
-      : card.workItemId !== null && card.stage !== "idle"
+    card.pullNumber === null
+      ? card.workItemId !== null && card.stage !== "idle"
         ? html`<span class="nodata">PR not opened yet</span>`
-        : constantHtml("");
+        : constantHtml("")
+      : card.pullNumber.kind === "error"
+        ? html`<span class="error">PR: error (${card.pullNumber.code})</span>`
+        : card.pullNumber.kind === "no-data"
+          ? html`<span class="nodata">PR: no data (${card.pullNumber.reason})</span>`
+          : repoAllowed
+            ? html`<a href="https://github.com/${card.repo}/pull/${card.pullNumber.text}"
+                >PR #${card.pullNumber.text}</a
+              >`
+            : html`<span>PR #${card.pullNumber.text}</span>`;
   const elapsedLine =
     card.elapsed === null
       ? constantHtml("")
       : html`<p class="meta">elapsed <b>${card.elapsed}</b></p>`;
   const modelLine =
-    card.modelText === null
+    card.modelText === null && card.auditorModelText === null
       ? constantHtml("")
-      : card.auditorModelText !== null
-        ? html`<p class="meta">author ${card.modelText} · auditor ${card.auditorModelText}</p>`
-        : card.providerId === null
-          ? html`<p class="meta">${card.modelText}</p>`
-          : html`<p class="meta">${card.modelText} (${card.providerId})</p>`;
+      : html`<p class="meta">
+          ${card.modelText === null ? "" : `${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}${card.modelText !== null && card.auditorModelText !== null ? " · " : ""}${card.auditorModelText ?? ""}
+        </p>`;
   const tokensCostSoFar =
-    card.tokens === null || card.cost === null
-      ? constantHtml("")
-      : html`<p class="meta">
-          this task so far ${groupDigits(card.tokens.input)} in / ${groupDigits(card.tokens.output)}
-          out tokens ·
-          <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
-        </p>`;
+    card.meterFailure !== null
+      ? card.meterFailure.kind === "error"
+        ? html`<p class="meta">
+            tokens: <span class="error">error (${card.meterFailure.code})</span> · cost:
+            <span class="error">error (${card.meterFailure.code})</span>
+          </p>`
+        : html`<p class="meta">
+            tokens:
+            <span class="nodata">no data (${card.meterFailure.reason})</span> · cost:
+            <span class="nodata">no data (${card.meterFailure.reason})</span>
+          </p>`
+      : card.tokens === null || card.cost === null
+        ? constantHtml("")
+        : html`<p class="meta">
+            this task so far ${groupDigits(card.tokens.input)} in /
+            ${groupDigits(card.tokens.output)} out tokens ·
+            <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
+          </p>`;
   const callLine =
-    card.latestCall === null
-      ? constantHtml("")
-      : html`<p class="meta">
-          latest call ${clockTime(card.latestCall.at)} ·
-          ${card.latestCall.inputTokens === null ? "—" : groupDigits(card.latestCall.inputTokens)}
-          in /
-          ${card.latestCall.outputTokens === null ? "—" : groupDigits(card.latestCall.outputTokens)}
-          out · ${groupDigits(card.latestCall.ms)} ms
-        </p>`;
+    card.meterFailure !== null
+      ? card.meterFailure.kind === "error"
+        ? html`<p class="meta">
+            latest call: <span class="error">error (${card.meterFailure.code})</span>
+          </p>`
+        : html`<p class="meta">
+            latest call:
+            <span class="nodata">no data (${card.meterFailure.reason})</span>
+          </p>`
+      : card.latestCall === null
+        ? constantHtml("")
+        : card.latestCall.inputTokens === null || card.latestCall.outputTokens === null
+          ? html`<p class="meta">
+              latest call ${clockTime(card.latestCall.at)} ·
+              <span class="nodata">no data (usage not reported)</span>
+            </p>`
+          : html`<p class="meta">
+              latest call ${clockTime(card.latestCall.at)} ·
+              ${groupDigits(card.latestCall.inputTokens)} in /
+              ${groupDigits(card.latestCall.outputTokens)} out · ${groupDigits(card.latestCall.ms)}
+              ms
+            </p>`;
   const probeLine =
     card.stage !== "idle" || card.probeAt === null
       ? constantHtml("")
       : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
+  const finishedDay = card.lastFinished === null ? null : card.lastFinished.at.slice(0, 10);
+  const pageDay = model.renderedAt.slice(0, 10);
+  const finishedWhen =
+    card.lastFinished === null
+      ? ""
+      : finishedDay !== null && finishedDay !== pageDay
+        ? `${monthDay(card.lastFinished.at)} ${card.lastFinished.at.slice(11, 16)}`
+        : card.lastFinished.at.slice(11, 16);
   const lastFinishedLine =
     card.lastFinished === null
       ? constantHtml("")
@@ -390,7 +460,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
             <a href="${buildHref(model, { task: card.lastFinished.workItemId })}"
               >${card.lastFinished.workItemId}</a
             >
-            at ${card.lastFinished.at.slice(11, 16)} (${card.lastFinished.outcome})
+            at ${finishedWhen} (${card.lastFinished.outcome})
           </p>`
         : constantHtml("");
   const todayLine =
@@ -416,32 +486,59 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   </div>`;
 }
 
-function renderJustFinished(entry: JustFinishedEntry, model: LiveModel): SafeHtml {
+function renderJustFinished(
+  entry: {
+    readonly workItemId: string;
+    readonly title: LiveCell;
+    readonly hostAlias: string | null;
+    readonly verdictCounts:
+      { readonly high: number; readonly medium: number; readonly low: number } | "invalid" | null;
+    readonly verdictFailure: LiveFailure | null;
+    readonly outcome: string;
+    readonly cost: LiveCell | null;
+    readonly at: string;
+    readonly headSha: string | null;
+  },
+  model: LiveModel,
+): SafeHtml {
   const taskHref = buildHref(model, { task: entry.workItemId });
   const auditHref =
     entry.headSha === null
-      ? null
+      ? buildHref(model, { task: entry.workItemId })
       : buildHref(model, { audit: `${entry.workItemId}@${entry.headSha}` });
   const costText =
     entry.cost === null
-      ? constantHtml("no cost")
+      ? entry.verdictFailure === null
+        ? constantHtml("no cost")
+        : entry.verdictFailure.kind === "error"
+          ? html`<span class="error">error (${entry.verdictFailure.code})</span>`
+          : html`<span class="nodata">no data (${entry.verdictFailure.reason})</span>`
       : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
-  const title = entry.title ?? entry.workItemId;
-  const counts = entry.verdictCounts;
+  const titleText: SafeHtml =
+    entry.title.kind === "text"
+      ? constantHtml(entry.title.text)
+      : entry.title.kind === "error"
+        ? html`<span class="error">error (${entry.title.code})</span>`
+        : html`<span class="nodata">no data (${entry.title.reason})</span>`;
+  const counts = entry.verdictFailure !== null ? "failed" : entry.verdictCounts;
   const countsText: SafeHtml =
     counts === null
       ? constantHtml("no data (no verdict)")
-      : counts === "invalid"
-        ? html`<span class="error">invalid verdict counts</span>`
-        : auditHref === null
-          ? constantHtml(`${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}`)
+      : counts === "failed"
+        ? entry.verdictFailure !== null && entry.verdictFailure.kind === "error"
+          ? html`<span class="error">counts: error (${entry.verdictFailure.code})</span>`
+          : entry.verdictFailure !== null
+            ? html`<span class="nodata">counts: no data (${entry.verdictFailure.reason})</span>`
+            : constantHtml("no data (no verdict)")
+        : counts === "invalid"
+          ? html`<span class="error">invalid verdict counts</span>`
           : html`<a href="${auditHref}"
               >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
             >`;
   const hostBadge = entry.hostAlias === null ? constantHtml("") : html` · ${entry.hostAlias}`;
   return html`<div class="fi">
-    <a href="${taskHref}">${title}</a>${hostBadge} · ${entry.outcome} · ${countsText} · ${costText}
-    · ${clockTime(entry.at)}
+    <a href="${taskHref}">${titleText}</a>${hostBadge} · ${entry.outcome} · ${countsText} ·
+    ${costText} · ${clockTime(entry.at)}
   </div>`;
 }
 
@@ -1096,7 +1193,7 @@ export function renderLive(model: LiveModel): string {
     if (model.justFinished.kind !== "ok") return sectionText(model.justFinished);
     if (model.justFinished.value.length === 0) return constantHtml("");
     return html`<div id="just-finished" class="fin">
-      <div class="fi"><b>Just finished</b></div>
+      <div class="fi fin-label"><b>Just finished</b></div>
       ${model.justFinished.value.map((entry) => renderJustFinished(entry, model))}
     </div>`;
   })();
@@ -1200,10 +1297,8 @@ export function renderLive(model: LiveModel): string {
         </header>
         <main>
           <section>
-            <h2>
-              Real work now
-              <span class="rw-subtitle">· what the real machines are doing at this moment</span>
-            </h2>
+            <h2>Real work now</h2>
+            <p class="rw-subtitle">what the real machines are doing at this moment</p>
             ${realWorkBlock} ${justFinishedBlock}
           </section>
           <div class="live-layout">

@@ -660,6 +660,24 @@ interface FixtureDir {
   readonly fixed: Parameters<typeof gatherInputs>[1];
 }
 
+function cardSlice(page: string, alias: string): string {
+  const marker = `>${alias}</a>`;
+  const start = page.indexOf(marker);
+  if (start === -1) throw new Error(`card for ${alias} not found`);
+  const divStart = page.lastIndexOf('<div class="rw', start);
+  const nextDiv = page.indexOf('<div class="rw', start);
+  const end = nextDiv === -1 ? page.indexOf('id="just-finished"') : nextDiv;
+  return page.slice(divStart === -1 ? start : divStart, end === -1 ? undefined : end);
+}
+
+function stripSlice(page: string): string {
+  const start = page.indexOf('id="just-finished"');
+  if (start === -1) throw new Error("just finished strip not found");
+  const divStart = page.lastIndexOf("<div", start);
+  const fleet = page.indexOf('id="live-fleet"', start);
+  return page.slice(divStart === -1 ? start : divStart, fleet === -1 ? undefined : fleet);
+}
+
 function makeFixture(trace: string): FixtureDir {
   const dir = mkdtempSync(join(tmpdir(), "live-view-"));
   writeFixtures(dir, trace);
@@ -669,6 +687,7 @@ function makeFixture(trace: string): FixtureDir {
       simTracePath: join(dir, "trace.jsonl"),
       meterUsagePath: join(dir, "meter-usage.jsonl"),
       portsPath: join(dir, "loop-ports.jsonl"),
+      repoSet: new Set(["example/demo-repo"]),
     },
     dashboardSources: {
       ledgerPath: join(dir, "ledger.jsonl"),
@@ -707,40 +726,69 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(page).toContain("Real work now");
     expect(page).toContain("what the real machines are doing at this moment");
     expect(page).not.toContain("Real fleet");
-    // running card details
-    expect(page).toContain("desktop");
-    expect(page).toContain("implement");
-    expect(page).toContain("Real task title");
-    expect(page).toContain("#42");
-    expect(page).toContain("PR #101");
-    expect(page).toContain("muse-spark-open-1026");
-    expect(page).toContain("baseten");
-    expect(page).toContain("elapsed");
-    expect(page).toContain("85,210");
-    expect(page).toContain("2,430");
-    expect(page).toContain("$");
-    expect(page).toContain("latest call");
-    expect(page).toContain("17:59:04");
-    expect(page).toContain("2,144");
-    // audit card
-    expect(page).toContain("laptop-a");
-    expect(page).toContain("audit");
-    expect(page).toContain("Report: how this factory built itself");
-    // idle cards with reason
-    expect(page).toContain("kiosk-a");
-    expect(page).toContain("laptop-b");
-    expect(page).toContain("no work queued");
-    expect(page).toContain("person at the desk");
-    expect(page).toContain("reported");
-    expect(page).toContain("last finished");
-    expect(page).toContain("today (UTC):");
-    // Just finished strip
+    // running card details, scoped to the desktop card slice
+    const desktopCard = cardSlice(page, "desktop");
+    expect(desktopCard).toContain("implement");
+    expect(desktopCard).toContain("Real task title");
+    expect(desktopCard).toContain('href="https://github.com/example/demo-repo/issues/42"');
+    expect(desktopCard).toContain('href="https://github.com/example/demo-repo/pull/101"');
+    expect(desktopCard).toContain("muse-spark-open-1026");
+    expect(desktopCard).toContain("(baseten)");
+    expect(desktopCard).toContain("elapsed");
+    expect(desktopCard).toContain("12 min");
+    expect(desktopCard).toContain("85,210");
+    expect(desktopCard).toContain("2,430");
+    expect(desktopCard).toContain("$0.1168");
+    expect(desktopCard).toContain("latest call 17:59:04");
+    const desktopFlat = desktopCard.replace(/\s+/g, " ");
+    expect(desktopFlat).toContain("1,000 in / 500 out");
+    expect(desktopFlat).toContain("250 ms");
+    expect(desktopCard).not.toContain("muse-spark-open-1026 (baseten) · latest");
+    // audit card, scoped to the laptop-a card slice
+    const auditCard = cardSlice(page, "laptop-a");
+    expect(auditCard).toContain("audit");
+    expect(auditCard).toContain("Report: how this factory built itself");
+    expect(auditCard).toContain("auditor: no data (verdict not written yet)");
+    const auditFlat = auditCard.replace(/\s+/g, " ");
+    expect(auditFlat).toContain("1,300,000 in / 48,000 out");
+    // idle cards with reason, scoped per card
+    const kioskCard = cardSlice(page, "kiosk-a");
+    expect(kioskCard).toContain("Idle: no work queued");
+    expect(kioskCard).toContain("reported 17:58:00");
+    expect(kioskCard).toContain("last finished");
+    const kioskFlat = kioskCard.replace(/\s+/g, " ");
+    expect(kioskFlat).toContain("w3-kiosk");
+    expect(kioskFlat).toContain("at 17:53 (merged)");
+    expect(kioskFlat).toContain("today (UTC): 2 tasks");
+    const laptopbCard = cardSlice(page, "laptop-b");
+    expect(laptopbCard).toContain("Idle: person at the desk");
+    expect(kioskCard).not.toContain("person at the desk");
+    // verdict-free repo check: links stay plain when the repo leaves the configured set
+    const liveNoRepo = buildLive(
+      await gatherLiveInputs({ ...fixture.sources, repoSet: new Set() }, dashboard, 60, () => {}),
+      { view: "overview", t: 60, paused: false, host: null },
+    );
+    const noRepoDesktop = cardSlice(renderLive(liveNoRepo), "desktop");
+    expect(noRepoDesktop).toContain("<span>#42</span>");
+    expect(noRepoDesktop).toContain("<span>PR #101</span>");
+    expect(noRepoDesktop).not.toContain("github.com");
+    // Just finished strip: three merged entries in order with their costs
     expect(page).toContain('id="just-finished"');
     expect(page).toContain("Just finished");
-    expect(page).toContain("w4-laptopb");
-    expect(page).toContain("w3-kiosk");
-    expect(page).toContain("merged");
-    expect(page).toContain("0/0/0");
+    const stripHtml = stripSlice(page);
+    const stripText = stripHtml.replace(/\s+/g, " ");
+    expect(stripText.indexOf("w4-laptopb") >= 0).toBe(true);
+    expect(stripText.indexOf("w4-laptopb")).toBeLessThan(stripText.indexOf("w3-kiosk"));
+    expect(stripText.indexOf("w3-kiosk")).toBeLessThan(stripText.indexOf("w1-old"));
+    expect(stripText).toContain("Docs update");
+    expect(stripText).toContain("laptop-b");
+    expect(stripText).toContain("Add login fix");
+    expect(stripText).toContain("kiosk-a");
+    expect(stripText).toContain("0/0/0");
+    expect(stripText).toContain("$0.0049");
+    expect(stripText).toContain("$0.0034");
+    expect(stripText).toContain("w1-old");
+    expect(stripText).toContain("$0.0039");
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
@@ -945,21 +993,28 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(both2.status).toBe(200);
     expect(await both2.text()).toContain('id="host-panel"');
     {
+      const mPath = join(fixture.dir, "meter-usage.jsonl");
+      const mOrig = readFileSync(mPath, "utf8");
+      writeFileSync(mPath, "{ invalid }");
+      const badCallBrokenMeter = await get(
+        "/?view=overview&call=2026-11-03T00%3A00%3A00.000Z%7Cw1-real",
+      );
+      expect(badCallBrokenMeter.status).toBe(404);
+      writeFileSync(mPath, mOrig);
+    }
+    {
       const vdir = join(fixture.dir, "verdicts", "w1-real");
       const brokenFile = join(vdir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
       const origBroken = readFileSync(brokenFile, "utf8");
       writeFileSync(brokenFile, "{ invalid }");
       const malformedWithBroken = await get("/?view=overview&audit=badaudit");
       expect(malformedWithBroken.status).toBe(404);
+      const auditBrokenStore = await get(
+        "/?view=overview&audit=w1-real%40bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      );
+      expect(auditBrokenStore.status).toBe(200);
+      expect(await auditBrokenStore.text()).toContain("error (verdicts-unreadable)");
       writeFileSync(brokenFile, origBroken);
-    }
-    {
-      const mPath = join(fixture.dir, "meter-usage.jsonl");
-      const mOrig = readFileSync(mPath, "utf8");
-      writeFileSync(mPath, "{ invalid }");
-      const malformedCallBroken = await get("/?view=overview&call=badcall");
-      expect(malformedCallBroken.status).toBe(404);
-      writeFileSync(mPath, mOrig);
     }
     {
       const taskLiveForLink = buildLive(
@@ -1041,7 +1096,8 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     );
     const pageBroken = renderLive(liveBroken);
     expect(pageBroken).toContain('id="real-work"');
-    expect(pageBroken).toContain("error (");
+    expect(pageBroken).toContain("error (registry-invalid)");
+    expect(pageBroken).not.toContain('class="nodata">no data (registry-invalid)');
     const brokenPanel = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {

@@ -321,6 +321,7 @@ async function makeHarness(
     maxActiveItems: overrides.maxActiveItems ?? 4,
     maxBriefBytes: overrides.maxBriefBytes ?? 65536,
     hostCooldown: { rejections: 3, windowMs: 600_000, cooldownMs: 900_000 },
+    hostAssessmentRefreshSec: 120,
     retireRetryMs: 60_000,
     ciPollMs: overrides.ciPollMs ?? 30_000,
     intake: {
@@ -822,6 +823,15 @@ test("a cooled host is skipped for every item, also by the exclusions retry", as
         harness.records
           .map((entry) => entry.event)
           .filter((event) => event === "placement" || event === "no-host");
+      expect(
+        harness.records.find((entry) => entry.event === "host-assessment")?.candidates,
+      ).toEqual([
+        {
+          hostAlias: "host-a",
+          excluded: false,
+          reason: "idle, on AC power, no battery, CPU 94% free, memory 64% free",
+        },
+      ]);
       expect(waits()).toEqual(["placement", "no-host", "no-host"]);
       // A backoff ends the wait, so the same wait after it is logged again.
       await updateLoopState(harness.ctx.statePath, (current) => {
@@ -924,6 +934,63 @@ test("a placement logs the chosen host and every candidate reason", async () => 
           ],
         },
       ]);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// #324: with an empty queue every tick assesses the collected hosts; the
+// event is written on the first tick, on a change, not for a counter alone,
+// and again once hostAssessmentRefreshSec has passed.
+test("an empty queue logs host-assessment on change and on refresh", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      await writeStore(harness.ctx.storePath, []);
+      const busy = (seconds: number): void => {
+        harness.hostControl.set("host-b", {
+          kind: "reply",
+          reply: replyOf(
+            capacityOf("host-b", {
+              idle: false,
+              idleReason: `user input ${String(seconds)} seconds ago`,
+              secondsSinceInput: seconds,
+            }),
+          ),
+        });
+      };
+      const scheduler = createScheduler(harness.ctx);
+      const tickAt = async (offsetMs: number): Promise<number> => {
+        harness.nowValue.current = new Date(Date.parse(NOW) + offsetMs);
+        await scheduler.tick();
+        await scheduler.settled();
+        return harness.records.filter((entry) => entry.event === "host-assessment").length;
+      };
+      expect(await tickAt(0)).toBe(1);
+      busy(30);
+      expect(await tickAt(1_000)).toBe(2);
+      busy(45);
+      expect(await tickAt(2_000)).toBe(2);
+      expect(await tickAt(120_999)).toBe(2);
+      expect(await tickAt(121_000)).toBe(3);
+      expect(harness.records.filter((entry) => entry.event === "host-assessment")[1]).toEqual({
+        event: "host-assessment",
+        candidates: [
+          {
+            hostAlias: "host-a",
+            excluded: false,
+            reason: "idle, on AC power, no battery, CPU 94% free, memory 64% free",
+          },
+          {
+            hostAlias: "host-b",
+            excluded: true,
+            reason: "excluded: not idle (user input 30 seconds ago)",
+          },
+        ],
+      });
+      expect(harness.records.some((entry) => entry.event === "placement")).toBe(false);
     } finally {
       restoreEnv();
     }

@@ -52,11 +52,12 @@ export interface LiveSources {
   readonly repos: Sourced<ReadonlySet<string>>;
 }
 
-// One host's line of the newest loop `placement` event that named it: the
-// event time and item, whether the engine chose it, and its verbatim reason.
+// One host's line of the newest loop `placement` or `host-assessment` event
+// that named it: the event time, the item (null for an assessment), whether
+// the engine chose it, and its verbatim reason.
 export interface PlacementEntry {
   readonly at: string;
-  readonly workItemId: string;
+  readonly workItemId: string | null;
   readonly chosen: boolean;
   readonly excluded: boolean;
   readonly reason: string;
@@ -123,7 +124,7 @@ export interface SimTrace {
 
 export type LiveTileState = SimTileState | "reported" | "unavailable";
 
-// The agent-limit exclusion text is the fixed template at src/placement/place.ts:144;
+// The agent-limit exclusion text is the fixed template at src/placement/place.ts:143;
 // place() runs its other exclusion checks first, so a host excluded for another reason
 // while running never carries this prefix.
 const AGENT_LIMIT_REASON_PREFIX = "excluded: at agent limit (";
@@ -788,9 +789,9 @@ export class LoopLogDataError extends Error {
   }
 }
 
-// Newest placement entry per host alias from the loop log's `placement`
-// events at or before asOf; other events are skipped, and an unterminated
-// last line is ignored because the loop may be appending to it.
+// Newest entry per host alias from the loop log's `placement` and
+// `host-assessment` events at or before asOf; other events are skipped, and
+// an unterminated last line is ignored because the loop may be appending to it.
 async function readPlacementsInput(
   path: string,
   asOf: Date,
@@ -819,18 +820,24 @@ async function readPlacementsInput(
         throw new LoopLogDataError(`${where}: not a JSON object`);
       }
       const line = parsed as Record<string, unknown>;
-      if (line["event"] !== "placement") {
+      const event = line["event"];
+      if (event !== "placement" && event !== "host-assessment") {
         return;
       }
+      const assessment = event === "host-assessment";
       const at = line["ts"];
-      const workItemId = line["workItemId"];
-      const chosenHost = line["chosenHostAlias"];
+      const chosenHost = assessment ? null : line["chosenHostAlias"];
       const candidates = line["candidates"];
       if (typeof at !== "string" || !ISO_PATTERN.test(at) || Number.isNaN(Date.parse(at))) {
         throw new LoopLogDataError(`${where}: invalid "ts"`);
       }
-      if (typeof workItemId !== "string" || workItemId === "" || hasControlChar(workItemId)) {
-        throw new LoopLogDataError(`${where}: invalid "workItemId"`);
+      let workItemId: string | null = null;
+      if (!assessment) {
+        const raw = line["workItemId"];
+        if (typeof raw !== "string" || raw === "" || hasControlChar(raw)) {
+          throw new LoopLogDataError(`${where}: invalid "workItemId"`);
+        }
+        workItemId = raw;
       }
       if (
         chosenHost !== null &&

@@ -554,17 +554,26 @@ The amber edge marks simulated tiles only.
 
 A real tile's state is read only from its card's fields. An open session is
 `running`; a registry, results or work store failure keeps `unavailable`;
-next, a placement entry younger than `placementMaxAgeSec` decides, matched on
-the stable prefix of the engine's reason:
+next, the newest entry for the host from either a loop `placement` or a loop
+`host-assessment` event (docs/loop.md) decides while it is younger than
+`placementMaxAgeSec`, so a real tile shows the host's state with an empty
+queue too. It is matched on the stable prefix of the engine's reason; for
+`excluded: not idle (<inner>)` on the probe's inner idle reason
+(`derive_idle` in `crates/moc-host-state/src/idle_rule.rs`):
 
-| Newest placement entry for the host           | State         |
-| --------------------------------------------- | ------------- |
-| not excluded (chosen, or eligible not chosen) | `eligible`    |
-| `excluded: not idle ...`                      | `busy`        |
-| `excluded: not on AC power`                   | `blocked`     |
-| `excluded: battery at ...`                    | `blocked`     |
-| `excluded: host state unavailable ...`        | `unavailable` |
-| any other excluded reason                     | `blocked`     |
+| Newest placement or assessment entry for the host               | State         |
+| --------------------------------------------------------------- | ------------- |
+| not excluded (chosen, eligible, or eligible not chosen)         | `eligible`    |
+| `excluded: not idle (not on AC power)`                          | `blocked`     |
+| `excluded: not idle (battery at ...)`                           | `blocked`     |
+| `excluded: not idle (outside the policy window)`                | `blocked`     |
+| `excluded: not idle (user activity unknown: ...)`               | `unavailable` |
+| `excluded: not idle (power unknown: ...)`                       | `unavailable` |
+| `excluded: not idle (...)`, any other inner reason (user input) | `busy`        |
+| `excluded: not on AC power`                                     | `blocked`     |
+| `excluded: battery at ...`                                      | `blocked`     |
+| `excluded: host state unavailable ...`                          | `unavailable` |
+| any other excluded reason                                       | `blocked`     |
 
 With no fresh entry, the probe mapping applies:
 
@@ -583,11 +592,12 @@ registry, results log or work store could not be read); the card's state line
 in the host panel names which one: `Idle: <cause> (...)` for the host,
 `state: error (<code>)` or `state: no data (<reason>)` for the source. The
 probes alone have no cause the simulated tiles call `blocked`; a placement
-entry gives one. A real tile's title ends with the newest placement, its
-`HH:MM:SS` time and `chosen` or the verbatim reason, and the real host panel
-has a `Last placement` block: time, item (linked to its task panel), `chosen`,
-`excluded` or `eligible, not chosen`, and the verbatim reason, marked when it
-is older than `placementMaxAgeSec`.
+entry gives one. A real tile's title ends with the newest entry (`placement`
+or `assessment`), its `HH:MM:SS` time and `chosen` or the verbatim reason,
+and the real host panel has a `Last placement` block: time, item (linked to
+its task panel) or `host assessment`, `chosen`, `excluded`, `eligible` or
+`eligible, not chosen`, and the verbatim reason, marked when it is older than
+`placementMaxAgeSec`.
 
 Real work now: one table row per open real session: host, task title (linked
 to the task panel), stage (`implement`, the only stage the model has), model

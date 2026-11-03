@@ -28,6 +28,9 @@ export function pendingReason(value: unknown): string {
   if (unmeasuredRequestsInvalid(value as PendingUsage)) {
     return "unmeasuredRequests requires known counts and must be at most requests";
   }
+  if (cachedInputTokensInvalid(value as PendingUsage)) {
+    return "cachedInputTokens must be at most inputTokens";
+  }
   const entry = value as { finishedAt?: unknown };
   if (typeof entry.finishedAt !== "string" || Number.isNaN(Date.parse(entry.finishedAt))) {
     return `finishedAt is not a valid date: ${JSON.stringify(entry.finishedAt)}`;
@@ -56,6 +59,14 @@ function unmeasuredRequestsInvalid(entry: PendingUsage): boolean {
   return false;
 }
 
+function cachedInputTokensInvalid(entry: PendingUsage): boolean {
+  return entry.tokens.some(
+    (token) =>
+      token.cachedInputTokens !== undefined &&
+      (token.inputTokens === null || token.cachedInputTokens > token.inputTokens),
+  );
+}
+
 function sourcePredicateError(value: PendingUsage): string | null {
   if (value.kind === "session") {
     if (value.tokens.some((entry) => entry.source === AUDITOR_USAGE_SOURCE)) {
@@ -78,6 +89,9 @@ export function isPendingUsage(value: unknown): value is PendingUsage {
     return false;
   }
   if (unmeasuredRequestsInvalid(entry)) {
+    return false;
+  }
+  if (cachedInputTokensInvalid(entry)) {
     return false;
   }
   if (Number.isNaN(Date.parse(entry.finishedAt))) {

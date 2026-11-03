@@ -20,6 +20,8 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
       output: number;
       measured: number;
       unmeasured: number;
+      cached: number;
+      cachedReported: boolean;
     }
   >();
   for (const callId of index.startOrder) {
@@ -41,6 +43,8 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
         output: 0,
         measured: 0,
         unmeasured: 0,
+        cached: 0,
+        cachedReported: false,
       };
       groups.set(key, group);
       groupOrder.push(key);
@@ -53,6 +57,11 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
       group.input += end.inputTokens;
       group.output += end.outputTokens;
       group.measured += 1;
+      // A measured call without a cached count counts as uncached.
+      if (end.cachedInputTokens !== undefined) {
+        group.cached += end.cachedInputTokens;
+        group.cachedReported = true;
+      }
     }
   }
   if (groupOrder.length === 0) {
@@ -78,6 +87,8 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
         output: number;
         measured: number;
         unmeasured: number;
+        cached: number;
+        cachedReported: boolean;
       };
       return {
         provider: group.provider,
@@ -87,6 +98,7 @@ export function joinUsage(index: UsageIndex, requestId: string): PortUsage {
         requests: group.measured + group.unmeasured,
         source: METER_SOURCE,
         ...(group.unmeasured > 0 ? { unmeasuredRequests: group.unmeasured } : {}),
+        ...(group.cachedReported ? { cachedInputTokens: group.cached } : {}),
       };
     }),
   };

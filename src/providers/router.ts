@@ -1,3 +1,4 @@
+import { cachedCount } from "../meter/sse.js";
 import { getProviders, loadProviderDescriptor, providerDescriptorExists } from "./config.js";
 import { loadProviderRoute } from "./route.js";
 import { PROVIDER_ROUTE_PATH } from "./paths.js";
@@ -26,6 +27,7 @@ export class ProviderError extends Error {
 export interface ProviderUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  readonly cachedInputTokens?: number;
 }
 
 export type ProviderFailureKind = "http" | "connection" | "timeout" | "body";
@@ -69,10 +71,26 @@ export interface SingleCallResult {
   readonly content: string;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  readonly cachedInputTokens?: number;
 }
 
 function usageCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+// The usage counts of a parsed body; cachedInputTokens only when valid.
+function usageOf(usage: unknown): ProviderUsage {
+  const record =
+    typeof usage === "object" && usage !== null && !Array.isArray(usage)
+      ? (usage as Record<string, unknown>)
+      : {};
+  const inputTokens = usageCount(record["prompt_tokens"]);
+  const cached = cachedCount(usage, inputTokens);
+  return {
+    inputTokens,
+    outputTokens: usageCount(record["completion_tokens"]),
+    ...(cached !== null ? { cachedInputTokens: cached } : {}),
+  };
 }
 
 function isAbortError(value: unknown): boolean {
@@ -143,8 +161,7 @@ export async function callProvider(
     }
     const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
       ?.message?.content;
-    const usage = (data as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } })
-      .usage;
+    const usage = usageOf((data as { usage?: unknown }).usage);
     if (typeof content !== "string") {
       // The provider answered 200 with usage attached, so the call may
       // be billed: carry the parsed usage for the ledger entry.
@@ -152,19 +169,12 @@ export async function callProvider(
         `Provider ${provider.id} returned invalid content`,
         502,
         true,
-        {
-          inputTokens: usageCount(usage?.prompt_tokens),
-          outputTokens: usageCount(usage?.completion_tokens),
-        },
+        usage,
         "body",
         { cause: data },
       );
     }
-    return {
-      content,
-      inputTokens: usageCount(usage?.prompt_tokens),
-      outputTokens: usageCount(usage?.completion_tokens),
-    };
+    return { content, ...usage };
   } catch (error: unknown) {
     if (error instanceof ProviderCallError) {
       // Already classified above (non-200, non-JSON, invalid content):
@@ -236,6 +246,9 @@ export async function callProviderOnce(
     content: result.content,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
+    ...(result.cachedInputTokens !== undefined
+      ? { cachedInputTokens: result.cachedInputTokens }
+      : {}),
   };
 }
 

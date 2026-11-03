@@ -6,7 +6,8 @@
 // zero, except an unmeasured audit call, which counts at the configured
 // bound (isBoundedAuditToken). A known-count entry with unmeasuredRequests
 // adds the meter-call bound of its provider's pool per unmeasured call
-// (bounded, not unknown).
+// (bounded, not unknown). Cached input is charged at the cached price only
+// when the entry carries cachedInputTokens and the provider prices it.
 import { AUDITOR_USAGE_SOURCE, type SpendEntry } from "../ledger/types.js";
 import type { NanoPricing } from "./pricing.js";
 
@@ -70,6 +71,24 @@ export function isPriced(pricing: NanoPricing): boolean {
   );
 }
 
+/** Undivided cost of one token row, tokens * priceNanoPer1M. cachedInput is
+    the cached share of input; without a cached price all input is charged
+    at the input price. The budget guard and the dashboard both use this. */
+export function tokenCostNanoTimes1M(
+  input: bigint,
+  cachedInput: bigint,
+  output: bigint,
+  pricing: NanoPricing,
+): bigint {
+  const cachedPrice = pricing.cachedInputNanoPer1M;
+  const cached = cachedPrice === undefined ? 0n : cachedInput;
+  return (
+    cached * (cachedPrice ?? 0n) +
+    (input - cached) * pricing.inputNanoPer1M +
+    output * pricing.outputNanoPer1M
+  );
+}
+
 export function utcCalendarDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -117,14 +136,17 @@ function costOfRecordNanoTimes1M(
         entry.outputTokens === null
           ? BigInt(bounds.auditCall.outputTokens) * requests
           : BigInt(entry.outputTokens);
-      costNanoTimes1M +=
-        input * providerPricing.inputNanoPer1M + output * providerPricing.outputNanoPer1M;
+      const cachedInput = entry.inputTokens === null ? 0n : BigInt(entry.cachedInputTokens ?? 0);
+      costNanoTimes1M += tokenCostNanoTimes1M(input, cachedInput, output, providerPricing);
       onBounded?.();
       continue;
     }
-    let cost =
-      BigInt(entry.inputTokens) * providerPricing.inputNanoPer1M +
-      BigInt(entry.outputTokens) * providerPricing.outputNanoPer1M;
+    let cost = tokenCostNanoTimes1M(
+      BigInt(entry.inputTokens),
+      BigInt(entry.cachedInputTokens ?? 0),
+      BigInt(entry.outputTokens),
+      providerPricing,
+    );
     const unmeasured = entry.unmeasuredRequests ?? 0;
     if (unmeasured > 0) {
       // Each billed call without usage counts at its pool's per-call
@@ -132,8 +154,12 @@ function costOfRecordNanoTimes1M(
       const meterCall = bounds.meterCallByProvider.get(entry.provider) ?? bounds.meterCall;
       cost +=
         BigInt(unmeasured) *
-        (BigInt(meterCall.inputTokens) * providerPricing.inputNanoPer1M +
-          BigInt(meterCall.outputTokens) * providerPricing.outputNanoPer1M);
+        tokenCostNanoTimes1M(
+          BigInt(meterCall.inputTokens),
+          0n,
+          BigInt(meterCall.outputTokens),
+          providerPricing,
+        );
       onBounded?.();
     }
     costNanoTimes1M += cost;

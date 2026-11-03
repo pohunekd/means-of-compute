@@ -65,6 +65,8 @@ export interface CallEndRecord {
   readonly status: number | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  // The provider's cached share of inputTokens; absent when it reported none.
+  readonly cachedInputTokens?: number;
   readonly clientGone: boolean;
   readonly ms: number;
   readonly bytesIn: number;
@@ -235,6 +237,13 @@ function checkRecord(index: UsageIndex, record: UsageLogRecord, path: string, li
       }
       if (billedForOutcome(record.outcome) !== record.billed) {
         fail(path, line, "call-end billed flag does not match its outcome");
+      }
+      if (
+        record.cachedInputTokens !== undefined &&
+        record.inputTokens !== null &&
+        record.cachedInputTokens > record.inputTokens
+      ) {
+        fail(path, line, "call-end cachedInputTokens above inputTokens");
       }
       break;
     }

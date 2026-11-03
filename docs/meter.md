@@ -60,7 +60,13 @@ nothing goes upstream:
    `completion_tokens` as output. A missing or unreadable usage
    gives a billed `no-usage` record with null counts — never zero.
    A count that is missing or not an integer is `null`, and the
-   outcome stays `ok`.
+   outcome stays `ok`. The same `usage` object gives the cached input
+   count, `prompt_tokens_details.cached_tokens`, which `prompt_tokens`
+   already includes. A valid one (an integer from 0 to the input count) is
+   recorded as `cachedInputTokens`; a missing, non-integer, negative or
+   larger-than-input value records no cached count and never fails the
+   call. Non-streaming calls through `src/providers/router.ts` read the
+   count by the same rule.
    A non-2xx answer is always `call-end` `upstream-status`, unbilled,
    with null counts, whatever happens to the body.
 9. Timeouts come only from this config, never from a provider descriptor's
@@ -215,6 +221,8 @@ Rules:
 
 - `at` is the exact `toISOString()` form. `status` is an integer or
   `null` (used before headers). Counts are integers `>= 0` or `null`.
+  A `call-end` may carry `cachedInputTokens`, an integer from 0 to a
+  non-null `inputTokens`.
 - `outcome` is one of `ok`, `no-usage`, `first-byte-timeout`,
   `idle-timeout`, `total-timeout`, `upstream-status`,
   `upstream-unreachable`, `upstream-broken`, `upstream-error`,
@@ -240,7 +248,7 @@ Rules:
   new calls get 503 `meter-unavailable`, and only a restart clears the
   latch.
 
-The join (`joinUsage`) groups billed calls of one request id by provider and model, in first-appearance order, with `source: "meter-proxy"`. A billed call that reports no usage (a timeout, a body without usage, or a start without an end) does not null its group: it adds one to `unmeasuredRequests`, and the known counts of the other calls are kept. A session with no billed call gets a measured zero (`requests: 0`, counts `0`).
+The join (`joinUsage`) groups billed calls of one request id by provider and model, in first-appearance order, with `source: "meter-proxy"`. A billed call that reports no usage (a timeout, a body without usage, or a start without an end) does not null its group: it adds one to `unmeasuredRequests`, and the known counts of the other calls are kept. The group's `cachedInputTokens` is the sum over its measured calls, a call without a cached count adding 0; it is written only when at least one call reported one. A session with no billed call gets a measured zero (`requests: 0`, counts `0`).
 
 ## Grant lifecycle
 

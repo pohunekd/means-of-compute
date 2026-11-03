@@ -61,6 +61,7 @@ export interface MeterLogEvent {
   readonly billed?: boolean;
   readonly inputTokens?: number | null;
   readonly outputTokens?: number | null;
+  readonly cachedInputTokens?: number;
   readonly ms?: number;
   readonly bytesIn?: number;
   readonly bytesOut?: number;

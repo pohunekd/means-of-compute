@@ -55,6 +55,7 @@ export interface SpendTokens {
   readonly requests: number | null;
   readonly source: string;
   readonly unmeasuredRequests?: number;
+  readonly cachedInputTokens?: number;
 }
 
 export interface SpendEntry {

@@ -372,7 +372,7 @@ function workItemsText(): string {
         schemaVersion: "v1",
         id: "w4-laptopb",
         repo: "example/demo-repo",
-        title: "Docs update",
+        title: "Docs update <i>INJ</i><img src=x alt=INJIMG>",
         goal: LONG_GOAL,
         issue: 20,
         dod: [{ id: "d1", text: "do", done: true }],
@@ -505,6 +505,14 @@ function ledgerText(): string {
           requests: 1,
           source: "meter",
         },
+        {
+          provider: "baseten",
+          model: "meta-models/muse-spark-open-1026",
+          inputTokens: null,
+          outputTokens: null,
+          requests: 1,
+          source: "meter",
+        },
       ],
       sessionSeconds: [{ hostAlias: "kiosk-a", seconds: 120, source: "registry" }],
       attempts: [{ model: "muse-glimmer-30b", result: "success" }],
@@ -606,11 +614,7 @@ function writeFixtures(dir: string, trace: string): void {
       sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       counts: { high: 0, medium: 0, low: 0 },
     },
-    {
-      id: "w4-laptopb",
-      sha: "cccccccccccccccccccccccccccccccccccccccc",
-      counts: { high: 0, medium: 0, low: 0 },
-    },
+
     {
       id: "w1-old",
       sha: "dddddddddddddddddddddddddddddddddddddddd",
@@ -628,7 +632,7 @@ function writeFixtures(dir: string, trace: string): void {
       JSON.stringify({
         schemaVersion: "v1",
         workItemId: id,
-        pullNumber: id === "w1-real" ? 101 : id === "w3-kiosk" ? 11 : id === "w4-laptopb" ? 21 : 9,
+        pullNumber: id === "w1-real" ? 101 : id === "w3-kiosk" ? 11 : 9,
         headSha: sha,
         repo: "example/demo-repo",
         auditorModel: "muse-spark-1.3-contributor",
@@ -678,6 +682,10 @@ function stripSlice(page: string): string {
   return page.slice(divStart === -1 ? start : divStart, fleet === -1 ? undefined : fleet);
 }
 
+function stripSliceCount(page: string): number {
+  return stripSlice(page).split('<div class="fi">').length - 1;
+}
+
 function makeFixture(trace: string): FixtureDir {
   const dir = mkdtempSync(join(tmpdir(), "live-view-"));
   writeFixtures(dir, trace);
@@ -687,7 +695,7 @@ function makeFixture(trace: string): FixtureDir {
       simTracePath: join(dir, "trace.jsonl"),
       meterUsagePath: join(dir, "meter-usage.jsonl"),
       portsPath: join(dir, "loop-ports.jsonl"),
-      repoSet: new Set(["example/demo-repo"]),
+      repos: { ok: true as const, value: new Set(["example/demo-repo"]) },
     },
     dashboardSources: {
       ledgerPath: join(dir, "ledger.jsonl"),
@@ -748,41 +756,133 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     const auditCard = cardSlice(page, "laptop-a");
     expect(auditCard).toContain("audit");
     expect(auditCard).toContain("Report: how this factory built itself");
-    expect(auditCard).toContain("auditor: no data (verdict not written yet)");
+    // The pending card carries the audit stage pill, not the implement one: the
+    // audit-stage mutation (stage to implement) fails this row.
+    expect(auditCard).toContain("stage audit");
+    // The results line and the ledger record carry no head sha: the head choice names
+    // the unknown round head explicitly in the auditor line.
+    expect(auditCard).toContain("auditor: audit (head unknown)");
+    expect(auditCard).not.toContain("verdict not written yet");
     expect(auditCard).not.toContain("muse-glimmer");
     const auditFlat = auditCard.replace(/\s+/g, " ");
     expect(auditFlat).toContain("1,300,000 in / 48,000 out");
+    expect(auditFlat).toContain("$1.8290");
     // idle cards with reason, scoped per card
     const kioskCard = cardSlice(page, "kiosk-a");
-    expect(kioskCard).toContain("Idle: no work queued");
+    expect(kioskCard).toContain("Idle: last round: merged");
     expect(kioskCard).toContain("reported 17:58:00");
     expect(kioskCard).toContain("last finished");
     const kioskFlat = kioskCard.replace(/\s+/g, " ");
     expect(kioskFlat).toContain("w3-kiosk");
     expect(kioskFlat).toContain("at 17:53 (merged)");
+    // A yesterday ledger record never counts toward today's two tasks on kiosk-a.
+    // One of the two entries is unpriced, so the card prints the `at least` form.
     expect(kioskFlat).toContain("today (UTC): 2 tasks");
+    expect(kioskFlat).toContain("at least");
+    expect(kioskFlat).toContain("of 3 entries unpriced");
+    expect(kioskFlat).toContain("$0.0073");
     const laptopbCard = cardSlice(page, "laptop-b");
-    expect(laptopbCard).toContain("Idle: person at the desk");
+    expect(laptopbCard).toContain("Idle: last round: merged, person at the desk");
     expect(kioskCard).not.toContain("person at the desk");
+    // The idle reason names the round outcome verbatim: mutating the separator fails rows.
+    expect(laptopbCard).toContain("last round: merged");
+    expect(laptopbCard).not.toContain("last round : merged");
+    // A newest start-rejected round never reads as audit: the card stays idle.
+    const liveRejected = buildLive(
+      await gatherLiveInputs(
+        {
+          ...fixture.sources,
+          repos: { ok: true, value: new Set(["example/demo-repo"]) },
+        },
+        {
+          ...dashboard,
+          results: {
+            ok: true,
+            value: [
+              ...(dashboard.results.ok ? dashboard.results.value : []),
+              {
+                schemaVersion: "v1" as const,
+                key: "w1-old:1",
+                at: "2026-11-03T17:59:30.000Z",
+                workItemId: "w1-old",
+                repo: "example/demo-repo",
+                round: 1,
+                retry: 0,
+                model: "meta/muse-glimmer-30b",
+                providerId: "nvidia-build",
+                hostAlias: "kiosk-a",
+                outcome: "start-rejected" as const,
+                routingResult: "excluded" as const,
+              },
+            ],
+          },
+        },
+        60,
+        () => {},
+      ),
+      { view: "overview", t: 60, paused: false, host: null },
+    );
+    const rejectedKiosk = cardSlice(renderLive(liveRejected), "kiosk-a");
+    expect(rejectedKiosk).toContain("Idle: last round: start-rejected");
+    expect(rejectedKiosk).not.toContain("audit");
     // verdict-free repo check: links stay plain when the repo leaves the configured set
     const liveNoRepo = buildLive(
-      await gatherLiveInputs({ ...fixture.sources, repoSet: new Set() }, dashboard, 60, () => {}),
+      await gatherLiveInputs(
+        { ...fixture.sources, repos: { ok: true, value: new Set() } },
+        dashboard,
+        60,
+        () => {},
+      ),
       { view: "overview", t: 60, paused: false, host: null },
     );
     const noRepoDesktop = cardSlice(renderLive(liveNoRepo), "desktop");
     expect(noRepoDesktop).toContain("<span>#42</span>");
     expect(noRepoDesktop).toContain("<span>PR #101</span>");
     expect(noRepoDesktop).not.toContain("github.com");
-    // Just finished strip: three merged entries in order with their costs
+    // failed specs check: every card keeps its rows and the links row reports the error
+    const liveBadSpecs = buildLive(
+      await gatherLiveInputs(
+        {
+          ...fixture.sources,
+          repos: { ok: false, failure: { kind: "error", code: "factory-specs-invalid" } },
+        },
+        dashboard,
+        60,
+        () => {},
+      ),
+      { view: "overview", t: 60, paused: false, host: null },
+    );
+    const badSpecsPage = renderLive(liveBadSpecs);
+    const badSpecsDesktop = cardSlice(badSpecsPage, "desktop");
+    const badSpecsFlat = badSpecsDesktop.replace(/\s+/g, " ");
+    expect(badSpecsFlat).toContain("links:");
+    expect(badSpecsFlat).toContain("error (factory-specs-invalid)");
+    // The failing repos set hides the plain links row exactly once per card.
+    expect(badSpecsDesktop).toContain("Real task title");
+    expect(badSpecsFlat).not.toContain("links: links:");
+    // failed specs keep the rows but hide the links: no issue or PR lines render
+    expect(badSpecsDesktop).not.toContain("github.com");
+    expect(badSpecsDesktop).not.toContain("#42");
+    expect(badSpecsFlat).not.toContain("PR #101");
+    // Just finished strip: three merged entries in order with their costs; the newest has no verdict
     expect(page).toContain('id="just-finished"');
     expect(page).toContain("Just finished");
+    // exactly three rows: w4-laptopb, w3-kiosk, w1-old; the queued w2-queued never appears
+    expect(stripSliceCount(page)).toBe(3);
     const stripHtml = stripSlice(page);
     const stripText = stripHtml.replace(/\s+/g, " ");
     expect(stripText.indexOf("w4-laptopb") >= 0).toBe(true);
     expect(stripText.indexOf("w4-laptopb")).toBeLessThan(stripText.indexOf("w3-kiosk"));
     expect(stripText.indexOf("w3-kiosk")).toBeLessThan(stripText.indexOf("w1-old"));
-    expect(stripText).toContain("Docs update");
     expect(stripText).toContain("laptop-b");
+    expect(stripText).toContain("w4-laptopb");
+    expect(stripText).toContain("Docs update");
+    // The work-store title is HTML-escaped through html.ts, never rendered raw.
+    expect(stripText).toContain("&lt;i&gt;INJ&lt;/i&gt;");
+    expect(stripText).not.toContain("<i>INJ</i>");
+    expect(stripText).toContain("0/0/0");
+    // The strip and the page are rendered on the same day: the at line prints clock only.
+    expect(stripText).toContain("17:55:00");
     expect(stripText).toContain("Add login fix");
     expect(stripText).toContain("kiosk-a");
     expect(stripText).toContain("0/0/0");
@@ -790,6 +890,56 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(stripText).toContain("$0.0034");
     expect(stripText).toContain("w1-old");
     expect(stripText).toContain("$0.0039");
+    expect(stripText).not.toContain("w2-queued");
+    // A findings round newer than the merges never enters the merged-only strip.
+    // An item with no ledger record reads `not in ledger yet`, never `$0.0000`.
+    const liveFinding = buildLive(
+      await gatherLiveInputs(
+        {
+          ...fixture.sources,
+          repos: { ok: true, value: new Set(["example/demo-repo"]) },
+        },
+        {
+          ...dashboard,
+          results: {
+            ok: true,
+            value: [
+              ...(dashboard.results.ok ? dashboard.results.value : []),
+              {
+                schemaVersion: "v1" as const,
+                key: "w9-new:0",
+                at: "2026-11-03T17:59:45.000Z",
+                workItemId: "w9-new",
+                repo: "example/demo-repo",
+                round: 0,
+                retry: 0,
+                model: "meta/muse-glimmer-30b",
+                providerId: "nvidia-build",
+                hostAlias: "laptop-b",
+                outcome: "findings" as const,
+                routingResult: "failure" as const,
+              },
+            ],
+          },
+        },
+        60,
+        () => {},
+      ),
+      { view: "overview", t: 60, paused: false, host: null },
+    );
+    expect(stripSliceCount(renderLive(liveFinding))).toBe(3);
+    // The findings entry renders as an audit card on its host, never in the merged strip.
+    const findingStrip = stripSlice(renderLive(liveFinding));
+    expect(findingStrip).not.toContain(">w9-new<");
+    // The last-finished line names the newest merged entry only: a mutated
+    // any-outcome newest would name the newer findings row instead.
+    const findingKiosk = cardSlice(renderLive(liveFinding), "laptop-b");
+    expect(findingKiosk).toContain("audit");
+    expect(findingKiosk).not.toContain("last finished");
+    // The strip total has no $0.0000 fallback: the newest row has no stored verdict
+    // and prints `no data (no verdict)` for its counts, never a zero cost.
+    expect(stripText).toContain("no data (no verdict)");
+    expect(stripText).not.toContain("$0.0000");
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
@@ -1094,6 +1244,9 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const meterBadDesktop = cardSlice(renderLive(liveMeterBad), "desktop");
     expect(meterBadDesktop).toContain("latest call:");
     expect(meterBadDesktop).toContain("error (meter-usage-invalid)");
+    // A broken meter also hides this card's today tokens: the count stays, the cost fails.
+    expect(meterBadDesktop).toContain("today (UTC):");
+    expect(meterBadDesktop).toContain("error (meter-usage-invalid)");
     writeFileSync(join(fixture.dir, "meter-usage.jsonl"), meterOrig1);
     writeFileSync(join(fixture.dir, "registry.json"), "{ invalid json }");
     const dashBroken = await dashboardInputs(fixture);
@@ -1110,9 +1263,15 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(pageBroken).toContain('id="real-work"');
     expect(pageBroken).toContain("error (registry-invalid)");
     expect(pageBroken).not.toContain('class="nodata">no data (registry-invalid)');
+    expect(pageBroken).not.toContain('class="nodata">no data (results-in');
+    // Every real host stays on the section: the broken source never drops a card.
+    expect(pageBroken).toContain("desktop");
+    expect(pageBroken).toContain("kiosk-a");
+    expect(pageBroken).toContain("laptop-b");
     const brokenDesktopCard = cardSlice(pageBroken, "desktop");
-    expect(brokenDesktopCard).toContain("Idle: error (registry-invalid)");
-    const brokenPanel = buildLive(
+    expect(brokenDesktopCard).toContain("state: error (registry-invalid)");
+    // A card whose item is missing from the store names the gap instead of `unknown`.
+    const noStoreLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {
         view: "overview",
@@ -1121,9 +1280,9 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         host: "desktop",
       },
     );
-    expect(brokenPanel.hostPanel).not.toBeNull();
-    const brokenPage2 = renderLive(brokenPanel);
-    expect(brokenPage2).toContain("error (");
+    expect(noStoreLive.hostPanel).not.toBeNull();
+    const noStorePage = renderLive(noStoreLive);
+    expect(noStorePage).toContain("error (");
   } finally {
     await server.stop();
     rmSync(fixture.dir, { recursive: true, force: true });

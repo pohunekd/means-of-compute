@@ -52,7 +52,7 @@ export const LIVE_CSS = [
   ".keycard .cite{font-size:0.42rem;margin:0.02rem 0 0;line-height:1}",
   ".keycard.live-simcard{border-top-style:dashed}",
   "section{padding:0.2rem 0.3rem 0.2rem;margin-top:0.2rem;border-radius:4px}",
-  "h2{font-size:0.95rem;margin:0 0 0.12rem}",
+  ".rw-heading{font-size:1.05rem;margin:0 0 0.12rem}",
   ".live-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,0.9fr);gap:0.3rem;align-items:start}",
   ".live-side{display:grid;gap:0.4rem}",
   ".live-side section{margin-top:0}",
@@ -108,7 +108,7 @@ export const LIVE_CSS = [
   ".rw .task.idle-task{color:var(--muted)}",
   ".rw .meta{font-size:15px;color:var(--muted);margin:2px 0;line-height:1.3}",
   ".rw .meta b{color:var(--text);font-weight:700}",
-  ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px}",
+  ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px;line-height:1.4}",
   ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
   ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
   ".fin{display:flex;gap:12px;margin:0 0 10px;align-items:baseline}",
@@ -135,6 +135,12 @@ function clockTime(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(iso) ? iso.slice(11, 19) : iso;
 }
 
+function stripDate(iso: string, pageDay: string): string {
+  const day = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day === pageDay) return clockTime(iso);
+  return `${monthDay(iso)} ${clockTime(iso)}`;
+}
+
 const MONTHS = [
   "Jan",
   "Feb",
@@ -151,6 +157,8 @@ const MONTHS = [
 ] as const;
 
 function monthDay(iso: string): string {
+  // Every constantHtml argument stays a literal: dynamic strings run through html``,
+  // which is why the strip-title escaper and the tab highlighter use literal branches.
   const month = Number(iso.slice(5, 7));
   const day = Number(iso.slice(8, 10));
   if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
@@ -334,7 +342,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const hostHref = buildHref(model, { host: card.alias });
   const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
   const repos = model.repos;
-  const repoAllowed = card.repo !== null && repos.has(card.repo);
+  const reposFailure = model.reposFailure;
+  const repoAllowed = reposFailure === null && card.repo !== null && repos.has(card.repo);
   const stageLabel = card.stage === "idle" ? "" : card.stage;
   const stageClass =
     card.stage === "implement" ? "stage" : card.stage === "audit" ? "stage audit" : "stage";
@@ -347,7 +356,9 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     card.stage === "idle"
       ? card.idleReason === null
         ? constantHtml("")
-        : html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
+        : card.idleReason.startsWith("last round: ")
+          ? html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
+          : html`<p class="task idle-task">state: ${card.idleReason}</p>`
       : card.title === null
         ? html`<p class="task"><span class="nodata">no work</span></p>`
         : card.title.kind === "error"
@@ -466,21 +477,35 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const todayLine =
     card.today === null
       ? constantHtml("")
-      : card.today.cost === null
+      : card.today.count === 0 && card.today.cost !== null
         ? html`<p class="meta">
-            today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
-          </p>`
-        : html`<p class="meta">
-            today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"} ·
+            today (UTC):
             <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
-          </p>`;
+          </p>`
+        : card.today.cost === null
+          ? html`<p class="meta">
+              today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
+            </p>`
+          : html`<p class="meta">
+              today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
+              ·
+              <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
+            </p>`;
   return html`<div class="rw${idleCls}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
       ${stageHtml}
     </div>
     ${titleLine}
-    <p class="meta">${issueLine} ${prLine}</p>
+    ${
+      reposFailure === null
+        ? html`<p class="meta">${issueLine} ${prLine}</p>`
+        : reposFailure.kind === "error"
+          ? html`<p class="meta">links: <span class="error">error (${reposFailure.code})</span></p>`
+          : html`<p class="meta">
+              links: <span class="nodata">no data (${reposFailure.reason})</span>
+            </p>`
+    }
     ${modelLine} ${elapsedLine} ${tokensCostSoFar} ${callLine} ${probeLine} ${lastFinishedLine}
     ${todayLine}
   </div>`;
@@ -516,7 +541,7 @@ function renderJustFinished(
       : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
   const titleText: SafeHtml =
     entry.title.kind === "text"
-      ? constantHtml(entry.title.text)
+      ? html`${entry.title.text}`
       : entry.title.kind === "error"
         ? html`<span class="error">error (${entry.title.code})</span>`
         : html`<span class="nodata">no data (${entry.title.reason})</span>`;
@@ -536,9 +561,10 @@ function renderJustFinished(
               >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
             >`;
   const hostBadge = entry.hostAlias === null ? constantHtml("") : html` · ${entry.hostAlias}`;
+  const pageDay = model.renderedAt.slice(0, 10);
   return html`<div class="fi">
     <a href="${taskHref}">${titleText}</a>${hostBadge} · ${entry.outcome} · ${countsText} ·
-    ${costText} · ${clockTime(entry.at)}
+    ${costText} · ${stripDate(entry.at, pageDay)}
   </div>`;
 }
 
@@ -603,7 +629,6 @@ function renderTabs(model: LiveModel): SafeHtml {
   const tabs = ["overview", "fleet", "work", "usage", "savings", "autonomy", "models"];
   const links = tabs.map((tab) => {
     const active = tab === model.view ? " active" : "";
-    const aria = tab === model.view ? ' aria-current="page"' : "";
     // Tab links keep t and pause, drop selection.
     const params = new URLSearchParams();
     params.set("view", tab);
@@ -614,7 +639,11 @@ function renderTabs(model: LiveModel): SafeHtml {
       params.set("pause", "1");
     }
     const href = `/?${params.toString()}`;
-    return html`<a class="tab${active}" href="${href}" ${constantHtml(aria)}>${tab}</a>`;
+    return tab === model.view
+      ? html`<a class="tab${active}" href="${href}" ${constantHtml(' aria-current="page"')}>
+          ${tab}</a
+        >`
+      : html`<a class="tab${active}" href="${href}">${tab}</a>`;
   });
   return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
 }
@@ -1297,7 +1326,7 @@ export function renderLive(model: LiveModel): string {
         </header>
         <main>
           <section>
-            <h2>Real work now</h2>
+            <h2 class="rw-heading">Real work now</h2>
             <p class="rw-subtitle">what the real machines are doing at this moment</p>
             ${realWorkBlock} ${justFinishedBlock}
           </section>

@@ -253,16 +253,38 @@ const OFFLINE_CAUSES: ReadonlySet<string> = new Set([
   "stale",
 ]);
 
+// Excluded-reason prefixes the placement engine writes, and the tile state
+// each means; any other excluded reason reads as blocked.
+const PLACEMENT_STATES: readonly (readonly [string, LiveTileState])[] = [
+  ["excluded: not idle", "busy"],
+  ["excluded: not on AC power", "blocked"],
+  ["excluded: battery at", "blocked"],
+  ["excluded: host state unavailable", "unavailable"],
+];
+
+function placementState(excluded: boolean, reason: string): LiveTileState {
+  if (!excluded) {
+    return "eligible";
+  }
+  return PLACEMENT_STATES.find(([prefix]) => reason.startsWith(prefix))?.[1] ?? "blocked";
+}
+
+// An open session is running; a source failure keeps its own state; a fresh
+// placement entry decides next; otherwise the probe-based idle reason does.
 function cardState(card: RealWorkCard): LiveTileState {
   if (card.stage !== "idle") {
     return "running";
   }
   const reason = card.idleReason;
+  if (reason !== null && (reason.startsWith("error (") || reason.startsWith("no data ("))) {
+    return "unavailable";
+  }
+  if (card.placement.kind === "ok" && card.placement.value?.fresh === true) {
+    const entry = card.placement.value.entry;
+    return placementState(entry.excluded, entry.reason);
+  }
   if (reason === null) {
     return "offline";
-  }
-  if (reason.startsWith("error (") || reason.startsWith("no data (")) {
-    return "unavailable";
   }
   if (reason === "no work queued" || /^\d+ queued, not placed$/.test(reason)) {
     return "eligible";
@@ -275,7 +297,8 @@ function cardState(card: RealWorkCard): LiveTileState {
 
 // A real machine as a fleet tile: the open session count (1 while the card
 // has an open session; no agent limit is in the live model), the card state
-// on the legend, and the task or idle reason in the title.
+// on the legend, and the task or idle reason in the title, followed by the
+// newest placement reason and its time.
 function realTileOf(card: RealWorkCard): LiveTile {
   const failed =
     card.stage === "idle" &&
@@ -283,6 +306,11 @@ function realTileOf(card: RealWorkCard): LiveTile {
     (card.idleReason.startsWith("error (") || card.idleReason.startsWith("no data ("));
   const state = cardState(card);
   const task = card.title !== null && card.title.kind === "text" ? card.title.text : "";
+  const now = card.stage === "implement" ? task : (card.idleReason ?? "no recorded probe");
+  const placement =
+    card.placement.kind === "ok" && card.placement.value !== null
+      ? ` - placement ${clockTime(card.placement.value.entry.at)}: ${card.placement.value.entry.chosen ? "chosen" : card.placement.value.entry.reason}`
+      : "";
   return {
     alias: card.alias,
     hostKind: "real host",
@@ -295,7 +323,7 @@ function realTileOf(card: RealWorkCard): LiveTile {
     runningError: null,
     maxAgents: null,
     batteryPercent: null,
-    detail: card.stage === "implement" ? task : (card.idleReason ?? "no recorded probe"),
+    detail: `${now}${placement}`,
   };
 }
 
@@ -708,6 +736,27 @@ function panelTime(iso: string, model: LiveModel): SafeHtml {
   >`;
 }
 
+// The host's newest placement entry: time, item, chosen or excluded and the
+// engine's verbatim reason; an entry older than the configured age no longer
+// decides the tile state.
+function lastPlacement(card: RealWorkCard, model: LiveModel): SafeHtml {
+  if (card.placement.kind !== "ok") {
+    return sectionText(card.placement);
+  }
+  const value = card.placement.value;
+  if (value === null) {
+    return html`<p class="row">no placement recorded</p>`;
+  }
+  const entry = value.entry;
+  const decision = entry.chosen ? "chosen" : entry.excluded ? "excluded" : "eligible, not chosen";
+  return html`<p class="row">
+      ${panelTime(entry.at, model)} ·
+      <a href="${buildHref(model, { task: entry.workItemId })}">${entry.workItemId}</a> ·
+      ${decision}${value.fresh ? "" : " (older than the placement age; the probe decides)"}
+    </p>
+    <p class="row">${entry.reason}</p>`;
+}
+
 function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { host: null });
   if (panel.kind === "sim") {
@@ -836,10 +885,13 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       ? (model.realWork.value.find((candidate) => candidate.alias === panel.alias) ?? null)
       : null;
   const nowBlock = card === null ? constantHtml("") : panelBlock("Now", renderRealNow(card, model));
+  const placementBlock =
+    card === null ? constantHtml("") : panelBlock("Last placement", lastPlacement(card, model));
   return html`<div class="panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
-    ${nowBlock} ${panelBlock("Probe", probeBlock)} ${panelBlock("Open sessions", sessionsBlock)}
-    ${panelBlock("Recent results", resultsBlock)} ${panelBlock("Recent meter calls", meterBlock)}
+    ${nowBlock} ${placementBlock} ${panelBlock("Probe", probeBlock)}
+    ${panelBlock("Open sessions", sessionsBlock)} ${panelBlock("Recent results", resultsBlock)}
+    ${panelBlock("Recent meter calls", meterBlock)}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
 }
@@ -1354,8 +1406,8 @@ export function renderLive(model: LiveModel): string {
       <div class="groups">${realGroup} ${simGroups}</div>
       ${legend}
       <p class="cite">
-        source: real recorded probes, dispatcher registry and work store; simulated fleet trace
-        (sim-trace-v1)
+        source: real recorded probes, dispatcher registry, work store and loop placement events;
+        simulated fleet trace (sim-trace-v1)
       </p>
     </section>
     <div class="rail">${rail}</div>

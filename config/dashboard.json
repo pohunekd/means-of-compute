@@ -5,6 +5,7 @@
   "maxRequestBytes": 1024,
   "idleTimeoutSec": 10,
   "workRowLimit": 50,
+  "placementMaxAgeSec": 600,
   "baselines": {
     "frontierTokens": {
       "label": "Claude Opus 5.5 list price (coordinator estimate)",

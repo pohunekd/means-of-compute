@@ -626,6 +626,48 @@ function writeFixtures(dir: string, trace: string): void {
     join(dir, "loop-ports.jsonl"),
     probes.map((p) => JSON.stringify(p)).join("\n") + "\n",
   );
+  // The newest placement names laptop-a not idle (busy), kiosk-a off AC power
+  // (blocked) and laptop-b free (eligible); an older event and other loop
+  // events are skipped, and the unterminated last line is ignored.
+  const placement = (ts: string, candidates: readonly unknown[]): string =>
+    JSON.stringify({
+      ts,
+      event: "placement",
+      workItemId: "w9-queued",
+      round: 0,
+      chosenHostAlias: null,
+      candidates,
+    });
+  writeFileSync(
+    join(dir, "loop.jsonl"),
+    [
+      JSON.stringify({ ts: "2026-11-03T17:40:00.000Z", event: "factory-start" }),
+      placement("2026-11-03T17:50:00.000Z", [
+        {
+          hostAlias: "kiosk-a",
+          excluded: true,
+          reason: "excluded: host state unavailable (stale)",
+        },
+      ]),
+      placement("2026-11-03T17:58:30.000Z", [
+        { hostAlias: "desktop", excluded: true, reason: "excluded: at agent limit (1/1)" },
+        {
+          hostAlias: "laptop-a",
+          excluded: true,
+          reason: "excluded: not idle (user input 3 seconds ago)",
+        },
+        { hostAlias: "kiosk-a", excluded: true, reason: "excluded: not on AC power" },
+        {
+          hostAlias: "laptop-b",
+          excluded: false,
+          reason:
+            "laptop-b is idle, on AC power, no battery, inside its policy window, 0/1 agents running",
+        },
+      ]),
+      JSON.stringify({ ts: "2026-11-03T17:59:00.000Z", event: "tick" }),
+      '{"ts":"2026-11-03T17:59:30.000Z","event":"placem',
+    ].join("\n"),
+  );
   writeFileSync(join(dir, "registry.json"), registryText());
   writeFileSync(join(dir, "results.jsonl"), resultsText());
   writeFileSync(join(dir, "ledger.jsonl"), ledgerText());
@@ -737,6 +779,8 @@ function makeFixture(trace: string): FixtureDir {
       simTracePath: join(dir, "trace.jsonl"),
       meterUsagePath: join(dir, "meter-usage.jsonl"),
       portsPath: join(dir, "loop-ports.jsonl"),
+      loopLogPath: join(dir, "loop.jsonl"),
+      placementMaxAgeSec: 600,
       repos: { ok: true as const, value: new Set(["example/demo-repo"]) },
     },
     dashboardSources: {
@@ -829,7 +873,49 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     // idle cards with reason, scoped per card
     // A queued work item flips the probe tail on every idle card with history.
     const kioskCard = cardSlice(live, "kiosk-a");
-    expect(tileClass(page, "kiosk-a")).toBe("tile tile-eligible");
+    // A fresh placement entry decides an idle real tile: kiosk-a off AC power
+    // is blocked, laptop-a not idle is busy and laptop-b free is eligible, with
+    // the verbatim reason and its time in the title; the group counts follow.
+    expect(tileClass(page, "kiosk-a")).toBe("tile tile-blocked");
+    expect(tileClass(page, "laptop-a")).toBe("tile tile-busy");
+    expect(tileClass(page, "laptop-b")).toBe("tile tile-eligible");
+    expect(page).toContain(
+      "kiosk-a: blocked, 1 queued, not placed - placement 17:58:30: excluded: not on AC power",
+    );
+    expect(page).toContain(
+      '<span class="gcount">1 running · 1 eligible · 1 blocked · 1 busy</span>',
+    );
+    // An entry older than the configured age no longer decides: the probe does.
+    {
+      const stale = renderLive(
+        buildLive(
+          await gatherLiveInputs(
+            { ...fixture.sources, placementMaxAgeSec: 60 },
+            dashboard,
+            60,
+            () => {},
+          ),
+          { view: "live", t: 60, paused: false, host: null },
+        ),
+      );
+      expect(tileClass(stale, "kiosk-a")).toBe("tile tile-eligible");
+      expect(tileClass(stale, "laptop-b")).toBe("tile tile-busy");
+    }
+    // The real host panel shows the last placement with its verbatim reason.
+    {
+      const kioskPanel = renderLive(
+        buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+          view: "live",
+          t: 60,
+          paused: false,
+          host: "kiosk-a",
+        }),
+      );
+      const block = kioskPanel.slice(kioskPanel.indexOf(">Last placement<"));
+      expect(block.replace(/\s+/g, " ")).toMatch(
+        /17:58:30<\/time > · <a href="[^"]*task=w9-queued">w9-queued<\/a> · excluded <\/p> <p class="row">excluded: not on AC power<\/p>/,
+      );
+    }
     expect(kioskCard).toContain("Idle: 1 queued, not placed");
     // Merged newest names no last round: the last-finished line covers it.
     expect(kioskCard).not.toContain("last round:");
@@ -869,7 +955,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskFlat).toContain("of 3 entries unpriced");
     expect(kioskFlat).toContain("$0.0073");
     const laptopbCard = cardSlice(live, "laptop-b");
-    expect(tileClass(page, "laptop-b")).toBe("tile tile-busy");
+    expect(page).toContain("laptop-b: eligible");
     expect(laptopbCard).toContain("Idle: person at the desk (1 queued, not placed)");
     expect(laptopbCard).not.toContain("last round:");
     expect(kioskCard).not.toContain("person at the desk");
@@ -1213,6 +1299,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       maxRequestBytes: 1024,
       idleTimeoutSec: 10,
       workRowLimit: 50,
+      placementMaxAgeSec: 600,
       baselines: BASELINES,
     };
     const server = await startDashboard({
@@ -1250,6 +1337,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     maxRequestBytes: 1024,
     idleTimeoutSec: 10,
     workRowLimit: 50,
+    placementMaxAgeSec: 600,
     baselines: BASELINES,
   };
   const server = await startDashboard({
@@ -1633,6 +1721,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     maxRequestBytes: 1024,
     idleTimeoutSec: 10,
     workRowLimit: 50,
+    placementMaxAgeSec: 600,
     baselines: BASELINES,
   };
   const plain = await startDashboard({
@@ -1857,6 +1946,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       maxRequestBytes: 1024,
       idleTimeoutSec: 10,
       workRowLimit: 50,
+      placementMaxAgeSec: 600,
       baselines: BASELINES,
     };
     const workServer = await startDashboard({
@@ -1909,6 +1999,7 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       maxRequestBytes: 1024,
       idleTimeoutSec: 10,
       workRowLimit: 50,
+      placementMaxAgeSec: 600,
       baselines: BASELINES,
     };
     const brokenMeterServer = await startDashboard({

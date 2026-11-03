@@ -1,5 +1,6 @@
 // Dashboard CLI: bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>]
-// [--results <path>] [--work <path>] [--sim-trace <path>] [--meter-usage <path>] [--ports <path>].
+// [--results <path>] [--work <path>] [--sim-trace <path>] [--meter-usage <path>] [--ports <path>]
+// [--loop-log <path>].
 // Startup parses the flags, pins the clock when asked, loads every config,
 // binds the loopback listener and serves until SIGINT or SIGTERM. Any
 // startup failure prints "factory: <message>" and exits 2; signals exit 0.
@@ -35,6 +36,7 @@ interface ServeFlags {
   simTrace: string | null;
   meterUsage: string | null;
   ports: string | null;
+  loopLog: string | null;
 }
 
 function parseServeArgs(argv: readonly string[]): ServeFlags {
@@ -46,6 +48,7 @@ function parseServeArgs(argv: readonly string[]): ServeFlags {
   let simTrace: string | null = null;
   let meterUsage: string | null = null;
   let ports: string | null = null;
+  let loopLog: string | null = null;
   let seenLedger = false;
   let seenVerdicts = false;
   let seenRegistry = false;
@@ -54,6 +57,7 @@ function parseServeArgs(argv: readonly string[]): ServeFlags {
   let seenSimTrace = false;
   let seenMeterUsage = false;
   let seenPorts = false;
+  let seenLoopLog = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] as string;
     if (arg === "--ledger") {
@@ -168,13 +172,27 @@ function parseServeArgs(argv: readonly string[]): ServeFlags {
         throw new Error("--ports needs a value");
       }
       ports = value;
+    } else if (arg === "--loop-log") {
+      if (seenLoopLog) {
+        throw new Error("--loop-log given twice");
+      }
+      seenLoopLog = true;
+      const value = argv[index + 1];
+      index += 1;
+      if (value === undefined || value === "") {
+        throw new Error("--loop-log needs a value");
+      }
+      if (value.startsWith("--")) {
+        throw new Error("--loop-log needs a value");
+      }
+      loopLog = value;
     } else if (arg.startsWith("--")) {
       throw new Error(`unknown flag ${arg}`);
     } else {
       throw new Error(`unexpected argument ${arg}`);
     }
   }
-  return { ledger, verdicts, registry, results, work, simTrace, meterUsage, ports };
+  return { ledger, verdicts, registry, results, work, simTrace, meterUsage, ports, loopLog };
 }
 
 async function serve(): Promise<number> {
@@ -232,6 +250,7 @@ async function serve(): Promise<number> {
   let workStorePath: string;
   let meterUsagePath: string;
   let portsPath: string;
+  let loopLogPath: string;
   let repos: LiveSources["repos"];
   try {
     const budget = await loadBudgetConfig();
@@ -286,6 +305,7 @@ async function serve(): Promise<number> {
     repos = specsRepos;
     meterUsagePath = flags.meterUsage ?? (await loadMeterConfig()).usageLogPath;
     portsPath = flags.ports ?? portsLogPath((await loopConfigOnce()).logPath);
+    loopLogPath = flags.loopLog ?? (await loopConfigOnce()).logPath;
     fixed = {
       budget,
       route,
@@ -315,6 +335,8 @@ async function serve(): Promise<number> {
         simTracePath: flags.simTrace,
         meterUsagePath,
         portsPath,
+        loopLogPath,
+        placementMaxAgeSec: config.placementMaxAgeSec,
         repos,
       },
       now: pinned === null ? () => new Date() : () => pinned,

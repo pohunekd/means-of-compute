@@ -31,7 +31,9 @@ export type LiveInputCode =
   | "meter-usage-invalid"
   | "meter-usage-unreadable"
   | "host-state-log-invalid"
-  | "host-state-log-unreadable";
+  | "host-state-log-unreadable"
+  | "loop-log-invalid"
+  | "loop-log-unreadable";
 
 export type LiveFailure =
   | { readonly kind: "no-data"; readonly reason: string }
@@ -44,7 +46,20 @@ export interface LiveSources {
   readonly simTracePath: string | null;
   readonly meterUsagePath: string;
   readonly portsPath: string;
+  readonly loopLogPath: string;
+  // A placement entry decides a real host's state only while it is younger.
+  readonly placementMaxAgeSec: number;
   readonly repos: Sourced<ReadonlySet<string>>;
+}
+
+// One host's line of the newest loop `placement` event that named it: the
+// event time and item, whether the engine chose it, and its verbatim reason.
+export interface PlacementEntry {
+  readonly at: string;
+  readonly workItemId: string;
+  readonly chosen: boolean;
+  readonly excluded: boolean;
+  readonly reason: string;
 }
 
 export type SimTileState = "offline" | "busy" | "blocked" | "eligible" | "running";
@@ -289,6 +304,12 @@ export interface RealWorkCard {
     readonly outcome: string;
   } | null;
   readonly today: { readonly count: number; readonly cost: LiveCell | null } | null;
+  // The host's newest placement entry at or before the page clock; fresh
+  // while younger than placementMaxAgeSec.
+  readonly placement: LiveSection<{
+    readonly entry: PlacementEntry;
+    readonly fresh: boolean;
+  } | null>;
 }
 
 export interface JustFinishedEntry {
@@ -345,6 +366,8 @@ export interface LiveInputs {
   readonly sim: LiveSourced<SimTrace>;
   readonly meter: LiveSourced<UsageIndex>;
   readonly probes: LiveSourced<readonly RecordedProbe[]>;
+  readonly placements: LiveSourced<ReadonlyMap<string, PlacementEntry>>;
+  readonly placementMaxAgeSec: number;
   readonly repos: Sourced<ReadonlySet<string>>;
 }
 
@@ -366,6 +389,8 @@ export class SimTraceError extends Error {
 }
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+// Loop log times are written with toISOString.
+const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const SIM_STATES: ReadonlySet<string> = new Set([
   "offline",
   "busy",
@@ -756,6 +781,107 @@ async function readProbesInput(
   }
 }
 
+export class LoopLogDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LoopLogDataError";
+  }
+}
+
+// Newest placement entry per host alias from the loop log's `placement`
+// events at or before asOf; other events are skipped, and an unterminated
+// last line is ignored because the loop may be appending to it.
+async function readPlacementsInput(
+  path: string,
+  asOf: Date,
+  log: (input: string, code: LiveInputCode, message: string) => void,
+): Promise<LiveSourced<ReadonlyMap<string, PlacementEntry>>> {
+  const label = "loop log";
+  try {
+    if ((await statInputPath(label, path)) === "absent") {
+      return { ok: false, failure: { kind: "no-data", reason: "no loop log" } };
+    }
+    const lines = (await readInputText(label, path)).split("\n").slice(0, -1);
+    const limit = asOf.getTime();
+    const newest = new Map<string, PlacementEntry>();
+    lines.forEach((text, index) => {
+      const where = `${label} ${path}: line ${String(index + 1)}`;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch (error: unknown) {
+        if (error instanceof SyntaxError) {
+          throw new LoopLogDataError(`${where}: not JSON`);
+        }
+        throw error;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new LoopLogDataError(`${where}: not a JSON object`);
+      }
+      const line = parsed as Record<string, unknown>;
+      if (line["event"] !== "placement") {
+        return;
+      }
+      const at = line["ts"];
+      const workItemId = line["workItemId"];
+      const chosenHost = line["chosenHostAlias"];
+      const candidates = line["candidates"];
+      if (typeof at !== "string" || !ISO_PATTERN.test(at) || Number.isNaN(Date.parse(at))) {
+        throw new LoopLogDataError(`${where}: invalid "ts"`);
+      }
+      if (typeof workItemId !== "string" || workItemId === "" || hasControlChar(workItemId)) {
+        throw new LoopLogDataError(`${where}: invalid "workItemId"`);
+      }
+      if (
+        chosenHost !== null &&
+        (typeof chosenHost !== "string" || !ALIAS_PATTERN.test(chosenHost))
+      ) {
+        throw new LoopLogDataError(`${where}: invalid "chosenHostAlias"`);
+      }
+      if (!Array.isArray(candidates)) {
+        throw new LoopLogDataError(`${where}: invalid "candidates"`);
+      }
+      if (Date.parse(at) > limit) {
+        return;
+      }
+      for (const raw of candidates as unknown[]) {
+        const candidate = raw as Record<string, unknown> | null;
+        const hostAlias = candidate?.["hostAlias"];
+        const excluded = candidate?.["excluded"];
+        const reason = candidate?.["reason"];
+        if (
+          typeof hostAlias !== "string" ||
+          !ALIAS_PATTERN.test(hostAlias) ||
+          typeof excluded !== "boolean" ||
+          typeof reason !== "string" ||
+          hasControlChar(reason)
+        ) {
+          throw new LoopLogDataError(`${where}: invalid candidate`);
+        }
+        const seen = newest.get(hostAlias);
+        if (seen === undefined || at >= seen.at) {
+          newest.set(hostAlias, {
+            at,
+            workItemId,
+            chosen: chosenHost === hostAlias,
+            excluded,
+            reason,
+          });
+        }
+      }
+    });
+    return { ok: true, value: newest };
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    const code: LiveInputCode =
+      error instanceof LoopLogDataError ? "loop-log-invalid" : "loop-log-unreadable";
+    log(label, code, error.message);
+    return { ok: false, failure: { kind: "error", code } };
+  }
+}
+
 export async function gatherLiveInputs(
   sources: LiveSources,
   dashboard: DashboardInputs,
@@ -765,12 +891,23 @@ export async function gatherLiveInputs(
   const emit = (input: string, code: LiveInputCode, message: string): void => {
     log({ input, code, message });
   };
-  const [sim, meter, probes] = await Promise.all([
+  const [sim, meter, probes, placements] = await Promise.all([
     readSimInput(sources.simTracePath, emit),
     readMeterInput(sources.meterUsagePath, emit),
     readProbesInput(sources.portsPath, dashboard.now, emit),
+    readPlacementsInput(sources.loopLogPath, dashboard.now, emit),
   ]);
-  return { now: dashboard.now, minute, dashboard, sim, meter, probes, repos: sources.repos };
+  return {
+    now: dashboard.now,
+    minute,
+    dashboard,
+    sim,
+    meter,
+    probes,
+    placements,
+    placementMaxAgeSec: sources.placementMaxAgeSec,
+    repos: sources.repos,
+  };
 }
 
 function failureCell(failure: InputFailure): LiveCell {
@@ -1147,6 +1284,23 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
     const registryEntry = openByAlias.get(alias) ?? null;
     const probeAt = probe?.at ?? null;
     const lastFinished = newestResultForHost(resultsOk, alias);
+    const placementEntry = inputs.placements.ok
+      ? (inputs.placements.value.get(alias) ?? null)
+      : null;
+    const placement: RealWorkCard["placement"] = !inputs.placements.ok
+      ? section(inputs.placements)
+      : {
+          kind: "ok",
+          value:
+            placementEntry === null
+              ? null
+              : {
+                  entry: placementEntry,
+                  fresh:
+                    inputs.now.getTime() - Date.parse(placementEntry.at) <=
+                    inputs.placementMaxAgeSec * 1000,
+                },
+        };
     // Today counts ledger records finished today on this host; partial pricing
     // prints the priced part with the `at least` form used elsewhere.
     let todayCount = 0;
@@ -1244,6 +1398,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
         idleReason: null,
         lastFinishedNote: null,
         probeAt,
+        placement,
         lastFinished:
           lastFinished !== null
             ? {
@@ -1327,6 +1482,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       })(),
       lastFinishedNote: idleNote,
       probeAt,
+      placement,
       lastFinished,
       today,
     };

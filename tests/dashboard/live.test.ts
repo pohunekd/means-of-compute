@@ -944,7 +944,6 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       ),
       { view: "live", t: 60, paused: false, host: null },
     );
-    const badSpecsPage = renderLive(liveBadSpecs);
     const badSpecsDesktop = cardSlice(liveBadSpecs, "desktop");
     const badSpecsFlat = badSpecsDesktop.replace(/\s+/g, " ");
     expect(badSpecsFlat).toContain("links:");

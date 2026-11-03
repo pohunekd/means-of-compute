@@ -261,11 +261,12 @@ async function serve(): Promise<number> {
       return workConfig;
     };
     workStorePath = flags.work ?? (await workConfigOnce()).storePath;
+    const specsPath = (await workConfigOnce()).factorySpecsPath;
     let specsRepos: LiveSources["repos"] = { ok: true, value: new Set() };
     try {
-      const specs = await loadFactorySpecs((await workConfigOnce()).factorySpecsPath);
+      const specs = await loadFactorySpecs(specsPath);
       specsRepos = { ok: true, value: new Set(specs.map((spec) => spec.repo)) };
-    } catch (error: unknown) {
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       specsRepos = {
         ok: false,

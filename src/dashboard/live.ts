@@ -259,7 +259,7 @@ export interface AuditPanel {
 
 export interface RealWorkCard {
   readonly alias: string;
-  readonly stage: "implement" | "audit" | "idle";
+  readonly stage: "implement" | "idle";
   readonly workItemId: string | null;
   readonly title: LiveCell | null;
   readonly issue: LiveCell | null;
@@ -268,7 +268,6 @@ export interface RealWorkCard {
   readonly branch: LiveCell | null;
   readonly modelText: string | null;
   readonly providerId: string | null;
-  readonly auditorModelText: string | null;
   readonly elapsed: string | null;
   readonly tokens: { readonly input: number; readonly output: number } | null;
   readonly cost: LiveCell | null;
@@ -282,6 +281,7 @@ export interface RealWorkCard {
   } | null;
   readonly meterFailure: LiveFailure | null;
   readonly idleReason: string | null;
+  readonly lastFinishedNote: string | null;
   readonly probeAt: string | null;
   readonly lastFinished: {
     readonly workItemId: string;
@@ -1197,7 +1197,6 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       const stage: RealWorkCard["stage"] = "implement";
       const modelText = stripProvider(registryEntry.model.model);
       const providerId = registryEntry.model.providerId;
-      const auditorModelText: string | null = null;
       const latest = inputs.meter.ok
         ? sumMeterForWorkItem(
             inputs.meter.value,
@@ -1227,13 +1226,13 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
           work === null ? workFieldFailed(inputs.dashboard.workItems) : workBranchCellOk(work),
         modelText,
         providerId,
-        auditorModelText,
         elapsed: formatElapsed(registryEntry.startedAt, inputs.now),
         tokens: latest.tokens,
         cost: costCell,
         latestCall: latest.latestCall,
         meterFailure,
         idleReason: null,
+        lastFinishedNote: null,
         probeAt,
         lastFinished:
           lastFinished !== null
@@ -1246,85 +1245,28 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
         today,
       };
     }
-    // No open session: only newest results for which an auditor actually ran read as audit.
-    // A round enters `auditing` from `ci` on a green check run (`src/loop/review.ts:457`),
-    // reaches the verdict read in `auditStep` (`src/loop/review.ts:689`), and a stored
-    // verdict that fails the merge check closes with outcome `findings`
-    // (`src/loop/merge.ts:173`); every other newest outcome (`start-rejected`, `lost`,
-    // `no-push`, `no-new-commit`, `empty-diff`, `diff-too-large`, `session-failed`,
-    // `red-ci`, `ci-timeout`, `trial-failed`, `merged`) leaves an idle card with the reason
-    // `last round: <outcome>`. The results line and the ledger record carry no head sha,
-    // so the round head is never recorded here: a findings round without a stored verdict
-    // prints `audit (head unknown)` in the auditor line.
+    // No open session: every host reads idle. The newest non-merged outcome names
+    // the round on its own meta line; the last-finished line already covers merged.
+    // A live audit stage needs the loop-state phase (`src/loop/review.ts:457`),
+    // which no dashboard input carries yet, so PR A shows no audit card: findings
+    // without a readable verdict reads as a missing verdict on the idle card.
     let idleNote: string | null = null;
-    let pending: (typeof resultsOk)[number] | null = null;
     {
       let newestForHost: (typeof resultsOk)[number] | null = null;
       for (const row of resultsOk) {
         if (row.hostAlias !== alias) continue;
         if (newestForHost === null || row.at > newestForHost.at) newestForHost = row;
       }
-      if (newestForHost !== null) {
+      if (newestForHost !== null && newestForHost.outcome !== "merged") {
         if (newestForHost.outcome === "findings") {
-          pending = newestForHost;
+          const verdicts = inputs.dashboard.verdicts.get(newestForHost.workItemId);
+          const stored = verdicts !== undefined && verdicts.ok ? verdicts.value : null;
+          idleNote =
+            stored !== null && stored.length > 0
+              ? `last round: ${newestForHost.outcome}`
+              : `last round: ${newestForHost.outcome} (verdict missing)`;
         } else {
           idleNote = `last round: ${newestForHost.outcome}`;
-        }
-      }
-      if (pending !== null) {
-        const verdicts = inputs.dashboard.verdicts.get(pending.workItemId);
-        const stored = verdicts !== undefined && verdicts.ok ? verdicts.value : null;
-        if (stored !== null && stored.length > 0) {
-          idleNote = `last round: ${pending.outcome}`;
-          pending = null;
-        }
-        if (pending !== null) {
-          const wid = pending.workItemId;
-          const work = workById.get(wid) ?? null;
-          const auditorModelText: string | null = "auditor: audit (head unknown)";
-          const meterInfo = inputs.meter.ok
-            ? sumMeterForWorkItem(inputs.meter.value, wid, inputs.dashboard.pricing)
-            : { tokens: null, cost: null, latestCall: null };
-          const costCell: typeof meterInfo.cost = !inputs.meter.ok
-            ? inputs.meter.failure.kind === "error"
-              ? { kind: "error", code: inputs.meter.failure.code }
-              : { kind: "no-data", reason: inputs.meter.failure.reason }
-            : meterInfo.cost;
-          return {
-            alias,
-            stage: "audit" as const,
-            workItemId: wid,
-            title:
-              work === null
-                ? workFieldFailed(inputs.dashboard.workItems)
-                : { kind: "text", text: work.title },
-            issue:
-              work === null ? workFieldFailed(inputs.dashboard.workItems) : workIssueCellOk(work),
-            pullNumber:
-              work === null ? workFieldFailed(inputs.dashboard.workItems) : workPullCellOk(work),
-            repo: work?.repo ?? null,
-            branch:
-              work === null ? workFieldFailed(inputs.dashboard.workItems) : workBranchCellOk(work),
-            modelText: null,
-            providerId: null,
-            auditorModelText,
-            elapsed: null,
-            tokens: meterInfo.tokens,
-            cost: costCell,
-            latestCall: null,
-            meterFailure: inputs.meter.ok ? null : inputs.meter.failure,
-            idleReason: null,
-            probeAt,
-            lastFinished:
-              lastFinished !== null
-                ? {
-                    workItemId: lastFinished.workItemId,
-                    at: lastFinished.at,
-                    outcome: lastFinished.outcome,
-                  }
-                : null,
-            today,
-          };
         }
       }
     }
@@ -1340,20 +1282,12 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       branch: null,
       modelText: null,
       providerId: null,
-      auditorModelText: null,
       elapsed: null,
       tokens: null,
       cost: null,
       latestCall: null,
       meterFailure: null,
       idleReason: (() => {
-        if (idleNote !== null) {
-          if (probe === null) return idleNote;
-          if (probe.kind === "unavailable" && probe.cause === "plugin-busy") {
-            return `${idleNote}, person at the desk`;
-          }
-          return idleNote;
-        }
         if (registryFailure !== null)
           return registryFailure.kind === "error"
             ? `error (${registryFailure.code})`
@@ -1374,6 +1308,7 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
         }
         return null;
       })(),
+      lastFinishedNote: idleNote,
       probeAt,
       lastFinished,
       today,

@@ -52,6 +52,7 @@ export const LIVE_CSS = [
   ".keycard .cite{font-size:0.42rem;margin:0.02rem 0 0;line-height:1}",
   ".keycard.live-simcard{border-top-style:dashed}",
   "section{padding:0.2rem 0.3rem 0.2rem;margin-top:0.2rem;border-radius:4px}",
+  "h2{font-size:0.7rem;margin:0 0 0.12rem}",
   ".rw-heading{font-size:1.05rem;margin:0 0 0.12rem}",
   ".live-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,0.9fr);gap:0.3rem;align-items:start}",
   ".live-side{display:grid;gap:0.4rem}",
@@ -110,7 +111,7 @@ export const LIVE_CSS = [
   ".rw .meta b{color:var(--text);font-weight:700}",
   ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px;line-height:1.4}",
   ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
-  ".stage.audit{background:var(--parked-bg);color:var(--parked-text)}",
+
   ".fin{display:flex;gap:12px;margin:0 0 10px;align-items:baseline}",
   ".fin .fi.fin-label{flex:0 0 auto;background:none;border:none;padding:6px 0;font-size:15px;font-weight:700}",
   ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:15px;line-height:1.3}",
@@ -157,8 +158,6 @@ const MONTHS = [
 ] as const;
 
 function monthDay(iso: string): string {
-  // Every constantHtml argument stays a literal: dynamic strings run through html``,
-  // which is why the strip-title escaper and the tab highlighter use literal branches.
   const month = Number(iso.slice(5, 7));
   const day = Number(iso.slice(8, 10));
   if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
@@ -344,21 +343,17 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const repos = model.repos;
   const reposFailure = model.reposFailure;
   const repoAllowed = reposFailure === null && card.repo !== null && repos.has(card.repo);
-  const stageLabel = card.stage === "idle" ? "" : card.stage;
-  const stageClass =
-    card.stage === "implement" ? "stage" : card.stage === "audit" ? "stage audit" : "stage";
+  const stageLabel = "implement";
   const idleCls = card.stage === "idle" ? " idle" : "";
   const stageHtml =
-    card.stage === "idle"
-      ? constantHtml("")
-      : html`<span class="${stageClass}">${stageLabel}</span>`;
+    card.stage === "idle" ? constantHtml("") : html`<span class="stage">${stageLabel}</span>`;
   const titleLine =
     card.stage === "idle"
       ? card.idleReason === null
         ? constantHtml("")
-        : card.idleReason.startsWith("last round: ")
-          ? html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
-          : html`<p class="task idle-task">state: ${card.idleReason}</p>`
+        : card.idleReason.startsWith("error (") || card.idleReason.startsWith("no data (")
+          ? html`<p class="task idle-task">state: ${card.idleReason}</p>`
+          : html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
       : card.title === null
         ? html`<p class="task"><span class="nodata">no work</span></p>`
         : card.title.kind === "error"
@@ -403,10 +398,10 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
       ? constantHtml("")
       : html`<p class="meta">elapsed <b>${card.elapsed}</b></p>`;
   const modelLine =
-    card.modelText === null && card.auditorModelText === null
+    card.modelText === null
       ? constantHtml("")
       : html`<p class="meta">
-          ${card.modelText === null ? "" : `${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}${card.modelText !== null && card.auditorModelText !== null ? " · " : ""}${card.auditorModelText ?? ""}
+          ${`${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}
         </p>`;
   const tokensCostSoFar =
     card.meterFailure !== null
@@ -462,6 +457,10 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
       : finishedDay !== null && finishedDay !== pageDay
         ? `${monthDay(card.lastFinished.at)} ${card.lastFinished.at.slice(11, 16)}`
         : card.lastFinished.at.slice(11, 16);
+  const lastRoundLine =
+    card.lastFinishedNote === null
+      ? constantHtml("")
+      : html`<p class="meta">${card.lastFinishedNote}</p>`;
   const lastFinishedLine =
     card.lastFinished === null
       ? constantHtml("")
@@ -500,14 +499,18 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     ${
       reposFailure === null
         ? html`<p class="meta">${issueLine} ${prLine}</p>`
-        : reposFailure.kind === "error"
-          ? html`<p class="meta">links: <span class="error">error (${reposFailure.code})</span></p>`
-          : html`<p class="meta">
-              links: <span class="nodata">no data (${reposFailure.reason})</span>
-            </p>`
+        : card.issue === null && card.pullNumber === null
+          ? constantHtml("")
+          : reposFailure.kind === "error"
+            ? html`<p class="meta">
+                links: <span class="error">error (${reposFailure.code})</span>
+              </p>`
+            : html`<p class="meta">
+                links: <span class="nodata">no data (${reposFailure.reason})</span>
+              </p>`
     }
-    ${modelLine} ${elapsedLine} ${tokensCostSoFar} ${callLine} ${probeLine} ${lastFinishedLine}
-    ${todayLine}
+    ${lastRoundLine} ${modelLine} ${elapsedLine} ${tokensCostSoFar} ${callLine} ${probeLine}
+    ${lastFinishedLine} ${todayLine}
   </div>`;
 }
 
@@ -539,6 +542,7 @@ function renderJustFinished(
           ? html`<span class="error">error (${entry.verdictFailure.code})</span>`
           : html`<span class="nodata">no data (${entry.verdictFailure.reason})</span>`
       : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
+  // Every constantHtml argument stays a literal: dynamic strings run through html``.
   const titleText: SafeHtml =
     entry.title.kind === "text"
       ? html`${entry.title.text}`

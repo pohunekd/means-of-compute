@@ -370,6 +370,24 @@ function workItemsText(): string {
       },
       {
         schemaVersion: "v1",
+        id: "w9-queued",
+        repo: "example/demo-repo",
+        title: "Queued follow-up",
+        goal: LONG_GOAL,
+        issue: 30,
+        dod: [{ id: "d1", text: "do", done: false }],
+        dependencies: [],
+        status: "queued",
+        statusReason: null,
+        assignedHostAlias: null,
+        branch: "feature/w9",
+        pullNumber: null,
+        modelRouting: { preferredModel: "muse-spark-open-1026", attempts: 0, fallbackUsed: false },
+        retryCount: 0,
+        stallRounds: 0,
+      },
+      {
+        schemaVersion: "v1",
         id: "w4-laptopb",
         repo: "example/demo-repo",
         title: "Docs update <i>INJ</i><img src=x alt=INJIMG>",
@@ -752,24 +770,20 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(desktopFlat).toContain("1,000 in / 500 out");
     expect(desktopFlat).toContain("250 ms");
     expect(desktopCard).not.toContain("muse-spark-open-1026 (baseten) · latest");
-    // audit card, scoped to the laptop-a card slice
+    // findings without a readable verdict reads idle, never audit: PR A has no
+    // live audit stage (it needs the loop-state phase, a later PR).
     const auditCard = cardSlice(page, "laptop-a");
-    expect(auditCard).toContain("audit");
-    expect(auditCard).toContain("Report: how this factory built itself");
-    // The pending card carries the audit stage pill, not the implement one: the
-    // audit-stage mutation (stage to implement) fails this row.
-    expect(auditCard).toContain("stage audit");
-    // The results line and the ledger record carry no head sha: the head choice names
-    // the unknown round head explicitly in the auditor line.
-    expect(auditCard).toContain("auditor: audit (head unknown)");
-    expect(auditCard).not.toContain("verdict not written yet");
-    expect(auditCard).not.toContain("muse-glimmer");
-    const auditFlat = auditCard.replace(/\s+/g, " ");
-    expect(auditFlat).toContain("1,300,000 in / 48,000 out");
-    expect(auditFlat).toContain("$1.8290");
+    expect(auditCard).toContain("Idle: 1 queued, not placed");
+    expect(auditCard).toContain("last round: findings (verdict missing)");
+    expect(auditCard).not.toContain("stage audit");
+    expect(auditCard).not.toContain("auditor:");
     // idle cards with reason, scoped per card
+    // A queued work item flips the probe tail on every idle card with history.
     const kioskCard = cardSlice(page, "kiosk-a");
-    expect(kioskCard).toContain("Idle: last round: merged");
+    expect(kioskCard).toContain("Idle: 1 queued, not placed");
+    // Merged newest names no last round: the last-finished line covers it.
+    expect(kioskCard).not.toContain("last round:");
+    expect(kioskCard).toContain("last finished");
     expect(kioskCard).toContain("reported 17:58:00");
     expect(kioskCard).toContain("last finished");
     const kioskFlat = kioskCard.replace(/\s+/g, " ");
@@ -805,11 +819,9 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskFlat).toContain("of 3 entries unpriced");
     expect(kioskFlat).toContain("$0.0073");
     const laptopbCard = cardSlice(page, "laptop-b");
-    expect(laptopbCard).toContain("Idle: last round: merged, person at the desk");
+    expect(laptopbCard).toContain("Idle: person at the desk (1 queued, not placed)");
+    expect(laptopbCard).not.toContain("last round:");
     expect(kioskCard).not.toContain("person at the desk");
-    // The idle reason names the round outcome verbatim: mutating the separator fails rows.
-    expect(laptopbCard).toContain("last round: merged");
-    expect(laptopbCard).not.toContain("last round : merged");
     // A newest start-rejected round never reads as audit: the card stays idle.
     const liveRejected = buildLive(
       await gatherLiveInputs(
@@ -846,7 +858,8 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       { view: "overview", t: 60, paused: false, host: null },
     );
     const rejectedKiosk = cardSlice(renderLive(liveRejected), "kiosk-a");
-    expect(rejectedKiosk).toContain("Idle: last round: start-rejected");
+    expect(rejectedKiosk).toContain("Idle: 1 queued, not placed");
+    expect(rejectedKiosk).toContain("last round: start-rejected");
     expect(rejectedKiosk).not.toContain("audit");
     // The last-finished line still names the newest merged entry: a mutated
     // any-outcome newest would name the newer start-rejected row instead.
@@ -1034,8 +1047,8 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     // The last-finished line names the newest merged entry only: a mutated
     // any-outcome newest would name the newer findings row instead.
     const findingKiosk = cardSlice(renderLive(liveFinding), "laptop-b");
-    expect(findingKiosk).toContain("audit");
-    expect(findingKiosk).not.toContain("last finished");
+    expect(findingKiosk).toContain("last round: findings (verdict missing)");
+    expect(findingKiosk).toContain("last finished");
     // The strip total has no $0.0000 fallback: the newest row has no stored verdict
     // and prints `no data (no verdict)` for its counts, never a zero cost.
     expect(stripText).toContain("no data (no verdict)");
@@ -1716,6 +1729,25 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
         { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
       );
       expect(pipeCall.status).toBe(404);
+      // M12: a malformed call timestamp 404s on the broken-meter server too;
+      // pattern checks stay on when the source is bad.
+      const brokenPatternCall = await fetch(
+        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&call=not-a-time%7Cw1-real`,
+        { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
+      );
+      expect(brokenPatternCall.status).toBe(404);
+      // M13: with the verdict file unreadable, a malformed audit id 404s on the
+      // same broken-meter server; pattern checks stay on when the store is bad.
+      const vdirBroken = join(fixture.dir, "verdicts", "w1-real");
+      const brokenFile2 = join(vdirBroken, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
+      const origBroken2 = readFileSync(brokenFile2, "utf8");
+      writeFileSync(brokenFile2, "{ invalid }");
+      const brokenPatternAudit = await fetch(
+        `http://localhost:${String(brokenMeterServer.port)}/?view=overview&audit=w1-real%40zz`,
+        { headers: { host: `localhost:${String(brokenMeterServer.port)}` } },
+      );
+      expect(brokenPatternAudit.status).toBe(404);
+      writeFileSync(brokenFile2, origBroken2);
     } finally {
       await brokenMeterServer.stop();
     }

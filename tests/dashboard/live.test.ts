@@ -1193,7 +1193,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
   }
 });
 
-test("tab links keep t and drop selection, pause drops refresh and mid frame preserves host, /live redirects and no live has no overview", async () => {
+test("tab links keep t and drop selection, pause drops refresh and mid frame preserves host, old views and /live redirect, and no live has no Live tab", async () => {
   const fixture = makeFixture(fixtureTrace());
   const config: DashboardConfig = {
     listenEnv: "MOC_DASHBOARD_LISTEN",
@@ -1228,8 +1228,8 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const overviewBody = await overview.text();
     expect(overviewBody).toContain('class="tab active"');
     expect(overviewBody).toContain("host=desk-001");
-    // Four tabs, each page with its subtitle and only its own figures: the
-    // old five-card strip (keyfigures) never returns on a tab page.
+    // Four tabs, each page with its subtitle and only its own figures: no
+    // tab repeats the five-card strip of figures from the other tabs.
     const tabs: readonly (readonly [string, string, string, readonly string[]])[] = [
       ["live", "Live", "the real machines and their work first", ["Total savings"]],
       ["work", "Work", "every task the factory has taken", ["Total savings", "Spent total"]],
@@ -1241,7 +1241,6 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       const tabList = [...body.matchAll(/<a class="tab[^"]*" href="\/\?view=(\w+)&amp;t=60"/g)];
       expect(tabList.map((match) => match[1])).toEqual(["live", "work", "models", "savings"]);
       expect(body).toContain(`<p class="sub"><b>${label}</b> - ${subtitle}`);
-      expect(body).not.toContain("keyfigures");
       for (const other of foreign) {
         expect(body).not.toContain(other);
       }
@@ -1495,7 +1494,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       headers: { host: `localhost:${String(plain.port)}` },
     });
     const workBody = await workRes.text();
-    expect(workBody).not.toContain(">overview<");
+    expect(workBody).not.toContain(">Live<");
     const taskStack = await fetch(`http://localhost:${String(plain.port)}/?task=w1-real`, {
       headers: { host: `localhost:${String(plain.port)}` },
     });

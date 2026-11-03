@@ -9,8 +9,8 @@ import { loadTimeline } from "../../src/sim/timeline.ts";
 import { runTimeline } from "../../src/sim/run.ts";
 
 describe("fleet simulator", () => {
-  test("the evening timeline expands to 300 hosts and replays byte-identically, and the first placement chooses a desk with the real place() reason", async () => {
-    const timeline = await loadTimeline("config/sim/evening-300.json");
+  test("the evening timeline expands to 100 hosts and replays byte-identically, and the first placement chooses a desk with the real place() reason", async () => {
+    const timeline = await loadTimeline("config/sim/evening-100.json");
     const config = await loadPlacementConfig();
     expect(timeline.seed).toBe(20261103);
     const linesA = runTimeline({ timeline, config });
@@ -19,19 +19,19 @@ describe("fleet simulator", () => {
     const b = linesB.map((l) => JSON.stringify(l)).join("\n") + "\n";
     expect(a).toBe(b);
     expect(createHash("sha256").update(a).digest("hex")).toBe(
-      "934478698a2667061cf970e4a6678828b9a5ccc918b3f52e170f7ac86b361224",
+      "f99d11f19e8d1906292849f646dd0489db866a8e89334fdbb472176e85ef99ac",
     );
     const lines = linesA as unknown as Record<string, unknown>[];
     const header = lines[0] as Record<string, unknown>;
     expect(header["kind"]).toBe("header");
-    expect(header["hostCount"]).toBe(300);
+    expect(header["hostCount"]).toBe(100);
     expect(header["schemaVersion"]).toBe("sim-trace-v1");
     const placements = lines.filter((l) => l["kind"] === "placement") as Record<string, unknown>[];
-    expect(placements.length).toBe(315);
+    expect(placements.length).toBe(110);
     const first = placements[0] as Record<string, unknown>;
-    expect(first["chosenHostAlias"]).toBe("desk-085");
+    expect(first["chosenHostAlias"]).toBe("desk-035");
     expect(first["reason"]).toBe(
-      "desk-085 is idle, on AC power, no battery, CPU 93% free, memory 71% free, inside its policy window, 0/2 agents running",
+      "desk-035 is idle, on AC power, no battery, CPU 92% free, memory 60% free, inside its policy window, 0/2 agents running",
     );
     const candidates = first["candidates"] as unknown[];
     expect(Array.isArray(candidates)).toBe(true);
@@ -167,7 +167,7 @@ describe("fleet simulator", () => {
       createHash("sha256")
         .update(stripped.map((r) => JSON.stringify(r)).join("\n") + "\n")
         .digest("hex"),
-    ).toBe("0b465d78ad29f2be59d3a0717efa1f92733f881c818deaa25966ec00d2004cf9");
+    ).toBe("daed890bbf9e9b56b288d99e29d2cc3f40921109b75ca5016d45171275df31bc");
     // Direct check: find a host line with running >=2 where tasks differ, and verify earliest task
     let foundEarliest = false;
     const active = new Map<
@@ -217,8 +217,8 @@ describe("fleet simulator", () => {
     expect(foundEarliest).toBe(true);
   });
 
-  test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-142 ineligible at its minute", async () => {
-    const timeline = await loadTimeline("config/sim/evening-300.json");
+  test("a battery of 40 excludes the docked laptop with the battery-floor reason and a return event makes desk-058 ineligible at its minute", async () => {
+    const timeline = await loadTimeline("config/sim/evening-100.json");
     const config = await loadPlacementConfig();
     const lines = runTimeline({ timeline, config }) as unknown as Record<string, unknown>[];
     const hostAt95 = lines.find(
@@ -238,14 +238,14 @@ describe("fleet simulator", () => {
     expect(laptop007Cand?.["excluded"]).toBe(true);
     expect(String(laptop007Cand?.["reason"])).toContain("battery at 40 percent");
     const hostAt100 = lines.find(
-      (l) => l["kind"] === "host" && l["alias"] === "desk-142" && l["atMinute"] === 100,
+      (l) => l["kind"] === "host" && l["alias"] === "desk-058" && l["atMinute"] === 100,
     ) as Record<string, unknown> | undefined;
     expect(hostAt100).toBeDefined();
     expect(hostAt100?.["eligible"]).toBe(false);
     expect(hostAt100?.["state"]).toBe("busy");
     expect(String(hostAt100?.["excludeReason"])).toContain("not idle");
     const eventAt100 = lines.find(
-      (l) => l["kind"] === "event" && l["alias"] === "desk-142" && l["atMinute"] === 100,
+      (l) => l["kind"] === "event" && l["alias"] === "desk-058" && l["atMinute"] === 100,
     ) as Record<string, unknown> | undefined;
     expect(eventAt100).toBeDefined();
     expect(eventAt100?.["event"]).toBe("return");
@@ -255,7 +255,7 @@ describe("fleet simulator", () => {
     const dir = mkdtempSync(join(tmpdir(), "sim-unknown-"));
     try {
       const badTimelinePath = join(dir, "bad.json");
-      const base = JSON.parse(readFileSync("config/sim/evening-300.json", "utf8")) as Record<
+      const base = JSON.parse(readFileSync("config/sim/evening-100.json", "utf8")) as Record<
         string,
         unknown
       >;
@@ -286,7 +286,7 @@ describe("fleet simulator", () => {
       expect(outExists).toBe(false);
       const out = join(dir, "out.jsonl");
       const proc2 = Bun.spawnSync(
-        ["bun", "run", "src/sim/cli.ts", "--timeline", "config/sim/evening-300.json", "--out", out],
+        ["bun", "run", "src/sim/cli.ts", "--timeline", "config/sim/evening-100.json", "--out", out],
         { stdout: "pipe", stderr: "pipe" },
       );
       expect(proc2.exitCode).toBe(0);
@@ -300,7 +300,7 @@ describe("fleet simulator", () => {
       expect(simSources).not.toContain("ledger");
       expect(simSources).not.toContain("meter");
       expect(simSources).not.toContain("registry");
-      const base2 = JSON.parse(readFileSync("config/sim/evening-300.json", "utf8")) as Record<
+      const base2 = JSON.parse(readFileSync("config/sim/evening-100.json", "utf8")) as Record<
         string,
         unknown
       >;

@@ -145,11 +145,11 @@ expected: the body starts with the marker `moc:work-item:gh-moc-167`. Two
 Before recording, off camera, stop the step 5 server, generate the simulated
 evening once, and start the live server against the real factory logs:
 
-`mkdir -p logs/sim && bun run sim:fleet --timeline config/sim/evening-300.json --out logs/sim/evening-300.jsonl`
+`mkdir -p logs/sim && bun run sim:fleet --timeline config/sim/evening-100.json --out logs/sim/evening-100.jsonl`
 
-expected: one summary line with 300 hosts. Then:
+expected: one summary line with 100 hosts. Then:
 
-`MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-300.jsonl`
+`MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-100.jsonl`
 
 and open `http://localhost:8080/live`.
 
@@ -163,7 +163,7 @@ unattended window. Battery beat: at simulated 18:35 (minute 95) `laptop-007
 battery at 40 percent` appears in `Simulated events (sim clock)`; the
 `laptop-007` tile keeps running with an amber edge and a `!` (running, now
 excluded - the battery reason is in its title) and turns amber (blocked)
-from minute 215, when its work ends. `desk-142 returned` appears at 18:40
+from minute 215, when its work ends. `desk-058 returned` appears at 18:40
 and `laptop-021 unplugged` at 19:15, each with its reason in the tile title.
 The `Simulated events (sim clock)` block shows `placed sim-... on ...
 because ...` rows with the placement engine's own reasons; real rounds sit

@@ -4,17 +4,34 @@
 // Pure: buildLive turns gathered Sourced inputs into the value the live
 // renderer turns into HTML. Simulated data arrives only through the sim
 // source and never through DashboardInputs, so no existing panel can show it.
+import { tokenCostNanoTimes1M } from "../budget/cost.js";
 import type { NanoPricing } from "../budget/pricing.js";
 import type { RegistryEntry } from "../dispatcher/registry.js";
 import { readInputText, statInputPath } from "../fs/input.js";
 import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { MeterLogError, replayUsageLog, type UsageIndex } from "../meter/usage-log.js";
-import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
+import { formatUsd, groupDigits, guardScaled } from "./money.js";
 import { verdictCounts } from "../auditor/verdict.js";
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
 import type { DashboardInputs, InputErrorCode, InputFailure, Sourced } from "./inputs.js";
 import { openSessionCount } from "./sessions.js";
 import { stat } from "node:fs/promises";
+
+// Display cost of one call or token row by the shared cost rule, so a row
+// with cachedInputTokens costs the same here as on the Cost tab.
+function rowCostScaled(
+  row: { inputTokens: number; outputTokens: number; cachedInputTokens?: number },
+  price: NanoPricing,
+): bigint {
+  return guardScaled(
+    tokenCostNanoTimes1M(
+      BigInt(row.inputTokens),
+      BigInt(row.cachedInputTokens ?? 0),
+      BigInt(row.outputTokens),
+      price,
+    ),
+  );
+}
 
 // Cell text for counters and activity rows: like the dashboard Cell, but
 // the error code may be a live input code as well as a dashboard one.
@@ -1036,8 +1053,7 @@ function sumMeterForWorkItem(
 } {
   let sumIn = 0;
   let sumOut = 0;
-  let scaledIn = 0n;
-  let scaledOut = 0n;
+  let scaled = 0n;
   let totalEntries = 0;
   let pricedEntries = 0;
   let missingTokens = false;
@@ -1073,8 +1089,14 @@ function sumMeterForWorkItem(
       const price = pricing.value.get(grant.providerId);
       if (price !== undefined) {
         pricedEntries += 1;
-        scaledIn += tokenCostScaled(end.inputTokens, price.inputNanoPer1M);
-        scaledOut += tokenCostScaled(end.outputTokens, price.outputNanoPer1M);
+        scaled += rowCostScaled(
+          {
+            inputTokens: end.inputTokens,
+            outputTokens: end.outputTokens,
+            cachedInputTokens: end.cachedInputTokens,
+          },
+          price,
+        );
       }
     }
   }
@@ -1098,11 +1120,11 @@ function sumMeterForWorkItem(
     } else {
       cost = {
         kind: "text",
-        text: `at least ${formatUsd(scaledIn + scaledOut)} (${String(unpriced)} of ${String(totalEntries)} entries unpriced)`,
+        text: `at least ${formatUsd(scaled)} (${String(unpriced)} of ${String(totalEntries)} entries unpriced)`,
       };
     }
   } else {
-    cost = { kind: "text", text: formatUsd(scaledIn + scaledOut) };
+    cost = { kind: "text", text: formatUsd(scaled) };
   }
   // null tokens when all entries missing tokens
   const finalTokens =
@@ -1205,8 +1227,14 @@ function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly Just
           const price = inputs.dashboard.pricing.value.get(t.provider);
           if (price === undefined) continue;
           priced += 1;
-          scaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
-          scaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+          scaled += rowCostScaled(
+            {
+              inputTokens: t.inputTokens,
+              outputTokens: t.outputTokens,
+              cachedInputTokens: t.cachedInputTokens,
+            },
+            price,
+          );
         }
         if (hasMissingTokens && priced === 0 && total > 0) {
           cost = { kind: "no-data", reason: "usage not reported" };
@@ -1330,8 +1358,14 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
           todayTotal += 1;
           if (price === undefined) continue;
           todayPriced += 1;
-          todayScaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
-          todayScaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+          todayScaled += rowCostScaled(
+            {
+              inputTokens: t.inputTokens,
+              outputTokens: t.outputTokens,
+              cachedInputTokens: t.cachedInputTokens,
+            },
+            price,
+          );
         }
       }
     }
@@ -1521,8 +1555,14 @@ function activityRows(
           : {
               kind: "text",
               text: formatUsd(
-                tokenCostScaled(end.inputTokens, price.inputNanoPer1M) +
-                  tokenCostScaled(end.outputTokens, price.outputNanoPer1M),
+                rowCostScaled(
+                  {
+                    inputTokens: end.inputTokens,
+                    outputTokens: end.outputTokens,
+                    cachedInputTokens: end.cachedInputTokens,
+                  },
+                  price,
+                ),
               ),
             };
     }
@@ -1987,8 +2027,14 @@ function buildCallPanel(inputs: LiveInputs, callKey: string): CallPanel | null {
           : {
               kind: "text",
               text: formatUsd(
-                tokenCostScaled(end.inputTokens, price.inputNanoPer1M) +
-                  tokenCostScaled(end.outputTokens, price.outputNanoPer1M),
+                rowCostScaled(
+                  {
+                    inputTokens: end.inputTokens,
+                    outputTokens: end.outputTokens,
+                    cachedInputTokens: end.cachedInputTokens,
+                  },
+                  price,
+                ),
               ),
             };
     }

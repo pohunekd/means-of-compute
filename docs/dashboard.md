@@ -136,8 +136,10 @@ interventions`, `Retries`) as cards, then the Work table, newest first,
   cards; then every Savings figure, labels as the panel has them, with its
   note and full source in one `Frontier list price comparison` table, and
   directly under it one assumptions line: the NVIDIA Build free tier is
-  priced at $0, neither side applies a cache discount, the frontier side is
-  assumed to use the same tokens, and only the factory ledger is counted.
+  priced at $0, the frontier side is assumed to use the same tokens, and only
+  the factory ledger is counted. Actual cost applies the cached-input rate
+  where the provider reported cached tokens; the frontier estimate assumes no
+  cache discount.
   No figure is a hero card or styled as a gain.
 
 On a framed tab a card's note is cut to two lines and its source to one,

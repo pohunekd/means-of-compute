@@ -207,7 +207,7 @@ export const TAB_SUBTITLES: Readonly<Record<TabId, string>> = {
 // and hours at a frontier list price; these are the assumptions behind them.
 const FRONTIER_HEADING = "Frontier list price comparison";
 const FRONTIER_ASSUMPTIONS =
-  "Assumptions: the NVIDIA Build free tier is priced at $0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted.";
+  "Assumptions: the NVIDIA Build free tier is priced at $0, the frontier side is assumed to use the same tokens, and only the factory ledger is counted. Actual cost applies the cached-input rate where the provider reported cached tokens; the frontier estimate assumes no cache discount.";
 
 const LIVE_TAGLINE =
   "Real placement engine, synthetic fleet; the four real machines and the model calls are live.";

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { WorkItem } from "../../contracts/v1/types.js";
 import type { HostCapacity } from "../../contracts/v1/types.js";
-import type { LoopLog } from "../../src/loop/log.js";
+import type { LoopLog, LoopLogEvent } from "../../src/loop/log.js";
 import { PortRejectedError } from "../../src/dispatcher/port.js";
 import { createDispatcher } from "../../src/dispatcher/dispatcher.js";
 import { createMemoryPort } from "../../src/dispatcher/memory-port.js";
@@ -73,12 +73,15 @@ function configOf(registryPath: string): DispatcherConfig {
   };
 }
 
-function logged(): { log: LoopLog; events: string[] } {
+function logged(): { log: LoopLog; events: string[]; records: LoopLogEvent[] } {
   const events: string[] = [];
+  const records: LoopLogEvent[] = [];
   return {
     events,
+    records,
     log: {
       log(event): void {
+        records.push(event);
         events.push(
           `${event.event}:${event.code ?? ""}:${event.detail ?? ""}:${event.sha ?? ""}:${typeof event.round === "number" ? String(event.round) : ""}:${event.requestId ?? ""}:${event.hostAlias ?? ""}`,
         );
@@ -199,6 +202,7 @@ function replyOf(capacity: HostCapacity): {
 interface Harness {
   ctx: SchedulerContext;
   events: string[];
+  records: LoopLogEvent[];
   registryPath: string;
   sandbox: Sandbox;
   nowValue: { current: Date };
@@ -350,6 +354,7 @@ async function makeHarness(
   return {
     ctx,
     events: seen.events,
+    records: seen.records,
     registryPath,
     sandbox,
     nowValue,
@@ -750,6 +755,11 @@ test("B1 a claim retries the excluded host and parks at maxStartRejections", asy
       expect(report.claimed).toEqual(["gh-demo-1"]);
       const retry = harness.events.find((line) => line.startsWith("exclusions-retried:"));
       expect(retry).toBe("exclusions-retried::host-a::::");
+      expect(
+        harness.records
+          .filter((entry) => entry.event === "placement")
+          .map((entry) => entry.chosenHostAlias),
+      ).toEqual(["host-a"]);
       const parked = (await readLoopState(ctx.statePath)).items["gh-demo-1"] as unknown as LoopItem;
       expect(parked.park).toMatchObject({ kind: "operator", code: "start-rejected" });
       expect(parked.startRejections).toBe(3);
@@ -808,7 +818,57 @@ test("a cooled host is skipped for every item, also by the exclusions retry", as
       expect(cooldowns).toHaveLength(1);
       expect(cooldowns[0]).toBe(`host-cooldown::${new Date(end).toISOString()}::::host-a`);
       expect(harness.events.some((line) => line.startsWith("exclusions-retried:"))).toBe(false);
-      expect(harness.events.some((line) => line.startsWith("no-host:"))).toBe(true);
+      expect(harness.events.filter((line) => line.startsWith("no-host:"))).toHaveLength(2);
+      expect(harness.records.filter((entry) => entry.event === "placement")).toHaveLength(1);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+// #318: a claim over one busy host and one idle host logs one placement
+// event with both candidates and the probe's idle reason verbatim.
+test("a placement logs the chosen host and every candidate reason", async () => {
+  await withTempDir(async (dir) => {
+    const restoreEnv = applyTestEnv();
+    try {
+      const harness = await makeHarness(dir);
+      harness.hostControl.set("host-b", {
+        kind: "reply",
+        reply: replyOf(
+          capacityOf("host-b", {
+            idle: false,
+            idleReason: "user input 30 seconds ago",
+            secondsSinceInput: 30,
+          }),
+        ),
+      });
+      await writeStore(harness.ctx.storePath, [item("gh-demo-1")]);
+      await appendPending(harness.ctx.ledgerPath, grantUsage("gh-demo-1:gh-demo-1:0", "gh-demo-1"));
+      const scheduler = createScheduler(harness.ctx);
+      const report = await scheduler.tick();
+      await scheduler.settled();
+      expect(report.claimed).toEqual(["gh-demo-1"]);
+      expect(harness.records.filter((entry) => entry.event === "placement")).toEqual([
+        {
+          event: "placement",
+          workItemId: "gh-demo-1",
+          round: 0,
+          chosenHostAlias: "host-a",
+          candidates: [
+            {
+              hostAlias: "host-a",
+              excluded: false,
+              reason: "idle, on AC power, no battery, CPU 94% free, memory 64% free",
+            },
+            {
+              hostAlias: "host-b",
+              excluded: true,
+              reason: "excluded: not idle (user input 30 seconds ago)",
+            },
+          ],
+        },
+      ]);
     } finally {
       restoreEnv();
     }

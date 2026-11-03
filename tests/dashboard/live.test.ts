@@ -1228,21 +1228,53 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     const overviewBody = await overview.text();
     expect(overviewBody).toContain('class="tab active"');
     expect(overviewBody).toContain("host=desk-001");
-    // Four tabs, each page with its subtitle and only its own figures: no
-    // tab repeats the five-card strip of figures from the other tabs.
+    // Four tabs, each page with its full subtitle and only its own figures: no
+    // tab repeats the five-card strip of figures from the other tabs. Only
+    // Live carries the simulated clock, the synthetic-fleet tagline and the
+    // replay; model names read whole in one form on every tab.
     const tabs: readonly (readonly [string, string, string, readonly string[]])[] = [
-      ["live", "Live", "the real machines and their work first", ["Total savings"]],
-      ["work", "Work", "every task the factory has taken", ["Total savings", "Spent total"]],
-      ["models", "Models", "every real model call the factory made", ["Total savings"]],
-      ["savings", "Savings", "what the same work would have cost", ["Finished tasks"]],
+      [
+        "live",
+        "Live",
+        "the real machines and their work first; below, the simulated company evening replayed through the real placement engine.",
+        ["Total savings"],
+      ],
+      [
+        "work",
+        "Work",
+        "every task the factory has taken: its status, its machine, its model and its audit verdict. All real.",
+        ["Total savings", "Spent total", "simulated", "synthetic", 'class="controls"'],
+      ],
+      [
+        "models",
+        "Models",
+        "every real model call the factory made: which model, which provider, how many tokens, what it cost.",
+        ["Total savings", "simulated", "synthetic", 'class="controls"'],
+      ],
+      [
+        "savings",
+        "Savings",
+        "what the same work would have cost at frontier prices, what it cost here, and the budget cap. All real, from the ledger.",
+        ["Finished tasks", "simulated", "synthetic", 'class="controls"'],
+      ],
     ];
     for (const [view, label, subtitle, foreign] of tabs) {
       const body = await (await get(`/?view=${view}&t=60`)).text();
       const tabList = [...body.matchAll(/<a class="tab[^"]*" href="\/\?view=(\w+)&amp;t=60"/g)];
       expect(tabList.map((match) => match[1])).toEqual(["live", "work", "models", "savings"]);
-      expect(body).toContain(`<p class="sub"><b>${label}</b> - ${subtitle}`);
+      expect(/<p class="sub">[\s\S]*?<\/p>/.exec(body)?.[0]).toBe(
+        `<p class="sub"><b>${label}</b> - ${subtitle}</p>`,
+      );
+      expect(body).not.toContain("…");
       for (const other of foreign) {
         expect(body).not.toContain(other);
+      }
+      if (view === "work") {
+        expect(body).toContain("muse-spark-open-1026 (baseten)");
+      }
+      if (view === "savings") {
+        // A pool row without both dollar values says so in the bar column.
+        expect(body).toContain('<td class="meterwrap"><span class="nodata">no data</span></td>');
       }
     }
     // Old views redirect to the tab that holds them, keeping t and pause.

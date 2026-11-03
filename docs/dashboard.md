@@ -50,7 +50,7 @@ the bound host with the bound port, or `localhost:<port>`: for an IPv4
 bind `{<host>:<p>, localhost:<p>}` where `<host>` is the configured
 listen host, for a `::1` bind `{[::1]:<p>, localhost:<p>}`; anything
 else, including a missing header, gets 421. Method must be `GET` (405) and
-the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `live,work,models,savings` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. The old view names redirect (301) to the tab that holds their content, keeping `t` and `pause` and dropping any selection: `fleet` and `overview` → `live`, `autonomy` → `work`, `usage` → `models`; without live sources a redirect to `live` goes to `work`. Without `view`, `/` is `live` when live sources are wired (a `--sim-trace` is given) and `work` otherwise; without live sources there is no Live tab (`view=live` →404) and no page carries simulated text. Work, Models and Savings accept a known host selection and ignore it; any other selection on them →404. Every tab carries the same header, tab bar (active marked) and, with live sources, the replay controls (pause/resume, restart t=0, step ±5, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view` and, on Live, the open panel. Tab links keep `t,pause` and drop the selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
+the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `live,work,models,savings` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. The old view names redirect (301) to the tab that holds their content, keeping `t` and `pause` and dropping any selection: `fleet` and `overview` → `live`, `autonomy` → `work`, `usage` → `models`; without live sources a redirect to `live` goes to `work`. Without `view`, `/` is `live` when live sources are wired (a `--sim-trace` is given) and `work` otherwise; without live sources there is no Live tab (`view=live` →404) and no page carries simulated text. Work, Models and Savings accept a known host selection and ignore it; any other selection on them →404. Every tab carries the same header and tab bar (active marked). Only Live carries the simulated clock, the synthetic-fleet tagline and the replay controls (pause/resume, restart t=0, step ±5, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view=live` and the open panel. Work, Models and Savings show the real clock and the real tagline, have no replay controls and no refresh. Tab links keep `t,pause` and drop the selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
 
 ## Config keys (`config/dashboard.json`)
 
@@ -95,9 +95,14 @@ are smaller. There is no `style` attribute, no script and no external asset.
 
 The header carries the product name, the real clock in a compact UTC form
 (`2026-11-01 13:03:54 UTC`, the full ISO value in the `time` element's
-`datetime` and `title`), with live sources the simulated clock and a paused
-badge, and one honesty tagline. The tab bar lists Live (only with live
-sources), Work, Models and Savings, with the replay controls on the right.
+`datetime` and `title`), on Live the simulated clock and a paused badge,
+and one honesty tagline: the synthetic-fleet line on Live, the real line
+on Work, Models and Savings. The tab bar lists Live (only with live
+sources), Work, Models and Savings, with the replay controls on the right
+on Live. Model names read in one form on the framed tabs and Live: the model
+without its namespace, then the provider in parentheses where the cell
+names it (`muse-spark-open-1026 (baseten)`), never cut in the middle; the
+cell's `title` keeps the recorded value.
 Under it each tab carries its one-line subtitle:
 
 | Tab     | Subtitle                                                                                                                 |
@@ -123,7 +128,8 @@ interventions`, `Retries`) as cards, then the Work table, newest first,
 - **Savings**: `Frontier-token baseline`, `Actual token cost` and `Token
 savings` as large cards; `Budget caps`, the Usage budget pools table with
   a bar of each pool's spent total against its total cap (read from the
-  row's own cells); and every Savings figure with its note and full source.
+  row's own cells; a row without both dollar values reads `no data` there);
+  and every Savings figure with its note and full source.
 
 On a framed tab a card's note is cut to two lines and its source to one,
 each with the full text in the card's `title`; the stacked snapshot shows
@@ -496,8 +502,7 @@ advances 5 sim-minutes and carries a meta refresh of
 `ceil(5 * 60 / speed)` seconds (clamped to 2..30; 5 seconds at the trace
 speed 60); the `+5` control is the plain next-frame link, so the page
 works even where a refresh does not fire. The final frame carries no
-refresh. The same refresh runs on Work, Models and Savings, so the header
-clock reads the same on every tab. There is no script and no external
+refresh. There is no script and no external
 resource: every page carries the one stylesheet under the CSP `CSS_HASH`. A
 meta refresh is a navigation, not a resource load, so `default-src 'none'`
 does not block it.

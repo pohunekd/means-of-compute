@@ -8,6 +8,7 @@
 // fields of rule 4.6 never reach a cell source.
 import { createHash } from "node:crypto";
 import { constantHtml, html, SafeHtml } from "./html.js";
+import { stripProvider } from "./live.js";
 import type { Cell, DashboardModel, Figure, Panel, PanelId, Table } from "./model.js";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -291,6 +292,37 @@ function cellClass(cell: Cell): string {
   }
 }
 
+// The one model-name form of the framed tabs and the Live panels: the model
+// without its namespace, then the provider in parentheses when it is known.
+export function modelLabel(model: string, providerId: string | null): string {
+  const name = stripProvider(model);
+  return providerId === null ? name : `${name} (${providerId})`;
+}
+
+// Work model cells are `<provider>/<model>`; the provider is the first segment.
+function frameModelText(text: string, panelId: PanelId): string {
+  const slash = text.indexOf("/");
+  return panelId === "work" && slash > 0
+    ? modelLabel(text.slice(slash + 1), text.slice(0, slash))
+    : modelLabel(text, null);
+}
+
+// Work verdict cells are `<sha> by <auditor model>: <counts>` joined by "; ";
+// the auditor model takes the shared model-name form, the rest stays as stored.
+const VERDICT_PART = /^([0-9a-f]{12}) by (.+): (high \d+, medium \d+, low \d+)$/;
+
+function frameVerdictText(text: string): string {
+  return text
+    .split("; ")
+    .map((part) => {
+      const match = VERDICT_PART.exec(part);
+      return match === null
+        ? part
+        : `${match[1] ?? ""} by ${modelLabel(match[2] ?? "", null)}: ${match[3] ?? ""}`;
+    })
+    .join("; ");
+}
+
 export function compactTime(iso: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(iso)) {
     return null;
@@ -393,6 +425,11 @@ function renderCell(cell: Cell, panelId: PanelId, column: string, ctx?: RenderCo
   if (ctx?.frame === true && SOURCE_COLUMNS.has(column)) {
     return html`<td class="srccol" title="${text}">${text}</td>`;
   }
+  // Framed tabs show names whole; the title keeps the recorded value.
+  if (ctx?.frame === true && (column === "model" || column === "branch" || column === "provider")) {
+    const shown = column === "model" ? frameModelText(text, panelId) : text;
+    return html`<td class="${base}"><span title="${text}">${shown}</span></td>`;
+  }
   if (panelId === "work" && column === "status") {
     return html`<td class="${base}"><span class="${statusPillClass(text)}">${text}</span></td>`;
   }
@@ -430,6 +467,11 @@ function renderCell(cell: Cell, panelId: PanelId, column: string, ctx?: RenderCo
       </td>`;
     }
     return html`<td class="${base}"><span class="mono nowrap">${text}</span></td>`;
+  }
+  if (ctx?.frame === true && panelId === "work" && column === "verdicts") {
+    return html`<td class="${base}">
+      <span class="verdicts" title="${text}">${frameVerdictText(text)}</span>
+    </td>`;
   }
   if (panelId === "work" && column === "verdicts") {
     return html`<td class="${base}"><span class="mono verdicts">${text}</span></td>`;
@@ -636,8 +678,11 @@ function renderRefresh(chrome: PageChrome): SafeHtml {
 // One framed page: header, tab bar with replay controls, the tab's one-line
 // subtitle, then the tab's own content in a 1920x1080 frame.
 export function renderFramedPage(chrome: PageChrome, main: SafeHtml): string {
-  const paused = chrome.paused ? html`<span class="paused">paused</span>` : constantHtml("");
-  const tagline = chrome.liveAvailable ? LIVE_TAGLINE : REAL_TAGLINE;
+  const paused =
+    chrome.paused && chrome.replay !== null
+      ? html`<span class="paused">paused</span>`
+      : constantHtml("");
+  const tagline = chrome.replay === null ? REAL_TAGLINE : LIVE_TAGLINE;
   return documentHtml(
     `Means of Compute - ${TAB_LABELS[chrome.view]}`,
     renderRefresh(chrome),
@@ -841,7 +886,7 @@ function capMeter(columns: readonly string[]): ExtraColumn {
       const spent = usdOf(row[columns.indexOf("spent total")]);
       const cap = usdOf(row[columns.indexOf("total cap")]);
       if (spent === null || cap === null || Number(cap) <= 0) {
-        return constantHtml("");
+        return constantHtml('<span class="nodata">no data</span>');
       }
       return html`<meter min="0" max="${cap}" value="${spent}"></meter>`;
     },
@@ -902,7 +947,7 @@ function renderSavingsTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
           </tbody>
         </table>
       </div>
-      <p class="cite">All figures real, from the ledger; no simulated number enters this tab.</p>
+      <p class="cite">All figures real, from the ledger.</p>
     </section>`;
 }
 

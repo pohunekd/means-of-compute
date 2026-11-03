@@ -7,9 +7,14 @@
 // 1920x1080 frame: Real work now, Just finished, then the compact simulated
 // fleet beside the right rail, which holds a detail panel when one is open.
 import { constantHtml, html, SafeHtml } from "./html.js";
-import { renderFramedPage, type PageChrome, type Selection, type TabId } from "./render.js";
+import {
+  modelLabel,
+  renderFramedPage,
+  type PageChrome,
+  type Selection,
+  type TabId,
+} from "./render.js";
 import { groupDigits } from "./money.js";
-import { stripProvider } from "./live.js";
 import { verdictCounts } from "../auditor/verdict.js";
 import type {
   AuditPanel,
@@ -76,16 +81,6 @@ function monthDay(iso: string): string {
   if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
     return iso.slice(0, 10);
   return `${MONTHS[month - 1] as string} ${String(day)}`;
-}
-
-function shortenMiddle(text: string, limit: number): string {
-  if (text.length <= limit) {
-    return text;
-  }
-  const keep = limit - 1;
-  const head = Math.ceil(keep * 0.6);
-  const tail = keep - head;
-  return `${text.slice(0, head)}…${text.slice(-tail)}`;
 }
 
 function cellText(cell: LiveCell): string {
@@ -312,9 +307,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const modelLine =
     card.modelText === null
       ? constantHtml("")
-      : html`<p class="meta">
-          ${`${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}
-        </p>`;
+      : html`<p class="meta">${modelLabel(card.modelText, card.providerId)}</p>`;
   const tokensCostSoFar =
     card.meterFailure !== null
       ? card.meterFailure.kind === "error"
@@ -495,7 +488,7 @@ function sectionText<T>(section: LiveSection<T>): SafeHtml {
 }
 
 function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml {
-  const model = shortenMiddle(row.model, 30);
+  const model = modelLabel(row.model, null);
   const tokens = (value: number | null): string =>
     value === null ? "no data" : groupDigits(value);
   const cost =
@@ -593,8 +586,8 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
                 (s) =>
                   html`<li class="mono">
                     <a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a>
-                    ${stripProvider(s.model.model)} (${s.model.providerId}) started ${s.startedAt}
-                    lastSeen ${s.lastSeenAt}
+                    ${modelLabel(s.model.model, s.model.providerId)} started ${s.startedAt} lastSeen
+                    ${s.lastSeenAt}
                   </li>`,
               )}
             </ul>
@@ -636,11 +629,11 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
                 return canLink
                   ? html`<li>
                       <a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
-                        >${c.model}</a
+                        >${modelLabel(c.model, null)}</a
                       >
                       ${c.at}
                     </li>`
-                  : html`<li>${c.model} ${c.at}</li>`;
+                  : html`<li>${modelLabel(c.model, null)} ${c.at}</li>`;
               })}
             </ul>
           </div>`;
@@ -703,7 +696,7 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Rounds:</p>
           <ul>
-            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${r.model} on ${r.hostAlias ?? "no host"}</li>`)}
+            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${modelLabel(r.model, null)} on ${r.hostAlias ?? "no host"}</li>`)}
           </ul>
         </div>`;
   const verdictsBlock =
@@ -762,7 +755,7 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Ledger tokens:</p>
           <ul>
-            ${panel.ledger.value.map((t) => html`<li>${t.model} (${t.provider}) in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
+            ${panel.ledger.value.map((t) => html`<li>${modelLabel(t.model, t.provider)} in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
           </ul>
           <p class="row">Ledger sessions:</p>
           <ul>
@@ -834,7 +827,7 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
   const modelLine =
     panel.workItem.kind === "ok"
       ? html`<p class="row">
-          Model: ${stripProvider(panel.workItem.value.modelRouting.preferredModel)}
+          Model: ${modelLabel(panel.workItem.value.modelRouting.preferredModel, null)}
         </p>`
       : constantHtml("");
   const retryLine =
@@ -882,7 +875,7 @@ function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
     <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
     <p class="row">Ended at: ${panel.endedAt}</p>
     <p class="row">Provider: ${detail.providerId}</p>
-    <p class="row">Model: ${detail.model} (${detail.providerId})</p>
+    <p class="row">Model: ${modelLabel(detail.model, detail.providerId)}</p>
     <p class="row">Role: ${detail.role ?? "-"}</p>
     <p class="row">Task: ${taskLink}</p>
     <p class="row">Host: ${hostLink}</p>
@@ -913,10 +906,10 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
           const countsLine = html`<p class="row">Counts: ${c}</p>`;
           const repoLine = html`<p class="row">Repo: ${verdict.repo}</p>`;
           const auditorLine = html`<p class="row">
-            Auditor: ${stripProvider(verdict.auditorModel)}
+            Auditor: ${modelLabel(verdict.auditorModel, null)}
           </p>`;
           const authorsLine = html`<p class="row">
-            Authors: ${verdict.authorModels.map(stripProvider).join(", ") || "none"}
+            Authors: ${verdict.authorModels.map((m) => modelLabel(m, null)).join(", ") || "none"}
           </p>`;
           const prLine =
             verdict.pullNumber === null
@@ -1017,8 +1010,8 @@ function selectionOf(model: LiveModel): Selection | null {
   return null;
 }
 
-// The shared page chrome at the live model's clocks. Only the Live tab keeps
-// the open panel in its replay links.
+// The shared page chrome at the live model's clocks. Only the Live tab carries
+// the replay and keeps the open panel in its replay links.
 export function chromeOf(model: LiveModel, view: TabId): PageChrome {
   return {
     view,
@@ -1026,13 +1019,17 @@ export function chromeOf(model: LiveModel, view: TabId): PageChrome {
     renderedAt: model.renderedAt,
     t: model.t,
     paused: model.paused,
-    replay: {
-      simAt: model.simAt,
-      simMinute: model.simMinute,
-      durationMinutes: model.durationMinutes,
-      refreshSeconds: model.refreshSeconds,
-      nextMinute: model.nextMinute,
-    },
+    // Work, Models and Savings are real only: no simulated clock, no replay.
+    replay:
+      view === "live"
+        ? {
+            simAt: model.simAt,
+            simMinute: model.simMinute,
+            durationMinutes: model.durationMinutes,
+            refreshSeconds: model.refreshSeconds,
+            nextMinute: model.nextMinute,
+          }
+        : null,
     selection: view === "live" ? selectionOf(model) : null,
   };
 }

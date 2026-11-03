@@ -808,7 +808,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskCard).toContain("last finished");
     const kioskFlat = kioskCard.replace(/\s+/g, " ");
     expect(kioskFlat).toContain("w3-kiosk");
-    expect(kioskFlat).toContain("at 17:53 (merged)");
+    expect(kioskFlat).toContain("at 17:53:00 (merged)");
     // A yesterday ledger record never counts toward today's two tasks on kiosk-a.
     // One of the two entries is unpriced, so the card prints the `at least` form.
     // A day-blind today count would also swallow yesterday's record and read 3 tasks.
@@ -886,7 +886,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     // any-outcome newest would name the newer start-rejected row instead.
     expect(rejectedKiosk).toContain("last finished");
     expect(rejectedKiosk).toContain("w3-kiosk");
-    expect(rejectedKiosk).toContain("at 17:53 (merged)");
+    expect(rejectedKiosk).toContain("at 17:53:00 (merged)");
     expect(rejectedKiosk).not.toContain("start-rejected)");
     // verdict-free repo check: links stay plain when the repo leaves the configured set
     const liveNoRepo = buildLive(
@@ -1419,6 +1419,10 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     );
     const realPanel = both2Body.slice(both2Body.indexOf('id="host-panel"'));
     expect(realPanel).toContain('<table class="ptable">');
+    // Both model columns on the panel read `name (provider)`.
+    expect(realPanel.slice(realPanel.indexOf("Recent meter calls"))).toContain(
+      "muse-spark-open-1026 (baseten)",
+    );
     expect(realPanel).not.toMatch(/>\s*\d{4}-\d{2}-\d{2}T/);
     {
       const mPath = join(fixture.dir, "meter-usage.jsonl");

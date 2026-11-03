@@ -392,8 +392,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     card.lastFinished === null
       ? ""
       : finishedDay !== null && finishedDay !== pageDay
-        ? `${monthDay(card.lastFinished.at)} ${card.lastFinished.at.slice(11, 16)}`
-        : card.lastFinished.at.slice(11, 16);
+        ? `${monthDay(card.lastFinished.at)} ${clockTime(card.lastFinished.at)}`
+        : clockTime(card.lastFinished.at);
   const lastRoundLine =
     card.lastFinishedNote === null
       ? constantHtml("")
@@ -701,9 +701,9 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
           panel.meterCalls.value.map((c) => {
             const name =
               c.workItemId === null
-                ? html`${modelLabel(c.model, null)}`
+                ? html`${modelLabel(c.model, c.providerId)}`
                 : html`<a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
-                    >${modelLabel(c.model, null)}</a
+                    >${modelLabel(c.model, c.providerId)}</a
                   >`;
             const tokens = (value: number | null): string =>
               value === null ? "no data" : groupDigits(value);

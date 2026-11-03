@@ -4,8 +4,9 @@
 // one CSP hash). Aliases are checked against the host-alias pattern; a
 // failure throws without the value (a 500 in the server). There is no
 // script: frames advance through a meta refresh. The layout fits one
-// 1920x1080 frame: Real work now, Just finished, then the compact simulated
-// fleet beside the right rail, which holds a detail panel when one is open.
+// 1920x1080 frame: one fleet grid (the real machines as the first group,
+// then the simulated groups) beside the right rail, which holds Real work
+// now, Just finished, Model activity and Events, or a detail panel.
 import { constantHtml, html, SafeHtml } from "./html.js";
 import {
   modelLabel,
@@ -193,14 +194,15 @@ function buildHref(model: LiveModel, overrides: LiveHrefOverrides): string {
 
 function tileLoad(tile: LiveTile): string {
   return tile.running === null
-    ? "err"
+    ? "–"
     : tile.maxAgents === null
       ? String(tile.running)
       : `${String(tile.running)}/${String(tile.maxAgents)}`;
 }
 
 // One line per tile: the full alias and the load; the state is the left
-// border colour, the amber edge and `!` mark running-but-excluded.
+// border colour, the amber edge and `!` mark a simulated tile running but
+// excluded. Real and simulated tiles differ only by their group's chip.
 function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
@@ -211,16 +213,15 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
       : `${tile.alias}: ${tile.state}, ${tile.detail}${battery}`;
   const title =
     tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
-  const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
-  const chip = tile.simulated ? constantHtml("") : html`<span class="chip chip-real">REAL</span>`;
-  const tileClass = tile.simulated ? "tile-sim" : "tile-real";
+  const flagged = tile.simulated && tile.flagged;
+  const flagMark = flagged ? html`<span class="flag">!</span>` : constantHtml("");
   const selected = model.hostPanel?.alias === tile.alias ? " selected" : "";
   return html`<a
     href="${href}"
-    class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}${selected}"
+    class="tile tile-${tile.state}${flagged ? " tile-flagged" : ""}${selected}"
     title="${title}"
     ><span class="alias">${tile.alias}</span
-    ><span class="load">${tileLoad(tile)}${flagMark}</span>${chip}</a
+    ><span class="load">${tileLoad(tile)}${flagMark}</span></a
   >`;
 }
 
@@ -233,7 +234,9 @@ function stateCounts(tiles: readonly LiveTile[]): string {
 
 function renderGroup(group: LiveGroup, model: LiveModel): SafeHtml {
   const hasSim = group.tiles.some((t) => t.simulated);
-  const tag = hasSim ? html`<span class="simtag">SIMULATED</span>` : constantHtml("");
+  const tag = hasSim
+    ? html`<span class="simtag">SIMULATED</span>`
+    : html`<span class="chip chip-real">REAL</span>`;
   return html`<div class="live-group">
     <span class="ghead"
       ><b>${group.title}</b>${tag}<span class="gcount">${stateCounts(group.tiles)}</span></span
@@ -270,22 +273,49 @@ function cardState(card: RealWorkCard): LiveTileState {
   return OFFLINE_CAUSES.has(reason.split(" (")[0] ?? "") ? "offline" : "unavailable";
 }
 
-function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
+// A real machine as a fleet tile: the open session count (1 while the card
+// has an open session; no agent limit is in the live model), the card state
+// on the legend, and the task or idle reason in the title.
+function realTileOf(card: RealWorkCard): LiveTile {
+  const failed =
+    card.stage === "idle" &&
+    card.idleReason !== null &&
+    (card.idleReason.startsWith("error (") || card.idleReason.startsWith("no data ("));
+  const state = cardState(card);
+  const task = card.title !== null && card.title.kind === "text" ? card.title.text : "";
+  return {
+    alias: card.alias,
+    hostKind: "real host",
+    site: "real",
+    simulated: false,
+    state,
+    eligible: state === "eligible",
+    flagged: false,
+    running: card.stage === "implement" ? 1 : failed ? null : 0,
+    runningError: null,
+    maxAgents: null,
+    batteryPercent: null,
+    detail: card.stage === "implement" ? task : (card.idleReason ?? "no recorded probe"),
+  };
+}
+
+// What a real machine is doing, from its card: the task with its links,
+// model, elapsed time and spend so far, or the idle reason with the last
+// round, last finished item and today's totals. The real host panel opens
+// with it.
+function renderRealNow(card: RealWorkCard, model: LiveModel): SafeHtml {
   if (!ALIAS_PATTERN.test(card.alias)) {
     throw new Error("dashboard live: invalid host alias in model");
   }
-  const hostHref = buildHref(model, { host: card.alias });
   const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
   const repos = model.repos;
   const reposFailure = model.reposFailure;
   const repoAllowed = reposFailure === null && card.repo !== null && repos.has(card.repo);
   const stageLabel = "implement";
-  const idleCls = card.stage === "idle" ? " idle" : "";
-  const selected = model.hostPanel?.alias === card.alias ? " selected" : "";
   const stageHtml =
     card.stage === "idle"
       ? constantHtml("")
-      : html`<span class="pill pill-running">${stageLabel}</span>`;
+      : html`<p class="meta"><span class="pill pill-running">${stageLabel}</span></p>`;
   const titleLine =
     card.stage === "idle"
       ? card.idleReason === null
@@ -427,12 +457,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
               ·
               <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
             </p>`;
-  return html`<div class="rw card${idleCls} tile-${cardState(card)}${selected}">
-    <div>
-      <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
-      ${stageHtml}
-    </div>
-    ${titleLine}
+  return html`<div class="now">
+    ${stageHtml} ${titleLine}
     ${
       reposFailure === null
         ? html`<p class="meta">${issueLine} ${prLine}</p>`
@@ -451,7 +477,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   </div>`;
 }
 
-function renderJustFinished(
+function justFinishedRow(
   entry: {
     readonly workItemId: string;
     readonly title: LiveCell;
@@ -501,12 +527,101 @@ function renderJustFinished(
           : html`<a href="${auditHref}"
               >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
             >`;
-  const hostBadge = entry.hostAlias === null ? constantHtml("") : html` · ${entry.hostAlias}`;
-  const pageDay = model.renderedAt.slice(0, 10);
-  return html`<div class="fi">
-    <a href="${taskHref}">${titleText}</a>${hostBadge} · ${entry.outcome} · ${countsText} ·
-    ${costText} · ${stripDate(entry.at, pageDay)}
-  </div>`;
+  return html`<tr>
+    <td><a href="${taskHref}">${titleText}</a></td>
+    <td class="nowrap">${entry.hostAlias ?? "-"}</td>
+    <td>${entry.outcome}</td>
+    <td>${countsText}</td>
+    <td>${costText}</td>
+    <td>${panelTime(entry.at, model)}</td>
+  </tr>`;
+}
+
+// Just finished (real): the newest merged items as table rows.
+function justFinishedSection(model: LiveModel): SafeHtml {
+  const body =
+    model.justFinished.kind !== "ok"
+      ? sectionText(model.justFinished)
+      : panelTable(
+          ["task", "host", "outcome", "audit", "cost", "time"],
+          model.justFinished.value.map((entry) => justFinishedRow(entry, model)),
+        );
+  return html`<section id="just-finished">
+    <h2>Just finished (real)</h2>
+    ${body}
+  </section>`;
+}
+
+// Real work now: one row per open real session, from the real cards.
+function realNowRow(card: RealWorkCard, model: LiveModel): SafeHtml {
+  if (!ALIAS_PATTERN.test(card.alias)) {
+    throw new Error("dashboard live: invalid host alias in model");
+  }
+  const title = card.title;
+  const task =
+    title === null
+      ? html`<span class="nodata">no work</span>`
+      : title.kind === "error"
+        ? html`<span class="error">error (${title.code})</span>`
+        : title.kind === "no-data"
+          ? html`<span class="nodata">no data (${title.reason})</span>`
+          : card.workItemId === null
+            ? html`${title.text}`
+            : html`<a href="${buildHref(model, { task: card.workItemId })}">${title.text}</a>`;
+  const soFar =
+    card.meterFailure !== null
+      ? card.meterFailure.kind === "error"
+        ? html`<span class="error">error (${card.meterFailure.code})</span>`
+        : html`<span class="nodata">no data (${card.meterFailure.reason})</span>`
+      : card.tokens === null || card.cost === null
+        ? html`<span class="nodata">no calls yet</span>`
+        : html`${groupDigits(card.tokens.input)} / ${groupDigits(card.tokens.output)} ·
+            <span class="${cellClass(card.cost)}">${cellText(card.cost)}</span>`;
+  return html`<tr>
+    <td class="nowrap"><a href="${buildHref(model, { host: card.alias })}">${card.alias}</a></td>
+    <td>${task}</td>
+    <td><span class="pill pill-running">implement</span></td>
+    <td>${card.modelText === null ? "-" : modelLabel(card.modelText, card.providerId)}</td>
+    <td>${card.elapsed ?? "-"}</td>
+    <td>${soFar}</td>
+  </tr>`;
+}
+
+function realNowSection(model: LiveModel): SafeHtml {
+  if (model.realWork.kind !== "ok") {
+    return html`<section id="real-work">
+      <h2>Real work now</h2>
+      ${sectionText(model.realWork)}
+    </section>`;
+  }
+  const cards = model.realWork.value;
+  const open = cards.filter((card) => card.stage === "implement");
+  if (open.length > 0) {
+    return html`<section id="real-work">
+      <h2>Real work now</h2>
+      ${panelTable(
+        ["host", "task", "stage", "model", "elapsed", "so far"],
+        open.map((card) => realNowRow(card, model)),
+      )}
+    </section>`;
+  }
+  let last: { readonly workItemId: string; readonly at: string; readonly outcome: string } | null =
+    null;
+  for (const card of cards) {
+    if (card.lastFinished !== null && (last === null || card.lastFinished.at > last.at)) {
+      last = card.lastFinished;
+    }
+  }
+  const lastLine =
+    last === null
+      ? constantHtml("")
+      : html` · last finished
+          <a href="${buildHref(model, { task: last.workItemId })}">${last.workItemId}</a> at
+          ${panelTime(last.at, model)} (${last.outcome})`;
+  return html`<section id="real-work">
+    <h2>Real work now</h2>
+    <p class="row">no real session open${lastLine}</p>
+  </section>`;
 }
 
 function sectionText<T>(section: LiveSection<T>): SafeHtml {
@@ -716,9 +831,14 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
             </tr>`;
           }),
         );
+  const card =
+    model.realWork.kind === "ok"
+      ? (model.realWork.value.find((candidate) => candidate.alias === panel.alias) ?? null)
+      : null;
+  const nowBlock = card === null ? constantHtml("") : panelBlock("Now", renderRealNow(card, model));
   return html`<div class="panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
-    ${panelBlock("Probe", probeBlock)} ${panelBlock("Open sessions", sessionsBlock)}
+    ${nowBlock} ${panelBlock("Probe", probeBlock)} ${panelBlock("Open sessions", sessionsBlock)}
     ${panelBlock("Recent results", resultsBlock)} ${panelBlock("Recent meter calls", meterBlock)}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
@@ -1155,55 +1275,44 @@ export function renderCallsSection(model: LiveModel, limit: number): SafeHtml {
   </section>`;
 }
 
-// One heading component for the real and the simulated fleet: the name, then
-// its counts.
-function fleetHeading(name: string, counts: string | null): SafeHtml {
-  return counts === null
-    ? html`<h2>${name}</h2>`
-    : html`<h2>${name} <span class="cnt">· ${counts}</span></h2>`;
-}
-
-function realFleetHeading(model: LiveModel): SafeHtml {
-  return fleetHeading(
-    "Real fleet",
-    model.realWork.kind === "ok"
-      ? `${groupDigits(model.realWork.value.length)} machines, live`
-      : null,
-  );
-}
-
-function simFleetHeading(model: LiveModel): SafeHtml {
+// The fleet heading: real and simulated machine counts, then the simulated
+// counters from the trace, labelled.
+function fleetHeading(model: LiveModel): SafeHtml {
+  const parts: string[] = [];
+  const real =
+    model.realWork.kind === "ok" ? `${groupDigits(model.realWork.value.length)} real` : null;
   const counters = model.simCounters;
-  return fleetHeading(
-    "Simulated fleet",
-    counters === null
-      ? null
-      : `${groupDigits(counters.eligible)} of ${groupDigits(counters.hostCount)} eligible · ${groupDigits(counters.workRunning)} work running · ${groupDigits(counters.placements)} placements (simulated)`,
-  );
+  const sim = counters === null ? null : `${groupDigits(counters.hostCount)} simulated`;
+  const machines = [real, sim].filter((part): part is string => part !== null).join(" + ");
+  if (machines !== "") {
+    parts.push(machines);
+  }
+  if (counters !== null) {
+    parts.push(
+      `${groupDigits(counters.eligible)} of ${groupDigits(counters.hostCount)} eligible · ${groupDigits(counters.workRunning)} work running · ${groupDigits(counters.placements)} placements (simulated)`,
+    );
+  }
+  return parts.length === 0
+    ? html`<h2>Fleet</h2>`
+    : html`<h2>Fleet <span class="cnt">· ${parts.join(" · ")}</span></h2>`;
 }
 
 export function renderLive(model: LiveModel): string {
-  const realWorkBlock = (() => {
-    if (model.realWork.kind !== "ok")
-      return html`<div id="real-work">${sectionText(model.realWork)}</div>`;
-    if (model.realWork.value.length === 0) return html`<p class="nodata">no real machines</p>`;
-    return html`<div id="real-work" class="realwork">
-      ${model.realWork.value.map((card) => renderRealWorkCard(card, model))}
-    </div>`;
-  })();
-  const justFinishedBlock = (() => {
-    if (model.justFinished.kind !== "ok") return sectionText(model.justFinished);
-    if (model.justFinished.value.length === 0) return constantHtml("");
-    return html`<div id="just-finished" class="fin">
-      <div class="fi fin-label"><b>Just finished</b></div>
-      ${model.justFinished.value.map((entry) => renderJustFinished(entry, model))}
-    </div>`;
-  })();
-  const simFleet =
+  const realGroup =
+    model.realWork.kind !== "ok"
+      ? sectionText(model.realWork)
+      : model.realWork.value.length === 0
+        ? constantHtml("")
+        : renderGroup(
+            {
+              title: `real (${String(model.realWork.value.length)})`,
+              tiles: model.realWork.value.map(realTileOf),
+            },
+            model,
+          );
+  const simGroups =
     model.simFleet.kind === "ok"
-      ? html`<div class="groups">
-          ${model.simFleet.value.map((group) => renderGroup(group, model))}
-        </div>`
+      ? model.simFleet.value.map((group) => renderGroup(group, model))
       : sectionText(model.simFleet);
   const tickerNote =
     model.tickerNote === null ? constantHtml("") : html`<p class="note">${model.tickerNote}</p>`;
@@ -1227,7 +1336,8 @@ export function renderLive(model: LiveModel): string {
   </p>`;
   const rail =
     detailPanel === null
-      ? html`<section id="live-activity">
+      ? html`${realNowSection(model)} ${justFinishedSection(model)}
+          <section id="live-activity">
             <h2>Model activity (real)</h2>
             ${activityTable(model, RAIL_ROWS.activity)}
             <p class="cite">source: real meter call-end records from the meter usage log</p>
@@ -1238,15 +1348,17 @@ export function renderLive(model: LiveModel): string {
             <p class="cite">source: real loop results; simulated host and placement trace lines</p>
           </section>`
       : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
-  const main = html`<div class="realnow">
-      ${realFleetHeading(model)} ${realWorkBlock} ${justFinishedBlock}
-    </div>
-    <div class="live-layout">
-      <section id="live-fleet">
-        ${simFleetHeading(model)} ${simFleet} ${legend}
-        <p class="cite">source: simulated fleet trace (sim-trace-v1)</p>
-      </section>
-      <div class="rail">${rail}</div>
-    </div>`;
+  const main = html`<div class="live-layout">
+    <section id="live-fleet">
+      ${fleetHeading(model)}
+      <div class="groups">${realGroup} ${simGroups}</div>
+      ${legend}
+      <p class="cite">
+        source: real recorded probes, dispatcher registry and work store; simulated fleet trace
+        (sim-trace-v1)
+      </p>
+    </section>
+    <div class="rail">${rail}</div>
+  </div>`;
   return renderFramedPage(chromeOf(model, "live"), main);
 }

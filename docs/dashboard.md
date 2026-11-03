@@ -105,12 +105,12 @@ names it (`muse-spark-open-1026 (baseten)`), never cut in the middle; the
 cell's `title` keeps the recorded value.
 Under it each tab carries its one-line subtitle:
 
-| Tab    | Subtitle                                                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Live   | the real machines and their work first; below, the simulated company evening replayed through the real placement engine. |
-| Work   | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                    |
-| Models | every real model call the factory made: which model, which provider, how many tokens, what it cost.                      |
-| Cost   | what the factory spent, against its budget caps.                                                                         |
+| Tab    | Subtitle                                                                                                                                                                                                                         |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live   | one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events. |
+| Work   | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                                                                                                                            |
+| Models | every real model call the factory made: which model, which provider, how many tokens, what it cost.                                                                                                                              |
+| Cost   | what the factory spent, against its budget caps.                                                                                                                                                                                 |
 
 Each tab fills exactly one 1920x1080 frame and shows only its own figures,
 all computed by `buildDashboard` and its panels; the renderer derives no
@@ -517,21 +517,32 @@ resource: every page carries the one stylesheet under the CSP `CSS_HASH`. A
 meta refresh is a navigation, not a resource load, so `default-src 'none'`
 does not block it.
 
-Live fits one 1920x1080 frame, with or without a panel open: the real fleet
-(`Real fleet · <n> machines, live`), then Just finished, then the simulated
-fleet beside the right rail. Both fleets use one heading component and the
-tile legend. The rail holds
-Model activity (the newest 3 rows) over Events, or the open panel, which
+Live fits one 1920x1080 frame, with or without a panel open: one fleet grid
+beside the right rail. The rail holds Real work now, Just finished (real),
+Model activity (the newest 3 rows) and Events, or the open panel, which
 scrolls inside the rail when it is longer than the frame.
 
-Real work now: one card per real machine (desktop, laptop-a, laptop-b, kiosk-a) with alias and REAL chip, stage pill (`implement`, `audit`, `merge`), task title link to the task panel, issue and PR links (PR shows `no data (PR not opened yet)` when null), model in use (`name (provider)`), elapsed time from registry `startedAt`, tokens and cost so far priced by `tokenCostScaled`, latest model call (time, in/out, ms). An idle card shows why in probe terms (`Idle — no work queued`, `Idle — person at the desk`) plus last finished item and today totals. When the host's newest round is not a merge, the card names it (`last round: <outcome>`); a findings round reads `(verdict missing)` when the verdict store holds no verdict for the item and `(verdicts: error (<code>))` or `(verdicts: no data (<reason>))` when the store cannot be read. Sources: dispatcher registry, recorded probes (`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and verdict store for stage, meter usage log for tokens/cost/latest call, ledger for today totals.
+The fleet heading reads `Fleet · <n> real + <n> simulated`, then the
+simulated counters from the trace at the cursor minute, labelled:
+`<eligible> of <hosts> eligible · <n> work running · <n> placements
+(simulated)`. The real machines are the first group, `real (<n>)`, in the
+same group heading as the simulated groups, with a solid `REAL` chip where
+those have the dashed `SIMULATED` chip, and the same per-state counts. The
+simulated tiles are grouped by site and kind, in group order, each heading
+with its name and host count, the `SIMULATED` chip and the per-state counts
+(`19 running · 11 eligible`). Every machine is one tile of one component: the
+full alias at 15 px and the load, the state as the tile's left border colour
+with the legend under the grid, and a link to its host panel; the open tile
+carries the shared `selected` outline. A simulated tile's load is
+`running/maxAgents`. A real tile's load is the open session count its card
+holds (`1` while a session is open, `0` otherwise, `–` when the registry,
+results log or work store cannot be read); the live model carries no agent
+limit for real hosts. States: `eligible` (can take work now), `running`,
+`blocked` (idle but excluded; the placement reason is in the tile title),
+`busy` (user present), `offline` (left the site network), and `unavailable`.
+The amber edge marks simulated tiles only.
 
-A real card is one link to its host panel: the alias anchor covers the whole
-card, inner links (task, issue, PR, last finished) sit above it, and the card
-takes the tile hover and focus style. The real alias is 19 px, larger than the
-15 px tile alias, because the real cards lead Live and the simulated fleet
-supports them. Its left border is its state on the tile legend, read only from
-the card's own fields:
+A real tile's state is read only from its card's fields:
 
 | Card                                                                      | State         |
 | ------------------------------------------------------------------------- | ------------- |
@@ -545,26 +556,34 @@ the card's own fields:
 `unavailable` covers both a host-side probe cause (the host answered but its
 probe failed, e.g. `daemon-rejected`) and a dashboard source failure (the
 registry, results log or work store could not be read); the card's state line
-names which one: `Idle: <cause> (...)` for the host, `state: error (<code>)`
-or `state: no data (<reason>)` for the source. The real probes have no cause
-the simulated tiles call `blocked`. A card's last-finished time is `HH:MM:SS`
-UTC, with the date first when it is not the page's UTC day. The open
-card or tile carries the shared `selected` outline.
+in the host panel names which one: `Idle: <cause> (...)` for the host,
+`state: error (<code>)` or `state: no data (<reason>)` for the source. The
+real probes have no cause the simulated tiles call `blocked`.
 
-Just finished: the newest 3 real results with item link, title, machine, audit counts (recounted via `verdictCounts`) and `merged`/`parked` outcome, cost. Sources: `loop-results.jsonl` newest 3, work store title, verdict store counts, ledger cost.
+Real work now: one table row per open real session: host, task title (linked
+to the task panel), stage (`implement`, the only stage the model has), model
+`name (provider)`, elapsed time from registry `startedAt`, and tokens and
+cost so far priced by `tokenCostScaled`. With no open session it reads `no
+real session open` and names the newest last-finished item.
 
-The simulated fleet heading carries the counters from the trace at the
-cursor minute, labelled: `Simulated fleet · <eligible> of <hosts> eligible ·
-<n> work running · <n> placements (simulated)`. The real figures live inside
-the cards. Tiles are grouped by site and kind, in group order; each group
-heading carries its name with the host count, the `SIMULATED` chip and the
-per-state counts (`19 running · 11 eligible`). A tile is one line: the full
-alias at 15 px and the load `running/maxAgents`; the state is the tile's left
-border colour, with the legend under the grid, and every tile links to its
-host panel. States: `eligible` (can take work now), `running`, `blocked`
-(idle but excluded; the placement reason is in the tile title), `busy` (user
-present), `offline` (left the site network), and for real hosts `reported`
-or `unavailable`.
+The real host panel opens with a `Now` block, the card: the stage and task
+with its issue and PR links (PR shows `PR not opened yet` when null), the
+model in use, elapsed time, tokens and cost so far and the latest model call
+(time, in/out, ms); or for an idle host why, in probe terms (`Idle: no work
+queued`, `Idle: person at the desk (...)`), the last round when it is not a
+merge (`last round: <outcome>`; a findings round reads `(verdict missing)`
+when the verdict store holds no verdict for the item and `(verdicts: error
+(<code>))` or `(verdicts: no data (<reason>))` when the store cannot be
+read), the last finished item at `HH:MM:SS` UTC (date first when not today)
+and today's totals. Sources: dispatcher registry, recorded probes
+(`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and
+verdict store, meter usage log for tokens, cost and latest call, ledger for
+today's totals.
+
+Just finished (real): the newest 3 merged results as table rows: task title
+link, host, outcome, audit counts (recounted via `verdictCounts`, linked to
+the audit panel), cost and time. Sources: `loop-results.jsonl` newest 3, work
+store title, verdict store counts, ledger cost.
 
 Model activity is real only: the newest 12 meter `call-end` records, each
 joined to its `call-start` for provider and model and to its grant for the

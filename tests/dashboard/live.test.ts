@@ -6,7 +6,12 @@ import { join } from "node:path";
 import type { BudgetConfig } from "../../src/budget/config.js";
 import type { Baselines, DashboardConfig } from "../../src/dashboard/config.js";
 import { gatherInputs, type DashboardInputs } from "../../src/dashboard/inputs.js";
-import { buildLive, gatherLiveInputs, type LiveSources } from "../../src/dashboard/live.js";
+import {
+  buildLive,
+  gatherLiveInputs,
+  type LiveModel,
+  type LiveSources,
+} from "../../src/dashboard/live.js";
 import { renderLive } from "../../src/dashboard/live-render.js";
 import { renderTabPage } from "../../src/dashboard/render.js";
 import { buildDashboard } from "../../src/dashboard/model.js";
@@ -683,26 +688,44 @@ interface FixtureDir {
   readonly fixed: Parameters<typeof gatherInputs>[1];
 }
 
-function cardSlice(page: string, alias: string): string {
-  const marker = `>${alias}</a>`;
-  const start = page.indexOf(marker);
-  if (start === -1) throw new Error(`card for ${alias} not found`);
-  const divStart = page.lastIndexOf('<div class="rw', start);
-  const nextDiv = page.indexOf('<div class="rw', start);
-  const end = nextDiv === -1 ? page.indexOf('id="just-finished"') : nextDiv;
-  return page.slice(divStart === -1 ? start : divStart, end === -1 ? undefined : end);
+// The `Now` block a real host panel opens with, rendered from the model's card
+// for the alias under an empty real host panel.
+function cardSlice(model: LiveModel, alias: string): string {
+  const page = renderLive({
+    ...model,
+    hostPanel: {
+      kind: "real",
+      alias,
+      probe: { kind: "ok", value: null },
+      registry: { kind: "ok", value: [] },
+      results: { kind: "ok", value: [] },
+      meterCalls: { kind: "ok", value: [] },
+    },
+    taskPanel: null,
+    callPanel: null,
+    auditPanel: null,
+  });
+  const start = page.indexOf('<div class="now">');
+  if (start === -1) throw new Error(`now block for ${alias} not found`);
+  return page.slice(start, page.indexOf('<div class="pblock">', start));
+}
+
+// The class of the fleet tile that opens the host panel of the alias.
+function tileClass(page: string, alias: string): string {
+  const match = new RegExp(`<a\\s+href="[^"]*host=${alias}"\\s+class="([^"]*)"`).exec(page);
+  if (match === null) throw new Error(`tile for ${alias} not found`);
+  return match[1] ?? "";
 }
 
 function stripSlice(page: string): string {
   const start = page.indexOf('id="just-finished"');
-  if (start === -1) throw new Error("just finished strip not found");
-  const divStart = page.lastIndexOf("<div", start);
-  const fleet = page.indexOf('id="live-fleet"', start);
-  return page.slice(divStart === -1 ? start : divStart, fleet === -1 ? undefined : fleet);
+  if (start === -1) throw new Error("just finished table not found");
+  return page.slice(start, page.indexOf("</section>", start));
 }
 
 function stripSliceCount(page: string): number {
-  return stripSlice(page).split('<div class="fi">').length - 1;
+  const slice = stripSlice(page);
+  return slice.slice(slice.indexOf("<tbody>")).split("<tr>").length - 1;
 }
 
 function makeFixture(trace: string): FixtureDir {
@@ -750,13 +773,20 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     });
     const page = renderLive(live);
     expect(page).toContain('id="real-work"');
-    // Real and simulated machines share one heading component and the tile
-    // legend: a real card's left border is its state.
-    expect(page).toContain('<h2>Real fleet <span class="cnt">· 4 machines, live</span></h2>');
-    expect(page).toContain('<h2>Simulated fleet <span class="cnt">· ');
+    // One fleet grid: the real machines are the first group, in the same
+    // group heading with a solid REAL chip, drawn as the same tiles; the open
+    // real session leads the rail in the Real work now table.
+    expect(page).toContain('<h2>Fleet <span class="cnt">· 4 real + 4 simulated · ');
+    expect(page).toContain('<b>real (4)</b><span class="chip chip-real">REAL</span>');
+    expect(page).not.toContain('class="rw');
+    expect(page).toMatch(/<span class="alias">desktop<\/span\s*><span class="load">1<\/span>/);
+    const realNow = page.slice(page.indexOf('id="real-work"'), page.indexOf('id="just-finished"'));
+    expect(realNow).toContain(">Real task title</a>");
+    expect(realNow).toContain("<td>muse-spark-open-1026 (baseten)</td>");
+    expect(realNow).toContain("<td>12 min</td>");
     // running card details, scoped to the desktop card slice
-    const desktopCard = cardSlice(page, "desktop");
-    expect(desktopCard).toContain('<div class="rw card tile-running">');
+    const desktopCard = cardSlice(live, "desktop");
+    expect(tileClass(page, "desktop")).toBe("tile tile-running");
     expect(desktopCard).toContain("implement");
     expect(desktopCard).toContain("Real task title");
     expect(desktopCard).toContain('href="https://github.com/example/demo-repo/issues/42"');
@@ -775,7 +805,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(desktopCard).not.toContain("muse-spark-open-1026 (baseten) · latest");
     // findings without a readable verdict reads idle, never audit: PR A has no
     // live audit stage (it needs the loop-state phase, a later PR).
-    const auditCard = cardSlice(page, "laptop-a");
+    const auditCard = cardSlice(live, "laptop-a");
     expect(auditCard).toContain("Idle: 1 queued, not placed");
     expect(auditCard).toContain("last round: findings (verdict missing)");
     expect(auditCard).not.toContain("stage audit");
@@ -789,7 +819,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         await gatherLiveInputs(fixture.sources, await dashboardInputs(fixture), 60, () => {}),
         { view: "live", t: 60, paused: false, host: null },
       );
-      const unreadableCard = cardSlice(renderLive(liveUnreadable), "laptop-a");
+      const unreadableCard = cardSlice(liveUnreadable, "laptop-a");
       expect(unreadableCard).toContain(
         "last round: findings (verdicts: error (verdicts-unreadable))",
       );
@@ -798,8 +828,8 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     }
     // idle cards with reason, scoped per card
     // A queued work item flips the probe tail on every idle card with history.
-    const kioskCard = cardSlice(page, "kiosk-a");
-    expect(kioskCard).toContain('<div class="rw card idle tile-eligible">');
+    const kioskCard = cardSlice(live, "kiosk-a");
+    expect(tileClass(page, "kiosk-a")).toBe("tile tile-eligible");
     expect(kioskCard).toContain("Idle: 1 queued, not placed");
     // Merged newest names no last round: the last-finished line covers it.
     expect(kioskCard).not.toContain("last round:");
@@ -829,7 +859,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
         await gatherLiveInputs(fixture.sources, dashYesterday, 60, () => {}),
         { view: "live", t: 60, paused: false, host: null },
       );
-      const kioskYesterday = cardSlice(renderLive(liveYesterday), "kiosk-a").replace(/\s+/g, " ");
+      const kioskYesterday = cardSlice(liveYesterday, "kiosk-a").replace(/\s+/g, " ");
       expect(kioskYesterday).toContain("today (UTC): 1 task");
       expect(kioskYesterday).not.toContain("2 tasks");
       writeFileSync(ledgerPath, ledgerOrig);
@@ -838,8 +868,8 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskFlat).toContain("at least");
     expect(kioskFlat).toContain("of 3 entries unpriced");
     expect(kioskFlat).toContain("$0.0073");
-    const laptopbCard = cardSlice(page, "laptop-b");
-    expect(laptopbCard).toContain('<div class="rw card idle tile-busy">');
+    const laptopbCard = cardSlice(live, "laptop-b");
+    expect(tileClass(page, "laptop-b")).toBe("tile tile-busy");
     expect(laptopbCard).toContain("Idle: person at the desk (1 queued, not placed)");
     expect(laptopbCard).not.toContain("last round:");
     expect(kioskCard).not.toContain("person at the desk");
@@ -878,7 +908,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       ),
       { view: "live", t: 60, paused: false, host: null },
     );
-    const rejectedKiosk = cardSlice(renderLive(liveRejected), "kiosk-a");
+    const rejectedKiosk = cardSlice(liveRejected, "kiosk-a");
     expect(rejectedKiosk).toContain("Idle: 1 queued, not placed");
     expect(rejectedKiosk).toContain("last round: start-rejected");
     expect(rejectedKiosk).not.toContain("audit");
@@ -898,7 +928,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       ),
       { view: "live", t: 60, paused: false, host: null },
     );
-    const noRepoDesktop = cardSlice(renderLive(liveNoRepo), "desktop");
+    const noRepoDesktop = cardSlice(liveNoRepo, "desktop");
     expect(noRepoDesktop).toContain("<span>#42</span>");
     expect(noRepoDesktop).toContain("<span>PR #101</span>");
     expect(noRepoDesktop).not.toContain("github.com");
@@ -915,8 +945,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       ),
       { view: "live", t: 60, paused: false, host: null },
     );
-    const badSpecsPage = renderLive(liveBadSpecs);
-    const badSpecsDesktop = cardSlice(badSpecsPage, "desktop");
+    const badSpecsDesktop = cardSlice(liveBadSpecs, "desktop");
     const badSpecsFlat = badSpecsDesktop.replace(/\s+/g, " ");
     expect(badSpecsFlat).toContain("links:");
     expect(badSpecsFlat).toContain("error (factory-specs-invalid)");
@@ -1067,7 +1096,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(findingStrip).not.toContain(">w9-new<");
     // The last-finished line names the newest merged entry only: a mutated
     // any-outcome newest would name the newer findings row instead.
-    const findingKiosk = cardSlice(renderLive(liveFinding), "laptop-b");
+    const findingKiosk = cardSlice(liveFinding, "laptop-b");
     expect(findingKiosk).toContain("last round: findings (verdict missing)");
     expect(findingKiosk).toContain("last finished");
     // The strip total has no $0.0000 fallback: the newest row has no stored verdict
@@ -1094,7 +1123,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       expect(stripNoLedger).not.toContain("$0.0000");
       writeFileSync(ledgerPath, ledgerOrig);
     }
-    expect(page).toContain('class="tile tile-sim');
+    expect(page).toContain('class="tile tile-');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
     const live95 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 95, () => {}), {
@@ -1115,6 +1144,18 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       .find((t) => t.alias === "desk-002");
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
+    // The amber edge is simulated-only: the same flagged tile drawn as a real
+    // machine carries no amber edge and no `!`.
+    if (flaggedTile === undefined) throw new Error("expected laptop-007");
+    const realFlagged = renderLive({
+      ...live,
+      simFleet: {
+        kind: "ok",
+        value: [{ title: "real (1)", tiles: [{ ...flaggedTile, simulated: false }] }],
+      },
+    });
+    expect(tileClass(realFlagged, "laptop-007")).toBe("tile tile-running");
+    expect(realFlagged).not.toContain('class="load">1/1<span class="flag">!</span>');
     const live45 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
       view: "live",
       t: 45,
@@ -1138,7 +1179,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       throw new Error("expected sim host panel for desk-001");
     expect(liveWithHost.hostPanel.runningTasks).toHaveLength(0);
     // The open tile carries the shared selected style.
-    expect(renderLive(liveWithHost)).toMatch(/class="tile tile-sim tile-\w+ selected"/);
+    expect(tileClass(renderLive(liveWithHost), "desk-001")).toMatch(/^tile tile-\w+ selected$/);
     const taskLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
       view: "live",
       t: 45,
@@ -1243,7 +1284,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       [
         "live",
         "Live",
-        "the real machines and their work first; below, the simulated company evening replayed through the real placement engine.",
+        "one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events.",
         ["Total savings"],
       ],
       [
@@ -1427,9 +1468,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(both2Body).toContain('id="host-panel"');
     // The open card is selected; the real host panel uses the shared blocks
     // and tables with HH:MM:SS times, the full ISO value only in attributes.
-    expect(cardSlice(both2Body, "desktop")).toContain(
-      '<div class="rw card tile-running selected">',
-    );
+    expect(tileClass(both2Body, "desktop")).toBe("tile tile-running selected");
     const realPanel = both2Body.slice(both2Body.indexOf('id="host-panel"'));
     expect(realPanel).toContain('<table class="ptable">');
     // Both model columns on the panel read `name (provider)`.
@@ -1535,7 +1574,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       await gatherLiveInputs(fixture.sources, dashMeterBad, 60, () => {}),
       { view: "live", t: 60, paused: false, host: null },
     );
-    const meterBadDesktop = cardSlice(renderLive(liveMeterBad), "desktop");
+    const meterBadDesktop = cardSlice(liveMeterBad, "desktop");
     expect(meterBadDesktop).toContain("latest call:");
     expect(meterBadDesktop).toContain("error (meter-usage-invalid)");
     // A broken meter also hides this card's today tokens: the count stays, the cost fails.
@@ -1562,9 +1601,13 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(pageBroken).toContain("desktop");
     expect(pageBroken).toContain("kiosk-a");
     expect(pageBroken).toContain("laptop-b");
-    const brokenDesktopCard = cardSlice(pageBroken, "desktop");
+    const brokenDesktopCard = cardSlice(liveBroken, "desktop");
     expect(brokenDesktopCard).toContain("state: error (registry-invalid)");
-    expect(brokenDesktopCard).toContain('<div class="rw card idle tile-unavailable">');
+    expect(tileClass(pageBroken, "desktop")).toBe("tile tile-unavailable");
+    // With no open real session the table says so and names the last finished item.
+    expect(pageBroken).toMatch(
+      /no real session open · last finished\s*<a href="[^"]*task=w4-laptopb">/,
+    );
     // A card whose item is missing from the store names the gap instead of `unknown`.
     const noStoreLive = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),

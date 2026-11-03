@@ -510,20 +510,38 @@ resource: every page carries the one stylesheet under the CSP `CSS_HASH`. A
 meta refresh is a navigation, not a resource load, so `default-src 'none'`
 does not block it.
 
-Live fits one 1920x1080 frame, with or without a panel open: Real work now,
-then Just finished, then the fleet beside the right rail. The rail holds
+Live fits one 1920x1080 frame, with or without a panel open: the real fleet
+(`Real fleet · <n> machines, live`), then Just finished, then the simulated
+fleet beside the right rail. Both fleets use one heading component and the
+tile legend. The rail holds
 Model activity (the newest 3 rows) over Events, or the open panel, which
 scrolls inside the rail when it is longer than the frame.
 
 Real work now: one card per real machine (desktop, laptop-a, laptop-b, kiosk-a) with alias and REAL chip, stage pill (`implement`, `audit`, `merge`), task title link to the task panel, issue and PR links (PR shows `no data (PR not opened yet)` when null), model in use (`name (provider)`), elapsed time from registry `startedAt`, tokens and cost so far priced by `tokenCostScaled`, latest model call (time, in/out, ms). An idle card shows why in probe terms (`Idle — no work queued`, `Idle — person at the desk`) plus last finished item and today totals. When the host's newest round is not a merge, the card names it (`last round: <outcome>`); a findings round reads `(verdict missing)` when the verdict store holds no verdict for the item and `(verdicts: error (<code>))` or `(verdicts: no data (<reason>))` when the store cannot be read. Sources: dispatcher registry, recorded probes (`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and verdict store for stage, meter usage log for tokens/cost/latest call, ledger for today totals.
 
+A real card is one link to its host panel: the alias anchor covers the whole
+card, inner links (task, issue, PR, last finished) sit above it, and the card
+takes the tile hover and focus style. Its left border is its state on the tile
+legend, read only from the card's own fields:
+
+| Card                                                                      | State         |
+| ------------------------------------------------------------------------- | ------------- |
+| open session (stage `implement`)                                          | `running`     |
+| idle, probe reported, `no work queued` or `<n> queued, not placed`        | `eligible`    |
+| idle, probe `plugin-busy` (`person at the desk`)                          | `busy`        |
+| idle, probe `host-unreachable`, `request-timeout` or `stale`              | `offline`     |
+| idle, no recorded probe                                                   | `offline`     |
+| idle, any other probe cause, or a registry, results or work store failure | `unavailable` |
+
+The real probes have no cause the simulated tiles call `blocked`. The open
+card or tile carries the shared `selected` outline.
+
 Just finished: the newest 3 real results with item link, title, machine, audit counts (recounted via `verdictCounts`) and `merged`/`parked` outcome, cost. Sources: `loop-results.jsonl` newest 3, work store title, verdict store counts, ledger cost.
 
-The fleet heading carries the simulated counters from the trace at the
-cursor minute, labelled: `Fleet · simulated evening: <eligible> of <hosts>
-eligible · <n> work running · <n> placements (simulated)`. The real figures
-live inside the cards; there is no Real fleet row, because the cards are the
-real fleet. Tiles are grouped by site and kind, in group order; each group
+The simulated fleet heading carries the counters from the trace at the
+cursor minute, labelled: `Simulated fleet · <eligible> of <hosts> eligible ·
+<n> work running · <n> placements (simulated)`. The real figures live inside
+the cards. Tiles are grouped by site and kind, in group order; each group
 heading carries its name with the host count, the `SIMULATED` chip and the
 per-state counts (`19 running · 11 eligible`). A tile is one line: the full
 alias at 15 px and the load `running/maxAgents`; the state is the tile's left
@@ -550,7 +568,7 @@ it carries an amber edge and a `!` marker when it is running, now excluded
 for a reason other than its agent limit (the legend reads the same), with
 the reason in the tile title.
 
-The detail rail lives in the right rail (the fleet column does not move): a breadcrumb reads `Fleet / <host> / <task> / <audit>` with `back to live`; precedence is host → task → call → audit, well-formed unknown or malformed selection →404 without echoing the value. Work rows link as `/?view=live&task=<id>` only on the Work tab (no figure changes); the stacked snapshot has no such links. Links exist only when the server has live sources and the id is known (a known work item); otherwise the cell is plain text. They are built with `pageHref` from `view=live` plus `t`, `pause`, `task`, never wrapping model-written verdict text. The audit PR link is shown only when `panel.workItemRepo !== null && verdict.repo === panel.workItemRepo`; otherwise it is plain `#<n>` with `(repo differs)` when both repos are known. A call with a broken meter shows only breadcrumb, `Call <endedAt>` and one `error (<code>)` line, no `ms 0` or `-` fillers, and `|nosuch` is rejected with 404. Each panel keeps one block per source: a simulated host shows site, kind, state, running/max load, battery, task, running tasks, events and placements; a real host shows its probe (kind, time and cause), open sessions (each linked to its task), recent results and recent meter calls; a simulated task shows kind, title, brief, placed at sim clock with verbatim placement reason and eligible count, host link and status running/ended via work-end clock; a real task shows title, status, repo, issue/PR links, branch, host link, preferred model, retry count, goal excerpt (first 280 chars with ellipsis and full goal in title; model names are never truncated, task goal excerpts are the one text cut, at 280 chars, with the full text on hover), DoD, rounds (with provider-stripped model), verdicts (recounted), ledger tokens and sessions as one block; a call shows provider, model as `name (provider)`, role, work item and host links, grouped tokens, ms and priced cost or no-data; an audit shows head SHA, recounted counts (`invalid (counts disagree)` on mismatch), repo, auditor, authors, findings and PR link when the repos match; each block keeps its own source with its heading, so a failed ledger renders one `Ledger: error (<code>)` line and other blocks keep data.
+The detail rail lives in the right rail (the fleet column does not move): a breadcrumb reads `Fleet / <host> / <task> / <audit>` with `back to live`; precedence is host → task → call → audit, well-formed unknown or malformed selection →404 without echoing the value. Work rows link as `/?view=live&task=<id>` only on the Work tab (no figure changes); the stacked snapshot has no such links. Links exist only when the server has live sources and the id is known (a known work item); otherwise the cell is plain text. They are built with `pageHref` from `view=live` plus `t`, `pause`, `task`, never wrapping model-written verdict text. The audit PR link is shown only when `panel.workItemRepo !== null && verdict.repo === panel.workItemRepo`; otherwise it is plain `#<n>` with `(repo differs)` when both repos are known. A call with a broken meter shows only breadcrumb, `Call <endedAt>` and one `error (<code>)` line, no `ms 0` or `-` fillers, and `|nosuch` is rejected with 404. Each panel keeps one block per source: both host panels use the same labelled blocks and tables, times as `HH:MM:SS` UTC with the date only when it is not the page's UTC day and the full ISO value in the `title`: a simulated host shows site, kind, state, running/max load, battery, task, then running tasks, latest events and placements as tables; a real host shows its probe (kind, time and cause), then open sessions (each linked to its task, model through the shared model name), recent results and recent meter calls as tables; a simulated task shows kind, title, brief, placed at sim clock with verbatim placement reason and eligible count, host link and status running/ended via work-end clock; a real task shows title, status, repo, issue/PR links, branch, host link, preferred model, retry count, goal excerpt (first 280 chars with ellipsis and full goal in title; model names are never truncated, task goal excerpts are the one text cut, at 280 chars, with the full text on hover), DoD, rounds (with provider-stripped model), verdicts (recounted), ledger tokens and sessions as one block; a call shows provider, model as `name (provider)`, role, work item and host links, grouped tokens, ms and priced cost or no-data; an audit shows head SHA, recounted counts (`invalid (counts disagree)` on mismatch), repo, auditor, authors, findings and PR link when the repos match; each block keeps its own source with its heading, so a failed ledger renders one `Ledger: error (<code>)` line and other blocks keep data.
 
 Failure rule, per section as on `/`: a missing input shows `no data`, an
 unreadable or invalid one shows an error code with details in the

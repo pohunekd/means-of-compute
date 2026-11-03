@@ -1,10 +1,10 @@
 // Scheduler slice: one non-overlapping tick over every loop item, plus
 // startup recovery. PR 9 calls recoverAtStartup once, then tick every tickMs.
-import type { WorkItem } from "../../contracts/v1/types.js";
+import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readVerdicts } from "../auditor/store.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
 import { readRegistry } from "../dispatcher/registry.js";
-import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
+import { readLoopState, updateLoopState, LoopStateDataError, type LoopState } from "./state.js";
 import type { LoopItem, MergeHold } from "./types.js";
 import type { MergeContext } from "./merge.js";
 import { mergeCheck, finishMerge } from "./merge.js";
@@ -44,7 +44,7 @@ import {
   initialLoopItem,
   watchSession,
 } from "./start.js";
-import { readWorkStore, readyItems } from "../work/store.js";
+import { readWorkStore, readyItems, type WorkStore } from "../work/store.js";
 import { fetchRefs, isAncestor, type GitDeps } from "./git.js";
 import { ciStatus } from "./merge-rule.js";
 
@@ -104,6 +104,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const ciDue = new Map<string, number>();
   const intake = createIntakeState();
   const cooldownsLogged = new Set<string>();
+  const placementsLogged = new Map<string, string>();
   const retireMemory = createRetireMemory();
   let sweep: Promise<void> | null = null;
   let triage: Promise<void> | null = null;
@@ -237,6 +238,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         ciDue,
         intake,
         cooldownsLogged,
+        placementsLogged,
         launchSweep,
         launchTriage,
       ),
@@ -402,6 +404,7 @@ async function claimOne(
   results: readonly ResultLine[],
   observations: readonly HostObservation[],
   isSettled: () => boolean,
+  placementsLogged: Map<string, string>,
 ): Promise<boolean> {
   const state = await readLoopState(ctx.statePath);
   const stored = state.items[item.id] as unknown as LoopItem | undefined;
@@ -441,6 +444,7 @@ async function claimOne(
       decision = retry;
     }
   }
+  logPlacement(ctx, placementsLogged, item.id, li.round, decision);
   if (decision.chosenHostAlias === null) {
     ctx.log.log({ event: "no-host", workItemId: item.id, detail: decision.reason });
     return li.excludedHosts.length > 0;
@@ -485,6 +489,46 @@ async function claimOne(
   return true;
 }
 
+// A chosen host is always logged. A wait with no host is logged only when
+// its round or candidates differ from the item's last wait in this process;
+// the comparison reads every digit run in a reason as one placeholder, so a
+// ticking counter alone writes nothing. The logged reasons stay verbatim.
+function logPlacement(
+  ctx: SchedulerContext,
+  placementsLogged: Map<string, string>,
+  workItemId: string,
+  round: number,
+  decision: PlacementDecision,
+): void {
+  const candidates = decision.candidates.map((entry) => ({
+    hostAlias: entry.hostAlias,
+    excluded: entry.excluded,
+    reason: entry.reason,
+  }));
+  if (decision.chosenHostAlias === null) {
+    const signature = JSON.stringify({
+      round,
+      candidates: candidates.map((entry) => ({
+        ...entry,
+        reason: entry.reason.replace(/\d+/g, "#"),
+      })),
+    });
+    if (placementsLogged.get(workItemId) === signature) {
+      return;
+    }
+    placementsLogged.set(workItemId, signature);
+  } else {
+    placementsLogged.delete(workItemId);
+  }
+  ctx.log.log({
+    event: "placement",
+    workItemId,
+    round,
+    chosenHostAlias: decision.chosenHostAlias,
+    candidates,
+  });
+}
+
 async function ensureLoopItem(ctx: SchedulerContext, id: string): Promise<void> {
   await updateLoopState(ctx.statePath, (current) => {
     if (current.items[id] !== undefined) {
@@ -504,6 +548,7 @@ async function runClaims(
   carry: ClaimCarry,
   isSettled: () => boolean,
   cooldownsLogged: Set<string>,
+  placementsLogged: Map<string, string>,
 ): Promise<void> {
   const store = await readWorkStore(ctx.storePath);
   const state = await readLoopState(ctx.statePath);
@@ -525,7 +570,49 @@ async function runClaims(
   const observations = (await ctx.collector.collect()).filter(
     (entry) => !cooled.has(entry.hostAlias),
   );
-  const candidates = readyItems(store).filter((item) => {
+  const candidates = claimCandidates(ctx, store, state, steps);
+  for (const item of candidates) {
+    if (isSettled() || carry.active >= ctx.maxActiveItems) {
+      break;
+    }
+    const next = await claimOne(
+      ctx,
+      item,
+      carry,
+      launchStep,
+      results,
+      observations,
+      isSettled,
+      placementsLogged,
+    );
+    if (!next) {
+      break;
+    }
+  }
+  // The wait memo keeps only items that can still be claimed: a placed,
+  // parked, backed-off or done item leaves it at the end of the pass.
+  const waiting = new Set(
+    claimCandidates(
+      ctx,
+      await readWorkStore(ctx.storePath),
+      await readLoopState(ctx.statePath),
+      steps,
+    ).map((item) => item.id),
+  );
+  for (const id of placementsLogged.keys()) {
+    if (!waiting.has(id)) {
+      placementsLogged.delete(id);
+    }
+  }
+}
+
+function claimCandidates(
+  ctx: SchedulerContext,
+  store: WorkStore,
+  state: LoopState,
+  steps: ReadonlySet<string>,
+): readonly WorkItem[] {
+  return readyItems(store).filter((item) => {
     if (steps.has(item.id)) {
       return false;
     }
@@ -536,15 +623,6 @@ async function runClaims(
     const backoff = li?.backoffUntil ?? null;
     return backoff === null || ctx.now().getTime() >= Date.parse(backoff);
   });
-  for (const item of candidates) {
-    if (isSettled() || carry.active >= ctx.maxActiveItems) {
-      return;
-    }
-    const next = await claimOne(ctx, item, carry, launchStep, results, observations, isSettled);
-    if (!next) {
-      return;
-    }
-  }
 }
 
 // One step call per launch (SR3). The result is unused; the step writes
@@ -627,6 +705,7 @@ async function tickOnce(
   ciDue: Map<string, number>,
   intake: IntakeState,
   cooldownsLogged: Set<string>,
+  placementsLogged: Map<string, string>,
   launchSweep: () => void,
   launchTriage: () => void,
 ): Promise<TickReport> {
@@ -714,6 +793,7 @@ async function tickOnce(
       carry,
       () => isStopped() || getFailure() !== null,
       cooldownsLogged,
+      placementsLogged,
     );
   }
   return { claimed: carry.claimed, launched: [...launched, ...carry.launched] };

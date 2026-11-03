@@ -2,6 +2,8 @@
 // through one in-process chain; the first failed write latches failed()
 // and later log calls write nothing. The detail field carries a fixed
 // code or an error message, never brief, goal, finding or issue text.
+// Placement candidates carry the engine's reason text, built from probe
+// fields, fixed collector cause codes and host aliases only.
 import { open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 
@@ -26,6 +28,7 @@ export type LoopEventName =
   | "merge-hold-cleared"
   | "budget-refused"
   | "no-host"
+  | "placement"
   | "exclusions-retried"
   | "host-cooldown"
   | "retire-failed"
@@ -43,6 +46,12 @@ export type LoopEventName =
   | "drift-cancel-unreachable"
   | "fallback-refused";
 
+export interface LoopPlacementCandidate {
+  readonly hostAlias: string;
+  readonly excluded: boolean;
+  readonly reason: string;
+}
+
 export interface LoopLogEvent {
   readonly event: LoopEventName;
   readonly workItemId?: string;
@@ -52,6 +61,8 @@ export interface LoopLogEvent {
   readonly sha?: string;
   readonly code?: string;
   readonly detail?: string;
+  readonly chosenHostAlias?: string | null;
+  readonly candidates?: readonly LoopPlacementCandidate[];
 }
 
 export interface LoopLog {

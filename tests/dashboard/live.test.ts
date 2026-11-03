@@ -8,6 +8,7 @@ import type { Baselines, DashboardConfig } from "../../src/dashboard/config.js";
 import { gatherInputs, type DashboardInputs } from "../../src/dashboard/inputs.js";
 import { buildLive, gatherLiveInputs, type LiveSources } from "../../src/dashboard/live.js";
 import { renderLive } from "../../src/dashboard/live-render.js";
+import { renderTabPage } from "../../src/dashboard/render.js";
 import { buildDashboard } from "../../src/dashboard/model.js";
 import { startDashboard } from "../../src/dashboard/server.js";
 
@@ -1276,6 +1277,46 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         // A pool row without both dollar values says so in the bar column.
         expect(body).toContain('<td class="meterwrap"><span class="nodata">no data</span></td>');
       }
+    }
+    // Zero spend is data: each budget bar carries its share of the cap as text,
+    // read from the row's own spent-total and total-cap cells.
+    {
+      const model = buildDashboard(await dashboardInputs(fixture));
+      const pool = (spent: string): readonly { kind: "text"; text: string }[] =>
+        ["meta", "every provider", spent, "$12.0000", spent, "$140.0000", "admitted"].map(
+          (text) => ({ kind: "text" as const, text }),
+        );
+      const savingsPage = renderTabPage("savings", {
+        model: {
+          ...model,
+          panels: model.panels.map((panel) =>
+            panel.id !== "usage"
+              ? panel
+              : {
+                  ...panel,
+                  tables: panel.tables.map((table) =>
+                    table.caption === "Budget pools"
+                      ? { ...table, rows: [pool("$0.0000"), pool("$35.0000")] }
+                      : table,
+                  ),
+                },
+          ),
+        },
+        chrome: {
+          view: "savings",
+          liveAvailable: true,
+          renderedAt: NOW.toISOString(),
+          t: 0,
+          paused: false,
+          replay: null,
+          selection: null,
+        },
+        knownWorkIds: new Set(),
+        workTotal: 0,
+        calls: null,
+      });
+      expect(savingsPage).toContain('<span class="capshare">0% of cap</span>');
+      expect(savingsPage).toContain('<span class="capshare">25% of cap</span>');
     }
     // Old views redirect to the tab that holds them, keeping t and pause.
     for (const [old, target] of [

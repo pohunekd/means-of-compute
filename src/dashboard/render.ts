@@ -89,6 +89,9 @@ export const DASHBOARD_CSS = [
   ".placement-full{margin:4px 0 0;color:var(--dim);font-size:15px;max-width:38rem}",
   "meter{display:block;width:100%;min-width:12rem;height:14px;margin-top:4px}",
   "td.fignote{color:var(--dim)}",
+  ".capbar{display:flex;align-items:center;gap:8px}",
+  ".capbar meter{margin-top:0;flex:1;min-width:8rem}",
+  ".capshare{font-size:15px;color:var(--dim);white-space:nowrap}",
   "td.figlabel,td.figamount{white-space:nowrap}",
   ".table-savings{table-layout:fixed}",
   ".table-savings td{padding:4px 8px;line-height:1.35}",
@@ -876,8 +879,9 @@ function usdOf(cell: Cell | undefined): string | null {
   return USD_TEXT.exec(cell.text)?.[1] ?? null;
 }
 
-// A bar of a budget pool row's spent total against its total cap, both read
-// from the row's own cells; a row without both dollar values has no bar.
+// A bar of a budget pool row's spent total against its total cap and the same
+// share as a whole percent, both read from the row's own cells; a row without
+// both dollar values reads no data.
 function capMeter(columns: readonly string[]): ExtraColumn {
   return {
     after: "spent total",
@@ -888,7 +892,11 @@ function capMeter(columns: readonly string[]): ExtraColumn {
       if (spent === null || cap === null || Number(cap) <= 0) {
         return constantHtml('<span class="nodata">no data</span>');
       }
-      return html`<meter min="0" max="${cap}" value="${spent}"></meter>`;
+      const share = Math.round((Number(spent) / Number(cap)) * 100);
+      return html`<span class="capbar"
+        ><meter min="0" max="${cap}" value="${spent}"></meter
+        ><span class="capshare">${String(share)}% of cap</span></span
+      >`;
     },
   };
 }

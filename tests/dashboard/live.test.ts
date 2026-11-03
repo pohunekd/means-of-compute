@@ -749,6 +749,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(auditCard).toContain("audit");
     expect(auditCard).toContain("Report: how this factory built itself");
     expect(auditCard).toContain("auditor: no data (verdict not written yet)");
+    expect(auditCard).not.toContain("muse-glimmer");
     const auditFlat = auditCard.replace(/\s+/g, " ");
     expect(auditFlat).toContain("1,300,000 in / 48,000 out");
     // idle cards with reason, scoped per card
@@ -1083,6 +1084,17 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(brokenPage).toContain("error (");
     expect(brokenPage).toContain("Goal:");
     writeFileSync(vPath, vOrig);
+    const meterOrig1 = readFileSync(join(fixture.dir, "meter-usage.jsonl"), "utf8");
+    writeFileSync(join(fixture.dir, "meter-usage.jsonl"), "{ invalid json }\n");
+    const dashMeterBad = await dashboardInputs(fixture);
+    const liveMeterBad = buildLive(
+      await gatherLiveInputs(fixture.sources, dashMeterBad, 60, () => {}),
+      { view: "overview", t: 60, paused: false, host: null },
+    );
+    const meterBadDesktop = cardSlice(renderLive(liveMeterBad), "desktop");
+    expect(meterBadDesktop).toContain("latest call:");
+    expect(meterBadDesktop).toContain("error (meter-usage-invalid)");
+    writeFileSync(join(fixture.dir, "meter-usage.jsonl"), meterOrig1);
     writeFileSync(join(fixture.dir, "registry.json"), "{ invalid json }");
     const dashBroken = await dashboardInputs(fixture);
     const liveBroken = buildLive(
@@ -1098,6 +1110,8 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(pageBroken).toContain('id="real-work"');
     expect(pageBroken).toContain("error (registry-invalid)");
     expect(pageBroken).not.toContain('class="nodata">no data (registry-invalid)');
+    const brokenDesktopCard = cardSlice(pageBroken, "desktop");
+    expect(brokenDesktopCard).toContain("Idle: error (registry-invalid)");
     const brokenPanel = buildLive(
       await gatherLiveInputs(fixture.sources, dashBroken, 60, () => {}),
       {

@@ -228,6 +228,26 @@ describe("fleet simulator", () => {
     expect(hostAt95?.["eligible"]).toBe(false);
     expect(String(hostAt95?.["excludeReason"])).toContain("battery at 40 percent");
     expect(String(hostAt95?.["excludeReason"])).toContain("50 percent floor");
+    // The beats the demo narrates: laptop-007 runs a research task at 95, every
+    // kiosk turns eligible when its window opens at 120, and laptop-021 is
+    // excluded for `not on AC power` from 135.
+    const hostAtOrBefore = (alias: string, minute: number): Record<string, unknown> | undefined =>
+      lines
+        .filter(
+          (l) =>
+            l["kind"] === "host" && l["alias"] === alias && (l["atMinute"] as number) <= minute,
+        )
+        .at(-1);
+    expect(hostAt95?.["state"]).toBe("running");
+    expect((hostAt95?.["task"] as { kind: string } | null)?.kind).toBe("research");
+    for (const kiosk of [1, 2, 3, 4, 5, 6].map((n) => `kiosk-lobby-00${String(n)}`)) {
+      expect(hostAtOrBefore(kiosk, 119)?.["eligible"]).toBe(false);
+      expect(hostAtOrBefore(kiosk, 120)?.["eligible"]).toBe(true);
+    }
+    expect(hostAtOrBefore("laptop-021", 134)?.["excludeReason"]).not.toBe(
+      "excluded: not on AC power",
+    );
+    expect(hostAtOrBefore("laptop-021", 135)?.["excludeReason"]).toBe("excluded: not on AC power");
     const placementAt96 = lines.find((l) => l["kind"] === "placement" && l["atMinute"] === 96) as
       Record<string, unknown> | undefined;
     expect(placementAt96).toBeDefined();

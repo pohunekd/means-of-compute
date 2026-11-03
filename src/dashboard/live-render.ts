@@ -1,16 +1,20 @@
-// Live view renderer. renderLive is pure: it turns the model of
-// src/dashboard/live.ts into one HTML string. The style element is the
-// dashboard stylesheet plus the live rules, hashed as LIVE_CSS_HASH for
-// the CSP. Aliases are checked against the host-alias pattern; a failure
-// throws without the value (a 500 in the server). There is no script:
-// frames advance through a meta refresh and a plain next-frame link.
-// The layout fits one 1920x1080 frame: one tile design for real and
-// simulated, compact, with real group first.
-import { createHash } from "node:crypto";
+// Live tab renderer. renderLive is pure: it turns the model of
+// src/dashboard/live.ts into one HTML string in the shared frame of
+// render.ts (header, tab bar, cards, boxes, tables, chips; one stylesheet and
+// one CSP hash). Aliases are checked against the host-alias pattern; a
+// failure throws without the value (a 500 in the server). There is no
+// script: frames advance through a meta refresh. The layout fits one
+// 1920x1080 frame: Real work now, Just finished, then the compact simulated
+// fleet beside the right rail, which holds a detail panel when one is open.
 import { constantHtml, html, SafeHtml } from "./html.js";
-import { DASHBOARD_CSS } from "./render.js";
+import {
+  modelLabel,
+  renderFramedPage,
+  type PageChrome,
+  type Selection,
+  type TabId,
+} from "./render.js";
 import { groupDigits } from "./money.js";
-import { stripProvider } from "./live.js";
 import { verdictCounts } from "../auditor/verdict.js";
 import type {
   AuditPanel,
@@ -29,108 +33,22 @@ import type {
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
-export const LIVE_CSS = [
-  "body{padding:0.15rem 0.5rem 0.1rem;font-size:12px;line-height:1.1}",
-  "h1{font-size:0.9rem;margin:0}",
-  ".tagline{font-size:0.6rem;margin:0.05rem 0 0}",
-  ".tabs{display:flex;gap:0.25rem;flex-wrap:wrap;margin:0.2rem 0 0;padding-bottom:0.25rem;border-bottom:1px solid var(--border)}",
-  ".tab{padding:0.14rem 0.4rem;border-radius:999px;font-size:0.68rem;font-weight:600;text-decoration:none;color:var(--muted);border:1px solid transparent;line-height:1}",
-  ".tab.active{color:var(--text);background:var(--surface-2);border-color:var(--border)}",
-  ".live-head{display:flex;flex-wrap:wrap;gap:0.15rem 0.8rem;align-items:baseline;margin-top:0.08rem}",
-  ".live-clocks{font-variant-numeric:tabular-nums;color:var(--muted);font-size:0.6rem;margin:0}",
-  ".live-clocks strong{color:var(--text)}",
-  ".paused-badge{display:inline-block;margin-left:0.3rem;padding:0.05rem 0.25rem;border-radius:3px;background:var(--parked-bg);color:var(--parked-text);font-weight:700;font-size:0.62rem;border:1px solid var(--border)}",
-  ".replay{font-size:0.6rem;margin:0.08rem 0 0;display:flex;flex-wrap:wrap;gap:0.15rem 0.4rem;align-items:center}",
-  ".replay a{color:var(--accent);text-decoration:none}",
-  ".replay a:hover{text-decoration:underline}",
-  ".jumps{display:flex;gap:0.2rem;flex-wrap:wrap}",
-  ".jumps a{padding:0.1rem 0.3rem;border:1px solid var(--border);border-radius:999px;font-size:0.62rem}",
-  ".keyfigures{grid-template-columns:repeat(6,1fr);gap:0.2rem;margin-top:0.15rem}",
-  ".keycard{padding:0.08rem 0.25rem;border-radius:4px}",
-  ".keycard .label{font-size:0.45rem;line-height:1}",
-  ".keycard .value{font-size:0.7rem;line-height:1}",
-  ".keycard .cite{font-size:0.42rem;margin:0.02rem 0 0;line-height:1}",
-  ".keycard.live-simcard{border-top-style:dashed}",
-  "section{padding:0.2rem 0.3rem 0.2rem;margin-top:0.2rem;border-radius:4px}",
-  "h2{font-size:0.7rem;margin:0 0 0.12rem}",
-  ".rw-heading{font-size:1.05rem;margin:0 0 0.12rem}",
-  ".live-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,0.9fr);gap:0.3rem;align-items:start}",
-  ".live-side{display:grid;gap:0.4rem}",
-  ".live-side section{margin-top:0}",
-  ".live-group h3{font-size:0.52rem;margin:0.08rem 0 0.04rem;color:var(--muted);line-height:1}",
-  ".live-group:first-child h3{margin-top:0}",
-  ".live-group .simtag{font-size:0.48rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.2rem;margin-left:0.25rem}",
-  ".tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(3.2rem,1fr));gap:1px}",
-  ".tile{border-radius:2px;padding:0.05rem 0.12rem;min-height:1.15rem;background:var(--surface-2);display:flex;flex-direction:column;gap:0;justify-content:center;line-height:1}",
-  ".tile-real{border:1px solid var(--border)}",
-  ".tile-sim{border:1px dashed var(--border)}",
-  ".tile .alias{font-family:var(--mono);font-size:0.48rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}",
-  ".tile .meta{font-size:0.44rem;display:flex;justify-content:space-between;align-items:baseline;gap:0.1rem;line-height:1;min-width:0;overflow:hidden}",
-  ".tile .load{font-variant-numeric:tabular-nums;font-weight:600;flex:none;white-space:nowrap}",
-  ".tile .state{font-size:0.42rem;text-transform:uppercase;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}",
-  ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
-  ".tile-flagged .alias{color:var(--parked-text)}",
-  ".flag{color:var(--parked-text);font-weight:700}",
-  ".chip{font-size:15px;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
-  ".chip-real{color:var(--accent)}",
-  ".tile-eligible{background:var(--done-bg);color:var(--done-text)}",
-  ".tile-running{background:var(--running-bg);color:var(--running-text)}",
-  ".tile-blocked{background:var(--parked-bg);color:var(--parked-text)}",
-  ".tile-busy{background:var(--neutral-bg);color:var(--neutral-text)}",
-  ".tile-offline{background:var(--surface);color:var(--muted)}",
-  ".tile-reported{background:var(--neutral-bg);color:var(--neutral-text)}",
-  ".tile-unavailable{background:var(--bad-bg);color:var(--bad-text)}",
-  ".live-legend{font-size:0.48rem;color:var(--muted);margin:0.08rem 0 0;line-height:1}",
-  ".dot{display:inline-block;width:0.4rem;height:0.4rem;border-radius:1px;margin:0 0.1rem 0 0.3rem;vertical-align:-1px}",
-  ".live-activity-table{font-size:0.55rem;line-height:1}",
-  ".live-activity-table td,.live-activity-table th{padding:0.06rem 0.15rem;white-space:nowrap}",
-  ".live-ticker{list-style:none;margin:0;padding:0}",
-  ".live-layout>*{min-width:0}",
-  ".live-side{min-width:0}",
-  ".live-side section{min-width:0;overflow:hidden}",
-  ".live-activity-table{max-width:100%}",
-  ".live-ticker{overflow:hidden}",
-  ".live-ticker li{font-size:0.55rem;padding:0.06rem 0.15rem;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1}",
-  ".live-ticker .sim{border-left:4px dashed var(--accent)}",
-  ".live-ticker time{font-variant-numeric:tabular-nums;color:var(--muted);margin-right:0.4rem;white-space:nowrap}",
-  ".live-events h3{font-size:0.62rem;margin:0.15rem 0 0.08rem;color:var(--muted)}",
-  ".live-events h3:first-child{margin-top:0}",
-  ".host-panel{border:1px solid var(--border);border-radius:10px;padding:0.6rem 0.8rem;background:var(--surface-2);margin-top:0.6rem}",
-  ".host-panel h3{font-size:0.95rem;margin:0 0 0.4rem}",
-  ".host-panel .row{font-size:0.82rem;margin:0.2rem 0;color:var(--muted)}",
-  ".host-panel .mono{font-family:var(--mono)}",
-  ".host-panel ul{margin:0.3rem 0 0;padding-left:1.2rem;font-size:0.8rem}",
-  ".host-panel a{color:var(--accent);text-decoration:none}",
-  ".realwork{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:10px 0}",
-  ".rw{background:var(--surface-2);border:1.5px solid var(--accent);border-radius:12px;padding:9px 12px}",
-  ".rw.idle{border-color:var(--border)}",
-  ".rw .al{font-size:22px;font-weight:700;font-family:var(--mono)}",
-  ".rw .task{font-size:17px;font-weight:600;margin:4px 0 2px;min-height:40px;line-height:1.3;overflow:hidden}",
-  ".rw .task.idle-task{color:var(--muted)}",
-  ".rw .meta{font-size:15px;color:var(--muted);margin:2px 0;line-height:1.3}",
-  ".rw .meta b{color:var(--text);font-weight:700}",
-  ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px;line-height:1.4}",
-  ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+// Rows the right rail shows so that it fits beside the fleet in the frame.
+const RAIL_ROWS = {
+  activity: 3,
+  events: 3,
+} as const;
 
-  ".fin{display:flex;gap:12px;margin:0 0 10px;align-items:baseline}",
-  ".fin .fi.fin-label{flex:0 0 auto;background:none;border:none;padding:6px 0;font-size:15px;font-weight:700}",
-  ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:15px;line-height:1.3}",
-  ".fin .fi b{font-size:16px}",
-  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}.realwork{grid-template-columns:repeat(2,1fr)}.fin{flex-wrap:wrap}}",
-].join("\n");
-
-export const LIVE_CSS_HASH = `sha256-${createHash("sha256")
-  .update(DASHBOARD_CSS + "\n" + LIVE_CSS, "utf8")
-  .digest("base64")}`;
-
-const LIVE_STYLE_HTML = constantHtml("<style>" + DASHBOARD_CSS + "\n" + LIVE_CSS + "</style>");
-
-function compactTime(iso: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(iso)) {
-    return iso;
-  }
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
-}
+// Tile states in legend and group-count order.
+const STATE_ORDER = [
+  "running",
+  "eligible",
+  "blocked",
+  "busy",
+  "offline",
+  "reported",
+  "unavailable",
+] as const;
 
 function clockTime(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(iso) ? iso.slice(11, 19) : iso;
@@ -163,16 +81,6 @@ function monthDay(iso: string): string {
   if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
     return iso.slice(0, 10);
   return `${MONTHS[month - 1] as string} ${String(day)}`;
-}
-
-function shortenMiddle(text: string, limit: number): string {
-  if (text.length <= limit) {
-    return text;
-  }
-  const keep = limit - 1;
-  const head = Math.ceil(keep * 0.6);
-  const tail = keep - head;
-  return `${text.slice(0, head)}…${text.slice(-tail)}`;
 }
 
 function cellText(cell: LiveCell): string {
@@ -282,55 +190,52 @@ function buildHref(model: LiveModel, overrides: LiveHrefOverrides): string {
   return qs.length > 0 ? `/?${qs}` : "/";
 }
 
-function shortenAlias(alias: string): string {
-  if (alias.length <= 9) {
-    return alias;
-  }
-  return `${alias.slice(0, 3)}...${alias.slice(-3)}`;
+function tileLoad(tile: LiveTile): string {
+  return tile.running === null
+    ? "err"
+    : tile.maxAgents === null
+      ? String(tile.running)
+      : `${String(tile.running)}/${String(tile.maxAgents)}`;
 }
 
+// One line per tile: the full alias and the load; the state is the left
+// border colour, the amber edge and `!` mark running-but-excluded.
 function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
-  const load =
-    tile.running === null
-      ? "err"
-      : tile.maxAgents === null
-        ? String(tile.running)
-        : `${String(tile.running)}/${String(tile.maxAgents)}`;
   const battery = tile.batteryPercent === null ? "" : ` bat ${String(tile.batteryPercent)}%`;
-  const displayAlias = shortenAlias(tile.alias);
   const baseTitle =
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
       : `${tile.alias}: ${tile.state}, ${tile.detail}${battery}`;
   const title =
     tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
-  const chip = html`<span class="chip chip-real">REAL</span>`;
-  const stateWord = tile.state;
   const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
+  const chip = tile.simulated ? constantHtml("") : html`<span class="chip chip-real">REAL</span>`;
   const tileClass = tile.simulated ? "tile-sim" : "tile-real";
-  const secondLine = tile.simulated
-    ? html`<span class="load">${load}${flagMark}</span><span class="state">${stateWord}</span>`
-    : html`<span class="load">${load}${flagMark}</span>${chip}`;
   return html`<a
     href="${href}"
     class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}"
     title="${title}"
-  >
-    <span class="meta"><span class="alias">${displayAlias}</span></span>
-    <span class="meta">${secondLine}</span>
-  </a>`;
+    ><span class="alias">${tile.alias}</span
+    ><span class="load">${tileLoad(tile)}${flagMark}</span>${chip}</a
+  >`;
+}
+
+function stateCounts(tiles: readonly LiveTile[]): string {
+  return STATE_ORDER.flatMap((state) => {
+    const count = tiles.filter((tile) => tile.state === state).length;
+    return count === 0 ? [] : [`${groupDigits(count)} ${state}`];
+  }).join(" · ");
 }
 
 function renderGroup(group: LiveGroup, model: LiveModel): SafeHtml {
   const hasSim = group.tiles.some((t) => t.simulated);
-  const heading = hasSim
-    ? html`<h3>${group.title}<span class="simtag">SIMULATED</span></h3>`
-    : html`<h3>${group.title}</h3>`;
+  const tag = hasSim ? html`<span class="simtag">SIMULATED</span>` : constantHtml("");
   return html`<div class="live-group">
-    ${heading}
-    <div class="tile-grid">${group.tiles.map((tile) => renderTile(tile, model))}</div>
+    <span class="ghead"
+      ><b>${group.title}</b>${tag}<span class="gcount">${stateCounts(group.tiles)}</span></span
+    >${group.tiles.map((tile) => renderTile(tile, model))}
   </div>`;
 }
 
@@ -346,7 +251,9 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const stageLabel = "implement";
   const idleCls = card.stage === "idle" ? " idle" : "";
   const stageHtml =
-    card.stage === "idle" ? constantHtml("") : html`<span class="stage">${stageLabel}</span>`;
+    card.stage === "idle"
+      ? constantHtml("")
+      : html`<span class="pill pill-running">${stageLabel}</span>`;
   const titleLine =
     card.stage === "idle"
       ? card.idleReason === null
@@ -400,9 +307,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const modelLine =
     card.modelText === null
       ? constantHtml("")
-      : html`<p class="meta">
-          ${`${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}
-        </p>`;
+      : html`<p class="meta">${modelLabel(card.modelText, card.providerId)}</p>`;
   const tokensCostSoFar =
     card.meterFailure !== null
       ? card.meterFailure.kind === "error"
@@ -490,7 +395,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
               ·
               <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
             </p>`;
-  return html`<div class="rw${idleCls}">
+  return html`<div class="rw card${idleCls}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
       ${stageHtml}
@@ -583,7 +488,7 @@ function sectionText<T>(section: LiveSection<T>): SafeHtml {
 }
 
 function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml {
-  const model = shortenMiddle(row.model, 30);
+  const model = modelLabel(row.model, null);
   const tokens = (value: number | null): string =>
     value === null ? "no data" : groupDigits(value);
   const cost =
@@ -593,16 +498,11 @@ function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml
   const canLinkCall = row.workItemId !== null;
   const callKey = canLinkCall ? `${row.at}|${row.workItemId}` : "";
   const modelLink = canLinkCall
-    ? html`<a
-        href="${buildHref(liveModel, { call: callKey })}"
-        class="mono nowrap"
-        title="${row.model}"
+    ? html`<a href="${buildHref(liveModel, { call: callKey })}" title="${row.model}"
         >${model === row.model ? row.model : model}</a
       >`
-    : html`<span class="mono nowrap" title="${row.model}"
-        >${model === row.model ? row.model : model}</span
-      >`;
-  const modelCell = html`<td>${modelLink}</td>`;
+    : html`<span title="${row.model}">${model === row.model ? row.model : model}</span>`;
+  const modelCell = html`<td class="modelcol">${modelLink}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
     ${modelCell}
@@ -616,7 +516,7 @@ function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml
 }
 
 function renderTickerBlock(model: LiveModel, simulated: boolean): SafeHtml {
-  const rows = model.ticker.filter((row) => row.simulated === simulated).slice(0, 6);
+  const rows = model.ticker.filter((row) => row.simulated === simulated).slice(0, RAIL_ROWS.events);
   const items = rows.map(
     (row) =>
       html`<li class="${row.simulated ? "sim" : "real"}" title="${row.text}">
@@ -624,95 +524,9 @@ function renderTickerBlock(model: LiveModel, simulated: boolean): SafeHtml {
       </li>`,
   );
   return html`<h3>${simulated ? "Simulated events (sim clock)" : "Real events"}</h3>
-    <ul class="live-ticker">
+    <ul class="tick">
       ${items}
     </ul>`;
-}
-
-function renderTabs(model: LiveModel): SafeHtml {
-  const tabs = ["overview", "fleet", "work", "usage", "savings", "autonomy", "models"];
-  const links = tabs.map((tab) => {
-    const active = tab === model.view ? " active" : "";
-    // Tab links keep t and pause, drop selection.
-    const params = new URLSearchParams();
-    params.set("view", tab);
-    if (model.t !== 0) {
-      params.set("t", String(model.t));
-    }
-    if (model.paused) {
-      params.set("pause", "1");
-    }
-    const href = `/?${params.toString()}`;
-    return tab === model.view
-      ? html`<a class="tab${active}" href="${href}" ${constantHtml(' aria-current="page"')}>
-          ${tab}</a
-        >`
-      : html`<a class="tab${active}" href="${href}">${tab}</a>`;
-  });
-  return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
-}
-
-function renderReplay(model: LiveModel): SafeHtml {
-  const jumpMinutes = [0, 60, 120, 180, 240];
-  const duration = model.durationMinutes ?? 240;
-  const addSelection = (params: URLSearchParams): void => {
-    if (model.hostPanel !== null) {
-      params.set("host", model.hostPanel.alias);
-    } else if (model.taskPanel !== null) {
-      params.set("task", model.taskPanel.workItemId);
-    } else if (model.callPanel !== null) {
-      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
-    } else if (model.auditPanel !== null) {
-      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
-    }
-  };
-  const jumps = jumpMinutes
-    .filter((m) => m <= duration)
-    .map((m) => {
-      const params = new URLSearchParams();
-      params.set("view", model.view);
-      params.set("t", String(m));
-      if (model.paused) {
-        params.set("pause", "1");
-      }
-      addSelection(params);
-      return html`<a href="/?${params.toString()}">${String(m)}</a>`;
-    });
-  // Helper for controls that preserve view/host.
-  const ctrlHref = (t: number, paused: boolean | null): string => {
-    const params = new URLSearchParams();
-    params.set("view", model.view);
-    if (t !== 0) {
-      params.set("t", String(t));
-    }
-    if (paused === true) {
-      params.set("pause", "1");
-    } else if (paused === null) {
-      if (model.paused) {
-        params.set("pause", "1");
-      }
-    }
-    addSelection(params);
-    const qs = params.toString();
-    return qs.length > 0 ? `/?${qs}` : "/";
-  };
-  const pauseHref = ctrlHref(model.t, true);
-  const resumeHref = ctrlHref(model.t, false);
-  const restartHref = ctrlHref(0, model.paused ? true : null);
-  const backHref = ctrlHref(Math.max(0, model.t - 5), model.paused ? true : null);
-  const forwardHref = ctrlHref(Math.min(duration, model.t + 5), model.paused ? true : null);
-  return html`<div class="replay">
-    <span>Replay:</span>
-    ${
-      model.paused
-        ? html`<a href="${resumeHref}">resume</a>`
-        : html`<a href="${pauseHref}">pause</a>`
-    }
-    <a href="${restartHref}">restart</a>
-    <a href="${backHref}">-5</a>
-    <a href="${forwardHref}">+5</a>
-    <span class="jumps">${jumps}</span>
-  </div>`;
 }
 
 function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
@@ -724,8 +538,8 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       !panel.eligible && panel.excludeReason !== null
         ? `State: ${panel.state} · ${panel.excludeReason}`
         : `State: ${panel.state}`;
-    return html`<div class="host-panel" id="host-panel">
-      <h3>${panel.alias} <span class="chip">SIMULATED</span></h3>
+    return html`<div class="panel" id="host-panel">
+      <h3>${panel.alias} <span class="simtag">SIMULATED</span></h3>
       <p class="row">Site: ${panel.site} · Kind: ${panel.hostKind}</p>
       <p class="row">${stateLine}</p>
       <p class="row">Running: ${String(panel.running)}/${String(panel.maxAgents)} ${battery}</p>
@@ -772,8 +586,8 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
                 (s) =>
                   html`<li class="mono">
                     <a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a>
-                    ${stripProvider(s.model.model)} (${s.model.providerId}) started ${s.startedAt}
-                    lastSeen ${s.lastSeenAt}
+                    ${modelLabel(s.model.model, s.model.providerId)} started ${s.startedAt} lastSeen
+                    ${s.lastSeenAt}
                   </li>`,
               )}
             </ul>
@@ -815,15 +629,15 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
                 return canLink
                   ? html`<li>
                       <a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
-                        >${c.model}</a
+                        >${modelLabel(c.model, null)}</a
                       >
                       ${c.at}
                     </li>`
-                  : html`<li>${c.model} ${c.at}</li>`;
+                  : html`<li>${modelLabel(c.model, null)} ${c.at}</li>`;
               })}
             </ul>
           </div>`;
-  return html`<div class="host-panel" id="host-panel">
+  return html`<div class="panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
     ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
     <p><a href="${backHref}">back to live</a></p>
@@ -837,8 +651,8 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
       panel.hostAlias === null
         ? "none"
         : html`<a href="${buildHref(model, { host: panel.hostAlias })}">${panel.hostAlias}</a>`;
-    return html`<div class="host-panel" id="task-panel">
-      <h3>${panel.workItemId} <span class="chip">SIMULATED</span></h3>
+    return html`<div class="panel" id="task-panel">
+      <h3>${panel.workItemId} <span class="simtag">SIMULATED</span></h3>
       <p class="row">Kind: ${panel.task.kind}</p>
       <p class="row">Title: ${panel.task.title}</p>
       <p class="row">Brief: ${panel.brief}</p>
@@ -882,7 +696,7 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Rounds:</p>
           <ul>
-            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${r.model} on ${r.hostAlias ?? "no host"}</li>`)}
+            ${panel.rounds.value.map((r) => html`<li>${r.at} ${r.outcome} ${modelLabel(r.model, null)} on ${r.hostAlias ?? "no host"}</li>`)}
           </ul>
         </div>`;
   const verdictsBlock =
@@ -941,7 +755,7 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
       : html`<div>
           <p class="row">Ledger tokens:</p>
           <ul>
-            ${panel.ledger.value.map((t) => html`<li>${t.model} (${t.provider}) in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
+            ${panel.ledger.value.map((t) => html`<li>${modelLabel(t.model, t.provider)} in ${t.inputTokens === null ? "no data" : groupDigits(t.inputTokens)} out ${t.outputTokens === null ? "no data" : groupDigits(t.outputTokens)} req ${t.requests === null ? "no data" : groupDigits(t.requests)} source ${t.source}</li>`)}
           </ul>
           <p class="row">Ledger sessions:</p>
           <ul>
@@ -1013,14 +827,14 @@ function renderTaskPanel(panel: TaskPanel, model: LiveModel): SafeHtml {
   const modelLine =
     panel.workItem.kind === "ok"
       ? html`<p class="row">
-          Model: ${stripProvider(panel.workItem.value.modelRouting.preferredModel)}
+          Model: ${modelLabel(panel.workItem.value.modelRouting.preferredModel, null)}
         </p>`
       : constantHtml("");
   const retryLine =
     panel.workItem.kind === "ok"
       ? html`<p class="row">Retries: ${String(panel.workItem.value.retryCount)}</p>`
       : constantHtml("");
-  return html`<div class="host-panel" id="task-panel">
+  return html`<div class="panel" id="task-panel">
     <h3>${title} <span class="chip chip-real">REAL</span></h3>
     ${statusLine} ${repoLine} ${issueLine} ${prLine} ${branchLine} ${assignedHostLine} ${modelLine}
     ${retryLine} ${goal} ${dodBlock} ${roundsBlock} ${verdictsBlock} ${ledgerBlock}
@@ -1036,7 +850,7 @@ function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
       panel.detail.kind === "error"
         ? html`<p class="error">error (${panel.detail.code})</p>`
         : html`<p class="nodata">no data (${panel.detail.reason})</p>`;
-    return html`<div class="host-panel" id="call-panel">
+    return html`<div class="panel" id="call-panel">
       <h3>Call ${panel.endedAt}</h3>
       ${err}
       <p><a href="${backHref}">back to live</a></p>
@@ -1057,11 +871,11 @@ function renderCallPanel(panel: CallPanel, model: LiveModel): SafeHtml {
     panel.workItemId === null
       ? "none"
       : html`<a href="${buildHref(model, { task: panel.workItemId })}">${panel.workItemId}</a>`;
-  return html`<div class="host-panel" id="call-panel">
+  return html`<div class="panel" id="call-panel">
     <h3>Call ${panel.callId} <span class="chip chip-real">REAL</span></h3>
     <p class="row">Ended at: ${panel.endedAt}</p>
     <p class="row">Provider: ${detail.providerId}</p>
-    <p class="row">Model: ${detail.model} (${detail.providerId})</p>
+    <p class="row">Model: ${modelLabel(detail.model, detail.providerId)}</p>
     <p class="row">Role: ${detail.role ?? "-"}</p>
     <p class="row">Task: ${taskLink}</p>
     <p class="row">Host: ${hostLink}</p>
@@ -1092,10 +906,10 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
           const countsLine = html`<p class="row">Counts: ${c}</p>`;
           const repoLine = html`<p class="row">Repo: ${verdict.repo}</p>`;
           const auditorLine = html`<p class="row">
-            Auditor: ${stripProvider(verdict.auditorModel)}
+            Auditor: ${modelLabel(verdict.auditorModel, null)}
           </p>`;
           const authorsLine = html`<p class="row">
-            Authors: ${verdict.authorModels.map(stripProvider).join(", ") || "none"}
+            Authors: ${verdict.authorModels.map((m) => modelLabel(m, null)).join(", ") || "none"}
           </p>`;
           const prLine =
             verdict.pullNumber === null
@@ -1130,7 +944,7 @@ function renderAuditPanel(panel: AuditPanel, model: LiveModel): SafeHtml {
             ${prLine}
           </div>`;
         })();
-  return html`<div class="host-panel" id="audit-panel">
+  return html`<div class="panel" id="audit-panel">
     <h3>Audit ${panel.workItemId}@${panel.headSha.slice(0, 7)}</h3>
     ${body}
     <p><a href="${backHref}">back to live</a></p>
@@ -1180,40 +994,103 @@ function renderDetailBreadcrumb(model: LiveModel): SafeHtml {
   return constantHtml("");
 }
 
+function selectionOf(model: LiveModel): Selection | null {
+  if (model.hostPanel !== null) {
+    return { key: "host", value: model.hostPanel.alias };
+  }
+  if (model.taskPanel !== null) {
+    return { key: "task", value: model.taskPanel.workItemId };
+  }
+  if (model.callPanel !== null) {
+    return { key: "call", value: `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}` };
+  }
+  if (model.auditPanel !== null) {
+    return { key: "audit", value: `${model.auditPanel.workItemId}@${model.auditPanel.headSha}` };
+  }
+  return null;
+}
+
+// The shared page chrome at the live model's clocks. Only the Live tab carries
+// the replay and keeps the open panel in its replay links.
+export function chromeOf(model: LiveModel, view: TabId): PageChrome {
+  return {
+    view,
+    liveAvailable: true,
+    renderedAt: model.renderedAt,
+    t: model.t,
+    paused: model.paused,
+    // Work, Models and Savings are real only: no simulated clock, no replay.
+    replay:
+      view === "live"
+        ? {
+            simAt: model.simAt,
+            simMinute: model.simMinute,
+            durationMinutes: model.durationMinutes,
+            refreshSeconds: model.refreshSeconds,
+            nextMinute: model.nextMinute,
+          }
+        : null,
+    selection: view === "live" ? selectionOf(model) : null,
+  };
+}
+
+function activityTable(model: LiveModel, limit: number): SafeHtml {
+  if (model.activity.kind !== "ok") {
+    return sectionText(model.activity);
+  }
+  const rows = model.activity.value.slice(0, limit);
+  return html`<div class="tablewrap">
+    <table class="live-activity-table">
+      <thead>
+        <tr>
+          <th>time</th>
+          <th>model</th>
+          <th>provider</th>
+          <th>role</th>
+          <th class="num">in</th>
+          <th class="num">out</th>
+          <th class="num">ms</th>
+          <th>cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => renderActivityRow(row, model))}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// Latest real meter calls, newest first, linked to the call panel; the
+// Models tab shows them under its tables.
+export function renderCallsSection(model: LiveModel, limit: number): SafeHtml {
+  const total = model.activity.kind === "ok" ? model.activity.value.length : 0;
+  const shown =
+    model.activity.kind === "ok" && total > limit
+      ? html`<p class="shown">showing ${String(limit)} of the newest ${String(total)} calls</p>`
+      : constantHtml("");
+  return html`<section id="latest-calls">
+    <h2>Latest calls <span class="cnt">· real, newest first; click a call for its detail</span></h2>
+    ${activityTable(model, limit)} ${shown}
+    <p class="cite">source: real meter call-end records from the meter usage log</p>
+  </section>`;
+}
+
+function fleetHeading(model: LiveModel): SafeHtml {
+  const counters = model.simCounters;
+  if (counters === null) {
+    return html`<h2>Fleet</h2>`;
+  }
+  return html`<h2>
+    Fleet
+    <span class="cnt"
+      >· simulated evening: ${groupDigits(counters.eligible)} of ${groupDigits(counters.hostCount)}
+      eligible · ${groupDigits(counters.workRunning)} work running ·
+      ${groupDigits(counters.placements)} placements (simulated)</span
+    >
+  </h2>`;
+}
+
 export function renderLive(model: LiveModel): string {
-  const nextMinute = model.nextMinute;
-  const refreshHref = (() => {
-    if (model.paused || nextMinute === null) {
-      return null;
-    }
-    const params = new URLSearchParams();
-    params.set("view", model.view);
-    params.set("t", String(nextMinute));
-    if (model.hostPanel !== null) {
-      params.set("host", model.hostPanel.alias);
-    } else if (model.taskPanel !== null) {
-      params.set("task", model.taskPanel.workItemId);
-    } else if (model.callPanel !== null) {
-      params.set("call", `${model.callPanel.endedAt}|${model.callPanel.workItemId ?? ""}`);
-    } else if (model.auditPanel !== null) {
-      params.set("audit", `${model.auditPanel.workItemId}@${model.auditPanel.headSha}`);
-    }
-    return `/?${params.toString()}`;
-  })();
-  const refresh =
-    refreshHref === null || model.refreshSeconds === null
-      ? constantHtml("")
-      : html`<meta
-          http-equiv="refresh"
-          content="${String(model.refreshSeconds)};url=${refreshHref}"
-        />`;
-  const simClock =
-    model.simAt === null
-      ? "no simulated input"
-      : `simulated evening ${compactTime(model.simAt)} (minute ${String(model.simMinute ?? 0)} of ${String(model.durationMinutes ?? 0)})`;
-  const pausedBadge = model.paused
-    ? html`<span class="paused-badge">paused</span>`
-    : constantHtml("");
   const realWorkBlock = (() => {
     if (model.realWork.kind !== "ok")
       return html`<div id="real-work">${sectionText(model.realWork)}</div>`;
@@ -1232,114 +1109,54 @@ export function renderLive(model: LiveModel): string {
   })();
   const simFleet =
     model.simFleet.kind === "ok"
-      ? model.simFleet.value.map((group) => renderGroup(group, model))
-      : sectionText(model.simFleet);
-  const activity =
-    model.activity.kind === "ok"
-      ? html`<div class="tablewrap">
-          <table class="live-activity-table">
-            <thead>
-              <tr>
-                <th>time</th>
-                <th>model</th>
-                <th>provider</th>
-                <th>role</th>
-                <th class="num">in</th>
-                <th class="num">out</th>
-                <th class="num">ms</th>
-                <th>cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${model.activity.value.map((row) => renderActivityRow(row, model))}
-            </tbody>
-          </table>
+      ? html`<div class="groups">
+          ${model.simFleet.value.map((group) => renderGroup(group, model))}
         </div>`
-      : sectionText(model.activity);
+      : sectionText(model.simFleet);
   const tickerNote =
     model.tickerNote === null ? constantHtml("") : html`<p class="note">${model.tickerNote}</p>`;
-  const hostPanel =
-    model.hostPanel === null ? constantHtml("") : renderHostPanel(model.hostPanel, model);
-  const taskPanel =
-    model.taskPanel === null ? constantHtml("") : renderTaskPanel(model.taskPanel, model);
-  const callPanel =
-    model.callPanel === null ? constantHtml("") : renderCallPanel(model.callPanel, model);
-  const auditPanel =
-    model.auditPanel === null ? constantHtml("") : renderAuditPanel(model.auditPanel, model);
   const detailPanel =
     model.hostPanel !== null
-      ? hostPanel
+      ? renderHostPanel(model.hostPanel, model)
       : model.taskPanel !== null
-        ? taskPanel
+        ? renderTaskPanel(model.taskPanel, model)
         : model.callPanel !== null
-          ? callPanel
-          : auditPanel;
-  const hasDetail =
-    model.hostPanel !== null ||
-    model.taskPanel !== null ||
-    model.callPanel !== null ||
-    model.auditPanel !== null;
-  const fleetContent = html`<h2>Fleet</h2>
-    ${simFleet}
-    <p class="live-legend">
-      <span class="dot tile-eligible"></span>eligible <span class="dot tile-running"></span>running
-      <span class="dot tile-blocked"></span>blocked (reason in the title)
-      <span class="dot tile-busy"></span>busy <span class="dot tile-offline"></span>offline · dashed
-      outline and the SIMULATED group tag mark simulated hosts · amber edge with
-      <span class="flag">!</span>: running, now excluded for a reason other than its agent limit
-      (reason in the title)
-    </p>
-    <p class="cite">
-      source: real recorded probes and dispatcher registry; simulated fleet trace (sim-trace-v1)
-    </p>`;
-  const sideContent = !hasDetail
-    ? html`<section id="live-activity">
-          <h2>Model activity (real)</h2>
-          ${activity}
-          <p class="cite">source: real meter call-end records from the meter usage log</p>
-        </section>
-        <section id="live-ticker" class="live-events">
-          <h2>Events</h2>
-          ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
-          <p class="cite">source: real loop results; simulated host and placement trace lines</p>
-        </section>`
-    : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
-  return (
-    "<!doctype html>\n" +
-    html`<html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        ${refresh}
-        <title>Means of Compute - live</title>
-        ${LIVE_STYLE_HTML}
-      </head>
-      <body>
-        <header>
-          <div class="live-head">
-            <h1>Means of Compute - live</h1>
-            <p class="live-clocks">
-              real <strong>${compactTime(model.renderedAt)}</strong> · ${simClock}${pausedBadge}
-            </p>
-          </div>
-          ${renderTabs(model)} ${renderReplay(model)}
-          <p class="tagline">
-            Real placement engine, synthetic fleet. The four real machines and the model calls are
-            live.
-          </p>
-        </header>
-        <main>
-          <section>
-            <h2 class="rw-heading">Real work now</h2>
-            <p class="rw-subtitle">what the real machines are doing at this moment</p>
-            ${realWorkBlock} ${justFinishedBlock}
+          ? renderCallPanel(model.callPanel, model)
+          : model.auditPanel !== null
+            ? renderAuditPanel(model.auditPanel, model)
+            : null;
+  const legend = html`<p class="legend">
+    Tile colours: <span class="dot tile-running"></span>running
+    <span class="dot tile-eligible"></span>eligible <span class="dot tile-blocked"></span>blocked
+    <span class="dot tile-busy"></span>busy <span class="dot tile-offline"></span>offline
+    <span class="dot tile-flagged"></span>amber edge with <span class="flag">!</span>: running, now
+    excluded for a reason other than its agent limit (reason in the title and the panel)
+  </p>`;
+  const rail =
+    detailPanel === null
+      ? html`<section id="live-activity">
+            <h2>Model activity (real)</h2>
+            ${activityTable(model, RAIL_ROWS.activity)}
+            <p class="cite">source: real meter call-end records from the meter usage log</p>
           </section>
-          <div class="live-layout">
-            <section id="live-fleet">${fleetContent}</section>
-            <div class="live-side">${sideContent}</div>
-          </div>
-        </main>
-      </body>
-    </html>`.value
-  );
+          <section id="live-ticker">
+            <h2>Events</h2>
+            ${renderTickerBlock(model, false)} ${renderTickerBlock(model, true)} ${tickerNote}
+            <p class="cite">source: real loop results; simulated host and placement trace lines</p>
+          </section>`
+      : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
+  const main = html`<div class="realnow">
+      <h2>
+        Real work now <span class="cnt">· what the real machines are doing at this moment</span>
+      </h2>
+      ${realWorkBlock} ${justFinishedBlock}
+    </div>
+    <div class="live-layout">
+      <section id="live-fleet">
+        ${fleetHeading(model)} ${simFleet} ${legend}
+        <p class="cite">source: simulated fleet trace (sim-trace-v1)</p>
+      </section>
+      <div class="rail">${rail}</div>
+    </div>`;
+  return renderFramedPage(chromeOf(model, "live"), main);
 }

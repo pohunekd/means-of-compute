@@ -1,8 +1,9 @@
 // Dashboard HTTP server. One Bun.serve on the loopback listen address:
-// GET / renders the dashboard and GET /live the live view when live sources
-// are wired; everything else gets a plain error status. The first
-// failing step answers (Host allowlist, method, path), and any throw while
-// gathering, building or rendering becomes a 500 without details.
+// GET / renders one of four tabs (Live, Work, Models, Savings; Live only when
+// live sources are wired), the old view names and GET /live redirect, and
+// everything else gets a plain error status. The first failing step answers
+// (Host allowlist, method, path), and any throw while gathering, building or
+// rendering becomes a 500 without details.
 import { appendFile } from "node:fs/promises";
 import type { DashboardConfig } from "./config.js";
 import {
@@ -11,10 +12,10 @@ import {
   type FixedInputs,
   type InputErrorCode,
 } from "./inputs.js";
-import { buildDashboard } from "./model.js";
-import { CSS_HASH, renderDashboard, renderDashboardWithView, TAB_CSS_HASH } from "./render.js";
+import { buildDashboard, workRows } from "./model.js";
+import { CSS_HASH, pageHref, renderTabPage, type PageChrome, type TabId } from "./render.js";
 import { buildLive, gatherLiveInputs, type LiveInputCode, type LiveSources } from "./live.js";
-import { LIVE_CSS_HASH, renderLive } from "./live-render.js";
+import { chromeOf, renderCallsSection, renderLive } from "./live-render.js";
 
 export type DashboardEventKind =
   "listening" | "request" | "input-error" | "render-error" | "stopped";
@@ -59,24 +60,20 @@ const HTML_HEADERS = {
   "x-frame-options": "DENY",
 } as const;
 
-const TAB_HTML_HEADERS = {
-  ...HTML_HEADERS,
-  "content-security-policy": `default-src 'none'; style-src '${TAB_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-} as const;
-
-const LIVE_HTML_HEADERS = {
-  ...HTML_HEADERS,
-  "content-security-policy": `default-src 'none'; style-src '${LIVE_CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-} as const;
-
 const TEXT_HEADERS = {
   "content-type": "text/plain; charset=utf-8",
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
 } as const;
 
-const VIEW_IDS = new Set(["overview", "fleet", "work", "usage", "savings", "autonomy", "models"]);
-const PANEL_VIEW_IDS = new Set(["work", "usage", "savings", "autonomy", "models"]);
+const TAB_IDS: ReadonlySet<string> = new Set<TabId>(["live", "work", "models", "savings"]);
+// Old view names redirect to the tab that holds their content.
+const LEGACY_VIEWS: ReadonlyMap<string, TabId> = new Map<string, TabId>([
+  ["overview", "live"],
+  ["fleet", "live"],
+  ["autonomy", "work"],
+  ["usage", "models"],
+]);
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const TASK_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const CALL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z\|[a-z0-9][a-z0-9-]{0,62}$/;
@@ -179,7 +176,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         const rawAudit = url.searchParams.get("audit");
 
         // Validate view.
-        if (rawView !== null && !VIEW_IDS.has(rawView)) {
+        if (rawView !== null && !TAB_IDS.has(rawView) && !LEGACY_VIEWS.has(rawView)) {
           return await respond(textResponse(404, "not found\n"), url.pathname);
         }
         // Validate t.
@@ -228,8 +225,18 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
         // Non-host selections are validated later against the built live model; malformed already 404ed above.
 
         const liveAvailable = deps.live != null && deps.live.simTracePath !== null;
-        // Without live sources, overview is not available.
-        if (!liveAvailable && rawView === "overview") {
+        const legacyTarget = rawView === null ? undefined : LEGACY_VIEWS.get(rawView);
+        if (isRootPath && legacyTarget !== undefined) {
+          const target = legacyTarget === "live" && !liveAvailable ? "work" : legacyTarget;
+          const headers: Record<string, string> = {
+            ...TEXT_HEADERS,
+            location: pageHref(target, liveMinute, paused, null),
+          };
+          return await respond(new Response("redirect\n", { status: 301, headers }), url.pathname);
+        }
+        const view: TabId = (rawView as TabId | null) ?? (liveAvailable ? "live" : "work");
+        // Without live sources there is no Live tab.
+        if (isRootPath && view === "live" && !liveAvailable) {
           return await respond(textResponse(404, "not found\n"), url.pathname);
         }
 
@@ -243,6 +250,19 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               message: entry.message,
             });
           });
+          const logInputError = (entry: {
+            readonly input: string;
+            readonly code: LiveInputCode;
+            readonly message: string;
+          }): void => {
+            deps.log({
+              level: "error",
+              event: "input-error",
+              input: entry.input,
+              code: entry.code,
+              message: entry.message,
+            });
+          };
 
           // Handle /live redirect with duration check.
           if (isLivePath) {
@@ -253,21 +273,11 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 liveSources,
                 inputs,
                 liveMinute,
-                (entry) => {
-                  deps.log({
-                    level: "error",
-                    event: "input-error",
-                    input: entry.input,
-                    code: entry.code,
-                    message: entry.message,
-                  });
-                },
+                logInputError,
               );
               if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
                 return await respond(textResponse(404, "not found\n"), url.pathname);
               }
-            } else if (rawMinute !== null && !/^\d+$/.test(rawMinute)) {
-              return await respond(textResponse(404, "not found\n"), url.pathname);
             }
             const target = rawMinute === null ? "/" : `/?t=${rawMinute}`;
             const headers: Record<string, string> = { ...TEXT_HEADERS, location: target };
@@ -276,63 +286,62 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               url.pathname,
             );
           }
+          // Work, Models and Savings take no panel: a known host is accepted
+          // and ignored, any other selection is 404.
+          if (view !== "live" && activeSelectionValue !== null) {
+            if (activeSelectionKey !== "host") {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
+            const known = new Set<string>();
+            if (inputs.hosts.ok) {
+              const hv = inputs.hosts.value;
+              if (hv.kind === "recorded") {
+                for (const p of hv.probes) known.add(p.hostAlias);
+              } else {
+                for (const o of hv.observations) known.add(o.hostAlias);
+              }
+            }
+            if (!known.has(activeSelectionValue)) {
+              return await respond(textResponse(404, "not found\n"), url.pathname);
+            }
+          }
+          const knownWorkIds = inputs.workItems.ok
+            ? new Set(inputs.workItems.value.map((w) => w.id))
+            : new Set<string>();
+          const workTotal = workRows(inputs).total;
           if (liveAvailable) {
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
             const liveSources = deps.live as LiveSources;
-            const liveInputs = await gatherLiveInputs(liveSources, inputs, liveMinute, (entry) => {
-              deps.log({
-                level: "error",
-                event: "input-error",
-                input: entry.input,
-                code: entry.code,
-                message: entry.message,
-              });
-            });
+            const liveInputs = await gatherLiveInputs(
+              liveSources,
+              inputs,
+              liveMinute,
+              logInputError,
+            );
             if (liveInputs.sim.ok && liveMinute > liveInputs.sim.value.durationMinutes) {
               return await respond(textResponse(404, "not found\n"), url.pathname);
             }
-
-            const effectiveView = rawView ?? "overview";
-            // Panel views render via dashboard model under same header/tab bar.
-            if (PANEL_VIEW_IDS.has(effectiveView)) {
-              if (activeSelectionValue !== null) {
-                if (activeSelectionKey !== "host") {
-                  return await respond(textResponse(404, "not found\n"), url.pathname);
-                }
-                const known = new Set<string>();
-                if (inputs.hosts.ok) {
-                  const hv = inputs.hosts.value;
-                  if (hv.kind === "recorded") {
-                    for (const p of hv.probes) known.add(p.hostAlias);
-                  } else {
-                    for (const o of hv.observations) known.add(o.hostAlias);
-                  }
-                }
-                if (!known.has(activeSelectionValue)) {
-                  return await respond(textResponse(404, "not found\n"), url.pathname);
-                }
-              }
-              const dashboard = buildDashboard(inputs);
-              const knownWorkIds = inputs.workItems.ok
-                ? new Set(inputs.workItems.value.map((w) => w.id))
-                : new Set<string>();
-              const page = renderDashboardWithView(dashboard, {
-                view: effectiveView,
+            if (view !== "live") {
+              const liveModel = buildLive(liveInputs, {
+                view: "live",
                 t: liveMinute,
                 paused,
-                host: activeSelectionValue,
-                liveAvailable: true,
+                host: null,
+              });
+              const page = renderTabPage(view, {
+                model: buildDashboard(inputs),
+                chrome: chromeOf(liveModel, view),
                 knownWorkIds,
+                workTotal,
+                calls: view === "models" ? (limit) => renderCallsSection(liveModel, limit) : null,
               });
-              const response = new Response(page, {
-                status: 200,
-                headers: { ...TAB_HTML_HEADERS },
-              });
-              return await respond(response, url.pathname);
+              return await respond(
+                new Response(page, { status: 200, headers: { ...HTML_HEADERS } }),
+                url.pathname,
+              );
             }
-            // Overview and fleet are live views.
             const liveModel = buildLive(liveInputs, {
-              view: effectiveView as "overview" | "fleet",
+              view: "live",
               t: liveMinute,
               paused,
               host: activeSelectionKey === "host" ? activeSelectionValue : null,
@@ -350,75 +359,34 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
                 return await respond(textResponse(404, "not found\n"), url.pathname);
               }
             }
-            const livePage = renderLive(liveModel);
-            const liveResponse = new Response(livePage, {
-              status: 200,
-              headers: { ...LIVE_HTML_HEADERS },
-            });
-            return await respond(liveResponse, url.pathname);
+            return await respond(
+              new Response(renderLive(liveModel), { status: 200, headers: { ...HTML_HEADERS } }),
+              url.pathname,
+            );
           }
-
-          // No live sources.
-          if (rawView !== null && VIEW_IDS.has(rawView)) {
-            if (rawView === "fleet" || PANEL_VIEW_IDS.has(rawView)) {
-              if (activeSelectionValue !== null) {
-                if (activeSelectionKey !== "host") {
-                  return await respond(textResponse(404, "not found\n"), url.pathname);
-                }
-                const known = new Set<string>();
-                if (inputs.hosts.ok) {
-                  const hv = inputs.hosts.value;
-                  if (hv.kind === "recorded") {
-                    for (const p of hv.probes) known.add(p.hostAlias);
-                  } else {
-                    for (const o of hv.observations) known.add(o.hostAlias);
-                  }
-                }
-                if (!known.has(activeSelectionValue)) {
-                  return await respond(textResponse(404, "not found\n"), url.pathname);
-                }
-              }
-              const dashboard = buildDashboard(inputs);
-              const knownWorkIds = inputs.workItems.ok
-                ? new Set(inputs.workItems.value.map((w) => w.id))
-                : new Set<string>();
-              const page = renderDashboardWithView(dashboard, {
-                view: rawView,
-                t: liveMinute,
-                paused,
-                host: activeSelectionValue,
-                liveAvailable: false,
-                knownWorkIds,
-              });
-              const response = new Response(page, {
-                status: 200,
-                headers: { ...TAB_HTML_HEADERS },
-              });
-              return await respond(response, url.pathname);
-            }
-          }
-          // No-live stacked page has no selection except host; task/call/audit are 404.
-          if (activeSelectionValue !== null && activeSelectionKey !== "host") {
+          if (view === "live") {
             return await respond(textResponse(404, "not found\n"), url.pathname);
           }
-          if (activeSelectionValue !== null && activeSelectionKey === "host") {
-            const known = new Set<string>();
-            if (inputs.hosts.ok) {
-              const hv = inputs.hosts.value;
-              if (hv.kind === "recorded") {
-                for (const p of hv.probes) known.add(p.hostAlias);
-              } else {
-                for (const o of hv.observations) known.add(o.hostAlias);
-              }
-            }
-            if (!known.has(activeSelectionValue)) {
-              return await respond(textResponse(404, "not found\n"), url.pathname);
-            }
-          }
-          // Without view and without live, render as today (stacked, no tabs) to keep snapshot untouched.
-          const page = renderDashboard(buildDashboard(inputs));
-          const response = new Response(page, { status: 200, headers: { ...HTML_HEADERS } });
-          return await respond(response, url.pathname);
+          const chrome: PageChrome = {
+            view,
+            liveAvailable: false,
+            renderedAt: inputs.now.toISOString(),
+            t: liveMinute,
+            paused,
+            replay: null,
+            selection: null,
+          };
+          const page = renderTabPage(view, {
+            model: buildDashboard(inputs),
+            chrome,
+            knownWorkIds,
+            workTotal,
+            calls: null,
+          });
+          return await respond(
+            new Response(page, { status: 200, headers: { ...HTML_HEADERS } }),
+            url.pathname,
+          );
         } catch (error: unknown) {
           deps.log({
             level: "error",

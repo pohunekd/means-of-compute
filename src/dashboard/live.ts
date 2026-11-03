@@ -304,6 +304,15 @@ export interface JustFinishedEntry {
   readonly headSha: string | null;
 }
 
+// Simulated fleet counters at the cursor minute, for the fleet heading only:
+// they never enter buildDashboard, Work, Models or Savings.
+export interface SimCounters {
+  readonly eligible: number;
+  readonly hostCount: number;
+  readonly workRunning: number;
+  readonly placements: number;
+}
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -314,10 +323,11 @@ export interface LiveModel {
   readonly realWork: LiveSection<readonly RealWorkCard[]>;
   readonly justFinished: LiveSection<readonly JustFinishedEntry[]>;
   readonly simFleet: LiveSection<readonly LiveGroup[]>;
+  readonly simCounters: SimCounters | null;
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
   readonly ticker: readonly LiveTickerRow[];
   readonly tickerNote: string | null;
-  readonly view: "overview" | "fleet";
+  readonly view: "live";
   readonly t: number;
   readonly paused: boolean;
   readonly hostPanel: HostPanel | null;
@@ -339,7 +349,7 @@ export interface LiveInputs {
 }
 
 export interface LiveOptions {
-  readonly view: "overview" | "fleet";
+  readonly view: "live";
   readonly t: number;
   readonly paused: boolean;
   readonly host: string | null;
@@ -1248,8 +1258,8 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
     // No open session: every host reads idle. The newest non-merged outcome names
     // the round on its own meta line; the last-finished line already covers merged.
     // A live audit stage needs the loop-state phase (`src/loop/review.ts:457`),
-    // which no dashboard input carries yet, so PR A shows no audit card: findings
-    // without a readable verdict reads as a missing verdict on the idle card.
+    // which no dashboard input carries yet, so there is no audit card: findings
+    // without a stored verdict reads as a missing verdict on the idle card.
     let idleNote: string | null = null;
     {
       let newestForHost: (typeof resultsOk)[number] | null = null;
@@ -1260,11 +1270,18 @@ function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWork
       if (newestForHost !== null && newestForHost.outcome !== "merged") {
         if (newestForHost.outcome === "findings") {
           const verdicts = inputs.dashboard.verdicts.get(newestForHost.workItemId);
-          const stored = verdicts !== undefined && verdicts.ok ? verdicts.value : null;
-          idleNote =
-            stored !== null && stored.length > 0
-              ? `last round: ${newestForHost.outcome}`
-              : `last round: ${newestForHost.outcome} (verdict missing)`;
+          // An unreadable store names its failure; only a readable store
+          // without a verdict reads as a missing verdict.
+          if (verdicts !== undefined && !verdicts.ok) {
+            const failure = verdicts.failure;
+            idleNote = `last round: ${newestForHost.outcome} (verdicts: ${failure.kind === "error" ? `error (${failure.code})` : `no data (${failure.reason})`})`;
+          } else {
+            const stored = verdicts !== undefined ? verdicts.value : null;
+            idleNote =
+              stored !== null && stored.length > 0
+                ? `last round: ${newestForHost.outcome}`
+                : `last round: ${newestForHost.outcome} (verdict missing)`;
+          }
         } else {
           idleNote = `last round: ${newestForHost.outcome}`;
         }
@@ -1960,6 +1977,17 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     realWork,
     justFinished,
     simFleet,
+    simCounters:
+      sim === null
+        ? null
+        : {
+            eligible: tiles.filter((tile) => tile.eligible).length,
+            hostCount: sim.hostCount,
+            workRunning: tiles.reduce((sum, tile) => sum + tile.running, 0),
+            placements: sim.placements.filter(
+              (placement) => placement.atMinute <= minute && placement.chosenHostAlias !== null,
+            ).length,
+          },
     activity: !inputs.meter.ok
       ? section(inputs.meter)
       : { kind: "ok", value: activityRows(inputs.meter.value, inputs.dashboard.pricing) },
@@ -1967,7 +1995,7 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     tickerNote: inputs.dashboard.results.ok
       ? null
       : `real events: ${inputs.dashboard.results.failure.kind === "error" ? `error (${inputs.dashboard.results.failure.code})` : `no data (${inputs.dashboard.results.failure.reason})`}`,
-    view: opts?.view ?? "overview",
+    view: opts?.view ?? "live",
     t: opts?.t ?? minute,
     paused: opts?.paused ?? false,
     hostPanel,

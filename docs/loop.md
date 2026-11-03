@@ -102,6 +102,8 @@ markers, and pinned merges; rule 3 stays in PR 5.
 - A valid verdict is posted once as the factory marker, and the item stays in `auditing` for the merge slice. A GitHub or git error keeps the phase and logs `github-error`.
 - A red close appends the round and reconciles the store to `queued`; the pull and the branch stay. `previousRoundOf` gives the next brief the outcome of the last session round, the findings of the last audited head, and, while the PR head is still the head of a `red-ci` round, that round's failing check names and its check excerpt. A red close stores the excerpt on the round: the `failure` annotations of each failing check (`GitHubPort.checkAnnotations`), without the runner's generic exit-code line, with the `github.checkExcerpt.stripPrefixes` runner paths removed, cut to `github.checkExcerpt.maxBytes`. The log line records only its size.
 
+A `cancelled` conclusion counts as a failing check and closes `red-ci`, and `ciStep` does not re-read the checks of an unchanged head, so a manual rerun that turns the checks green on the same head is not picked up, later rounds close `no-new-commit` and the stall rule applies. Rerun the cancelled jobs with `gh run rerun <run-id> --failed` and, once the head is green with a clean audit at that head, merge it under the merge rule outside the loop.
+
 ## Driver merge (PR 5e)
 
 `src/loop/merge.ts` takes an audited item to merged:

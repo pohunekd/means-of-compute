@@ -724,7 +724,8 @@ function stripSlice(page: string): string {
 }
 
 function stripSliceCount(page: string): number {
-  return stripSlice(page).split('<tr class="fi">').length - 1;
+  const slice = stripSlice(page);
+  return slice.slice(slice.indexOf("<tbody>")).split("<tr>").length - 1;
 }
 
 function makeFixture(trace: string): FixtureDir {
@@ -785,7 +786,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(realNow).toContain("<td>12 min</td>");
     // running card details, scoped to the desktop card slice
     const desktopCard = cardSlice(live, "desktop");
-    expect(tileClass(page, "desktop")).toBe("tile tile-real tile-running");
+    expect(tileClass(page, "desktop")).toBe("tile tile-running");
     expect(desktopCard).toContain("implement");
     expect(desktopCard).toContain("Real task title");
     expect(desktopCard).toContain('href="https://github.com/example/demo-repo/issues/42"');
@@ -828,7 +829,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     // idle cards with reason, scoped per card
     // A queued work item flips the probe tail on every idle card with history.
     const kioskCard = cardSlice(live, "kiosk-a");
-    expect(tileClass(page, "kiosk-a")).toBe("tile tile-real tile-eligible");
+    expect(tileClass(page, "kiosk-a")).toBe("tile tile-eligible");
     expect(kioskCard).toContain("Idle: 1 queued, not placed");
     // Merged newest names no last round: the last-finished line covers it.
     expect(kioskCard).not.toContain("last round:");
@@ -868,7 +869,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskFlat).toContain("of 3 entries unpriced");
     expect(kioskFlat).toContain("$0.0073");
     const laptopbCard = cardSlice(live, "laptop-b");
-    expect(tileClass(page, "laptop-b")).toBe("tile tile-real tile-busy");
+    expect(tileClass(page, "laptop-b")).toBe("tile tile-busy");
     expect(laptopbCard).toContain("Idle: person at the desk (1 queued, not placed)");
     expect(laptopbCard).not.toContain("last round:");
     expect(kioskCard).not.toContain("person at the desk");
@@ -1122,7 +1123,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       expect(stripNoLedger).not.toContain("$0.0000");
       writeFileSync(ledgerPath, ledgerOrig);
     }
-    expect(page).toContain('class="tile tile-sim');
+    expect(page).toContain('class="tile tile-');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');
     const live95 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 95, () => {}), {
@@ -1143,6 +1144,18 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       .find((t) => t.alias === "desk-002");
     expect(atLimitTile?.flagged).toBe(false);
     expect(page).toContain("tile-flagged");
+    // The amber edge is simulated-only: the same flagged tile drawn as a real
+    // machine carries no amber edge and no `!`.
+    if (flaggedTile === undefined) throw new Error("expected laptop-007");
+    const realFlagged = renderLive({
+      ...live,
+      simFleet: {
+        kind: "ok",
+        value: [{ title: "real (1)", tiles: [{ ...flaggedTile, simulated: false }] }],
+      },
+    });
+    expect(tileClass(realFlagged, "laptop-007")).toBe("tile tile-running");
+    expect(realFlagged).not.toContain('class="load">1/1<span class="flag">!</span>');
     const live45 = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
       view: "live",
       t: 45,
@@ -1166,7 +1179,7 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
       throw new Error("expected sim host panel for desk-001");
     expect(liveWithHost.hostPanel.runningTasks).toHaveLength(0);
     // The open tile carries the shared selected style.
-    expect(renderLive(liveWithHost)).toMatch(/class="tile tile-sim tile-\w+ selected"/);
+    expect(tileClass(renderLive(liveWithHost), "desk-001")).toMatch(/^tile tile-\w+ selected$/);
     const taskLive = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 45, () => {}), {
       view: "live",
       t: 45,
@@ -1271,7 +1284,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       [
         "live",
         "Live",
-        "the real machines and their work first; below, the simulated company evening replayed through the real placement engine.",
+        "one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events.",
         ["Total savings"],
       ],
       [
@@ -1455,7 +1468,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(both2Body).toContain('id="host-panel"');
     // The open card is selected; the real host panel uses the shared blocks
     // and tables with HH:MM:SS times, the full ISO value only in attributes.
-    expect(tileClass(both2Body, "desktop")).toBe("tile tile-real tile-running selected");
+    expect(tileClass(both2Body, "desktop")).toBe("tile tile-running selected");
     const realPanel = both2Body.slice(both2Body.indexOf('id="host-panel"'));
     expect(realPanel).toContain('<table class="ptable">');
     // Both model columns on the panel read `name (provider)`.
@@ -1590,7 +1603,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
     expect(pageBroken).toContain("laptop-b");
     const brokenDesktopCard = cardSlice(liveBroken, "desktop");
     expect(brokenDesktopCard).toContain("state: error (registry-invalid)");
-    expect(tileClass(pageBroken, "desktop")).toBe("tile tile-real tile-unavailable");
+    expect(tileClass(pageBroken, "desktop")).toBe("tile tile-unavailable");
     // With no open real session the table says so and names the last finished item.
     expect(pageBroken).toMatch(
       /no real session open · last finished\s*<a href="[^"]*task=w4-laptopb">/,

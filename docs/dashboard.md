@@ -105,12 +105,12 @@ names it (`muse-spark-open-1026 (baseten)`), never cut in the middle; the
 cell's `title` keeps the recorded value.
 Under it each tab carries its one-line subtitle:
 
-| Tab    | Subtitle                                                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Live   | the real machines and their work first; below, the simulated company evening replayed through the real placement engine. |
-| Work   | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                    |
-| Models | every real model call the factory made: which model, which provider, how many tokens, what it cost.                      |
-| Cost   | what the factory spent, against its budget caps.                                                                         |
+| Tab    | Subtitle                                                                                                                                                                                                                         |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live   | one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events. |
+| Work   | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                                                                                                                            |
+| Models | every real model call the factory made: which model, which provider, how many tokens, what it cost.                                                                                                                              |
+| Cost   | what the factory spent, against its budget caps.                                                                                                                                                                                 |
 
 Each tab fills exactly one 1920x1080 frame and shows only its own figures,
 all computed by `buildDashboard` and its panels; the renderer derives no

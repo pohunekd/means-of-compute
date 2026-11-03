@@ -148,7 +148,7 @@ export const DASHBOARD_CSS = [
   ".ptable td,.ptable th{padding:4px 6px}",
   ".panel .ptable td:not(:last-child){white-space:nowrap}",
   ".breadcrumb{font-size:15px;color:var(--dim)}",
-  "@media (max-width:900px){.frame{height:auto}.live-layout,.cols2{grid-template-columns:1fr}.realwork{grid-template-columns:repeat(2,minmax(0,1fr))}.fin{flex-wrap:wrap}.tagline{margin-left:0}}",
+  "@media (max-width:900px){.frame{height:auto}.live-layout,.cols2{grid-template-columns:1fr}.tagline{margin-left:0}}",
 ].join("\n");
 
 const STYLE_HTML = constantHtml("<style>" + DASHBOARD_CSS + "</style>");
@@ -196,7 +196,7 @@ export const TAB_LABELS: Readonly<Record<TabId, string>> = {
 };
 
 export const TAB_SUBTITLES: Readonly<Record<TabId, string>> = {
-  live: "the real machines and their work first; below, the simulated company evening replayed through the real placement engine.",
+  live: "one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events.",
   work: "every task the factory has taken: its status, its machine, its model and its audit verdict. All real.",
   models:
     "every real model call the factory made: which model, which provider, how many tokens, what it cost.",

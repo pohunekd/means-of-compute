@@ -201,7 +201,8 @@ function tileLoad(tile: LiveTile): string {
 }
 
 // One line per tile: the full alias and the load; the state is the left
-// border colour, the amber edge and `!` mark running-but-excluded.
+// border colour, the amber edge and `!` mark a simulated tile running but
+// excluded. Real and simulated tiles differ only by their group's chip.
 function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   checkAlias(tile);
   const href = buildHref(model, { host: tile.alias });
@@ -212,12 +213,12 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
       : `${tile.alias}: ${tile.state}, ${tile.detail}${battery}`;
   const title =
     tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
-  const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
-  const tileClass = tile.simulated ? "tile-sim" : "tile-real";
+  const flagged = tile.simulated && tile.flagged;
+  const flagMark = flagged ? html`<span class="flag">!</span>` : constantHtml("");
   const selected = model.hostPanel?.alias === tile.alias ? " selected" : "";
   return html`<a
     href="${href}"
-    class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}${selected}"
+    class="tile tile-${tile.state}${flagged ? " tile-flagged" : ""}${selected}"
     title="${title}"
     ><span class="alias">${tile.alias}</span
     ><span class="load">${tileLoad(tile)}${flagMark}</span></a
@@ -526,7 +527,7 @@ function justFinishedRow(
           : html`<a href="${auditHref}"
               >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
             >`;
-  return html`<tr class="fi">
+  return html`<tr>
     <td><a href="${taskHref}">${titleText}</a></td>
     <td class="nowrap">${entry.hostAlias ?? "-"}</td>
     <td>${entry.outcome}</td>

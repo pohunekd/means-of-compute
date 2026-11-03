@@ -16,7 +16,7 @@ import type { BudgetGate } from "../../src/budget/gate.js";
 import { PortUnreachableError } from "../../src/dispatcher/port.js";
 import { createMeteredPort } from "../../src/meter/metered-port.js";
 import type { Meter } from "../../src/meter/meter.js";
-import { meterUrl, withMeter } from "./helpers.js";
+import { meterUrl, openBoundGrant, readLogLines, withMeter } from "./helpers.js";
 
 const MODEL = { providerId: "meta-api", model: "muse-spark-1.3-contributor" };
 
@@ -166,6 +166,18 @@ test("a metered session records real counts", async () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+test("a streamed cached count reaches the call-end record", async () => {
+  await withMeter("tests/meter/recordings/stream-cached.json", async (fixture) => {
+    const { requestId } = await openBoundGrant(fixture.meter);
+    await postCall(fixture.meter, requestId);
+    const ends = (await readLogLines(fixture.logPath))
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((record) => record["kind"] === "call-end");
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ inputTokens: 1200, outputTokens: 80, cachedInputTokens: 1100 });
   });
 });
 

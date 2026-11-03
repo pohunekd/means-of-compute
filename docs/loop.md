@@ -128,7 +128,7 @@ A `cancelled` conclusion counts as a failing check and closes `red-ci`, and `ciS
 
 ## Intake (PR 6b)
 
-`src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. An open issue that carries the opt-in and ready labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. An issue already imported under its own id is skipped silently; every other skipped issue logs `intake-skip` with its code, and an issue already tracked under another id logs once per process run.
+`src/loop/intake.ts` imports GitHub issues when `github.intake.enabled` is set, at most once every `pollMs`, after the step calls of a tick and before its claims. It queries `readyIssues` for issues carrying both labels configured as `github.intake.optInLabel` (`factory:auto` in `config/loop.json`) and `github.intake.readyLabel` (`readiness:ready` in `config/loop.json`). An open issue that carries both labels, comes from a trusted author, has a `## DoD` list, has only closed dependencies, and fits the size limits becomes a queued item `gh-<idPrefix>-<number>`. `parseIssueDod` accepts lines `- D<n>: <text>` under a `## DoD` heading, ids unique, at least one line. An issue without both labels is not returned by the label query and logs nothing; an issue already imported under its own id is skipped silently; every other skipped issue logs `intake-skip` with its code, and an issue already tracked under another id logs once per process run.
 
 ## Follow-ups and digest (PR 7)
 

@@ -4,7 +4,7 @@ import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readVerdicts } from "../auditor/store.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
 import { readRegistry } from "../dispatcher/registry.js";
-import { readLoopState, updateLoopState, LoopStateDataError } from "./state.js";
+import { readLoopState, updateLoopState, LoopStateDataError, type LoopState } from "./state.js";
 import type { LoopItem, MergeHold } from "./types.js";
 import type { MergeContext } from "./merge.js";
 import { mergeCheck, finishMerge } from "./merge.js";
@@ -44,7 +44,7 @@ import {
   initialLoopItem,
   watchSession,
 } from "./start.js";
-import { readWorkStore, readyItems } from "../work/store.js";
+import { readWorkStore, readyItems, type WorkStore } from "../work/store.js";
 import { fetchRefs, isAncestor, type GitDeps } from "./git.js";
 import { ciStatus } from "./merge-rule.js";
 
@@ -490,7 +490,9 @@ async function claimOne(
 }
 
 // A chosen host is always logged. A wait with no host is logged only when
-// its round or candidates differ from the item's last wait in this process.
+// its round or candidates differ from the item's last wait in this process;
+// the comparison reads every digit run in a reason as one placeholder, so a
+// ticking counter alone writes nothing. The logged reasons stay verbatim.
 function logPlacement(
   ctx: SchedulerContext,
   placementsLogged: Map<string, string>,
@@ -504,7 +506,13 @@ function logPlacement(
     reason: entry.reason,
   }));
   if (decision.chosenHostAlias === null) {
-    const signature = JSON.stringify({ round, candidates });
+    const signature = JSON.stringify({
+      round,
+      candidates: candidates.map((entry) => ({
+        ...entry,
+        reason: entry.reason.replace(/\d+/g, "#"),
+      })),
+    });
     if (placementsLogged.get(workItemId) === signature) {
       return;
     }
@@ -562,20 +570,10 @@ async function runClaims(
   const observations = (await ctx.collector.collect()).filter(
     (entry) => !cooled.has(entry.hostAlias),
   );
-  const candidates = readyItems(store).filter((item) => {
-    if (steps.has(item.id)) {
-      return false;
-    }
-    const li = state.items[item.id] as unknown as LoopItem | undefined;
-    if (li !== undefined && (li.phase !== "idle" || li.park !== null || li.finalize !== null)) {
-      return false;
-    }
-    const backoff = li?.backoffUntil ?? null;
-    return backoff === null || ctx.now().getTime() >= Date.parse(backoff);
-  });
+  const candidates = claimCandidates(ctx, store, state, steps);
   for (const item of candidates) {
     if (isSettled() || carry.active >= ctx.maxActiveItems) {
-      return;
+      break;
     }
     const next = await claimOne(
       ctx,
@@ -588,9 +586,43 @@ async function runClaims(
       placementsLogged,
     );
     if (!next) {
-      return;
+      break;
     }
   }
+  // The wait memo keeps only items that can still be claimed: a placed,
+  // parked, backed-off or done item leaves it at the end of the pass.
+  const waiting = new Set(
+    claimCandidates(
+      ctx,
+      await readWorkStore(ctx.storePath),
+      await readLoopState(ctx.statePath),
+      steps,
+    ).map((item) => item.id),
+  );
+  for (const id of placementsLogged.keys()) {
+    if (!waiting.has(id)) {
+      placementsLogged.delete(id);
+    }
+  }
+}
+
+function claimCandidates(
+  ctx: SchedulerContext,
+  store: WorkStore,
+  state: LoopState,
+  steps: ReadonlySet<string>,
+): readonly WorkItem[] {
+  return readyItems(store).filter((item) => {
+    if (steps.has(item.id)) {
+      return false;
+    }
+    const li = state.items[item.id] as unknown as LoopItem | undefined;
+    if (li !== undefined && (li.phase !== "idle" || li.park !== null || li.finalize !== null)) {
+      return false;
+    }
+    const backoff = li?.backoffUntil ?? null;
+    return backoff === null || ctx.now().getTime() >= Date.parse(backoff);
+  });
 }
 
 // One step call per launch (SR3). The result is unused; the step writes

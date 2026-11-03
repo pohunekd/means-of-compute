@@ -14,6 +14,7 @@ import {
   resolveDashboardListen,
   type DashboardConfig,
 } from "../dashboard/config.js";
+import type { LiveSources } from "../dashboard/live.js";
 import { createLogAppender, startDashboard, type DashboardServer } from "../dashboard/server.js";
 import { requireWritableTarget } from "../fs/write.js";
 import { loadLedgerConfig } from "../ledger/read.js";
@@ -21,6 +22,7 @@ import { providerDescriptorExists } from "../providers/config.js";
 import { PROVIDERS_DIR, PROVIDER_ROUTE_PATH } from "../providers/paths.js";
 import { loadProviderRoute } from "../providers/route.js";
 import { loadWorkConfig } from "../work/config.js";
+import { loadFactorySpecs } from "../work/specs.js";
 import { loadMeterConfig } from "../meter/config.js";
 import { portsLogPath } from "../loop/config.js";
 
@@ -230,6 +232,7 @@ async function serve(): Promise<number> {
   let workStorePath: string;
   let meterUsagePath: string;
   let portsPath: string;
+  let repos: LiveSources["repos"];
   try {
     const budget = await loadBudgetConfig();
     const route = await loadProviderRoute(PROVIDER_ROUTE_PATH, providerDescriptorExists);
@@ -249,7 +252,38 @@ async function serve(): Promise<number> {
       return loopConfig;
     };
     resultsPath = flags.results ?? (await loopConfigOnce()).resultsPath;
-    workStorePath = flags.work ?? (await loadWorkConfig()).storePath;
+    // The repo set needs the work config for the specs path; failed specs keep the
+    // work rows and mark every card links: error (factory-specs-invalid).
+    // The work config loads only when its paths are needed: --work overrides the store path.
+    let workConfig: Awaited<ReturnType<typeof loadWorkConfig>> | null = null;
+    const workConfigOnce = async (): Promise<Awaited<ReturnType<typeof loadWorkConfig>>> => {
+      workConfig ??= await loadWorkConfig();
+      return workConfig;
+    };
+    workStorePath = flags.work ?? (await workConfigOnce()).storePath;
+    const specsPath = (await workConfigOnce()).factorySpecsPath;
+    let specsRepos: LiveSources["repos"] = { ok: true, value: new Set() };
+    try {
+      const specs = await loadFactorySpecs(specsPath);
+      specsRepos = { ok: true, value: new Set(specs.map((spec) => spec.repo)) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      specsRepos = {
+        ok: false,
+        failure: {
+          kind: "error",
+          code: "factory-specs-invalid" as const,
+        },
+      };
+      log({
+        level: "error",
+        event: "input-error",
+        input: "factory-specs",
+        code: "factory-specs-invalid",
+        message,
+      });
+    }
+    repos = specsRepos;
     meterUsagePath = flags.meterUsage ?? (await loadMeterConfig()).usageLogPath;
     portsPath = flags.ports ?? portsLogPath((await loopConfigOnce()).logPath);
     fixed = {
@@ -277,7 +311,12 @@ async function serve(): Promise<number> {
         resultsPath,
         workStorePath,
       },
-      live: { simTracePath: flags.simTrace, meterUsagePath, portsPath },
+      live: {
+        simTracePath: flags.simTrace,
+        meterUsagePath,
+        portsPath,
+        repos,
+      },
       now: pinned === null ? () => new Date() : () => pinned,
       log,
     });

@@ -23,6 +23,7 @@ import { workRows } from "./model.js";
 import type { Baselines } from "./config.js";
 
 export type InputErrorCode =
+  | "factory-specs-invalid"
   | "ledger-invalid"
   | "ledger-unreadable"
   | "pricing-unavailable"

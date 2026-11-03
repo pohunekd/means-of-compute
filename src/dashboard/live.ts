@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-assignment, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unused-vars */
 // Live view model: recorded real fleet, the real meter activity and a
 // simulated fleet replayed from a sim-trace-v1 file (docs/dashboard.md).
 // Pure: buildLive turns gathered Sourced inputs into the value the live
@@ -9,8 +10,9 @@ import { readInputText, statInputPath } from "../fs/input.js";
 import { HostStateLogDataError, readRecordedProbes, type RecordedProbe } from "../hoststate/log.js";
 import { MeterLogError, replayUsageLog, type UsageIndex } from "../meter/usage-log.js";
 import { formatUsd, groupDigits, tokenCostScaled } from "./money.js";
+import { verdictCounts } from "../auditor/verdict.js";
 import type { AuditVerdict, WorkItem } from "../../contracts/v1/types.js";
-import type { DashboardInputs, InputFailure, Sourced } from "./inputs.js";
+import type { DashboardInputs, InputErrorCode, InputFailure, Sourced } from "./inputs.js";
 import { openSessionCount } from "./sessions.js";
 import { stat } from "node:fs/promises";
 
@@ -33,7 +35,7 @@ export type LiveInputCode =
 
 export type LiveFailure =
   | { readonly kind: "no-data"; readonly reason: string }
-  | { readonly kind: "error"; readonly code: LiveInputCode };
+  | { readonly kind: "error"; readonly code: LiveInputCode | InputErrorCode };
 
 export type LiveSourced<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly failure: LiveFailure };
@@ -42,6 +44,7 @@ export interface LiveSources {
   readonly simTracePath: string | null;
   readonly meterUsagePath: string;
   readonly portsPath: string;
+  readonly repos: Sourced<ReadonlySet<string>>;
 }
 
 export type SimTileState = "offline" | "busy" | "blocked" | "eligible" | "running";
@@ -128,12 +131,6 @@ export interface LiveTile {
 export interface LiveGroup {
   readonly title: string;
   readonly tiles: readonly LiveTile[];
-}
-
-export interface LiveCounter {
-  readonly label: string;
-  readonly simulated: boolean;
-  readonly cell: LiveCell;
 }
 
 export interface LiveActivityRow {
@@ -260,6 +257,53 @@ export interface AuditPanel {
   readonly workItemRepo: string | null;
 }
 
+export interface RealWorkCard {
+  readonly alias: string;
+  readonly stage: "implement" | "idle";
+  readonly workItemId: string | null;
+  readonly title: LiveCell | null;
+  readonly issue: LiveCell | null;
+  readonly pullNumber: LiveCell | null;
+  readonly repo: string | null;
+  readonly branch: LiveCell | null;
+  readonly modelText: string | null;
+  readonly providerId: string | null;
+  readonly elapsed: string | null;
+  readonly tokens: { readonly input: number; readonly output: number } | null;
+  readonly cost: LiveCell | null;
+  // Null when source failed, the reason is in outer LiveSection error/no-data.
+  readonly latestCall: {
+    readonly at: string;
+    readonly inputTokens: number | null;
+    readonly outputTokens: number | null;
+    readonly ms: number;
+    readonly model: string;
+  } | null;
+  readonly meterFailure: LiveFailure | null;
+  readonly idleReason: string | null;
+  readonly lastFinishedNote: string | null;
+  readonly probeAt: string | null;
+  readonly lastFinished: {
+    readonly workItemId: string;
+    readonly at: string;
+    readonly outcome: string;
+  } | null;
+  readonly today: { readonly count: number; readonly cost: LiveCell | null } | null;
+}
+
+export interface JustFinishedEntry {
+  readonly workItemId: string;
+  readonly title: LiveCell;
+  readonly hostAlias: string | null;
+  readonly verdictCounts:
+    { readonly high: number; readonly medium: number; readonly low: number } | "invalid" | null;
+  readonly verdictFailure: LiveFailure | null;
+  readonly outcome: string;
+  readonly cost: LiveCell | null;
+  readonly at: string;
+  readonly headSha: string | null;
+}
+
 export interface LiveModel {
   readonly renderedAt: string;
   readonly simAt: string | null;
@@ -267,8 +311,8 @@ export interface LiveModel {
   readonly durationMinutes: number | null;
   readonly refreshSeconds: number | null;
   readonly nextMinute: number | null;
-  readonly counters: readonly LiveCounter[];
-  readonly realFleet: LiveSection<readonly LiveTile[]>;
+  readonly realWork: LiveSection<readonly RealWorkCard[]>;
+  readonly justFinished: LiveSection<readonly JustFinishedEntry[]>;
   readonly simFleet: LiveSection<readonly LiveGroup[]>;
   readonly activity: LiveSection<readonly LiveActivityRow[]>;
   readonly ticker: readonly LiveTickerRow[];
@@ -280,6 +324,8 @@ export interface LiveModel {
   readonly taskPanel: TaskPanel | null;
   readonly callPanel: CallPanel | null;
   readonly auditPanel: AuditPanel | null;
+  readonly repos: ReadonlySet<string>;
+  readonly reposFailure: LiveFailure | null;
 }
 
 export interface LiveInputs {
@@ -289,6 +335,7 @@ export interface LiveInputs {
   readonly sim: LiveSourced<SimTrace>;
   readonly meter: LiveSourced<UsageIndex>;
   readonly probes: LiveSourced<readonly RecordedProbe[]>;
+  readonly repos: Sourced<ReadonlySet<string>>;
 }
 
 export interface LiveOptions {
@@ -713,7 +760,7 @@ export async function gatherLiveInputs(
     readMeterInput(sources.meterUsagePath, emit),
     readProbesInput(sources.portsPath, dashboard.now, emit),
   ]);
-  return { now: dashboard.now, minute, dashboard, sim, meter, probes };
+  return { now: dashboard.now, minute, dashboard, sim, meter, probes, repos: sources.repos };
 }
 
 function failureCell(failure: InputFailure): LiveCell {
@@ -784,6 +831,490 @@ export function stripProvider(model: string): string {
   const idx = model.lastIndexOf("/");
   if (idx !== -1) return model.slice(idx + 1);
   return model;
+}
+
+function formatElapsed(startedAt: string, now: Date): string | null {
+  const startMs = Date.parse(startedAt);
+  if (!Number.isFinite(startMs)) return null;
+  const diffMs = now.getTime() - startMs;
+  if (diffMs < 0) return "no data (clock skew)";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${String(mins)} min`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(rem)}m`;
+}
+
+function idleReasonFromProbe(probe: RecordedProbe, queued: number | null): string {
+  const tail =
+    queued === null || queued === 0 ? "no work queued" : `${String(queued)} queued, not placed`;
+  if (probe.kind === "unavailable") {
+    if (probe.cause === "plugin-busy") return `person at the desk (${tail})`;
+    const label = probe.cause === null ? "unavailable" : probe.cause.replace(/-/g, " ");
+    return `${label} (${tail})`;
+  }
+  return tail;
+}
+
+function newestResultForHost(
+  results: readonly { at: string; outcome: string; workItemId: string; hostAlias: string | null }[],
+  hostAlias: string,
+): { at: string; outcome: string; workItemId: string } | null {
+  let best: { at: string; outcome: string; workItemId: string } | null = null;
+  for (const entry of results) {
+    if (entry.hostAlias !== hostAlias) continue;
+    if (entry.outcome !== "merged") continue;
+    if (best === null || entry.at > best.at) {
+      best = { at: entry.at, outcome: entry.outcome, workItemId: entry.workItemId };
+    }
+  }
+  return best;
+}
+
+function sumMeterForWorkItem(
+  meter: UsageIndex,
+  workItemId: string,
+  pricing: Sourced<ReadonlyMap<string, NanoPricing>>,
+): {
+  tokens: { input: number; output: number } | null;
+  cost: LiveCell | null;
+  latestCall: RealWorkCard["latestCall"];
+} {
+  let sumIn = 0;
+  let sumOut = 0;
+  let scaledIn = 0n;
+  let scaledOut = 0n;
+  let totalEntries = 0;
+  let pricedEntries = 0;
+  let missingTokens = false;
+  let latest: {
+    at: string;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    ms: number;
+    model: string;
+  } | null = null;
+  for (const end of meter.ends.values()) {
+    const grant = meter.grants.get(end.requestId)?.open;
+    if (grant === undefined || grant.workItemId !== workItemId) continue;
+    totalEntries += 1;
+    if (latest === null || end.at > latest.at) {
+      const start = meter.starts.get(end.callId);
+      const rawModel = start?.model ?? grant.model;
+      latest = {
+        at: end.at,
+        inputTokens: end.inputTokens,
+        outputTokens: end.outputTokens,
+        ms: end.ms,
+        model: stripProvider(rawModel),
+      };
+    }
+    if (end.inputTokens === null || end.outputTokens === null) {
+      missingTokens = true;
+      continue;
+    }
+    sumIn += end.inputTokens;
+    sumOut += end.outputTokens;
+    if (pricing.ok) {
+      const price = pricing.value.get(grant.providerId);
+      if (price !== undefined) {
+        pricedEntries += 1;
+        scaledIn += tokenCostScaled(end.inputTokens, price.inputNanoPer1M);
+        scaledOut += tokenCostScaled(end.outputTokens, price.outputNanoPer1M);
+      }
+    }
+  }
+  if (latest === null) return { tokens: null, cost: null, latestCall: null };
+  const tokens =
+    (totalEntries > 0 && !missingTokens) || sumIn !== 0 || sumOut !== 0
+      ? { input: sumIn, output: sumOut }
+      : null;
+  let cost: LiveCell | null = null;
+  if (missingTokens && pricedEntries === 0) {
+    cost = { kind: "no-data", reason: "usage not reported" };
+  } else if (!pricing.ok) {
+    cost = failureCell(pricing.failure);
+  } else if (totalEntries > pricedEntries) {
+    const unpriced = totalEntries - pricedEntries;
+    if (pricedEntries === 0) {
+      cost = {
+        kind: "no-data",
+        reason: `${String(unpriced)} of ${String(totalEntries)} entries unpriced`,
+      };
+    } else {
+      cost = {
+        kind: "text",
+        text: `at least ${formatUsd(scaledIn + scaledOut)} (${String(unpriced)} of ${String(totalEntries)} entries unpriced)`,
+      };
+    }
+  } else {
+    cost = { kind: "text", text: formatUsd(scaledIn + scaledOut) };
+  }
+  // null tokens when all entries missing tokens
+  const finalTokens =
+    missingTokens && pricedEntries === 0 && sumIn === 0 && sumOut === 0 ? null : tokens;
+  return { tokens: finalTokens, cost, latestCall: latest };
+}
+
+function workFieldFailed(workItems: Sourced<readonly WorkItem[]>): LiveCell {
+  return workItems.ok
+    ? { kind: "no-data", reason: "not in work store" }
+    : workItems.failure.kind === "error"
+      ? { kind: "error", code: workItems.failure.code }
+      : { kind: "no-data", reason: workItems.failure.reason };
+}
+
+function workIssueCellOk(work: WorkItem): LiveCell {
+  return work.issue === null
+    ? { kind: "no-data", reason: "no issue linked" }
+    : { kind: "text", text: String(work.issue) };
+}
+
+function workPullCellOk(work: WorkItem): LiveCell {
+  return work.pullNumber === null
+    ? { kind: "no-data", reason: "PR not opened yet" }
+    : { kind: "text", text: String(work.pullNumber) };
+}
+
+function workBranchCellOk(work: WorkItem): LiveCell {
+  return work.branch === null
+    ? { kind: "no-data", reason: "no branch yet" }
+    : { kind: "text", text: work.branch };
+}
+
+function buildJustFinishedSection(inputs: LiveInputs): LiveSection<readonly JustFinishedEntry[]> {
+  if (!inputs.dashboard.results.ok) {
+    return inputs.dashboard.results.failure.kind === "error"
+      ? { kind: "error", code: inputs.dashboard.results.failure.code }
+      : { kind: "no-data", reason: inputs.dashboard.results.failure.reason };
+  }
+  const results = inputs.dashboard.results.value;
+  const filtered = results.filter((r) => r.outcome === "merged");
+  const sorted = [...filtered].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, 3);
+  if (sorted.length === 0) return { kind: "ok", value: [] };
+  const workById = new Map<string, WorkItem>();
+  if (inputs.dashboard.workItems.ok) {
+    for (const item of inputs.dashboard.workItems.value) workById.set(item.id, item);
+  }
+  const entries: JustFinishedEntry[] = sorted.map((row) => {
+    const work = workById.get(row.workItemId);
+    const title: LiveCell =
+      work === undefined
+        ? inputs.dashboard.workItems.ok
+          ? { kind: "text", text: row.workItemId }
+          : workFieldFailed(inputs.dashboard.workItems)
+        : { kind: "text", text: work.title };
+    const verdicts = inputs.dashboard.verdicts.get(row.workItemId);
+    // The results line and the ledger record carry no head sha, so the round head
+    // is never recorded here: this row counts its verdicts by position and names
+    // this head choice explicitly.
+    const chosen =
+      verdicts !== undefined && verdicts.ok && verdicts.value.length > 0
+        ? (verdicts.value[verdicts.value.length - 1] ?? null)
+        : null;
+    let countedVal: JustFinishedEntry["verdictCounts"] = null;
+    let verdictFailure: LiveFailure | null = null;
+    if (verdicts === undefined) {
+      countedVal = null;
+    } else if (!verdicts.ok) {
+      verdictFailure =
+        verdicts.failure.kind === "error"
+          ? { kind: "error", code: verdicts.failure.code }
+          : { kind: "no-data", reason: verdicts.failure.reason };
+    } else if (verdicts.value.length === 0) {
+      countedVal = null;
+    } else if (chosen !== null) {
+      countedVal = verdictCounts(chosen);
+    }
+    let cost: LiveCell | null;
+    if (!inputs.dashboard.ledger.ok) {
+      cost =
+        inputs.dashboard.ledger.failure.kind === "error"
+          ? { kind: "error", code: inputs.dashboard.ledger.failure.code }
+          : { kind: "no-data", reason: inputs.dashboard.ledger.failure.reason };
+    } else if (!inputs.dashboard.pricing.ok) {
+      cost = failureCell(inputs.dashboard.pricing.failure);
+    } else {
+      const rec = inputs.dashboard.ledger.value.records.find(
+        (r) => r.workItemId === row.workItemId,
+      );
+      if (rec !== undefined) {
+        let scaled = 0n;
+        const total = rec.tokens.length;
+        let priced = 0;
+        let hasMissingTokens = false;
+        for (const t of rec.tokens) {
+          if (t.inputTokens === null || t.outputTokens === null) {
+            hasMissingTokens = true;
+            continue;
+          }
+          const price = inputs.dashboard.pricing.value.get(t.provider);
+          if (price === undefined) continue;
+          priced += 1;
+          scaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
+          scaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+        }
+        if (hasMissingTokens && priced === 0 && total > 0) {
+          cost = { kind: "no-data", reason: "usage not reported" };
+        } else if (total > priced) {
+          const unpriced = total - priced;
+          if (priced === 0) {
+            cost = {
+              kind: "no-data",
+              reason: `${String(unpriced)} of ${String(total)} entries unpriced`,
+            };
+          } else {
+            cost = {
+              kind: "text",
+              text: `at least ${formatUsd(scaled)} (${String(unpriced)} of ${String(total)} entries unpriced)`,
+            };
+          }
+        } else {
+          cost = { kind: "text", text: formatUsd(scaled) };
+        }
+      } else {
+        cost = { kind: "no-data", reason: "not in ledger yet" };
+      }
+    }
+    const headSha: string | null = chosen === null ? null : chosen.headSha;
+    return {
+      workItemId: row.workItemId,
+      title,
+      hostAlias: row.hostAlias,
+      verdictCounts: countedVal,
+      verdictFailure,
+      outcome: row.outcome,
+      cost,
+      at: row.at,
+      headSha,
+    };
+  });
+  return { kind: "ok", value: entries };
+}
+
+function buildRealWorkSection(inputs: LiveInputs): LiveSection<readonly RealWorkCard[]> {
+  if (!inputs.probes.ok) {
+    return inputs.probes.failure.kind === "error"
+      ? { kind: "error", code: inputs.probes.failure.code }
+      : { kind: "no-data", reason: inputs.probes.failure.reason };
+  }
+  const registryOk = inputs.dashboard.registry.ok;
+  const probes = inputs.probes.value;
+  const aliasSet = new Set<string>(probes.map((p) => p.hostAlias));
+  if (registryOk) {
+    for (const entry of inputs.dashboard.registry.value) {
+      if (entry.terminal === null) aliasSet.add(entry.hostAlias);
+    }
+  }
+  const aliases = [...aliasSet].sort();
+  if (aliases.length === 0) return { kind: "ok", value: [] };
+  const probeByAlias = new Map<string, RecordedProbe>(probes.map((p) => [p.hostAlias, p] as const));
+  const openByAlias = new Map<string, RegistryEntry>();
+  if (registryOk) {
+    for (const entry of inputs.dashboard.registry.value) {
+      if (entry.terminal !== null) continue;
+      const prev = openByAlias.get(entry.hostAlias);
+      if (prev === undefined || entry.startedAt > prev.startedAt)
+        openByAlias.set(entry.hostAlias, entry);
+    }
+  }
+  const workById = new Map<string, WorkItem>();
+  if (inputs.dashboard.workItems.ok) {
+    for (const item of inputs.dashboard.workItems.value) workById.set(item.id, item);
+  }
+  // results sorted newest first per host for lastFinished
+  const resultsOk = inputs.dashboard.results.ok ? inputs.dashboard.results.value : [];
+  // Map workItemId -> newest result for stage inference
+  const newestResultByWorkItem = new Map<string, (typeof resultsOk)[number]>();
+  for (const row of resultsOk) {
+    const prev = newestResultByWorkItem.get(row.workItemId);
+    if (prev === undefined || row.at > prev.at) newestResultByWorkItem.set(row.workItemId, row);
+  }
+  const ledgerRecords = inputs.dashboard.ledger.ok ? inputs.dashboard.ledger.value.records : [];
+  const utcDay = inputs.now.toISOString().slice(0, 10);
+  const cards: RealWorkCard[] = aliases.map((alias) => {
+    const probe = probeByAlias.get(alias) ?? null;
+    const registryEntry = openByAlias.get(alias) ?? null;
+    const probeAt = probe?.at ?? null;
+    const lastFinished = newestResultForHost(resultsOk, alias);
+    // Today counts ledger records finished today on this host; partial pricing
+    // prints the priced part with the `at least` form used elsewhere.
+    let todayCount = 0;
+    let todayScaled = 0n;
+    let todayTotal = 0;
+    let todayPriced = 0;
+    if (inputs.dashboard.ledger.ok) {
+      for (const rec of ledgerRecords) {
+        if (rec.finishedAt.slice(0, 10) !== utcDay) continue;
+        if (!rec.sessionSeconds.some((s) => s.hostAlias === alias)) continue;
+        todayCount += 1;
+        for (const t of rec.tokens) {
+          if (t.inputTokens === null || t.outputTokens === null) {
+            todayTotal += 1;
+            continue;
+          }
+          const price = inputs.dashboard.pricing.ok
+            ? inputs.dashboard.pricing.value.get(t.provider)
+            : undefined;
+          todayTotal += 1;
+          if (price === undefined) continue;
+          todayPriced += 1;
+          todayScaled += tokenCostScaled(t.inputTokens, price.inputNanoPer1M);
+          todayScaled += tokenCostScaled(t.outputTokens, price.outputNanoPer1M);
+        }
+      }
+    }
+    let today: RealWorkCard["today"] = null;
+    if (inputs.dashboard.ledger.ok) {
+      let cost: LiveCell | null = null;
+      if (todayCount === 0) {
+        cost = null;
+      } else if (!inputs.dashboard.pricing.ok) {
+        cost = failureCell(inputs.dashboard.pricing.failure);
+      } else if (todayTotal === 0) {
+        cost = { kind: "no-data", reason: "usage not reported" };
+      } else if (todayPriced === 0) {
+        cost = {
+          kind: "no-data",
+          reason: `${String(todayTotal)} of ${String(todayTotal)} entries unpriced`,
+        };
+      } else if (todayTotal > todayPriced) {
+        const unpriced = todayTotal - todayPriced;
+        cost = {
+          kind: "text",
+          text: `at least ${formatUsd(todayScaled)} (${String(unpriced)} of ${String(todayTotal)} entries unpriced)`,
+        };
+      } else cost = { kind: "text", text: formatUsd(todayScaled) };
+      if (probe !== null) today = { count: todayCount, cost };
+    } else if (!inputs.dashboard.ledger.ok) {
+      today = { count: 0, cost: failureCell(inputs.dashboard.ledger.failure) };
+    }
+    const registryFailure: LiveFailure | null = inputs.dashboard.registry.ok
+      ? null
+      : inputs.dashboard.registry.failure;
+    if (registryEntry !== null && registryFailure === null) {
+      const work = workById.get(registryEntry.workItemId) ?? null;
+      const stage: RealWorkCard["stage"] = "implement";
+      const modelText = stripProvider(registryEntry.model.model);
+      const providerId = registryEntry.model.providerId;
+      const latest = inputs.meter.ok
+        ? sumMeterForWorkItem(
+            inputs.meter.value,
+            registryEntry.workItemId,
+            inputs.dashboard.pricing,
+          )
+        : { tokens: null, cost: null, latestCall: null };
+      const meterFailure: LiveFailure | null = inputs.meter.ok ? null : inputs.meter.failure;
+      const costCell: typeof latest.cost = !inputs.meter.ok
+        ? inputs.meter.failure.kind === "error"
+          ? { kind: "error", code: inputs.meter.failure.code }
+          : { kind: "no-data", reason: inputs.meter.failure.reason }
+        : latest.cost;
+      return {
+        alias,
+        stage,
+        workItemId: registryEntry.workItemId,
+        title:
+          work === null
+            ? workFieldFailed(inputs.dashboard.workItems)
+            : { kind: "text", text: work.title },
+        issue: work === null ? workFieldFailed(inputs.dashboard.workItems) : workIssueCellOk(work),
+        pullNumber:
+          work === null ? workFieldFailed(inputs.dashboard.workItems) : workPullCellOk(work),
+        repo: work?.repo ?? null,
+        branch:
+          work === null ? workFieldFailed(inputs.dashboard.workItems) : workBranchCellOk(work),
+        modelText,
+        providerId,
+        elapsed: formatElapsed(registryEntry.startedAt, inputs.now),
+        tokens: latest.tokens,
+        cost: costCell,
+        latestCall: latest.latestCall,
+        meterFailure,
+        idleReason: null,
+        lastFinishedNote: null,
+        probeAt,
+        lastFinished:
+          lastFinished !== null
+            ? {
+                workItemId: lastFinished.workItemId,
+                at: lastFinished.at,
+                outcome: lastFinished.outcome,
+              }
+            : null,
+        today,
+      };
+    }
+    // No open session: every host reads idle. The newest non-merged outcome names
+    // the round on its own meta line; the last-finished line already covers merged.
+    // A live audit stage needs the loop-state phase (`src/loop/review.ts:457`),
+    // which no dashboard input carries yet, so PR A shows no audit card: findings
+    // without a readable verdict reads as a missing verdict on the idle card.
+    let idleNote: string | null = null;
+    {
+      let newestForHost: (typeof resultsOk)[number] | null = null;
+      for (const row of resultsOk) {
+        if (row.hostAlias !== alias) continue;
+        if (newestForHost === null || row.at > newestForHost.at) newestForHost = row;
+      }
+      if (newestForHost !== null && newestForHost.outcome !== "merged") {
+        if (newestForHost.outcome === "findings") {
+          const verdicts = inputs.dashboard.verdicts.get(newestForHost.workItemId);
+          const stored = verdicts !== undefined && verdicts.ok ? verdicts.value : null;
+          idleNote =
+            stored !== null && stored.length > 0
+              ? `last round: ${newestForHost.outcome}`
+              : `last round: ${newestForHost.outcome} (verdict missing)`;
+        } else {
+          idleNote = `last round: ${newestForHost.outcome}`;
+        }
+      }
+    }
+    // Idle: no running work, no recent finished host work
+    return {
+      alias,
+      stage: "idle",
+      workItemId: null,
+      title: null,
+      issue: null,
+      pullNumber: null,
+      repo: null,
+      branch: null,
+      modelText: null,
+      providerId: null,
+      elapsed: null,
+      tokens: null,
+      cost: null,
+      latestCall: null,
+      meterFailure: null,
+      idleReason: (() => {
+        if (registryFailure !== null)
+          return registryFailure.kind === "error"
+            ? `error (${registryFailure.code})`
+            : `no data (${registryFailure.reason})`;
+        if (!inputs.dashboard.results.ok)
+          return inputs.dashboard.results.failure.kind === "error"
+            ? `error (${inputs.dashboard.results.failure.code})`
+            : `no data (${inputs.dashboard.results.failure.reason})`;
+        if (!inputs.dashboard.workItems.ok)
+          return inputs.dashboard.workItems.failure.kind === "error"
+            ? `error (${inputs.dashboard.workItems.failure.code})`
+            : `no data (${inputs.dashboard.workItems.failure.reason})`;
+        if (probe !== null) {
+          const queued = inputs.dashboard.workItems.value.filter(
+            (w) => w.status === "queued",
+          ).length;
+          return idleReasonFromProbe(probe, queued);
+        }
+        return null;
+      })(),
+      lastFinishedNote: idleNote,
+      probeAt,
+      lastFinished,
+      today,
+    };
+  });
+  return { kind: "ok", value: cards };
 }
 
 function activityRows(
@@ -1339,7 +1870,6 @@ function buildAuditPanel(inputs: LiveInputs, auditKey: string): AuditPanel | nul
 
 export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
   const nowIso = inputs.now.toISOString();
-  const utcDay = nowIso.slice(0, 10);
   const sim = inputs.sim.ok ? inputs.sim.value : null;
   const minute = inputs.minute;
   const tiles = sim === null ? [] : simTilesAt(sim, minute);
@@ -1349,67 +1879,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     nextMinute === null || sim === null
       ? null
       : Math.min(30, Math.max(2, Math.ceil((LIVE_STEP_MINUTES * 60) / sim.speed)));
-  const counters: LiveCounter[] = [
-    {
-      label: "Real hosts reporting",
-      simulated: false,
-      cell: liveCell(inputs.probes, (probes) =>
-        probes.length === 0
-          ? "0"
-          : `${groupDigits(probes.filter((probe) => probe.kind === "reported").length)} of ${groupDigits(probes.length)}`,
-      ),
-    },
-    {
-      label: "Sessions running",
-      simulated: false,
-      cell: sourcedCell(inputs.dashboard.registry, (entries) =>
-        groupDigits(entries.filter((entry) => entry.terminal === null).length),
-      ),
-    },
-    {
-      label: "Meter calls today",
-      simulated: false,
-      cell: liveCell(inputs.meter, (index) =>
-        groupDigits(
-          [...index.ends.values()].filter((end) => end.at.slice(0, 10) === utcDay).length,
-        ),
-      ),
-    },
-    {
-      label: "Simulated hosts eligible",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : {
-              kind: "text",
-              text: `${groupDigits(tiles.filter((tile) => tile.eligible).length)} of ${groupDigits(sim.hostCount)}`,
-            },
-    },
-    {
-      label: "Simulated work running",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : { kind: "text", text: groupDigits(tiles.reduce((sum, tile) => sum + tile.running, 0)) },
-    },
-    {
-      label: "Simulated placements",
-      simulated: true,
-      cell:
-        sim === null
-          ? liveCell(inputs.sim, () => "")
-          : {
-              kind: "text",
-              text: groupDigits(
-                sim.placements.filter(
-                  (placement) => placement.atMinute <= minute && placement.chosenHostAlias !== null,
-                ).length,
-              ),
-            },
-    },
-  ];
+  const realWork: LiveSection<readonly RealWorkCard[]> = buildRealWorkSection(inputs);
+  const justFinished: LiveSection<readonly JustFinishedEntry[]> = buildJustFinishedSection(inputs);
   const simFleet: LiveSection<readonly LiveGroup[]> = !inputs.sim.ok
     ? section(inputs.sim)
     : (() => {
@@ -1486,10 +1957,8 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     durationMinutes: sim === null ? null : sim.durationMinutes,
     refreshSeconds,
     nextMinute,
-    counters,
-    realFleet: !inputs.probes.ok
-      ? section(inputs.probes)
-      : { kind: "ok", value: realTiles(inputs.probes.value, inputs.dashboard.registry) },
+    realWork,
+    justFinished,
     simFleet,
     activity: !inputs.meter.ok
       ? section(inputs.meter)
@@ -1505,5 +1974,7 @@ export function buildLive(inputs: LiveInputs, opts?: LiveOptions): LiveModel {
     taskPanel,
     callPanel,
     auditPanel,
+    repos: inputs.repos.ok ? inputs.repos.value : new Set<string>(),
+    reposFailure: inputs.repos.ok ? null : inputs.repos.failure,
   };
 }

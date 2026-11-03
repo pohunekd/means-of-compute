@@ -467,16 +467,18 @@ dashboard's value with the live style hash (`LIVE_CSS_HASH` over the
 dashboard stylesheet plus the live rules). A meta refresh is a navigation,
 not a resource load, so `default-src 'none'` does not block it.
 
-Overview fits one 1920x1080 frame without scrolling (with a host selection the page may scroll). The unified tile renderer uses one size for every host (alias, load `running/maxAgents`, state colour): real tiles carry a solid border and a `REAL` chip, simulated tiles a dashed border and a `SIMULATED` group tag; the group heading carries the site/kind count and real group renders first. The grid groups tiles
-by site and kind; the real fleet is one group of tiles showing the alias, count and a `REAL` chip, state as colour and title. Simulated tiles are compact blocks under a group heading with a `SIMULATED` tag: the alias, load and state word are on the tile face, the tile outline is dashed.
+Overview fits one 1920x1080 frame without scrolling (with a host selection the page may scroll). Live leads with Real work now, then Just finished, then the fleet.
+
+Real work now: one card per real machine (desktop, laptop-a, laptop-b, kiosk-a) with alias and REAL chip, stage pill (`implement`, `audit`, `merge`), task title link to the task panel, issue and PR links (PR shows `no data (PR not opened yet)` when null), model in use (`name (provider)`), elapsed time from registry `startedAt`, tokens and cost so far priced by `tokenCostScaled`, latest model call (time, in/out, ms). An idle card shows why in probe terms (`Idle — no work queued`, `Idle — person at the desk`) plus last finished item and today totals. Sources: dispatcher registry, recorded probes (`loop-ports.jsonl` via `readRecordedProbes`), work store, loop results and verdict store for stage, meter usage log for tokens/cost/latest call, ledger for today totals.
+
+Just finished: the newest 3 real results with item link, title, machine, audit counts (recounted via `verdictCounts`) and `merged`/`parked` outcome, cost. Sources: `loop-results.jsonl` newest 3, work store title, verdict store counts, ledger cost.
+
+The unified tile renderer uses one size for every host (alias, load `running/maxAgents`, state colour): real tiles carry a solid border and a `REAL` chip, simulated tiles a dashed border and a `SIMULATED` group tag; the group heading carries the site/kind count. The grid groups tiles
+by site and kind; the fleet box no longer carries a Real fleet row because the cards are the real fleet. Simulated tiles are compact blocks under a group heading with a `SIMULATED` tag: the alias, load and state word are on the tile face, the tile outline is dashed.
 States: `eligible` (can take work now), `running`, `blocked` (idle
 but excluded; the placement reason is in the tile title), `busy` (user
 present), `offline` (left the site network), and for real hosts `reported`
-or `unavailable`. Counters keep the
-sources apart and never sum them: `Real hosts reporting`, `Sessions
-running`, `Meter calls today`, then `Simulated hosts eligible`,
-`Simulated work running` and `Simulated placements`, each labelled
-simulated.
+or `unavailable`. The former counters strip is removed from Live; its real values live inside the cards and its simulated values in the fleet heading when present.
 
 Model activity is real only: the newest 12 meter `call-end` records, each
 joined to its `call-start` for provider and model and to its grant for the

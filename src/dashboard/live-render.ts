@@ -17,12 +17,13 @@ import type {
   CallPanel,
   HostPanel,
   LiveActivityRow,
+  LiveFailure,
   LiveCell,
-  LiveCounter,
   LiveGroup,
   LiveModel,
   LiveSection,
   LiveTile,
+  RealWorkCard,
   TaskPanel,
 } from "./live.js";
 
@@ -52,6 +53,7 @@ export const LIVE_CSS = [
   ".keycard.live-simcard{border-top-style:dashed}",
   "section{padding:0.2rem 0.3rem 0.2rem;margin-top:0.2rem;border-radius:4px}",
   "h2{font-size:0.7rem;margin:0 0 0.12rem}",
+  ".rw-heading{font-size:1.05rem;margin:0 0 0.12rem}",
   ".live-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,0.9fr);gap:0.3rem;align-items:start}",
   ".live-side{display:grid;gap:0.4rem}",
   ".live-side section{margin-top:0}",
@@ -69,7 +71,7 @@ export const LIVE_CSS = [
   ".tile-flagged{box-shadow:inset 3px 0 0 var(--parked-text)}",
   ".tile-flagged .alias{color:var(--parked-text)}",
   ".flag{color:var(--parked-text);font-weight:700}",
-  ".chip{font-size:0.42rem;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
+  ".chip{font-size:15px;font-weight:700;letter-spacing:0.05em;border:1px solid currentColor;border-radius:3px;padding:0 0.15rem;flex-shrink:0}",
   ".chip-real{color:var(--accent)}",
   ".tile-eligible{background:var(--done-bg);color:var(--done-text)}",
   ".tile-running{background:var(--running-bg);color:var(--running-text)}",
@@ -99,7 +101,22 @@ export const LIVE_CSS = [
   ".host-panel .mono{font-family:var(--mono)}",
   ".host-panel ul{margin:0.3rem 0 0;padding-left:1.2rem;font-size:0.8rem}",
   ".host-panel a{color:var(--accent);text-decoration:none}",
-  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}}",
+  ".realwork{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:10px 0}",
+  ".rw{background:var(--surface-2);border:1.5px solid var(--accent);border-radius:12px;padding:9px 12px}",
+  ".rw.idle{border-color:var(--border)}",
+  ".rw .al{font-size:22px;font-weight:700;font-family:var(--mono)}",
+  ".rw .task{font-size:17px;font-weight:600;margin:4px 0 2px;min-height:40px;line-height:1.3;overflow:hidden}",
+  ".rw .task.idle-task{color:var(--muted)}",
+  ".rw .meta{font-size:15px;color:var(--muted);margin:2px 0;line-height:1.3}",
+  ".rw .meta b{color:var(--text);font-weight:700}",
+  ".rw-subtitle{color:var(--muted);font-weight:500;font-size:16px;line-height:1.4}",
+  ".stage{display:inline-block;border-radius:999px;padding:1px 10px;font-size:15px;font-weight:700;background:var(--running-bg);color:var(--running-text);border:1px solid var(--border)}",
+
+  ".fin{display:flex;gap:12px;margin:0 0 10px;align-items:baseline}",
+  ".fin .fi.fin-label{flex:0 0 auto;background:none;border:none;padding:6px 0;font-size:15px;font-weight:700}",
+  ".fin .fi{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:15px;line-height:1.3}",
+  ".fin .fi b{font-size:16px}",
+  "@media (max-width:900px){.live-layout{grid-template-columns:1fr}.keyfigures{grid-template-columns:repeat(2,1fr)}.realwork{grid-template-columns:repeat(2,1fr)}.fin{flex-wrap:wrap}}",
 ].join("\n");
 
 export const LIVE_CSS_HASH = `sha256-${createHash("sha256")
@@ -117,6 +134,35 @@ function compactTime(iso: string): string {
 
 function clockTime(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(iso) ? iso.slice(11, 19) : iso;
+}
+
+function stripDate(iso: string, pageDay: string): string {
+  const day = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day === pageDay) return clockTime(iso);
+  return `${monthDay(iso)} ${clockTime(iso)}`;
+}
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+function monthDay(iso: string): string {
+  const month = Number(iso.slice(5, 7));
+  const day = Number(iso.slice(8, 10));
+  if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12)
+    return iso.slice(0, 10);
+  return `${MONTHS[month - 1] as string} ${String(day)}`;
 }
 
 function shortenMiddle(text: string, limit: number): string {
@@ -145,17 +191,6 @@ function cellText(cell: LiveCell): string {
 
 function cellClass(cell: LiveCell): string {
   return cell.kind === "text" ? "value" : cell.kind === "no-data" ? "nodata" : "error";
-}
-
-function renderCounter(counter: LiveCounter): SafeHtml {
-  const label = counter.simulated ? `${counter.label} (simulated)` : counter.label;
-  return html`<div class="keycard ${counter.simulated ? "live-simcard" : ""}">
-    <span class="label">${label}</span>
-    <span class="${cellClass(counter.cell)}">${cellText(counter.cell)}</span>
-    <p class="cite">
-      source: ${counter.simulated ? "simulated fleet trace" : "real factory inputs"}
-    </p>
-  </div>`;
 }
 
 function checkAlias(tile: LiveTile): void {
@@ -268,7 +303,7 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   const baseTitle =
     tile.detail === ""
       ? `${tile.alias}: ${tile.state}${battery}`
-      : `${tile.alias}: ${tile.state} - ${tile.detail}${battery}`;
+      : `${tile.alias}: ${tile.state}, ${tile.detail}${battery}`;
   const title =
     tile.runningError !== null ? `${baseTitle} - registry error (${tile.runningError})` : baseTitle;
   const chip = html`<span class="chip chip-real">REAL</span>`;
@@ -296,6 +331,244 @@ function renderGroup(group: LiveGroup, model: LiveModel): SafeHtml {
   return html`<div class="live-group">
     ${heading}
     <div class="tile-grid">${group.tiles.map((tile) => renderTile(tile, model))}</div>
+  </div>`;
+}
+
+function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
+  if (!ALIAS_PATTERN.test(card.alias)) {
+    throw new Error("dashboard live: invalid host alias in model");
+  }
+  const hostHref = buildHref(model, { host: card.alias });
+  const taskHref = card.workItemId === null ? null : buildHref(model, { task: card.workItemId });
+  const repos = model.repos;
+  const reposFailure = model.reposFailure;
+  const repoAllowed = reposFailure === null && card.repo !== null && repos.has(card.repo);
+  const stageLabel = "implement";
+  const idleCls = card.stage === "idle" ? " idle" : "";
+  const stageHtml =
+    card.stage === "idle" ? constantHtml("") : html`<span class="stage">${stageLabel}</span>`;
+  const titleLine =
+    card.stage === "idle"
+      ? card.idleReason === null
+        ? constantHtml("")
+        : card.idleReason.startsWith("error (") || card.idleReason.startsWith("no data (")
+          ? html`<p class="task idle-task">state: ${card.idleReason}</p>`
+          : html`<p class="task idle-task">Idle: ${card.idleReason}</p>`
+      : card.title === null
+        ? html`<p class="task"><span class="nodata">no work</span></p>`
+        : card.title.kind === "error"
+          ? html`<p class="task"><span class="error">title: error (${card.title.code})</span></p>`
+          : card.title.kind === "no-data"
+            ? html`<p class="task">
+                <span class="nodata">title: no data (${card.title.reason})</span>
+              </p>`
+            : taskHref === null
+              ? html`<p class="task">${card.title.text}</p>`
+              : html`<p class="task"><a href="${taskHref}">${card.title.text}</a></p>`;
+  const issueLine =
+    card.issue === null
+      ? constantHtml("")
+      : card.issue.kind === "error"
+        ? html`<span class="error">issue: error (${card.issue.code})</span>`
+        : card.issue.kind === "text"
+          ? repoAllowed
+            ? html`<a href="https://github.com/${card.repo}/issues/${card.issue.text}"
+                >#${card.issue.text}</a
+              >`
+            : html`<span>#${card.issue.text}</span>`
+          : card.issue.reason === "no issue linked"
+            ? constantHtml("")
+            : html`<span class="nodata">issue: no data (${card.issue.reason})</span>`;
+  const prLine =
+    card.pullNumber === null
+      ? card.workItemId !== null && card.stage !== "idle"
+        ? html`<span class="nodata">PR not opened yet</span>`
+        : constantHtml("")
+      : card.pullNumber.kind === "error"
+        ? html`<span class="error">PR: error (${card.pullNumber.code})</span>`
+        : card.pullNumber.kind === "no-data"
+          ? html`<span class="nodata">PR: no data (${card.pullNumber.reason})</span>`
+          : repoAllowed
+            ? html`<a href="https://github.com/${card.repo}/pull/${card.pullNumber.text}"
+                >PR #${card.pullNumber.text}</a
+              >`
+            : html`<span>PR #${card.pullNumber.text}</span>`;
+  const elapsedLine =
+    card.elapsed === null
+      ? constantHtml("")
+      : html`<p class="meta">elapsed <b>${card.elapsed}</b></p>`;
+  const modelLine =
+    card.modelText === null
+      ? constantHtml("")
+      : html`<p class="meta">
+          ${`${card.modelText}${card.providerId === null ? "" : ` (${card.providerId})`}`}
+        </p>`;
+  const tokensCostSoFar =
+    card.meterFailure !== null
+      ? card.meterFailure.kind === "error"
+        ? html`<p class="meta">
+            tokens: <span class="error">error (${card.meterFailure.code})</span> · cost:
+            <span class="error">error (${card.meterFailure.code})</span>
+          </p>`
+        : html`<p class="meta">
+            tokens:
+            <span class="nodata">no data (${card.meterFailure.reason})</span> · cost:
+            <span class="nodata">no data (${card.meterFailure.reason})</span>
+          </p>`
+      : card.tokens === null || card.cost === null
+        ? constantHtml("")
+        : html`<p class="meta">
+            this task so far ${groupDigits(card.tokens.input)} in /
+            ${groupDigits(card.tokens.output)} out tokens ·
+            <b class="${cellClass(card.cost)}">${cellText(card.cost)}</b>
+          </p>`;
+  const callLine =
+    card.meterFailure !== null
+      ? card.meterFailure.kind === "error"
+        ? html`<p class="meta">
+            latest call: <span class="error">error (${card.meterFailure.code})</span>
+          </p>`
+        : html`<p class="meta">
+            latest call:
+            <span class="nodata">no data (${card.meterFailure.reason})</span>
+          </p>`
+      : card.latestCall === null
+        ? constantHtml("")
+        : card.latestCall.inputTokens === null || card.latestCall.outputTokens === null
+          ? html`<p class="meta">
+              latest call ${clockTime(card.latestCall.at)} ·
+              <span class="nodata">no data (usage not reported)</span>
+            </p>`
+          : html`<p class="meta">
+              latest call ${clockTime(card.latestCall.at)} ·
+              ${groupDigits(card.latestCall.inputTokens)} in /
+              ${groupDigits(card.latestCall.outputTokens)} out · ${groupDigits(card.latestCall.ms)}
+              ms
+            </p>`;
+  const probeLine =
+    card.stage !== "idle" || card.probeAt === null
+      ? constantHtml("")
+      : html`<p class="meta">reported ${clockTime(card.probeAt)}</p>`;
+  const finishedDay = card.lastFinished === null ? null : card.lastFinished.at.slice(0, 10);
+  const pageDay = model.renderedAt.slice(0, 10);
+  const finishedWhen =
+    card.lastFinished === null
+      ? ""
+      : finishedDay !== null && finishedDay !== pageDay
+        ? `${monthDay(card.lastFinished.at)} ${card.lastFinished.at.slice(11, 16)}`
+        : card.lastFinished.at.slice(11, 16);
+  const lastRoundLine =
+    card.lastFinishedNote === null
+      ? constantHtml("")
+      : html`<p class="meta">${card.lastFinishedNote}</p>`;
+  const lastFinishedLine =
+    card.lastFinished === null
+      ? constantHtml("")
+      : card.stage === "idle"
+        ? html`<p class="meta">
+            last finished
+            <a href="${buildHref(model, { task: card.lastFinished.workItemId })}"
+              >${card.lastFinished.workItemId}</a
+            >
+            at ${finishedWhen} (${card.lastFinished.outcome})
+          </p>`
+        : constantHtml("");
+  const todayLine =
+    card.today === null
+      ? constantHtml("")
+      : card.today.count === 0 && card.today.cost !== null
+        ? html`<p class="meta">
+            today (UTC):
+            <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
+          </p>`
+        : card.today.cost === null
+          ? html`<p class="meta">
+              today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
+            </p>`
+          : html`<p class="meta">
+              today (UTC): ${String(card.today.count)} ${card.today.count === 1 ? "task" : "tasks"}
+              ·
+              <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
+            </p>`;
+  return html`<div class="rw${idleCls}">
+    <div>
+      <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
+      ${stageHtml}
+    </div>
+    ${titleLine}
+    ${
+      reposFailure === null
+        ? html`<p class="meta">${issueLine} ${prLine}</p>`
+        : card.issue === null && card.pullNumber === null
+          ? constantHtml("")
+          : reposFailure.kind === "error"
+            ? html`<p class="meta">
+                links: <span class="error">error (${reposFailure.code})</span>
+              </p>`
+            : html`<p class="meta">
+                links: <span class="nodata">no data (${reposFailure.reason})</span>
+              </p>`
+    }
+    ${lastRoundLine} ${modelLine} ${elapsedLine} ${tokensCostSoFar} ${callLine} ${probeLine}
+    ${lastFinishedLine} ${todayLine}
+  </div>`;
+}
+
+function renderJustFinished(
+  entry: {
+    readonly workItemId: string;
+    readonly title: LiveCell;
+    readonly hostAlias: string | null;
+    readonly verdictCounts:
+      { readonly high: number; readonly medium: number; readonly low: number } | "invalid" | null;
+    readonly verdictFailure: LiveFailure | null;
+    readonly outcome: string;
+    readonly cost: LiveCell | null;
+    readonly at: string;
+    readonly headSha: string | null;
+  },
+  model: LiveModel,
+): SafeHtml {
+  const taskHref = buildHref(model, { task: entry.workItemId });
+  const auditHref =
+    entry.headSha === null
+      ? buildHref(model, { task: entry.workItemId })
+      : buildHref(model, { audit: `${entry.workItemId}@${entry.headSha}` });
+  const costText =
+    entry.cost === null
+      ? entry.verdictFailure === null
+        ? constantHtml("no cost")
+        : entry.verdictFailure.kind === "error"
+          ? html`<span class="error">error (${entry.verdictFailure.code})</span>`
+          : html`<span class="nodata">no data (${entry.verdictFailure.reason})</span>`
+      : html`<span class="${cellClass(entry.cost)}">${cellText(entry.cost)}</span>`;
+  // Every constantHtml argument stays a literal: dynamic strings run through html``.
+  const titleText: SafeHtml =
+    entry.title.kind === "text"
+      ? html`${entry.title.text}`
+      : entry.title.kind === "error"
+        ? html`<span class="error">error (${entry.title.code})</span>`
+        : html`<span class="nodata">no data (${entry.title.reason})</span>`;
+  const counts = entry.verdictFailure !== null ? "failed" : entry.verdictCounts;
+  const countsText: SafeHtml =
+    counts === null
+      ? constantHtml("no data (no verdict)")
+      : counts === "failed"
+        ? entry.verdictFailure !== null && entry.verdictFailure.kind === "error"
+          ? html`<span class="error">counts: error (${entry.verdictFailure.code})</span>`
+          : entry.verdictFailure !== null
+            ? html`<span class="nodata">counts: no data (${entry.verdictFailure.reason})</span>`
+            : constantHtml("no data (no verdict)")
+        : counts === "invalid"
+          ? html`<span class="error">invalid verdict counts</span>`
+          : html`<a href="${auditHref}"
+              >${String(counts.high)}/${String(counts.medium)}/${String(counts.low)}</a
+            >`;
+  const hostBadge = entry.hostAlias === null ? constantHtml("") : html` · ${entry.hostAlias}`;
+  const pageDay = model.renderedAt.slice(0, 10);
+  return html`<div class="fi">
+    <a href="${taskHref}">${titleText}</a>${hostBadge} · ${entry.outcome} · ${countsText} ·
+    ${costText} · ${stripDate(entry.at, pageDay)}
   </div>`;
 }
 
@@ -360,7 +633,6 @@ function renderTabs(model: LiveModel): SafeHtml {
   const tabs = ["overview", "fleet", "work", "usage", "savings", "autonomy", "models"];
   const links = tabs.map((tab) => {
     const active = tab === model.view ? " active" : "";
-    const aria = tab === model.view ? ' aria-current="page"' : "";
     // Tab links keep t and pause, drop selection.
     const params = new URLSearchParams();
     params.set("view", tab);
@@ -371,7 +643,11 @@ function renderTabs(model: LiveModel): SafeHtml {
       params.set("pause", "1");
     }
     const href = `/?${params.toString()}`;
-    return html`<a class="tab${active}" href="${href}" ${constantHtml(aria)}>${tab}</a>`;
+    return tab === model.view
+      ? html`<a class="tab${active}" href="${href}" ${constantHtml(' aria-current="page"')}>
+          ${tab}</a
+        >`
+      : html`<a class="tab${active}" href="${href}">${tab}</a>`;
   });
   return html`<nav class="tabs" aria-label="Views">${links}</nav>`;
 }
@@ -938,10 +1214,22 @@ export function renderLive(model: LiveModel): string {
   const pausedBadge = model.paused
     ? html`<span class="paused-badge">paused</span>`
     : constantHtml("");
-  const realFleet =
-    model.realFleet.kind === "ok"
-      ? renderGroup({ title: "Real fleet", tiles: model.realFleet.value }, model)
-      : sectionText(model.realFleet);
+  const realWorkBlock = (() => {
+    if (model.realWork.kind !== "ok")
+      return html`<div id="real-work">${sectionText(model.realWork)}</div>`;
+    if (model.realWork.value.length === 0) return html`<p class="nodata">no real machines</p>`;
+    return html`<div id="real-work" class="realwork">
+      ${model.realWork.value.map((card) => renderRealWorkCard(card, model))}
+    </div>`;
+  })();
+  const justFinishedBlock = (() => {
+    if (model.justFinished.kind !== "ok") return sectionText(model.justFinished);
+    if (model.justFinished.value.length === 0) return constantHtml("");
+    return html`<div id="just-finished" class="fin">
+      <div class="fi fin-label"><b>Just finished</b></div>
+      ${model.justFinished.value.map((entry) => renderJustFinished(entry, model))}
+    </div>`;
+  })();
   const simFleet =
     model.simFleet.kind === "ok"
       ? model.simFleet.value.map((group) => renderGroup(group, model))
@@ -992,7 +1280,7 @@ export function renderLive(model: LiveModel): string {
     model.callPanel !== null ||
     model.auditPanel !== null;
   const fleetContent = html`<h2>Fleet</h2>
-    ${realFleet} ${simFleet}
+    ${simFleet}
     <p class="live-legend">
       <span class="dot tile-eligible"></span>eligible <span class="dot tile-running"></span>running
       <span class="dot tile-blocked"></span>blocked (reason in the title)
@@ -1039,9 +1327,13 @@ export function renderLive(model: LiveModel): string {
             Real placement engine, synthetic fleet. The four real machines and the model calls are
             live.
           </p>
-          <div class="keyfigures">${model.counters.map((counter) => renderCounter(counter))}</div>
         </header>
         <main>
+          <section>
+            <h2 class="rw-heading">Real work now</h2>
+            <p class="rw-subtitle">what the real machines are doing at this moment</p>
+            ${realWorkBlock} ${justFinishedBlock}
+          </section>
           <div class="live-layout">
             <section id="live-fleet">${fleetContent}</section>
             <div class="live-side">${sideContent}</div>

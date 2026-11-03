@@ -3,7 +3,7 @@
 // and later log calls write nothing. The detail field carries a fixed
 // code or an error message, never brief, goal, finding or issue text.
 // Placement candidates carry the engine's reason text, built from probe
-// fields and host aliases only.
+// fields, fixed collector cause codes and host aliases only.
 import { open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 

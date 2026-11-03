@@ -18,7 +18,7 @@ dashboard in this issue.
 ## Run
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>]
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve [--ledger <path>] [--verdicts <dir>] [--registry <path>] [--results <path>] [--work <path>] [--sim-trace <path>] [--meter-usage <path>] [--ports <path>] [--loop-log <path>]
 MOC_DASHBOARD_NOW=2026-10-27T12:00:00.000Z bun run factory:serve  # tests only
 ```
 
@@ -65,6 +65,7 @@ inside `baselines`; any failure exits 2 naming the key.
 | `maxRequestBytes`                      | integer in `1..65536`; currently `1024`                                                                                                |
 | `idleTimeoutSec`                       | integer in `1..255`; currently `10`                                                                                                    |
 | `workRowLimit`                         | integer in `1..1000`; currently `50`                                                                                                   |
+| `placementMaxAgeSec`                   | integer in `1..86400`; seconds a placement entry decides a real tile; currently `600`                                                  |
 | `baselines.frontierTokens`             | `null`, or an object with exactly `label`, `inputPer1M`, `outputPer1M`, `source`, `asOf`                                               |
 | `baselines.cloudSandboxHour`           | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf`                                                                 |
 | `baselines.ownedHostHour`              | `null`, or an object with exactly `label`, `perHour`, `source`, `asOf`                                                                 |
@@ -489,10 +490,10 @@ built by `buildLive` (`src/dashboard/live.ts`) and rendered by `renderLive`
 are not involved, and simulated data never enters their inputs, the ledger,
 Work, Models, Cost or `demo:numbers`.
 
-Run it through `factory:serve` with three extra flags, each at most once:
+Run it through `factory:serve` with four extra flags, each at most once:
 
 ```sh
-MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-100.jsonl
+MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-100.jsonl --loop-log logs/loop.jsonl
 ```
 
 - `--sim-trace <path>` has no default. Without it the simulated groups show
@@ -502,6 +503,14 @@ MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/e
 - `--ports <path>` defaults to `loop-ports.jsonl` next to `logPath` of
   `config/loop.json`. The real tiles are the newest recorded probe per alias
   at or before the page clock, as in the static snapshot's Fleet.
+- `--loop-log <path>` defaults to `logPath` of `config/loop.json`. It is read
+  read-only on every request; only `placement` events are used (shape in
+  `docs/loop.md`), newest per real host alias at or before the page clock, and
+  an unterminated last line is ignored. A missing log reads `no data (no loop
+log)`; an unreadable one `error (loop-log-unreadable)`; a line that is not a
+  JSON object or a `placement` event with a bad `ts`, `workItemId`,
+  `chosenHostAlias` or candidate `error (loop-log-invalid)`. The real tiles
+  then fall back to the probe mapping below.
 
 The cursor is the query: `/live?t=<minute>` shows the simulated fleet at
 that minute of the trace. A `t` that is not a non-negative integer, or one
@@ -542,7 +551,21 @@ limit for real hosts. States: `eligible` (can take work now), `running`,
 `busy` (user present), `offline` (left the site network), and `unavailable`.
 The amber edge marks simulated tiles only.
 
-A real tile's state is read only from its card's fields:
+A real tile's state is read only from its card's fields. An open session is
+`running`; a registry, results or work store failure keeps `unavailable`;
+next, a placement entry younger than `placementMaxAgeSec` decides, matched on
+the stable prefix of the engine's reason:
+
+| Newest placement entry for the host           | State         |
+| --------------------------------------------- | ------------- |
+| not excluded (chosen, or eligible not chosen) | `eligible`    |
+| `excluded: not idle ...`                      | `busy`        |
+| `excluded: not on AC power`                   | `blocked`     |
+| `excluded: battery at ...`                    | `blocked`     |
+| `excluded: host state unavailable ...`        | `unavailable` |
+| any other excluded reason                     | `blocked`     |
+
+With no fresh entry, the probe mapping applies:
 
 | Card                                                                      | State         |
 | ------------------------------------------------------------------------- | ------------- |
@@ -558,7 +581,12 @@ probe failed, e.g. `daemon-rejected`) and a dashboard source failure (the
 registry, results log or work store could not be read); the card's state line
 in the host panel names which one: `Idle: <cause> (...)` for the host,
 `state: error (<code>)` or `state: no data (<reason>)` for the source. The
-real probes have no cause the simulated tiles call `blocked`.
+probes alone have no cause the simulated tiles call `blocked`; a placement
+entry gives one. A real tile's title ends with the newest placement, its
+`HH:MM:SS` time and `chosen` or the verbatim reason, and the real host panel
+has a `Last placement` block: time, item (linked to its task panel), `chosen`,
+`excluded` or `eligible, not chosen`, and the verbatim reason, marked when it
+is older than `placementMaxAgeSec`.
 
 Real work now: one table row per open real session: host, task title (linked
 to the task panel), stage (`implement`, the only stage the model has), model

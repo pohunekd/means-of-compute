@@ -52,6 +52,7 @@ function makeDashboardConfig(): DashboardConfig {
     maxRequestBytes: 1024,
     idleTimeoutSec: 10,
     workRowLimit: 50,
+    placementMaxAgeSec: 600,
     baselines,
   };
 }

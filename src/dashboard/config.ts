@@ -37,6 +37,7 @@ export interface DashboardConfig {
   readonly maxRequestBytes: number;
   readonly idleTimeoutSec: number;
   readonly workRowLimit: number;
+  readonly placementMaxAgeSec: number;
   readonly baselines: Baselines;
 }
 
@@ -54,6 +55,7 @@ const TOP_LEVEL_KEYS = [
   "maxRequestBytes",
   "idleTimeoutSec",
   "workRowLimit",
+  "placementMaxAgeSec",
   "baselines",
 ] as const;
 
@@ -254,6 +256,14 @@ function parseDashboardConfig(raw: unknown, path: string): DashboardConfig {
     maxRequestBytes: parseInteger(record, "maxRequestBytes", "maxRequestBytes", path, 1, 65536),
     idleTimeoutSec: parseInteger(record, "idleTimeoutSec", "idleTimeoutSec", path, 1, 255),
     workRowLimit: parseInteger(record, "workRowLimit", "workRowLimit", path, 1, 1000),
+    placementMaxAgeSec: parseInteger(
+      record,
+      "placementMaxAgeSec",
+      "placementMaxAgeSec",
+      path,
+      1,
+      86400,
+    ),
     baselines: {
       frontierTokens: parseTokenBaseline(
         baselines["frontierTokens"],

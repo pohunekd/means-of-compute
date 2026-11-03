@@ -509,7 +509,7 @@ function renderActivityRow(row: LiveActivityRow, liveModel: LiveModel): SafeHtml
         >${model === row.model ? row.model : model}</a
       >`
     : html`<span title="${row.model}">${model === row.model ? row.model : model}</span>`;
-  const modelCell = html`<td>${modelLink}</td>`;
+  const modelCell = html`<td class="modelcol">${modelLink}</td>`;
   return html`<tr>
     <td><time class="time" datetime="${row.at}" title="${row.at}">${clockTime(row.at)}</time></td>
     ${modelCell}

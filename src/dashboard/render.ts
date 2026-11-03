@@ -137,6 +137,8 @@ export const DASHBOARD_CSS = [
   ".dot.tile-blocked{background:var(--blk)}",
   ".dot.tile-busy{background:var(--busy)}",
   ".dot.tile-flagged{background:none;border:2px solid var(--amber)}",
+  ".live-activity-table th,.live-activity-table td{padding:5px 5px}",
+  ".live-activity-table .modelcol{min-width:7rem}",
   ".tick{list-style:none;margin:0;padding:0;font-size:15px}",
   ".tick li{padding:3px 0;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
   ".tick time{color:var(--dim);margin-right:6px;font-variant-numeric:tabular-nums}",
@@ -210,7 +212,7 @@ const REAL_TAGLINE =
 // Rows a framed tab shows before `showing N of M`; with the row and card
 // sizes of DASHBOARD_CSS these keep every tab inside one 1920x1080 frame.
 const FRAME_ROWS = {
-  work: 17,
+  work: 15,
   modelsTable: 6,
   calls: 4,
 } as const;

@@ -113,7 +113,7 @@ number:
 
 - **Work**: the Autonomy figures (`Finished tasks`, `Parked tasks`, `Human
 interventions`, `Retries`) as cards, then the Work table, newest first,
-  with its first 17 rows and `showing N of M items` over every work item.
+  with its first 15 rows and `showing N of M items` over every work item.
 - **Models**: the Usage figures as cards, then the Models table, the
   Autonomy `Sessions per model (finished tasks)` table and, with live
   sources, the newest real meter calls (as on Live, linked to the call

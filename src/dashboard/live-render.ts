@@ -1435,8 +1435,8 @@ export function renderLive(model: LiveModel): string {
       <div class="groups">${realGroup} ${simGroups}</div>
       ${legend}
       <p class="cite">
-        source: real recorded probes, dispatcher registry, work store and loop placement events;
-        simulated fleet trace (sim-trace-v1)
+        source: real recorded probes, dispatcher registry, work store and loop placement and
+        host-assessment events; simulated fleet trace (sim-trace-v1)
       </p>
     </section>
     <div class="rail">${rail}</div>

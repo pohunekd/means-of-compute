@@ -1,6 +1,7 @@
 // Savings coverage and figure notes: the token figures cover the records
 // with full token counts and name the excluded ones in a note, and every
-// qualifier renders as its own element under the value.
+// qualifier renders as its own element under the value. The cached-input
+// upper-bound note stays only for providers with rows lacking a cached count.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -14,7 +15,12 @@ const NOW = new Date("2026-10-28T12:00:00.000Z");
 
 function record(
   workItemId: string,
-  audit: { inputTokens: number | null; outputTokens: number | null; unmeasuredRequests?: number },
+  audit: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    unmeasuredRequests?: number;
+    cachedInputTokens?: number;
+  },
   seconds: number,
 ): Record<string, unknown> {
   return {
@@ -260,6 +266,41 @@ test("tokens by provider table empty when only w2-demo has no token counts", asy
     expect(table.note).toBe(
       "token counts not reported for w2-demo; 0 pending entries are not in this table; they count in spend above.",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost note drops the cached-input upper bound only when every row carries a count", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cached-note-"));
+  try {
+    await mkdir(join(dir, "verdicts"), { recursive: true });
+    const cachedLine = record(
+      "w1-demo",
+      { inputTokens: 100_000, outputTokens: 10_000, cachedInputTokens: 60_000 },
+      3600,
+    );
+    const figuresOf = async (lines: readonly unknown[]): Promise<Record<string, Figure>> => {
+      await writeFile(
+        join(dir, "ledger.jsonl"),
+        lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+      );
+      const model = buildDashboard(await inputsFor(dir));
+      const figures = model.panels.flatMap((panel) => panel.figures);
+      return Object.fromEntries(figures.map((figure) => [figure.label, figure]));
+    };
+    const note = "upper bound: cached-input pricing of meta-api not applied";
+    const counted = await figuresOf([cachedLine]);
+    expect(counted["Spent total"]?.source).not.toContain(note);
+    expect(counted["Actual token cost"]?.source).not.toContain(note);
+    // 60,000 * 0.002 + 40,000 * 0.1 + 10,000 * 0.2 USD per 1M tokens on meta-api.
+    expect(counted["Actual token cost"]?.cell).toEqual({ kind: "text", text: "$0.0061" });
+    const mixed = await figuresOf([
+      cachedLine,
+      record("w2-demo", { inputTokens: 100_000, outputTokens: 10_000 }, 1800),
+    ]);
+    expect(mixed["Spent total"]?.source).toContain(note);
+    expect(mixed["Actual token cost"]?.source).toContain(note);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

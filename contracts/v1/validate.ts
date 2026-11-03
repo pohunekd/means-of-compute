@@ -26,7 +26,7 @@ const validators = {
   "work-item": ajv.compile(workItemSchema),
   "host-capacity": ajv.compile(hostCapacitySchema),
   "placement-decision": ajv.compile(placementDecisionSchema),
-  "usage-record": ajv.compile(usageRecordSchema),
+  "usage-record": ajv.compile<UsageRecord>(usageRecordSchema),
   "audit-verdict": ajv.compile(auditVerdictSchema),
   "factory-spec": ajv.compile(factorySpecSchema),
 } as const;
@@ -44,9 +44,32 @@ const validateUsageRecord = validators["usage-record"];
 const validateAuditVerdict = validators["audit-verdict"];
 const validateFactorySpec = validators["factory-spec"];
 
+// JSON Schema cannot compare two fields of one object, so the bound
+// cachedInputTokens <= inputTokens is checked here, in the Ajv error shape.
+function cachedInputErrors(record: UsageRecord): readonly Record<string, unknown>[] | null {
+  const errors = record.tokens.flatMap((token, index) =>
+    token.cachedInputTokens !== undefined &&
+    token.inputTokens !== null &&
+    token.cachedInputTokens > token.inputTokens
+      ? [
+          {
+            instancePath: `/tokens/${String(index)}/cachedInputTokens`,
+            keyword: "maximum",
+            params: { comparison: "<=", limit: token.inputTokens },
+            message: "must be <= inputTokens",
+          },
+        ]
+      : [],
+  );
+  return errors.length === 0 ? null : errors;
+}
+
 export function contractErrors(schemaName: SchemaName, value: unknown): unknown {
   if (!Object.hasOwn(validators, schemaName)) {
     throw new Error(`Unknown schema: ${schemaName}`);
+  }
+  if (schemaName === "usage-record") {
+    return validateUsageRecord(value) ? cachedInputErrors(value) : validateUsageRecord.errors;
   }
   validators[schemaName](value);
   return validators[schemaName].errors;
@@ -65,7 +88,7 @@ export function isPlacementDecision(value: unknown): value is PlacementDecision 
 }
 
 export function isUsageRecord(value: unknown): value is UsageRecord {
-  return validateUsageRecord(value);
+  return validateUsageRecord(value) && cachedInputErrors(value) === null;
 }
 
 export function isAuditVerdict(value: unknown): value is AuditVerdict {

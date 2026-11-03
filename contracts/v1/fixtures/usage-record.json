@@ -9,7 +9,8 @@
       "inputTokens": 12000,
       "outputTokens": 3400,
       "requests": 14,
-      "source": "provider-usage"
+      "source": "provider-usage",
+      "cachedInputTokens": 9600
     },
     {
       "provider": "meta-api",

@@ -79,6 +79,8 @@ function foldTokens(
       outputs: (number | null)[];
       requests: number[];
       unmeasured: number;
+      cached: number;
+      cachedReported: boolean;
     }
   >();
   const collect = (token: PendingTokenUsage): void => {
@@ -96,6 +98,8 @@ function foldTokens(
         outputs: [],
         requests: [],
         unmeasured: 0,
+        cached: 0,
+        cachedReported: false,
       };
       groups.set(key, group);
       order.push(key);
@@ -104,6 +108,10 @@ function foldTokens(
     group.outputs.push(token.outputTokens);
     group.requests.push(token.requests);
     group.unmeasured += token.unmeasuredRequests ?? 0;
+    if (token.cachedInputTokens !== undefined) {
+      group.cached += token.cachedInputTokens;
+      group.cachedReported = true;
+    }
   };
   if (existing !== null) {
     for (const token of existing) {
@@ -138,6 +146,9 @@ function foldTokens(
       ...(group.unmeasured > 0 && inputTokens !== null && outputTokens !== null
         ? { unmeasuredRequests: group.unmeasured }
         : {}),
+      // An entry without a cached count adds none; the count is dropped when
+      // the folded input is unknown.
+      ...(group.cachedReported && inputTokens !== null ? { cachedInputTokens: group.cached } : {}),
     };
   });
 }

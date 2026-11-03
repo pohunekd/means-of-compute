@@ -292,8 +292,9 @@ failure. With no entries in scope the price part is prefixed with
 `no entries; `. Every money figure cites every price entry it used via
 `config/providers/<id>.json input $<in> per 1M, output $<out> per 1M`,
 joined with `"; "`, plus `; upper bound: cached-input pricing of <ids> not
-applied` when a provider prices cached input (there is no cached count to
-apply it to). When the scope holds bounded unmeasured entries, the spent-today and spent-total values carry the note `includes the upper bound for unmeasured calls of <sorted ids>`. The spent-today ids are bounded entries finished that day; the spent-total ids are every bounded entry.
+applied` listing each provider that prices cached input unless it has token
+rows in the figure's scope and every one of them carries `cachedInputTokens`.
+Token cost uses the cached rule of docs/budget-guard.md. When the scope holds bounded unmeasured entries, the spent-today and spent-total values carry the note `includes the upper bound for unmeasured calls of <sorted ids>`. The spent-today ids are bounded entries finished that day; the spent-total ids are every bounded entry.
 
 `Budget pools`, the first table: one row per budget pool
 (docs/budget-guard.md), main pool first, columns

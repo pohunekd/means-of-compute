@@ -69,6 +69,7 @@ function toExitCode(error: unknown): 2 | 3 | 4 {
 interface AuditorUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  readonly cachedInputTokens?: number;
 }
 
 // One ledger entry per provider call that may be billed, on success
@@ -95,6 +96,9 @@ async function recordAuditUsage(
           outputTokens: usage?.outputTokens ?? null,
           requests: 1,
           source: AUDITOR_USAGE_SOURCE,
+          ...(usage?.cachedInputTokens !== undefined && usage.inputTokens !== null
+            ? { cachedInputTokens: usage.cachedInputTokens }
+            : {}),
         },
       ],
       session: null,
@@ -209,7 +213,13 @@ export async function runAudit(input: AuditInput, deps: AuditDeps): Promise<Audi
     deps.ledgerPath,
     input.item.id,
     auditor,
-    { inputTokens: call.inputTokens, outputTokens: call.outputTokens },
+    {
+      inputTokens: call.inputTokens,
+      outputTokens: call.outputTokens,
+      ...(call.cachedInputTokens !== undefined
+        ? { cachedInputTokens: call.cachedInputTokens }
+        : {}),
+    },
     deps.now,
   );
 

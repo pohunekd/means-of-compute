@@ -110,6 +110,9 @@ export interface TokenUsage {
   // Billed calls that reported no usage; when present, inputTokens and
   // outputTokens are the sums of the other calls and are never null.
   readonly unmeasuredRequests?: number;
+  // Input tokens of the measured calls that the provider reported as cached,
+  // at most inputTokens; absent means none were reported as cached.
+  readonly cachedInputTokens?: number;
 }
 
 export interface SessionTime {

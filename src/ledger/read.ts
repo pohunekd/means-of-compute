@@ -139,6 +139,9 @@ export function spendEntriesOf(contents: LedgerContents): readonly SpendEntry[] 
       entry.outputTokens !== null
         ? { unmeasuredRequests: entry.unmeasuredRequests }
         : {}),
+      ...(entry.cachedInputTokens !== undefined
+        ? { cachedInputTokens: entry.cachedInputTokens }
+        : {}),
     })),
   }));
   for (const entry of contents.pending) {
@@ -156,6 +159,9 @@ export function spendEntriesOf(contents: LedgerContents): readonly SpendEntry[] 
         token.inputTokens !== null &&
         token.outputTokens !== null
           ? { unmeasuredRequests: token.unmeasuredRequests }
+          : {}),
+        ...(token.cachedInputTokens !== undefined
+          ? { cachedInputTokens: token.cachedInputTokens }
           : {}),
       })),
     });

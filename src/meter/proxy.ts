@@ -475,6 +475,7 @@ async function forwardCall(
     status: number | null;
     inputTokens: number | null;
     outputTokens: number | null;
+    cachedInputTokens?: number;
     clientGone: boolean;
     ms: number;
     bytesOut: number;
@@ -489,6 +490,9 @@ async function forwardCall(
       status: final.status,
       inputTokens: final.inputTokens,
       outputTokens: final.outputTokens,
+      ...(final.cachedInputTokens !== undefined
+        ? { cachedInputTokens: final.cachedInputTokens }
+        : {}),
       clientGone: final.clientGone,
       ms: final.ms,
       bytesIn,
@@ -518,6 +522,9 @@ async function forwardCall(
       billed: final.billed,
       inputTokens: final.inputTokens,
       outputTokens: final.outputTokens,
+      ...(final.cachedInputTokens !== undefined
+        ? { cachedInputTokens: final.cachedInputTokens }
+        : {}),
       ms: final.ms,
       bytesIn,
       bytesOut: final.bytesOut,
@@ -651,6 +658,7 @@ async function forwardCall(
         let billed: boolean;
         let inputTokens: number | null;
         let outputTokens: number | null;
+        let cachedInputTokens: number | undefined;
         if (!is2xx) {
           // Whatever happens to the body, the end is upstream-status,
           // unbilled, with null counts.
@@ -674,6 +682,7 @@ async function forwardCall(
           }
           inputTokens = counts.inputTokens;
           outputTokens = counts.outputTokens;
+          cachedInputTokens = seen.seen ? seen.cachedInputTokens : undefined;
           if (!clientGone && outcome !== "ok" && outcome !== "no-usage") {
             errorReason = outcome ?? "upstream-broken";
           }
@@ -684,6 +693,7 @@ async function forwardCall(
           status,
           inputTokens,
           outputTokens,
+          ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
           clientGone,
           ms: Math.round(state.timers.elapsedMs() - m0),
           bytesOut,

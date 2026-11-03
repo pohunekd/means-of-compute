@@ -189,6 +189,16 @@ function isValidPortToken(token: TokenUsage): boolean {
       return false;
     }
   }
+  if (token.cachedInputTokens !== undefined) {
+    if (
+      !Number.isSafeInteger(token.cachedInputTokens) ||
+      token.cachedInputTokens < 0 ||
+      token.inputTokens === null ||
+      token.cachedInputTokens > token.inputTokens
+    ) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -231,6 +241,9 @@ function pendingEntryOf(entry: RegistryEntry, terminal: RegistryTerminal): Pendi
             source: token.source,
             ...(token.unmeasuredRequests !== undefined
               ? { unmeasuredRequests: token.unmeasuredRequests }
+              : {}),
+            ...(token.cachedInputTokens !== undefined
+              ? { cachedInputTokens: token.cachedInputTokens }
               : {}),
           }))
         : [

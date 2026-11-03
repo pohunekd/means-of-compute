@@ -107,10 +107,16 @@
         "status": { "type": ["integer", "null"] },
         "inputTokens": { "$ref": "#/$defs/tokens" },
         "outputTokens": { "$ref": "#/$defs/tokens" },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
         "clientGone": { "type": "boolean" },
         "ms": { "type": "integer", "minimum": 0 },
         "bytesIn": { "type": "integer", "minimum": 0 },
         "bytesOut": { "type": "integer", "minimum": 0 }
+      },
+      "dependentSchemas": {
+        "cachedInputTokens": {
+          "properties": { "inputTokens": { "type": "integer" } }
+        }
       }
     }
   }

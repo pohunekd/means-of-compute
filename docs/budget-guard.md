@@ -36,13 +36,17 @@ coordinator's daily digest channel.
   used is the JSON number as parsed: each validated price number goes through
   `Number.prototype.toString()`; the guard rejects a `toString()` result
   containing `e`/`E` or with more than 9 decimals. A source text with more
-  digits than a double holds is outside the rule and is not detected. The
-  guard prices all input tokens at `inputPer1M` and output tokens at
-  `outputPer1M` per 1M tokens. All sums and cap comparisons are exact BigInt: cost accumulates undivided as tokens *
+  digits than a double holds is outside the rule and is not detected. A
+  token entry costs
+  `cachedInputTokens * cachedInputPer1M + (inputTokens - cachedInputTokens) * inputPer1M + outputTokens * outputPer1M`
+  per 1M tokens when the provider has `cachedInputPer1M`; without that price all
+  input is charged at `inputPer1M`. An entry without `cachedInputTokens`
+  has no cached tokens, so its input is charged at `inputPer1M` in full.
+  The unmeasured-call bounds are charged at `inputPer1M`. The guard and the
+  dashboard share one function for this (`tokenCostNanoTimes1M` in
+  `src/budget/cost.ts`). All sums and cap comparisons are exact BigInt: cost accumulates undivided as tokens *
   priceNanoPer1M per scope and is compared with capNano * 1_000_000; a
-  float appears only for display. Cached pricing is not applied because
-  contracts-v1 `TokenUsage` has no cached-token count, so spend is an upper
-  bound. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
+  float appears only for display. Meta Contributor prices (0.10 input, 0.20 output USD per 1M) and the
   Muse Wonder Standard prices (4.00 input, 0.20 cached input, 20.00 output USD
   per 1M; `config/providers/meta-wonder.json`; source https://dev.meta.ai/docs/pricing-rate-limits,
   read 2026-10-28), the Muse Spark Open prices on Baseten (1.25 input, 0.15

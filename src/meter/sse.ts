@@ -6,6 +6,8 @@ export type UsageSeen =
       readonly seen: true;
       readonly inputTokens: number | null;
       readonly outputTokens: number | null;
+      // Present only for a valid count: an integer from 0 to inputTokens.
+      readonly cachedInputTokens?: number;
     }
   | { readonly seen: false };
 
@@ -18,6 +20,20 @@ export function usageCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+// usage.prompt_tokens_details.cached_tokens, counted inside prompt_tokens. A
+// missing or invalid count, or one above the input count, is no cached count.
+export function cachedCount(usage: unknown, inputTokens: number | null): number | null {
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) {
+    return null;
+  }
+  const details = (usage as Record<string, unknown>)["prompt_tokens_details"];
+  if (typeof details !== "object" || details === null || Array.isArray(details)) {
+    return null;
+  }
+  const cached = usageCount((details as Record<string, unknown>)["cached_tokens"]);
+  return cached !== null && inputTokens !== null && cached <= inputTokens ? cached : null;
+}
+
 function candidateCounts(payload: unknown): UsageSeen {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return { seen: false };
@@ -27,10 +43,13 @@ function candidateCounts(payload: unknown): UsageSeen {
     return { seen: false };
   }
   const record = usage as Record<string, unknown>;
+  const inputTokens = usageCount(record["prompt_tokens"]);
+  const cached = cachedCount(record, inputTokens);
   return {
     seen: true,
-    inputTokens: usageCount(record["prompt_tokens"]),
+    inputTokens,
     outputTokens: usageCount(record["completion_tokens"]),
+    ...(cached !== null ? { cachedInputTokens: cached } : {}),
   };
 }
 

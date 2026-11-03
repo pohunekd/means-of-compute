@@ -9,6 +9,7 @@ import {
   isBoundedAuditToken,
   isPriced,
   summarizeSpend,
+  tokenCostNanoTimes1M,
   utcCalendarDay,
 } from "../budget/cost.js";
 import { poolHolds, poolsOf, spendBoundsOf } from "../budget/config.js";
@@ -144,10 +145,20 @@ function priceCite(ids: readonly string[], pricing: ReadonlyMap<string, NanoPric
   return parts.join("; ");
 }
 
-function cachedClause(ids: readonly string[], pricing: ReadonlyMap<string, NanoPricing>): string {
+// A provider with a cached price stays an upper bound unless it has token
+// rows in scope and every one of them carries a cached count.
+function cachedClause(
+  ids: readonly string[],
+  pricing: ReadonlyMap<string, NanoPricing>,
+  tokens: readonly { readonly provider: string; readonly cachedInputTokens?: number }[],
+): string {
+  const counted = (id: string): boolean => {
+    const rows = tokens.filter((token) => token.provider === id);
+    return rows.length > 0 && rows.every((token) => token.cachedInputTokens !== undefined);
+  };
   const cached = [...new Set(ids)]
     .sort()
-    .filter((id) => pricing.get(id)?.cachedInputNanoPer1M !== undefined);
+    .filter((id) => pricing.get(id)?.cachedInputNanoPer1M !== undefined && !counted(id));
   return cached.length === 0
     ? ""
     : `; upper bound: cached-input pricing of ${cached.join(", ")} not applied`;
@@ -722,10 +733,18 @@ function buildUsagePanel(inputs: DashboardInputs, day: string): Panel {
     const allPrefix = allIds.length === 0 ? "no entries; " : "";
     const spentTodaySource =
       `ledger records and pending entries finished on ${day}, tokens × price; ` +
-      `${todayPrefix}${priceCite(todayScope, pricing)}${cachedClause(todayScope, pricing)}`;
+      `${todayPrefix}${priceCite(todayScope, pricing)}${cachedClause(
+        todayScope,
+        pricing,
+        scope.today.flatMap((entry) => entry.tokens),
+      )}`;
     const spentTotalSource =
       `ledger records and pending entries, tokens × price; ` +
-      `${allPrefix}${priceCite(allScope, pricing)}${cachedClause(allScope, pricing)}`;
+      `${allPrefix}${priceCite(allScope, pricing)}${cachedClause(
+        allScope,
+        pricing,
+        scope.all.flatMap((entry) => entry.tokens),
+      )}`;
     const boundedToday = summary.boundedTodayWorkItemIds;
     if (unknownToday.length > 0) {
       const ids = [...new Set(unknownToday.map((entry) => entry.workItemId))].sort();
@@ -997,7 +1016,11 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
     const pricing = inputs.pricing.value;
     const actualSource =
       `ledger records with full token counts, tokens × price; ` +
-      `${recordIds.length === 0 ? "no entries; " : ""}${priceCite(recordIds, pricing)}${cachedClause(recordIds, pricing)}`;
+      `${recordIds.length === 0 ? "no entries; " : ""}${priceCite(recordIds, pricing)}${cachedClause(
+        recordIds,
+        pricing,
+        measured.flatMap((record) => record.tokens),
+      )}`;
     if (coverage.emptyReason !== null) {
       figures.push({
         label: "Actual token cost",
@@ -1016,8 +1039,14 @@ function buildSavingsPanel(inputs: DashboardInputs): Panel {
             }
             return (
               inner +
-              tokenCostScaled(token.inputTokens ?? 0, entry.inputNanoPer1M) +
-              tokenCostScaled(token.outputTokens ?? 0, entry.outputNanoPer1M)
+              guardScaled(
+                tokenCostNanoTimes1M(
+                  BigInt(token.inputTokens ?? 0),
+                  BigInt(token.cachedInputTokens ?? 0),
+                  BigInt(token.outputTokens ?? 0),
+                  entry,
+                ),
+              )
             );
           }, 0n),
         0n,

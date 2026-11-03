@@ -777,6 +777,29 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(kioskFlat).toContain("at 17:53 (merged)");
     // A yesterday ledger record never counts toward today's two tasks on kiosk-a.
     // One of the two entries is unpriced, so the card prints the `at least` form.
+    // A day-blind today count would also swallow yesterday's record and read 3 tasks.
+    {
+      const ledgerPath = join(fixture.dir, "ledger.jsonl");
+      const ledgerOrig = readFileSync(ledgerPath, "utf8");
+      const moved = ledgerOrig
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) =>
+          line.includes('"w1-old"')
+            ? line.replace("2026-11-03T17:51:00.000Z", "2026-11-02T17:51:00.000Z")
+            : line,
+        );
+      writeFileSync(ledgerPath, `${moved.join("\n")}\n`);
+      const dashYesterday = await dashboardInputs(fixture);
+      const liveYesterday = buildLive(
+        await gatherLiveInputs(fixture.sources, dashYesterday, 60, () => {}),
+        { view: "overview", t: 60, paused: false, host: null },
+      );
+      const kioskYesterday = cardSlice(renderLive(liveYesterday), "kiosk-a").replace(/\s+/g, " ");
+      expect(kioskYesterday).toContain("today (UTC): 1 task");
+      expect(kioskYesterday).not.toContain("2 tasks");
+      writeFileSync(ledgerPath, ledgerOrig);
+    }
     expect(kioskFlat).toContain("today (UTC): 2 tasks");
     expect(kioskFlat).toContain("at least");
     expect(kioskFlat).toContain("of 3 entries unpriced");
@@ -825,6 +848,12 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     const rejectedKiosk = cardSlice(renderLive(liveRejected), "kiosk-a");
     expect(rejectedKiosk).toContain("Idle: last round: start-rejected");
     expect(rejectedKiosk).not.toContain("audit");
+    // The last-finished line still names the newest merged entry: a mutated
+    // any-outcome newest would name the newer start-rejected row instead.
+    expect(rejectedKiosk).toContain("last finished");
+    expect(rejectedKiosk).toContain("w3-kiosk");
+    expect(rejectedKiosk).toContain("at 17:53 (merged)");
+    expect(rejectedKiosk).not.toContain("start-rejected)");
     // verdict-free repo check: links stay plain when the repo leaves the configured set
     const liveNoRepo = buildLive(
       await gatherLiveInputs(
@@ -891,6 +920,77 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     expect(stripText).toContain("w1-old");
     expect(stripText).toContain("$0.0039");
     expect(stripText).not.toContain("w2-queued");
+    // The strip counts the verdicts of the newest stored head: with two stored
+    // verdicts for w3-kiosk, the row shows the last one (0/0/0), never the older
+    // tampered 1/0/0 that the position-zero mutation would pick.
+    {
+      const vdir = join(fixture.dir, "verdicts", "w3-kiosk");
+      const olderPath = join(vdir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json");
+      writeFileSync(
+        olderPath,
+        JSON.stringify({
+          schemaVersion: "v1",
+          workItemId: "w3-kiosk",
+          pullNumber: 11,
+          headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          repo: "example/demo-repo",
+          auditorModel: "muse-spark-1.3-contributor",
+          authorModels: ["meta-models/muse-spark-open-1026"],
+          counts: { high: 1, medium: 0, low: 0 },
+          findings: [
+            {
+              severity: "high",
+              location: "src/a.ts:1",
+              defect: "x",
+              scenario: "s",
+              fixDirection: "f",
+            },
+          ],
+        }),
+      );
+      const dashTwo = await dashboardInputs(fixture);
+      const liveTwo = buildLive(await gatherLiveInputs(fixture.sources, dashTwo, 60, () => {}), {
+        view: "overview",
+        t: 60,
+        paused: false,
+        host: null,
+      });
+      const stripTwo = stripSlice(renderLive(liveTwo)).replace(/\s+/g, " ");
+      expect(stripTwo).toContain("0/0/0");
+      expect(stripTwo).not.toContain("1/0/0");
+      rmSync(olderPath);
+    }
+    // The strip recounts findings instead of trusting stored counts: a tampered
+    // w1-old verdict (counts 0/0/0 over one high finding) renders
+    // `invalid verdict counts`, never `0/0/0` that raw stored counts would show.
+    {
+      const vPath = join(
+        fixture.dir,
+        "verdicts",
+        "w1-old",
+        "dddddddddddddddddddddddddddddddddddddddd.json",
+      );
+      const vOrig = readFileSync(vPath, "utf8");
+      const tampered = JSON.parse(vOrig) as Record<string, unknown>;
+      tampered["findings"] = [
+        {
+          severity: "high",
+          location: "src/a.ts:1",
+          defect: "x",
+          scenario: "s",
+          fixDirection: "f",
+        },
+      ];
+      writeFileSync(vPath, JSON.stringify(tampered));
+      const dashTamperedStrip = await dashboardInputs(fixture);
+      const liveTamperedStrip = buildLive(
+        await gatherLiveInputs(fixture.sources, dashTamperedStrip, 60, () => {}),
+        { view: "overview", t: 60, paused: false, host: null },
+      );
+      const stripTampered = stripSlice(renderLive(liveTamperedStrip)).replace(/\s+/g, " ");
+      expect(stripTampered).toContain("invalid verdict counts");
+      writeFileSync(vPath, vOrig);
+    }
     // A findings round newer than the merges never enters the merged-only strip.
     // An item with no ledger record reads `not in ledger yet`, never `$0.0000`.
     const liveFinding = buildLive(
@@ -940,6 +1040,26 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
     // and prints `no data (no verdict)` for its counts, never a zero cost.
     expect(stripText).toContain("no data (no verdict)");
     expect(stripText).not.toContain("$0.0000");
+    // A strip entry without a ledger record reads `not in ledger yet`: removing
+    // the w1-old ledger record turns its cost into the no-data form, never a
+    // zero cost that the missing-ledger mutation would restore.
+    {
+      const ledgerPath = join(fixture.dir, "ledger.jsonl");
+      const ledgerOrig = readFileSync(ledgerPath, "utf8");
+      const kept = ledgerOrig
+        .split("\n")
+        .filter((line) => line.trim() !== "" && !line.includes('"w1-old"'));
+      writeFileSync(ledgerPath, `${kept.join("\n")}\n`);
+      const dashNoLedger = await dashboardInputs(fixture);
+      const liveNoLedger = buildLive(
+        await gatherLiveInputs(fixture.sources, dashNoLedger, 60, () => {}),
+        { view: "overview", t: 60, paused: false, host: null },
+      );
+      const stripNoLedger = stripSlice(renderLive(liveNoLedger)).replace(/\s+/g, " ");
+      expect(stripNoLedger).toContain("not in ledger yet");
+      expect(stripNoLedger).not.toContain("$0.0000");
+      writeFileSync(ledgerPath, ledgerOrig);
+    }
     expect(page).toContain('class="tile tile-sim');
     expect(page).toContain("REAL");
     expect(page).toContain('<span class="simtag">SIMULATED</span>');

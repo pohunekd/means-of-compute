@@ -1296,7 +1296,17 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
                   ...panel,
                   tables: panel.tables.map((table) =>
                     table.caption === "Budget pools"
-                      ? { ...table, rows: [pool("$0.0000"), pool("$35.0000")] }
+                      ? {
+                          ...table,
+                          rows: [
+                            pool("$0.0000"),
+                            pool("$0.5000"),
+                            pool("$35.0000"),
+                            pool("$139.9000"),
+                            pool("$140.0000"),
+                            pool("$200.0000"),
+                          ],
+                        }
                       : table,
                   ),
                 },
@@ -1317,6 +1327,10 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
       });
       expect(savingsPage).toContain('<span class="capshare">0% of cap</span>');
       expect(savingsPage).toContain('<span class="capshare">25% of cap</span>');
+      expect(savingsPage).toContain('<span class="capshare">&lt;1% of cap</span>');
+      expect(savingsPage).toContain('<span class="capshare">99% of cap</span>');
+      expect(savingsPage).toContain('<span class="capshare">100% of cap</span>');
+      expect(savingsPage).toContain('<span class="capshare">over cap (143%)</span>');
     }
     // Old views redirect to the tab that holds them, keeping t and pause.
     for (const [old, target] of [

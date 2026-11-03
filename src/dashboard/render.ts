@@ -879,6 +879,25 @@ function usdOf(cell: Cell | undefined): string | null {
   return USD_TEXT.exec(cell.text)?.[1] ?? null;
 }
 
+// Share of the cap, so text, bar and the guard decision never disagree:
+// zero spend reads `0% of cap`; a share under 1% reads `<1% of cap`; up to the
+// cap it is the rounded whole percent, `100%` only once spent reaches the cap;
+// over the cap it reads `over cap (143%)` while the meter stays full.
+function capShareText(spent: number, cap: number): string {
+  const share = (spent / cap) * 100;
+  if (spent === 0) {
+    return "0% of cap";
+  }
+  if (spent > cap) {
+    return `over cap (${String(Math.round(share))}%)`;
+  }
+  if (share < 1) {
+    return "<1% of cap";
+  }
+  const whole = Math.round(share);
+  return `${String(spent < cap ? Math.min(whole, 99) : whole)}% of cap`;
+}
+
 // A bar of a budget pool row's spent total against its total cap and the same
 // share as a whole percent, both read from the row's own cells; a row without
 // both dollar values reads no data.
@@ -892,10 +911,9 @@ function capMeter(columns: readonly string[]): ExtraColumn {
       if (spent === null || cap === null || Number(cap) <= 0) {
         return constantHtml('<span class="nodata">no data</span>');
       }
-      const share = Math.round((Number(spent) / Number(cap)) * 100);
       return html`<span class="capbar"
         ><meter min="0" max="${cap}" value="${spent}"></meter
-        ><span class="capshare">${String(share)}% of cap</span></span
+        ><span class="capshare">${capShareText(Number(spent), Number(cap))}</span></span
       >`;
     },
   };

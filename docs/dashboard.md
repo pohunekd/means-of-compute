@@ -128,7 +128,9 @@ interventions`, `Retries`) as cards, then the Work table, newest first,
 - **Savings**: `Frontier-token baseline`, `Actual token cost` and `Token
 savings` as large cards; `Budget caps`, the Usage budget pools table with
   a bar of each pool's spent total against its total cap (read from the
-  row's own cells, with the same share as a whole percent, `37% of cap`; a
+  row's own cells, with the same share as text: `0% of cap` for no spend,
+  `<1% of cap` under 1%, the rounded whole percent such as `37% of cap` up to
+  the cap (`100%` only once spent reaches it), `over cap (143%)` past it; a
   row without both dollar values reads `no data` there);
   and every Savings figure with its note and full source.
 

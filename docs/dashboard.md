@@ -570,10 +570,12 @@ queue too. It is matched on the stable prefix of the engine's reason; for
 | `excluded: not idle (user activity unknown: ...)`               | `unavailable` |
 | `excluded: not idle (power unknown: ...)`                       | `unavailable` |
 | `excluded: not idle (...)`, any other inner reason (user input) | `busy`        |
-| `excluded: not on AC power`                                     | `blocked`     |
-| `excluded: battery at ...`                                      | `blocked`     |
 | `excluded: host state unavailable ...`                          | `unavailable` |
 | any other excluded reason                                       | `blocked`     |
+
+An excluded reason the table does not list reads `blocked`; that covers the
+engine's direct `excluded: not on AC power`, `excluded: battery at ...`,
+`excluded: outside policy window` and `excluded: at agent limit ...` reasons.
 
 With no fresh entry, the probe mapping applies:
 

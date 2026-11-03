@@ -253,11 +253,10 @@ const OFFLINE_CAUSES: ReadonlySet<string> = new Set([
   "stale",
 ]);
 
-// Excluded-reason prefixes the placement engine writes, and the tile state
-// each means; any other excluded reason reads as blocked.
+// Excluded-reason prefixes the placement engine writes that do not read as
+// blocked; any other excluded reason, among them the AC power, battery and
+// policy-window prefixes, reads as blocked.
 const PLACEMENT_STATES: readonly (readonly [string, LiveTileState])[] = [
-  ["excluded: not on AC power", "blocked"],
-  ["excluded: battery at", "blocked"],
   ["excluded: host state unavailable", "unavailable"],
 ];
 

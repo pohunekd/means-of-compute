@@ -1417,11 +1417,19 @@ test("real tiles take the newest placement or host assessment and map not-idle i
       [
         assessment("2026-11-03T17:58:45.000Z", [
           notIdle("kiosk-a", "user activity unknown: unavailable"),
+          {
+            hostAlias: "laptop-b",
+            excluded: true,
+            reason: "excluded: host state unavailable (stale)",
+          },
         ]),
+        placement("2026-11-03T17:58:50.000Z", [notIdle("laptop-a", "not on AC power")]),
       ],
       null,
     );
     expect(tileClass(activity, "kiosk-a")).toBe("tile tile-unavailable");
+    expect(tileClass(activity, "laptop-b")).toBe("tile tile-unavailable");
+    expect(tileClass(activity, "laptop-a")).toBe("tile tile-blocked");
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

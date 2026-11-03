@@ -1,5 +1,5 @@
 // Dashboard HTTP server. One Bun.serve on the loopback listen address:
-// GET / renders one of four tabs (Live, Work, Models, Savings; Live only when
+// GET / renders one of four tabs (Live, Work, Models, Cost; Live only when
 // live sources are wired), the old view names and GET /live redirect, and
 // everything else gets a plain error status. The first failing step answers
 // (Host allowlist, method, path), and any throw while gathering, building or
@@ -66,13 +66,14 @@ const TEXT_HEADERS = {
   "x-content-type-options": "nosniff",
 } as const;
 
-const TAB_IDS: ReadonlySet<string> = new Set<TabId>(["live", "work", "models", "savings"]);
+const TAB_IDS: ReadonlySet<string> = new Set<TabId>(["live", "work", "models", "cost"]);
 // Old view names redirect to the tab that holds their content.
 const LEGACY_VIEWS: ReadonlyMap<string, TabId> = new Map<string, TabId>([
   ["overview", "live"],
   ["fleet", "live"],
   ["autonomy", "work"],
   ["usage", "models"],
+  ["savings", "cost"],
 ]);
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const TASK_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -286,7 +287,7 @@ export async function startDashboard(deps: DashboardDeps): Promise<DashboardServ
               url.pathname,
             );
           }
-          // Work, Models and Savings take no panel: a known host is accepted
+          // Work, Models and Cost take no panel: a known host is accepted
           // and ignored, any other selection is 404.
           if (view !== "live" && activeSelectionValue !== null) {
             if (activeSelectionKey !== "host") {

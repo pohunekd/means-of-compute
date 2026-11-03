@@ -36,9 +36,6 @@ main{min-width:0}
 .card>.label{display:block;font-size:15px;letter-spacing:0.04em;color:var(--dim);text-transform:uppercase}
 .card>.value{display:block;font-size:31px;font-weight:650;line-height:1.2;margin:2px 0}
 .card>.nodata,.card>.error{display:block;font-size:17px;margin:4px 0}
-.big .card>.value{font-size:42px}
-.card.good{border-top-color:var(--run)}
-.card.good>.value{color:var(--run)}
 section,.panel{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 10px;min-width:0}
 h2{font-size:19px;margin:0 0 4px;font-weight:650}
 h2 .cnt{color:var(--dim);font-weight:500;font-size:16px}
@@ -50,7 +47,7 @@ h3{font-size:17px;margin:0 0 4px;font-weight:650}
 .cite{font-size:12.5px;color:var(--faint);margin:4px 0 0;overflow-wrap:anywhere}
 .shown{font-size:15px;color:var(--dim);margin:6px 0 0}
 .frame .card .note,.frame section .note{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.frame .card .cite,.frame .big .card .note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frame .card .cite,.frame .oneline .card .note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chip{display:inline-block;font-size:15px;font-weight:700;letter-spacing:0.04em;border-radius:5px;padding:0 7px;line-height:1.35;vertical-align:1px;white-space:nowrap}
 .chip-real{background:var(--real);color:var(--on-strong)}
 .simtag{display:inline-block;font-size:15px;font-weight:700;letter-spacing:0.04em;border-radius:5px;padding:0 7px;line-height:1.3;vertical-align:1px;white-space:nowrap;border:1.5px dashed var(--dim);color:var(--dim)}
@@ -78,19 +75,27 @@ details summary{cursor:pointer;font-weight:600;color:var(--acc);white-space:nowr
 .placement-full{margin:4px 0 0;color:var(--dim);font-size:15px;max-width:38rem}
 meter{display:block;width:100%;min-width:12rem;height:14px;margin-top:4px}
 td.fignote{color:var(--dim)}
+.capbar{display:flex;align-items:center;gap:8px}
+.capbar meter{margin-top:0;flex:1;min-width:8rem}
+.capshare{font-size:15px;color:var(--dim);white-space:nowrap}
 td.figlabel,td.figamount{white-space:nowrap}
-.table-savings{table-layout:fixed}
-.table-savings td{padding:4px 8px;line-height:1.35}
-.table-savings .c-label{width:14%}
-.table-savings .c-amount{width:8%}
-.table-savings .c-note{width:34%}
+.table-frontier{table-layout:fixed}
+.table-frontier td{padding:4px 8px;line-height:1.35}
+.table-frontier .c-label{width:14%}
+.table-frontier .c-amount{width:8%}
+.table-frontier .c-note{width:34%}
 meter::-webkit-meter-bar{background:var(--panel);border:1px solid var(--line);border-radius:5px}
 meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
 .cols2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;align-items:start}
 .realwork{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:6px 0 8px}
-.rw{border:1.5px solid var(--real);border-top-width:1.5px;padding:8px 12px}
-.rw.idle{border-color:var(--line)}
-.rw .al{font-size:19px;font-weight:650;color:var(--ink)}
+.rw{position:relative;border:1.5px solid var(--real);border-left:5px solid var(--off);padding:8px 12px}
+.rw.idle{border-top-color:var(--line);border-right-color:var(--line);border-bottom-color:var(--line)}
+.rw .al{font-size:19px;font-weight:650;color:var(--acc)}
+.rw .al::after{content:'';position:absolute;inset:0;border-radius:inherit}
+.rw a:not(.al){position:relative;z-index:1}
+.rw:hover{border-color:var(--acc)}
+.rw .al:hover{text-decoration:none}
+.rw:has(.al:focus-visible){outline:2px solid var(--acc);outline-offset:2px}
 .rw .task{font-size:16px;font-weight:600;margin:3px 0 2px;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .rw .task.idle-task{color:var(--dim)}
 .rw .meta{font-size:15px;color:var(--dim);margin:1px 0;line-height:1.35}
@@ -119,6 +124,7 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
 .tile-reported{border-left-color:var(--eli)}
 .tile-unavailable{border-left-color:var(--bad)}
 .tile-flagged{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber)}
+.selected{outline:2px solid var(--acc);outline-offset:2px}
 .flag{color:var(--amber);font-weight:700}
 .legend{font-size:13.5px;color:var(--dim);margin:6px 0 0}
 .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin:0 4px 0 10px;vertical-align:-1px;background:var(--off)}
@@ -126,6 +132,7 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
 .dot.tile-eligible{background:var(--eli)}
 .dot.tile-blocked{background:var(--blk)}
 .dot.tile-busy{background:var(--busy)}
+.dot.tile-unavailable{background:var(--bad)}
 .dot.tile-flagged{background:none;border:2px solid var(--amber)}
 .live-activity-table th,.live-activity-table td{padding:5px 5px}
 .live-activity-table .modelcol{min-width:7rem}
@@ -137,6 +144,10 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
 .panel ul{margin:2px 0 4px;padding-left:20px;font-size:15px}
 .panel li{margin:1px 0;overflow-wrap:anywhere}
 .panel h3{font-size:19px}
+.pblock{margin:8px 0 0}
+.plabel{font-size:15px;font-weight:650;color:var(--ink);margin:0 0 2px}
+.ptable td,.ptable th{padding:4px 6px}
+.ptable td:not(:last-child){white-space:nowrap}
 .breadcrumb{font-size:15px;color:var(--dim)}
 @media (max-width:900px){.frame{height:auto}.live-layout,.cols2{grid-template-columns:1fr}.realwork{grid-template-columns:repeat(2,minmax(0,1fr))}.fin{flex-wrap:wrap}.tagline{margin-left:0}}</style>
       </head>
@@ -155,12 +166,7 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
         Every figure names its source. "no data" means an input is missing; "error" means an input
         could not be read (details in logs/dashboard.jsonl).
       </p>
-      <div class="cards"><div class="card" title="token savings over 38 of 45 records; gh-moc-130, gh-moc-139, gh-moc-141 have no token counts; gh-moc-159, gh-moc-174, gh-moc-190, gh-moc-252 have calls without usage; compute-hour savings over all 45 records; source: token savings plus compute-hour savings above; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M; config/providers/baseten.json input $1.25 per 1M, output $4.25 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; config/dashboard.json baselines.cloudSandboxHour $0.36 per hour; config/dashboard.json baselines.ownedHostHour $0.045 per hour">
-    <span class="label">Total savings</span>
-    <span class="value">$204.9589</span>
-    <p class="note">token savings over 38 of 45 records; gh-moc-130, gh-moc-139, gh-moc-141 have no token counts; gh-moc-159, gh-moc-174, gh-moc-190, gh-moc-252 have calls without usage; compute-hour savings over all 45 records</p>
-    <p class="cite">source: token savings plus compute-hour savings above; config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M; config/providers/baseten.json input $1.25 per 1M, output $4.25 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; config/dashboard.json baselines.cloudSandboxHour $0.36 per hour; config/dashboard.json baselines.ownedHostHour $0.045 per hour</p>
-  </div><div class="card" title="includes the upper bound for unmeasured calls of gh-moc-130; source: ledger records and pending entries, tokens × price; config/providers/baseten.json input $1.25 per 1M, output $4.25 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of baseten, meta-api not applied">
+      <div class="cards"><div class="card" title="includes the upper bound for unmeasured calls of gh-moc-130; source: ledger records and pending entries, tokens × price; config/providers/baseten.json input $1.25 per 1M, output $4.25 per 1M; config/providers/meta-api.json input $0.1 per 1M, output $0.2 per 1M; config/providers/nvidia-build.json input $0 per 1M, output $0 per 1M; upper bound: cached-input pricing of baseten, meta-api not applied">
     <span class="label">Spent total</span>
     <span class="value">$11.5475</span>
     <p class="note">includes the upper bound for unmeasured calls of gh-moc-130</p>
@@ -550,8 +556,8 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
     </div>
     <p class="cite">source: ledger records sessionSeconds[]</p><p class="note">each value is rounded to two decimals; the total is rounded from the unrounded seconds, so the rows can differ from it by 0.01</p>
   </section><section id="savings">
-    <h2>Savings</h2>
-    <div class="cards">
+      <h2>Frontier list price comparison</h2>
+      <div class="cards">
           <div class="card" title="over 38 of 45 records; gh-moc-130, gh-moc-139, gh-moc-141 have no token counts; gh-moc-159, gh-moc-174, gh-moc-190, gh-moc-252 have calls without usage; source: ledger records with full token counts (input 49,906,008, output 652,321); config/dashboard.json baselines.frontierTokens input $4 per 1M, output $20 per 1M (Claude Opus 5.5 list price (coordinator estimate); https://claude.com/pricing read 2026-10-28; standard tier, no cache or batch discount; as of 2026-10-28)">
     <span class="label">Frontier-token baseline</span>
     <span class="value">$212.6705</span>
@@ -594,7 +600,9 @@ meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}
     <p class="cite">source: ledger records; 11 pending entries are not included</p>
   </div>
         </div>
-  </section><section id="autonomy">
+      <p class="note">Assumptions: the NVIDIA Build free tier is priced at $0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted.</p>
+      
+    </section><section id="autonomy">
     <h2>Autonomy</h2>
     <div class="cards">
           <div class="card" title="source: ledger records humanInterventions (45 records)">

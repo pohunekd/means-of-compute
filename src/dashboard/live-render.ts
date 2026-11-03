@@ -1099,7 +1099,7 @@ export function chromeOf(model: LiveModel, view: TabId): PageChrome {
     renderedAt: model.renderedAt,
     t: model.t,
     paused: model.paused,
-    // Work, Models and Savings are real only: no simulated clock, no replay.
+    // Work, Models and Cost are real only: no simulated clock, no replay.
     replay:
       view === "live"
         ? {

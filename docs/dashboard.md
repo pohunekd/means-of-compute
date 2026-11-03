@@ -1,6 +1,6 @@
 # Dashboard
 
-Four tabs served by the factory process: Live, Work, Models and Savings. They
+Four tabs served by the factory process: Live, Work, Models and Cost. They
 read the ledger file, verdict store, prices, host state and, for Live, the
 meter usage log and a simulated trace, and render server-side; there is no
 client JavaScript and no external resource. While the replay runs, a tab
@@ -50,7 +50,7 @@ the bound host with the bound port, or `localhost:<port>`: for an IPv4
 bind `{<host>:<p>, localhost:<p>}` where `<host>` is the configured
 listen host, for a `::1` bind `{[::1]:<p>, localhost:<p>}`; anything
 else, including a missing header, gets 421. Method must be `GET` (405) and
-the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `live,work,models,savings` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. The old view names redirect (301) to the tab that holds their content, keeping `t` and `pause` and dropping any selection: `fleet` and `overview` → `live`, `autonomy` → `work`, `usage` → `models`; without live sources a redirect to `live` goes to `work`. Without `view`, `/` is `live` when live sources are wired (a `--sim-trace` is given) and `work` otherwise; without live sources there is no Live tab (`view=live` →404) and no page carries simulated text. Work, Models and Savings accept a known host selection and ignore it; any other selection on them →404. Every tab carries the same header and tab bar (active marked). Only Live carries the simulated clock, the synthetic-fleet tagline and the replay controls (pause/resume, restart t=0, step ±5, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view=live` and the open panel. Work, Models and Savings show the real clock and the real tagline, have no replay controls and no refresh. Tab links keep `t,pause` and drop the selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
+the path `/` (404 for any other path). Query grammar on `/` is `view,t,pause,host,task,call,audit` where `view` is one of `live,work,models,cost` (unknown →404), `t` a non-negative integer past duration →404, `pause` only `1`, and selection keys match `^[a-z][a-z0-9-]{0,31}$` for host alias, `^[a-z0-9][a-z0-9-]{0,62}$` for task, `call` as `[^|]+\|[^|]+`, `audit` as `[^@]+@[^@]+` with precedence `host>task>call>audit`; well-formed unknown selection →404. The old view names redirect (301) to the tab that holds their content, keeping `t` and `pause` and dropping any selection: `fleet` and `overview` → `live`, `autonomy` → `work`, `usage` → `models`, `savings` → `cost`; without live sources a redirect to `live` goes to `work`. Without `view`, `/` is `live` when live sources are wired (a `--sim-trace` is given) and `work` otherwise; without live sources there is no Live tab (`view=live` →404) and no page carries simulated text. Work, Models and Cost accept a known host selection and ignore it; any other selection on them →404. Every tab carries the same header and tab bar (active marked). Only Live carries the simulated clock, the synthetic-fleet tagline and the replay controls (pause/resume, restart t=0, step ±5, jumps 0/60/120/180/240 filtered by duration); paused has no refresh meta and a paused badge, otherwise meta refresh to `t+5` preserving `view=live` and the open panel. Work, Models and Cost show the real clock and the real tagline, have no replay controls and no refresh. Tab links keep `t,pause` and drop the selection. `GET /live` 301 → `/?t=<t>` (no t → `/`).
 
 ## Config keys (`config/dashboard.json`)
 
@@ -97,20 +97,20 @@ The header carries the product name, the real clock in a compact UTC form
 (`2026-11-01 13:03:54 UTC`, the full ISO value in the `time` element's
 `datetime` and `title`), on Live the simulated clock and a paused badge,
 and one honesty tagline: the synthetic-fleet line on Live, the real line
-on Work, Models and Savings. The tab bar lists Live (only with live
-sources), Work, Models and Savings, with the replay controls on the right
+on Work, Models and Cost. The tab bar lists Live (only with live
+sources), Work, Models and Cost, with the replay controls on the right
 on Live. Model names read in one form on the framed tabs and Live: the model
 without its namespace, then the provider in parentheses where the cell
 names it (`muse-spark-open-1026 (baseten)`), never cut in the middle; the
 cell's `title` keeps the recorded value.
 Under it each tab carries its one-line subtitle:
 
-| Tab     | Subtitle                                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Live    | the real machines and their work first; below, the simulated company evening replayed through the real placement engine. |
-| Work    | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                    |
-| Models  | every real model call the factory made: which model, which provider, how many tokens, what it cost.                      |
-| Savings | what the same work would have cost at frontier prices, what it cost here, and the budget cap. All real, from the ledger. |
+| Tab    | Subtitle                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Live   | the real machines and their work first; below, the simulated company evening replayed through the real placement engine. |
+| Work   | every task the factory has taken: its status, its machine, its model and its audit verdict. All real.                    |
+| Models | every real model call the factory made: which model, which provider, how many tokens, what it cost.                      |
+| Cost   | what the factory spent, against its budget caps.                                                                         |
 
 Each tab fills exactly one 1920x1080 frame and shows only its own figures,
 all computed by `buildDashboard` and its panels; the renderer derives no
@@ -125,22 +125,29 @@ interventions`, `Retries`) as cards, then the Work table, newest first,
   panel), beside the Usage `Tokens by provider` and `Session hours by host`
   tables. A table shows at most 6 rows and says `showing N of M rows` when
   it leaves rows out.
-- **Savings**: `Frontier-token baseline`, `Actual token cost` and `Token
-savings` as large cards; `Budget caps`, the Usage budget pools table with
-  a bar of each pool's spent total against its total cap (read from the
-  row's own cells, with the same share as text: `0% of cap` for no spend,
-  `<1% of cap` under 1%, the rounded whole percent such as `37% of cap` up to
-  the cap (`100%` only once spent reaches it), `over cap (143%)` past it; a
-  row without both dollar values reads `no data` there);
-  and every Savings figure with its note and full source.
+- **Cost**: first `Budget caps`, the Usage budget pools table with a bar of
+  each pool's spent total against its total cap (read from the row's own
+  cells, with the same share as text: `0% of cap` for no spend, `<1% of cap`
+  under 1%, the rounded whole percent such as `37% of cap` up to the cap
+  (`100%` only once spent reaches it), `over cap (143%)` past it; a row
+  without both dollar values reads `no data` there); then the spend the
+  Savings panel computes, `Actual token cost` and `Owned compute cost`, as
+  cards; then every Savings figure, labels as the panel has them, with its
+  note and full source in one `Frontier list price comparison` table, and
+  directly under it one assumptions line: the NVIDIA Build free tier is
+  priced at $0, neither side applies a cache discount, the frontier side is
+  assumed to use the same tokens, and only the factory ledger is counted.
+  No figure is a hero card or styled as a gain.
 
 On a framed tab a card's note is cut to two lines and its source to one,
 each with the full text in the card's `title`; the stacked snapshot shows
 them in full. The stacked page (the snapshot) carries the same header with
 the rendered time and UTC day, a line on what "no data" and "error" mean, a
-strip of key figure cards (`Total savings`, `Spent total`, `Spent today`,
-`Finished tasks`, `Parked tasks`, reused from the panels), then every panel
-in order. On a narrow screen a wide table scrolls inside its box and the
+strip of key figure cards (`Spent total`, `Spent today`, `Finished tasks`,
+`Parked tasks`, reused from the panels), then every panel in order; the
+Savings panel is headed `Frontier list price comparison` and carries the same
+assumptions line as Cost under its figures. Stacked section anchors are the
+model panel ids, so `#savings` holds the frontier comparison. On a narrow screen a wide table scrolls inside its box and the
 frame grows with its content.
 
 ## Panels
@@ -480,7 +487,7 @@ simulator trace, the real meter activity feed and an event ticker. It is
 built by `buildLive` (`src/dashboard/live.ts`) and rendered by `renderLive`
 (`src/dashboard/live-render.ts`) in the shared frame; the dashboard panels
 are not involved, and simulated data never enters their inputs, the ledger,
-Work, Models, Savings or `demo:numbers`.
+Work, Models, Cost or `demo:numbers`.
 
 Run it through `factory:serve` with three extra flags, each at most once:
 

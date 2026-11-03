@@ -128,10 +128,13 @@ test("the page carries the key figures, pills, placement details and compact val
   expect(page).toContain(
     `<time datetime="${STAMP}" title="${STAMP}">2026-11-01 13:03:54 UTC</time>`,
   );
+  // The key strip leads with spend; savings appear only in the frontier
+  // comparison section, after Work.
   const savingsAt = page.indexOf("Total savings");
   const workAt = page.indexOf('<section id="work">');
-  expect(savingsAt).toBeGreaterThan(-1);
-  expect(savingsAt).toBeLessThan(workAt);
+  expect(workAt).toBeGreaterThan(-1);
+  expect(savingsAt).toBeGreaterThan(workAt);
+  expect(page).toContain("<h2>Frontier list price comparison</h2>");
   for (const label of ["Spent total", "Finished tasks", "Parked tasks"]) {
     expect(page.slice(0, workAt)).toContain(label);
   }

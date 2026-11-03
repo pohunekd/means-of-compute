@@ -99,7 +99,7 @@ simulated trace)
 expected: the line `factory: dashboard listening (dashboard) port 8080`. Work
 lists `demo-a`, `demo-b` and `demo-c` as `done`; `demo-a` shows two verdicts by
 `muse-spark-1.3-contributor`, high 1 at the first head and clean at the second.
-Models shows spent today $0.0001 and NVIDIA Build requests 4 of 1,000; Savings
+Models shows spent today $0.0001 and NVIDIA Build requests 4 of 1,000; Cost
 shows the day cap $12.0000 and the total cap $140.0000 under Budget caps. Stop
 the server with Ctrl-C.
 
@@ -173,8 +173,8 @@ because ...` rows with the placement engine's own reasons; real rounds sit
 in the separate `Real events` block above it, and the Model activity table
 lands real meter call-end rows while the factory works. The fleet heading
 carries the simulated counters, labelled `(simulated)`; no simulated count
-enters the cards or the Work, Models and Savings tabs. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; Work,
-Models and Savings are one click away in the tab bar, in the same design.
+enters the cards or the Work, Models and Cost tabs. Click a fleet tile, a running task or a meter row to open the right rail: the breadcrumb shows `Fleet / <host>` or `Fleet / <task>` for a task, `Fleet / <task> / <call>` for a call and `Fleet / <task> / <audit>` for an audit with `back to live`; a simulated task shows its kind, title and brief, placed-at time, verbatim reason and eligible count; a real task shows title, status and goal excerpt, DoD, rounds and ledger as one block each with its own source; a call shows provider, model as `name (provider)` and grouped tokens with priced cost. The fleet column does not move. The final frame stops refreshing; Work,
+Models and Cost are one click away in the tab bar, in the same design.
 
 ## Multi-host run (W3.1)
 

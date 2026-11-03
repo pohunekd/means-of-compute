@@ -75,7 +75,7 @@ The full description is in [docs/architecture.md](docs/architecture.md).
   [docs/budget-guard.md](docs/budget-guard.md)): the ledger stores usage per item,
   and the guard reads it before every new model session.
 - **Dashboard** ([docs/dashboard.md](docs/dashboard.md)): one loopback-only page
-  with fleet, work, usage and savings, rendered on the server.
+  with four tabs Live, Work, Models and Cost, rendered on the server.
 - **Merge rule**: the loop merges a pull request only when its required checks are
   green and a valid audit verdict exists for that exact head commit. The merge is
   pinned to that commit.
@@ -175,6 +175,13 @@ each run resets the sandbox.
 
 ### Dashboard over the demo data
 
+The dashboard has four tabs:
+
+- **Live** — one fleet grid, the four real machines as the first group and the simulated company evening after them, replayed through the real placement engine; on the right, the live work of the real machines, model activity and events.
+- **Work** — every task the factory has taken: its status, its machine, its model and its audit verdict. All real.
+- **Models** — every real model call the factory made: which model, which provider, how many tokens, what it cost.
+- **Cost** — what the factory spent, against its budget caps.
+
 ```sh
 MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve \
   --ledger logs/loop-demo/ledger.jsonl \
@@ -186,9 +193,10 @@ MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve \
 
 Success is the line `factory: dashboard listening (dashboard) port 8080`. Then
 `http://localhost:8080/` lists three `done` items with their audit verdicts and the
-spend against the caps. Fleet columns show "no data (host state not wired)" in this
-mode, which is expected. Without the flags the dashboard reads the production paths
+spend against the caps. Without the flags the dashboard reads the production paths
 under `logs/`.
+
+To see the fleet at scale, first generate the trace with `bun run sim:fleet --timeline config/sim/evening-100.json --out logs/sim/evening-100.jsonl` and then run `MOC_DASHBOARD_LISTEN=127.0.0.1:8080 bun run factory:serve --sim-trace logs/sim/evening-100.jsonl --loop-log logs/loop.jsonl` (with the demo data use `--loop-log logs/loop-demo/loop.jsonl`). Live shows one fleet grid in which the real machines are the first group, followed by the simulated evening.
 
 A static snapshot of the production dashboard is committed as [docs/demo/dashboard.html](docs/demo/dashboard.html). It was rendered by `bun run dashboard:snapshot` from the recorded ledger, verdicts, registry and loop results, as of the time in its header. GitHub shows the file as source, so download it and open it in a browser. The "Static snapshot" section of [docs/dashboard.md](docs/dashboard.md) describes the command.
 

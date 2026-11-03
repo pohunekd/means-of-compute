@@ -1,6 +1,6 @@
 {
   "schemaVersion": "sim-v1",
-  "name": "evening-300",
+  "name": "evening-100",
   "seed": 20261103,
   "startAt": "2026-11-03T17:00:00.000Z",
   "durationMinutes": 240,
@@ -70,37 +70,37 @@
   "generators": [
     {
       "kind": "desk",
-      "count": 90,
+      "count": 30,
       "aliasPrefix": "desk-",
       "site": "hq-floor-2"
     },
     {
       "kind": "desk",
-      "count": 90,
+      "count": 30,
       "aliasPrefix": "desk-",
       "site": "hq-floor-3"
     },
     {
       "kind": "laptop",
-      "count": 80,
+      "count": 24,
       "aliasPrefix": "laptop-",
       "site": "hq-floor-2"
     },
     {
       "kind": "kiosk",
-      "count": 12,
+      "count": 6,
       "aliasPrefix": "kiosk-lobby-",
       "site": "lobby"
     },
     {
       "kind": "meeting",
-      "count": 20,
+      "count": 6,
       "aliasPrefix": "meeting-3b-",
       "site": "hq-floor-3"
     },
     {
       "kind": "signage",
-      "count": 8,
+      "count": 4,
       "aliasPrefix": "signage-lobby-",
       "site": "lobby"
     }
@@ -124,7 +124,7 @@
       "atMinute": 20,
       "kind": "laptop",
       "type": "leave",
-      "fraction": 0.6,
+      "fraction": 0.55,
       "staggerMinutes": 1
     },
     {
@@ -180,7 +180,7 @@
     },
     {
       "atMinute": 100,
-      "alias": "desk-142",
+      "alias": "desk-058",
       "type": "return"
     },
     {
@@ -206,7 +206,7 @@
     {
       "firstAtMinute": 15,
       "everyMinutes": 2,
-      "count": 25,
+      "count": 10,
       "durationMinutes": 50,
       "idPrefix": "sim-w-",
       "tasks": [
@@ -231,7 +231,7 @@
     {
       "firstAtMinute": 50,
       "everyMinutes": 1,
-      "count": 100,
+      "count": 35,
       "durationMinutes": 120,
       "idPrefix": "sim-x-",
       "tasks": [
@@ -256,7 +256,7 @@
     {
       "firstAtMinute": 65,
       "everyMinutes": 1,
-      "count": 100,
+      "count": 35,
       "durationMinutes": 120,
       "idPrefix": "sim-y-",
       "tasks": [
@@ -281,7 +281,7 @@
     {
       "firstAtMinute": 80,
       "everyMinutes": 1,
-      "count": 90,
+      "count": 30,
       "durationMinutes": 120,
       "idPrefix": "sim-z-",
       "tasks": [

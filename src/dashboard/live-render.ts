@@ -27,6 +27,7 @@ import type {
   LiveModel,
   LiveSection,
   LiveTile,
+  LiveTileState,
   RealWorkCard,
   TaskPanel,
 } from "./live.js";
@@ -213,9 +214,10 @@ function renderTile(tile: LiveTile, model: LiveModel): SafeHtml {
   const flagMark = tile.flagged ? html`<span class="flag">!</span>` : constantHtml("");
   const chip = tile.simulated ? constantHtml("") : html`<span class="chip chip-real">REAL</span>`;
   const tileClass = tile.simulated ? "tile-sim" : "tile-real";
+  const selected = model.hostPanel?.alias === tile.alias ? " selected" : "";
   return html`<a
     href="${href}"
-    class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}"
+    class="tile ${tileClass} tile-${tile.state}${tile.flagged ? " tile-flagged" : ""}${selected}"
     title="${title}"
     ><span class="alias">${tile.alias}</span
     ><span class="load">${tileLoad(tile)}${flagMark}</span>${chip}</a
@@ -239,6 +241,35 @@ function renderGroup(group: LiveGroup, model: LiveModel): SafeHtml {
   </div>`;
 }
 
+// A real card's state on the tile legend, read from the card's own fields
+// (table in docs/dashboard.md): an open session is running; an idle card
+// reads its probe-based idle reason; no recorded probe is offline.
+const OFFLINE_CAUSES: ReadonlySet<string> = new Set([
+  "host unreachable",
+  "request timeout",
+  "stale",
+]);
+
+function cardState(card: RealWorkCard): LiveTileState {
+  if (card.stage !== "idle") {
+    return "running";
+  }
+  const reason = card.idleReason;
+  if (reason === null) {
+    return "offline";
+  }
+  if (reason.startsWith("error (") || reason.startsWith("no data (")) {
+    return "unavailable";
+  }
+  if (reason === "no work queued" || /^\d+ queued, not placed$/.test(reason)) {
+    return "eligible";
+  }
+  if (reason.startsWith("person at the desk (")) {
+    return "busy";
+  }
+  return OFFLINE_CAUSES.has(reason.split(" (")[0] ?? "") ? "offline" : "unavailable";
+}
+
 function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   if (!ALIAS_PATTERN.test(card.alias)) {
     throw new Error("dashboard live: invalid host alias in model");
@@ -250,6 +281,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
   const repoAllowed = reposFailure === null && card.repo !== null && repos.has(card.repo);
   const stageLabel = "implement";
   const idleCls = card.stage === "idle" ? " idle" : "";
+  const selected = model.hostPanel?.alias === card.alias ? " selected" : "";
   const stageHtml =
     card.stage === "idle"
       ? constantHtml("")
@@ -360,8 +392,8 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
     card.lastFinished === null
       ? ""
       : finishedDay !== null && finishedDay !== pageDay
-        ? `${monthDay(card.lastFinished.at)} ${card.lastFinished.at.slice(11, 16)}`
-        : card.lastFinished.at.slice(11, 16);
+        ? `${monthDay(card.lastFinished.at)} ${clockTime(card.lastFinished.at)}`
+        : clockTime(card.lastFinished.at);
   const lastRoundLine =
     card.lastFinishedNote === null
       ? constantHtml("")
@@ -395,7 +427,7 @@ function renderRealWorkCard(card: RealWorkCard, model: LiveModel): SafeHtml {
               ·
               <span class="${cellClass(card.today.cost)}">${cellText(card.today.cost)}</span>
             </p>`;
-  return html`<div class="rw card${idleCls}">
+  return html`<div class="rw card${idleCls} tile-${cardState(card)}${selected}">
     <div>
       <a class="al" href="${hostHref}">${card.alias}</a> <span class="chip chip-real">REAL</span>
       ${stageHtml}
@@ -529,6 +561,38 @@ function renderTickerBlock(model: LiveModel, simulated: boolean): SafeHtml {
     </ul>`;
 }
 
+// Panel building blocks shared by the host panels: a labelled block, a table
+// in the dashboard table style, and a time as HH:MM:SS UTC with the date only
+// when it is not the page's UTC day.
+function panelBlock(label: string, body: SafeHtml): SafeHtml {
+  return html`<div class="pblock">
+    <p class="plabel">${label}</p>
+    ${body}
+  </div>`;
+}
+
+function panelTable(heads: readonly string[], rows: readonly SafeHtml[]): SafeHtml {
+  if (rows.length === 0) {
+    return html`<p class="row">none</p>`;
+  }
+  return html`<table class="ptable">
+    <thead>
+      <tr>
+        ${heads.map((head) => html`<th>${head}</th>`)}
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>`;
+}
+
+function panelTime(iso: string, model: LiveModel): SafeHtml {
+  return html`<time class="time" datetime="${iso}" title="${iso}"
+    >${stripDate(iso, model.renderedAt.slice(0, 10))}</time
+  >`;
+}
+
 function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
   const backHref = buildHref(model, { host: null });
   if (panel.kind === "sim") {
@@ -538,108 +602,124 @@ function renderHostPanel(panel: HostPanel, model: LiveModel): SafeHtml {
       !panel.eligible && panel.excludeReason !== null
         ? `State: ${panel.state} · ${panel.excludeReason}`
         : `State: ${panel.state}`;
+    const running = panelTable(
+      ["task", "since"],
+      panel.runningTasks.map(
+        (t) =>
+          html`<tr>
+            <td><a href="${buildHref(model, { task: t.workItemId })}">${t.workItemId}</a></td>
+            <td>${panelTime(t.at, model)}</td>
+          </tr>`,
+      ),
+    );
+    const events = panelTable(
+      ["time", "event"],
+      panel.events.map(
+        (e) =>
+          html`<tr>
+            <td>${panelTime(e.at, model)}</td>
+            <td>${e.text}</td>
+          </tr>`,
+      ),
+    );
+    const placements = panelTable(
+      ["time", "task", "placed on", "reason"],
+      panel.placements.map(
+        (p) =>
+          html`<tr>
+            <td>${panelTime(p.at, model)}</td>
+            <td><a href="${buildHref(model, { task: p.workItemId })}">${p.workItemId}</a></td>
+            <td>${p.chosenHostAlias ?? "none"}</td>
+            <td>${p.reason}</td>
+          </tr>`,
+      ),
+    );
     return html`<div class="panel" id="host-panel">
       <h3>${panel.alias} <span class="simtag">SIMULATED</span></h3>
       <p class="row">Site: ${panel.site} · Kind: ${panel.hostKind}</p>
       <p class="row">${stateLine}</p>
       <p class="row">Running: ${String(panel.running)}/${String(panel.maxAgents)} ${battery}</p>
       ${task === "" ? constantHtml("") : html`<p class="row">Task: ${task}</p>`}
-      <p class="row">Running tasks:</p>
-      <ul>
-        ${panel.runningTasks.map((t) => html`<li><a href="${buildHref(model, { task: t.workItemId })}">${t.workItemId}</a> at ${t.at}</li>`)}
-      </ul>
-      <p class="row">Events (up to 6):</p>
-      <ul>
-        ${panel.events.map((e) => html`<li>${e.text} at ${e.at}</li>`)}
-      </ul>
-      <p class="row">Placements (up to 6):</p>
-      <ul>
-        ${panel.placements.map((p) => html`<li><a href="${buildHref(model, { task: p.workItemId })}">${p.workItemId}</a> -> ${p.chosenHostAlias ?? "none"}: ${p.reason}</li>`)}
-      </ul>
+      ${panelBlock("Running tasks", running)} ${panelBlock("Latest events (up to 6)", events)}
+      ${panelBlock("Placements (up to 6)", placements)}
       <p><a href="${backHref}">back to live</a></p>
     </div>`;
   }
-  // Probe block with time and cause
   const probeBlock =
     panel.probe.kind !== "ok"
       ? sectionText(panel.probe)
       : panel.probe.value === null
-        ? html`<p class="row">Probe: no probe</p>`
+        ? html`<p class="row">no probe recorded</p>`
         : html`<p class="row">
-            Probe: ${panel.probe.value.kind} at
-            ${panel.probe.value.at}${panel.probe.value.cause === null ? "" : ` cause ${panel.probe.value.cause}`}
+            ${panel.probe.value.kind} at
+            ${panelTime(panel.probe.value.at, model)}${
+              panel.probe.value.cause === null ? "" : ` · cause ${panel.probe.value.cause}`
+            }
           </p>`;
-  // Registry block: open sessions with details
-  const registryBlock =
+  const sessionsBlock =
     panel.registry.kind !== "ok"
-      ? panel.registry.kind === "error"
-        ? html`<p class="row">Open sessions:</p>
-            <p class="error">error (${panel.registry.code})</p>`
-        : html`<p class="row">Open sessions:</p>
-            <p class="nodata">no data (${panel.registry.reason})</p>`
-      : panel.registry.value.length === 0
-        ? html`<p class="row">Open sessions: none</p>`
-        : html`<div>
-            <p class="row">Open sessions:</p>
-            <ul>
-              ${panel.registry.value.map(
-                (s) =>
-                  html`<li class="mono">
-                    <a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a>
-                    ${modelLabel(s.model.model, s.model.providerId)} started ${s.startedAt} lastSeen
-                    ${s.lastSeenAt}
-                  </li>`,
-              )}
-            </ul>
-          </div>`;
+      ? sectionText(panel.registry)
+      : panelTable(
+          ["task", "model", "started", "last seen"],
+          panel.registry.value.map(
+            (s) =>
+              html`<tr>
+                <td><a href="${buildHref(model, { task: s.workItemId })}">${s.workItemId}</a></td>
+                <td>${modelLabel(s.model.model, s.model.providerId)}</td>
+                <td>${panelTime(s.startedAt, model)}</td>
+                <td>${panelTime(s.lastSeenAt, model)}</td>
+              </tr>`,
+          ),
+        );
   const resultsBlock =
     panel.results.kind !== "ok"
-      ? panel.results.kind === "error"
-        ? html`<p class="row">Recent results:</p>
-            <p class="error">error (${panel.results.code})</p>`
-        : html`<p class="row">Recent results:</p>
-            <p class="nodata">no data (${panel.results.reason})</p>`
-      : html`<div>
-          <p class="row">Recent results:</p>
-          <ul>
-            ${panel.results.value.map((r) =>
-              r.known
-                ? html`<li>
-                    <a href="${buildHref(model, { task: r.workItemId })}">${r.workItemId}</a>
-                    ${r.outcome} at ${r.at}
-                  </li>`
-                : html`<li>${r.workItemId} ${r.outcome} at ${r.at}</li>`,
-            )}
-          </ul>
-        </div>`;
+      ? sectionText(panel.results)
+      : panelTable(
+          ["time", "task", "outcome"],
+          panel.results.value.map(
+            (r) =>
+              html`<tr>
+                <td>${panelTime(r.at, model)}</td>
+                <td>
+                  ${
+                    r.known
+                      ? html`<a href="${buildHref(model, { task: r.workItemId })}"
+                          >${r.workItemId}</a
+                        >`
+                      : html`${r.workItemId}`
+                  }
+                </td>
+                <td>${r.outcome}</td>
+              </tr>`,
+          ),
+        );
   const meterBlock =
     panel.meterCalls.kind !== "ok"
-      ? panel.meterCalls.kind === "error"
-        ? html`<p class="row">Recent meter calls:</p>
-            <p class="error">error (${panel.meterCalls.code})</p>`
-        : html`<p class="row">Recent meter calls:</p>
-            <p class="nodata">no data (${panel.meterCalls.reason})</p>`
-      : panel.meterCalls.value.length === 0
-        ? html`<p class="row">Recent meter calls: none</p>`
-        : html`<div>
-            <p class="row">Recent meter calls:</p>
-            <ul>
-              ${panel.meterCalls.value.map((c) => {
-                const canLink = c.workItemId !== null;
-                return canLink
-                  ? html`<li>
-                      <a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
-                        >${modelLabel(c.model, null)}</a
-                      >
-                      ${c.at}
-                    </li>`
-                  : html`<li>${modelLabel(c.model, null)} ${c.at}</li>`;
-              })}
-            </ul>
-          </div>`;
+      ? sectionText(panel.meterCalls)
+      : panelTable(
+          ["time", "model", "in", "out", "cost"],
+          panel.meterCalls.value.map((c) => {
+            const name =
+              c.workItemId === null
+                ? html`${modelLabel(c.model, c.providerId)}`
+                : html`<a href="${buildHref(model, { call: `${c.at}|${c.workItemId}` })}"
+                    >${modelLabel(c.model, c.providerId)}</a
+                  >`;
+            const tokens = (value: number | null): string =>
+              value === null ? "no data" : groupDigits(value);
+            return html`<tr>
+              <td>${panelTime(c.at, model)}</td>
+              <td>${name}</td>
+              <td class="num">${tokens(c.inputTokens)}</td>
+              <td class="num">${tokens(c.outputTokens)}</td>
+              <td class="${cellClass(c.cost)}">${cellText(c.cost)}</td>
+            </tr>`;
+          }),
+        );
   return html`<div class="panel" id="host-panel">
     <h3>${panel.alias} <span class="chip chip-real">REAL</span></h3>
-    ${probeBlock} ${registryBlock} ${resultsBlock} ${meterBlock}
+    ${panelBlock("Probe", probeBlock)} ${panelBlock("Open sessions", sessionsBlock)}
+    ${panelBlock("Recent results", resultsBlock)} ${panelBlock("Recent meter calls", meterBlock)}
     <p><a href="${backHref}">back to live</a></p>
   </div>`;
 }
@@ -1075,19 +1155,31 @@ export function renderCallsSection(model: LiveModel, limit: number): SafeHtml {
   </section>`;
 }
 
-function fleetHeading(model: LiveModel): SafeHtml {
+// One heading component for the real and the simulated fleet: the name, then
+// its counts.
+function fleetHeading(name: string, counts: string | null): SafeHtml {
+  return counts === null
+    ? html`<h2>${name}</h2>`
+    : html`<h2>${name} <span class="cnt">· ${counts}</span></h2>`;
+}
+
+function realFleetHeading(model: LiveModel): SafeHtml {
+  return fleetHeading(
+    "Real fleet",
+    model.realWork.kind === "ok"
+      ? `${groupDigits(model.realWork.value.length)} machines, live`
+      : null,
+  );
+}
+
+function simFleetHeading(model: LiveModel): SafeHtml {
   const counters = model.simCounters;
-  if (counters === null) {
-    return html`<h2>Fleet</h2>`;
-  }
-  return html`<h2>
-    Fleet
-    <span class="cnt"
-      >· simulated evening: ${groupDigits(counters.eligible)} of ${groupDigits(counters.hostCount)}
-      eligible · ${groupDigits(counters.workRunning)} work running ·
-      ${groupDigits(counters.placements)} placements (simulated)</span
-    >
-  </h2>`;
+  return fleetHeading(
+    "Simulated fleet",
+    counters === null
+      ? null
+      : `${groupDigits(counters.eligible)} of ${groupDigits(counters.hostCount)} eligible · ${groupDigits(counters.workRunning)} work running · ${groupDigits(counters.placements)} placements (simulated)`,
+  );
 }
 
 export function renderLive(model: LiveModel): string {
@@ -1129,8 +1221,9 @@ export function renderLive(model: LiveModel): string {
     Tile colours: <span class="dot tile-running"></span>running
     <span class="dot tile-eligible"></span>eligible <span class="dot tile-blocked"></span>blocked
     <span class="dot tile-busy"></span>busy <span class="dot tile-offline"></span>offline
+    <span class="dot tile-unavailable"></span>unavailable
     <span class="dot tile-flagged"></span>amber edge with <span class="flag">!</span>: running, now
-    excluded for a reason other than its agent limit (reason in the title and the panel)
+    excluded for a reason other than its agent limit (reason in the title)
   </p>`;
   const rail =
     detailPanel === null
@@ -1146,14 +1239,11 @@ export function renderLive(model: LiveModel): string {
           </section>`
       : html`${renderDetailBreadcrumb(model)} ${detailPanel}`;
   const main = html`<div class="realnow">
-      <h2>
-        Real work now <span class="cnt">· what the real machines are doing at this moment</span>
-      </h2>
-      ${realWorkBlock} ${justFinishedBlock}
+      ${realFleetHeading(model)} ${realWorkBlock} ${justFinishedBlock}
     </div>
     <div class="live-layout">
       <section id="live-fleet">
-        ${fleetHeading(model)} ${simFleet} ${legend}
+        ${simFleetHeading(model)} ${simFleet} ${legend}
         <p class="cite">source: simulated fleet trace (sim-trace-v1)</p>
       </section>
       <div class="rail">${rail}</div>

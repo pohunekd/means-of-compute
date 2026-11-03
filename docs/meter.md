@@ -109,7 +109,8 @@ An unauthenticated caller learns nothing about grants: rows 2 and later run
 only after row 1 holds. A token is useless after the session ends, and
 rotating the secret invalidates every live token. A caller token
 is valid only while its grant is open, and it travels through
-session metadata, never through a config file.
+the session's secret env slot, never through session metadata or a config file
+(see [Host setup](#host-setup)).
 
 ### Caller token
 

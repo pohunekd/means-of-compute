@@ -1528,7 +1528,7 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         ].map((marker) => body.indexOf(marker));
         expect(order.every((at, i) => at > 0 && (i === 0 || at > (order[i - 1] ?? 0)))).toBe(true);
         expect(body).toMatch(
-          /<\/table>\s*<\/div>\s*<p class="note assume">Assumptions: the NVIDIA Build free tier is priced at \$0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted\.<\/p>/,
+          /<\/table>\s*<\/div>\s*<p class="note assume">Assumptions: the NVIDIA Build free tier is priced at \$0, the frontier side is assumed to use the same tokens, and only the factory ledger is counted\. Actual cost applies the cached-input rate where the provider reported cached tokens; the frontier estimate assumes no cache discount\.<\/p>/,
         );
       }
     }
@@ -2157,6 +2157,73 @@ test("a call-end joins its start and grant into a priced activity row, and a nul
       await brokenMeterServer.stop();
     }
     writeFileSync(meterPath, meterOrig2);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("live costs apply the cached-input rate of reported cached tokens", async () => {
+  const fixture = makeFixture(fixtureTrace());
+  try {
+    // Cached counts on one meter call (w1-real) and two ledger records.
+    const cached = (
+      path: string,
+      pick: (value: Record<string, unknown>) => number | null,
+    ): void => {
+      const lines = readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => line !== "");
+      const next = lines.map((line) => {
+        const value = JSON.parse(line) as Record<string, unknown>;
+        const count = pick(value);
+        return JSON.stringify(count === null ? value : { ...value, cachedInputTokens: count });
+      });
+      writeFileSync(path, next.map((line) => `${line}\n`).join(""));
+    };
+    cached(join(fixture.dir, "meter-usage.jsonl"), (value) =>
+      value["kind"] === "call-end" && value["inputTokens"] === 84210 ? 80000 : null,
+    );
+    const ledgerPath = join(fixture.dir, "ledger.jsonl");
+    const records = readFileSync(ledgerPath, "utf8")
+      .split("\n")
+      .filter((line) => line !== "");
+    writeFileSync(
+      ledgerPath,
+      records
+        .map((line) => {
+          const record = JSON.parse(line) as { workItemId: string; tokens: object[] };
+          if (record.workItemId !== "w4-laptopb" && record.workItemId !== "w1-old") {
+            return `${line}\n`;
+          }
+          const tokens = record.tokens.map((token) => ({ ...token, cachedInputTokens: 1000 }));
+          return `${JSON.stringify({ ...record, tokens })}\n`;
+        })
+        .join(""),
+    );
+    const dashboard = await dashboardInputs(fixture);
+    const view = { view: "live" as const, t: 60, paused: false, host: null };
+    const live = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), view);
+    const page = renderLive(live);
+    // Baseten: 1.25 input, 0.15 cached input, 4.25 output USD per 1M.
+    // Desktop meter calls: 80,000 cached + 5,210 input + 2,430 output = $0.02884.
+    expect(cardSlice(live, "desktop")).toContain("$0.0288");
+    // The w1-real call: 80,000 cached + 4,210 input + 1,930 output = $0.025465.
+    if (live.activity.kind !== "ok") throw new Error("expected activity rows");
+    const call = live.activity.value.find((row) => row.inputTokens === 84210);
+    expect(call?.cost).toEqual({ kind: "text", text: "$0.0255" });
+    const panel = buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+      ...view,
+      call: "2026-11-03T17:59:02.000Z|w1-real",
+    });
+    if (panel.callPanel?.detail.kind !== "ok") throw new Error("expected call detail");
+    expect(panel.callPanel.detail.value.cost).toEqual({ kind: "text", text: "$0.0255" });
+    // w4-laptopb: 1,000 cached + 200 input + 800 output = $0.0038;
+    // w1-old: 1,000 cached + 100 input + 600 output = $0.0028.
+    const strip = stripSlice(page);
+    expect(strip).toContain("$0.0038");
+    expect(strip).toContain("$0.0028");
+    // kiosk-a today: w3-kiosk $0.003375 plus w1-old $0.002825.
+    expect(cardSlice(live, "kiosk-a").replace(/\s+/g, " ")).toContain("$0.0062");
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }

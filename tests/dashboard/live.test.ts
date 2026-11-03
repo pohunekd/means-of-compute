@@ -1284,9 +1284,12 @@ test("tab links keep t and drop selection, pause drops refresh and mid frame pre
         expect(body).toContain('<td class="meterwrap"><span class="nodata">no data</span></td>');
         // Budget caps lead, then the spend cards, then the frontier comparison
         // with its assumptions line directly under the table.
-        const order = ["Budget caps", ">Actual token cost<", "Frontier list price comparison"].map(
-          (marker) => body.indexOf(marker),
-        );
+        const order = [
+          "Budget caps",
+          ">Actual token cost<",
+          ">Owned compute cost<",
+          "Frontier list price comparison",
+        ].map((marker) => body.indexOf(marker));
         expect(order.every((at, i) => at > 0 && (i === 0 || at > (order[i - 1] ?? 0)))).toBe(true);
         expect(body).toMatch(
           /<\/table>\s*<\/div>\s*<p class="note assume">Assumptions: the NVIDIA Build free tier is priced at \$0, neither side applies a cache discount, the frontier side is assumed to use the same tokens, and only the factory ledger is counted\.<\/p>/,

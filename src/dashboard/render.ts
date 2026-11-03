@@ -90,11 +90,11 @@ export const DASHBOARD_CSS = [
   ".capbar meter{margin-top:0;flex:1;min-width:8rem}",
   ".capshare{font-size:15px;color:var(--dim);white-space:nowrap}",
   "td.figlabel,td.figamount{white-space:nowrap}",
-  ".table-savings{table-layout:fixed}",
-  ".table-savings td{padding:4px 8px;line-height:1.35}",
-  ".table-savings .c-label{width:14%}",
-  ".table-savings .c-amount{width:8%}",
-  ".table-savings .c-note{width:34%}",
+  ".table-frontier{table-layout:fixed}",
+  ".table-frontier td{padding:4px 8px;line-height:1.35}",
+  ".table-frontier .c-label{width:14%}",
+  ".table-frontier .c-amount{width:8%}",
+  ".table-frontier .c-note{width:34%}",
   "meter::-webkit-meter-bar{background:var(--panel);border:1px solid var(--line);border-radius:5px}",
   "meter::-webkit-meter-optimum-value{background:var(--run);border-radius:5px}",
   ".cols2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;align-items:start}",
@@ -979,7 +979,7 @@ function renderCostTab(inputs: TabPageInputs, ctx: RenderContext): SafeHtml {
     <section class="box">
       <h2>${FRONTIER_HEADING} <span class="cnt">· every figure names its source</span></h2>
       <div class="tablewrap">
-        <table class="table-savings" aria-label="${FRONTIER_HEADING}">
+        <table class="table-frontier" aria-label="${FRONTIER_HEADING}">
           <thead>
             <tr>
               <th class="c-label">figure</th>

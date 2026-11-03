@@ -146,7 +146,8 @@ the rendered time and UTC day, a line on what "no data" and "error" mean, a
 strip of key figure cards (`Spent total`, `Spent today`, `Finished tasks`,
 `Parked tasks`, reused from the panels), then every panel in order; the
 Savings panel is headed `Frontier list price comparison` and carries the same
-assumptions line as Cost under its figures. On a narrow screen a wide table scrolls inside its box and the
+assumptions line as Cost under its figures. Stacked section anchors are the
+model panel ids, so `#savings` holds the frontier comparison. On a narrow screen a wide table scrolls inside its box and the
 frame grows with its content.
 
 ## Panels

@@ -1328,6 +1328,113 @@ test("unified fleet uses one tile renderer with markers and flagged logic", asyn
   }
 });
 
+// #324: per real host the newest of a `placement` and a `host-assessment`
+// entry decides the idle tile, an open session still wins, and a probe
+// reason the engine wraps as `excluded: not idle (<inner>)` maps on the inner
+// text: the two production reasons are blocked and busy.
+test("real tiles take the newest placement or host assessment and map not-idle inner reasons", async () => {
+  const fixture = makeFixture(fixtureTrace());
+  try {
+    const dashboard = await dashboardInputs(fixture);
+    const render = async (lines: readonly object[], host: string | null): Promise<string> => {
+      writeFileSync(
+        join(fixture.dir, "loop.jsonl"),
+        lines.map((line) => JSON.stringify(line)).join("\n") + "\n",
+      );
+      return renderLive(
+        buildLive(await gatherLiveInputs(fixture.sources, dashboard, 60, () => {}), {
+          view: "live",
+          t: 60,
+          paused: false,
+          host,
+        }),
+      );
+    };
+    const eligible = (hostAlias: string): object => ({
+      hostAlias,
+      excluded: false,
+      reason: "idle, on AC power, no battery, CPU 90% free, memory 60% free",
+    });
+    const notIdle = (hostAlias: string, inner: string): object => ({
+      hostAlias,
+      excluded: true,
+      reason: `excluded: not idle (${inner})`,
+    });
+    const assessment = (ts: string, candidates: readonly object[]): object => ({
+      ts,
+      event: "host-assessment",
+      candidates,
+    });
+    const placement = (ts: string, candidates: readonly object[]): object => ({
+      ts,
+      event: "placement",
+      workItemId: "w9-queued",
+      round: 0,
+      chosenHostAlias: null,
+      candidates,
+    });
+    const lines = [
+      placement("2026-11-03T17:50:00.000Z", [eligible("laptop-a"), eligible("kiosk-a")]),
+      assessment("2026-11-03T17:58:45.000Z", [
+        notIdle("desktop", "user input 0 seconds ago"),
+        notIdle("laptop-a", "not on AC power"),
+        notIdle("kiosk-a", "user input 0 seconds ago"),
+        {
+          hostAlias: "laptop-b",
+          excluded: true,
+          reason: "excluded: host state unavailable (stale)",
+        },
+      ]),
+      placement("2026-11-03T17:59:00.000Z", [eligible("laptop-b")]),
+    ];
+    const page = await render(lines, null);
+    expect(tileClass(page, "desktop")).toBe("tile tile-running");
+    expect(tileClass(page, "laptop-a")).toBe("tile tile-blocked");
+    expect(tileClass(page, "kiosk-a")).toBe("tile tile-busy");
+    expect(tileClass(page, "laptop-b")).toBe("tile tile-eligible");
+    expect(page).toContain(
+      "laptop-a: blocked, 1 queued, not placed - assessment 17:58:45: excluded: not idle (not on AC power)",
+    );
+    const panel = await render(lines, "laptop-a");
+    const block = panel.slice(panel.indexOf(">Last placement<"));
+    expect(block.replace(/\s+/g, " ")).toMatch(
+      /17:58:45<\/time > · host assessment · excluded <\/p> <p class="row">excluded: not idle \(not on AC power\)<\/p>/,
+    );
+    const inner = await render(
+      [
+        assessment("2026-11-03T17:58:45.000Z", [
+          notIdle("laptop-a", "battery at 20 percent, at or below the 50 percent floor"),
+          notIdle("kiosk-a", "power unknown: unavailable"),
+          notIdle("laptop-b", "outside the policy window"),
+        ]),
+      ],
+      null,
+    );
+    expect(tileClass(inner, "laptop-a")).toBe("tile tile-blocked");
+    expect(tileClass(inner, "kiosk-a")).toBe("tile tile-unavailable");
+    expect(tileClass(inner, "laptop-b")).toBe("tile tile-blocked");
+    const activity = await render(
+      [
+        assessment("2026-11-03T17:58:45.000Z", [
+          notIdle("kiosk-a", "user activity unknown: unavailable"),
+          {
+            hostAlias: "laptop-b",
+            excluded: true,
+            reason: "excluded: host state unavailable (stale)",
+          },
+        ]),
+        placement("2026-11-03T17:58:50.000Z", [notIdle("laptop-a", "not on AC power")]),
+      ],
+      null,
+    );
+    expect(tileClass(activity, "kiosk-a")).toBe("tile tile-unavailable");
+    expect(tileClass(activity, "laptop-b")).toBe("tile tile-unavailable");
+    expect(tileClass(activity, "laptop-a")).toBe("tile tile-blocked");
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("tab links keep t and drop selection, pause drops refresh and mid frame preserves host, old views and /live redirect, and no live has no Live tab", async () => {
   const fixture = makeFixture(fixtureTrace());
   const config: DashboardConfig = {

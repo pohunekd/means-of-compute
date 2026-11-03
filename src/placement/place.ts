@@ -16,14 +16,30 @@ interface CandidateBuild {
   readonly loadRatio: number;
 }
 
+// Every host's own assessment, in host order: excluded or eligible with the
+// reason and score placement uses. It takes no work item.
+export function assessHosts(
+  hosts: readonly HostCapacity[],
+  running: readonly WorkItem[],
+  config: PlacementConfig,
+): PlacementCandidate[] {
+  return hosts.map((host) => assessHost(host, running, config));
+}
+
 export function place(
   item: WorkItem,
   hosts: readonly HostCapacity[],
   running: readonly WorkItem[],
   config: PlacementConfig,
 ): PlacementDecision {
-  const built: CandidateBuild[] = hosts.map((host) => buildCandidate(host, running, config));
-  const candidates: PlacementCandidate[] = built.map((entry) => entry.candidate);
+  const candidates = assessHosts(hosts, running, config);
+  const built: CandidateBuild[] = candidates.map((candidate, index) => {
+    const host = hosts[index];
+    if (host === undefined) {
+      throw new Error("Placement: candidate without a host");
+    }
+    return { candidate, loadRatio: host.cpu.load1m / host.cpu.cores };
+  });
   const eligible = built.filter((entry) => !entry.candidate.excluded);
   if (eligible.length === 0) {
     const decision: PlacementDecision = {
@@ -73,77 +89,59 @@ function isBetter(challenger: CandidateBuild, incumbent: CandidateBuild): boolea
   return challenger.candidate.hostAlias < incumbent.candidate.hostAlias;
 }
 
-function buildCandidate(
+function assessHost(
   host: HostCapacity,
   running: readonly WorkItem[],
   config: PlacementConfig,
-): CandidateBuild {
+): PlacementCandidate {
   const loadRatio = host.cpu.load1m / host.cpu.cores;
   if (!host.idle) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: `excluded: not idle (${host.idleReason})`,
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: `excluded: not idle (${host.idleReason})`,
+      excluded: true,
     };
   }
   if (!host.acPower) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: "excluded: not on AC power",
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: "excluded: not on AC power",
+      excluded: true,
     };
   }
   if (host.batteryPercent !== null && host.batteryPercent <= config.batteryFloorPercent) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: `excluded: battery at ${String(host.batteryPercent)} percent, at or below the ${String(config.batteryFloorPercent)} percent floor`,
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: `excluded: battery at ${String(host.batteryPercent)} percent, at or below the ${String(config.batteryFloorPercent)} percent floor`,
+      excluded: true,
     };
   }
   if (host.secondsSinceInput < config.minInputIdleSeconds) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: `excluded: user input ${String(host.secondsSinceInput)} seconds ago`,
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: `excluded: user input ${String(host.secondsSinceInput)} seconds ago`,
+      excluded: true,
     };
   }
   if (!host.policy.insideWindow) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: "excluded: outside policy window",
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: "excluded: outside policy window",
+      excluded: true,
     };
   }
   const runningCount = countRunningOnHost(running, host.hostAlias);
   if (runningCount >= host.policy.maxConcurrentAgents) {
     return {
-      loadRatio,
-      candidate: {
-        hostAlias: host.hostAlias,
-        score: 0,
-        reason: `excluded: at agent limit (${String(runningCount)}/${String(host.policy.maxConcurrentAgents)})`,
-        excluded: true,
-      },
+      hostAlias: host.hostAlias,
+      score: 0,
+      reason: `excluded: at agent limit (${String(runningCount)}/${String(host.policy.maxConcurrentAgents)})`,
+      excluded: true,
     };
   }
   const cpuFree = Math.max(0, 1 - loadRatio);
@@ -160,13 +158,10 @@ function buildCandidate(
   const memPercent = Math.round(memFree * 100);
   const gpuText = host.gpu.present ? ", GPU present" : "";
   return {
-    loadRatio,
-    candidate: {
-      hostAlias: host.hostAlias,
-      score,
-      reason: `${powerText}, CPU ${String(cpuPercent)}% free, memory ${String(memPercent)}% free${gpuText}`,
-      excluded: false,
-    },
+    hostAlias: host.hostAlias,
+    score,
+    reason: `${powerText}, CPU ${String(cpuPercent)}% free, memory ${String(memPercent)}% free${gpuText}`,
+    excluded: false,
   };
 }
 

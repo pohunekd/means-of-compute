@@ -29,6 +29,7 @@ export type LoopEventName =
   | "budget-refused"
   | "no-host"
   | "placement"
+  | "host-assessment"
   | "exclusions-retried"
   | "host-cooldown"
   | "retire-failed"

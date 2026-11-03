@@ -19,6 +19,7 @@
   "unreachableRetryMs": 30000,
   "budgetBackoffMs": 600000,
   "maxStartRejections": 3,
+  "hostAssessmentRefreshSec": 120,
   "hostCooldown": {
     "rejections": 3,
     "windowMs": 600000,

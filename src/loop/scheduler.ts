@@ -1,8 +1,9 @@
 // Scheduler slice: one non-overlapping tick over every loop item, plus
 // startup recovery. PR 9 calls recoverAtStartup once, then tick every tickMs.
-import type { PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
+import type { PlacementCandidate, PlacementDecision, WorkItem } from "../../contracts/v1/types.js";
 import { readVerdicts } from "../auditor/store.js";
 import type { HostObservation, HostStateCollector } from "../hoststate/collector.js";
+import type { LoopPlacementCandidate } from "./log.js";
 import { readRegistry } from "../dispatcher/registry.js";
 import { readLoopState, updateLoopState, LoopStateDataError, type LoopState } from "./state.js";
 import type { LoopItem, MergeHold } from "./types.js";
@@ -19,7 +20,7 @@ import {
 import { runDigest } from "./digest.js";
 import type { PlacementConfig } from "../placement/config.js";
 import type { SpendBounds } from "../budget/cost.js";
-import { placeObserved } from "../placement/observed.js";
+import { assessObserved, placeObserved } from "../placement/observed.js";
 import { cooledHosts } from "./host-cooldown.js";
 import { createRetireMemory, retireClosedSessions, type SchedulerDispatcher } from "./retire.js";
 import type {
@@ -72,6 +73,7 @@ export interface SchedulerContext extends MergeContext {
   readonly maxActiveItems: number;
   readonly maxBriefBytes: number;
   readonly hostCooldown: LoopHostCooldownConfig;
+  readonly hostAssessmentRefreshSec: number;
   readonly dispatcher: SchedulerDispatcher;
   readonly retireRetryMs: number;
   readonly ciPollMs: number;
@@ -105,6 +107,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
   const intake = createIntakeState();
   const cooldownsLogged = new Set<string>();
   const placementsLogged = new Map<string, string>();
+  const assessmentLogged: AssessmentMemo = { signature: null, atMs: 0 };
   const retireMemory = createRetireMemory();
   let sweep: Promise<void> | null = null;
   let triage: Promise<void> | null = null;
@@ -239,6 +242,7 @@ export function createScheduler(ctx: SchedulerContext): Scheduler {
         intake,
         cooldownsLogged,
         placementsLogged,
+        assessmentLogged,
         launchSweep,
         launchTriage,
       ),
@@ -500,19 +504,9 @@ function logPlacement(
   round: number,
   decision: PlacementDecision,
 ): void {
-  const candidates = decision.candidates.map((entry) => ({
-    hostAlias: entry.hostAlias,
-    excluded: entry.excluded,
-    reason: entry.reason,
-  }));
+  const candidates = loggedCandidates(decision.candidates);
   if (decision.chosenHostAlias === null) {
-    const signature = JSON.stringify({
-      round,
-      candidates: candidates.map((entry) => ({
-        ...entry,
-        reason: entry.reason.replace(/\d+/g, "#"),
-      })),
-    });
+    const signature = JSON.stringify({ round, candidates: normalizedCandidates(candidates) });
     if (placementsLogged.get(workItemId) === signature) {
       return;
     }
@@ -527,6 +521,45 @@ function logPlacement(
     chosenHostAlias: decision.chosenHostAlias,
     candidates,
   });
+}
+
+interface AssessmentMemo {
+  signature: string | null;
+  atMs: number;
+}
+
+function loggedCandidates(candidates: readonly PlacementCandidate[]): LoopPlacementCandidate[] {
+  return candidates.map((entry) => ({
+    hostAlias: entry.hostAlias,
+    excluded: entry.excluded,
+    reason: entry.reason,
+  }));
+}
+
+// Every digit run in a reason reads as one placeholder, so a ticking counter
+// alone never counts as a change.
+function normalizedCandidates(
+  candidates: readonly LoopPlacementCandidate[],
+): LoopPlacementCandidate[] {
+  return candidates.map((entry) => ({ ...entry, reason: entry.reason.replace(/\d+/g, "#") }));
+}
+
+// Every collected host's own state, logged when the normalized candidates
+// differ from the last logged ones or hostAssessmentRefreshSec has passed.
+function logAssessment(
+  ctx: SchedulerContext,
+  memo: AssessmentMemo,
+  candidates: readonly PlacementCandidate[],
+): void {
+  const logged = loggedCandidates(candidates);
+  const signature = JSON.stringify(normalizedCandidates(logged));
+  const nowMs = ctx.now().getTime();
+  if (memo.signature === signature && nowMs - memo.atMs < ctx.hostAssessmentRefreshSec * 1000) {
+    return;
+  }
+  memo.signature = signature;
+  memo.atMs = nowMs;
+  ctx.log.log({ event: "host-assessment", candidates: logged });
 }
 
 async function ensureLoopItem(ctx: SchedulerContext, id: string): Promise<void> {
@@ -549,6 +582,7 @@ async function runClaims(
   isSettled: () => boolean,
   cooldownsLogged: Set<string>,
   placementsLogged: Map<string, string>,
+  assessmentLogged: AssessmentMemo,
 ): Promise<void> {
   const store = await readWorkStore(ctx.storePath);
   const state = await readLoopState(ctx.statePath);
@@ -567,9 +601,15 @@ async function runClaims(
       ctx.log.log({ event: "host-cooldown", hostAlias, detail: new Date(until).toISOString() });
     }
   }
-  const observations = (await ctx.collector.collect()).filter(
-    (entry) => !cooled.has(entry.hostAlias),
+  const collected = await ctx.collector.collect();
+  // The assessment is each host's own state: cooled hosts and per-item
+  // exclusions do not apply to it.
+  logAssessment(
+    ctx,
+    assessmentLogged,
+    assessObserved(collected, carry.running, ctx.placementConfig),
   );
+  const observations = collected.filter((entry) => !cooled.has(entry.hostAlias));
   const candidates = claimCandidates(ctx, store, state, steps);
   for (const item of candidates) {
     if (isSettled() || carry.active >= ctx.maxActiveItems) {
@@ -706,6 +746,7 @@ async function tickOnce(
   intake: IntakeState,
   cooldownsLogged: Set<string>,
   placementsLogged: Map<string, string>,
+  assessmentLogged: AssessmentMemo,
   launchSweep: () => void,
   launchTriage: () => void,
 ): Promise<TickReport> {
@@ -794,6 +835,7 @@ async function tickOnce(
       () => isStopped() || getFailure() !== null,
       cooldownsLogged,
       placementsLogged,
+      assessmentLogged,
     );
   }
   return { claimed: carry.claimed, launched: [...launched, ...carry.launched] };

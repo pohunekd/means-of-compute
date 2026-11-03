@@ -253,18 +253,33 @@ const OFFLINE_CAUSES: ReadonlySet<string> = new Set([
   "stale",
 ]);
 
-// Excluded-reason prefixes the placement engine writes, and the tile state
-// each means; any other excluded reason reads as blocked.
+// Excluded-reason prefixes the placement engine writes that do not read as
+// blocked; any other excluded reason, among them the AC power, battery and
+// policy-window prefixes, reads as blocked.
 const PLACEMENT_STATES: readonly (readonly [string, LiveTileState])[] = [
-  ["excluded: not idle", "busy"],
-  ["excluded: not on AC power", "blocked"],
-  ["excluded: battery at", "blocked"],
   ["excluded: host state unavailable", "unavailable"],
+];
+
+// The engine wraps the probe's own non-idle reason as
+// `excluded: not idle (<inner>)`; the inner texts come from derive_idle in
+// crates/moc-host-state/src/idle_rule.rs. Any other inner text is a person
+// at the desk.
+const NOT_IDLE_PREFIX = "excluded: not idle (";
+const NOT_IDLE_STATES: readonly (readonly [string, LiveTileState])[] = [
+  ["not on AC power", "blocked"],
+  ["battery", "blocked"],
+  ["outside the policy window", "blocked"],
+  ["user activity unknown", "unavailable"],
+  ["power unknown", "unavailable"],
 ];
 
 function placementState(excluded: boolean, reason: string): LiveTileState {
   if (!excluded) {
     return "eligible";
+  }
+  if (reason.startsWith(NOT_IDLE_PREFIX) && reason.endsWith(")")) {
+    const inner = reason.slice(NOT_IDLE_PREFIX.length, -1);
+    return NOT_IDLE_STATES.find(([prefix]) => inner.startsWith(prefix))?.[1] ?? "busy";
   }
   return PLACEMENT_STATES.find(([prefix]) => reason.startsWith(prefix))?.[1] ?? "blocked";
 }
@@ -307,10 +322,14 @@ function realTileOf(card: RealWorkCard): LiveTile {
   const state = cardState(card);
   const task = card.title !== null && card.title.kind === "text" ? card.title.text : "";
   const now = card.stage === "implement" ? task : (card.idleReason ?? "no recorded probe");
-  const placement =
+  const entry =
     card.placement.kind === "ok" && card.placement.value !== null
-      ? ` - placement ${clockTime(card.placement.value.entry.at)}: ${card.placement.value.entry.chosen ? "chosen" : card.placement.value.entry.reason}`
-      : "";
+      ? card.placement.value.entry
+      : null;
+  const placement =
+    entry === null
+      ? ""
+      : ` - ${entry.workItemId === null ? "assessment" : "placement"} ${clockTime(entry.at)}: ${entry.chosen ? "chosen" : entry.reason}`;
   return {
     alias: card.alias,
     hostKind: "real host",
@@ -736,9 +755,9 @@ function panelTime(iso: string, model: LiveModel): SafeHtml {
   >`;
 }
 
-// The host's newest placement entry: time, item, chosen or excluded and the
-// engine's verbatim reason; an entry older than the configured age no longer
-// decides the tile state.
+// The host's newest placement or assessment entry: time, item (or `host
+// assessment`), chosen, excluded or eligible and the engine's verbatim reason;
+// an entry older than the configured age no longer decides the tile state.
 function lastPlacement(card: RealWorkCard, model: LiveModel): SafeHtml {
   if (card.placement.kind !== "ok") {
     return sectionText(card.placement);
@@ -748,10 +767,19 @@ function lastPlacement(card: RealWorkCard, model: LiveModel): SafeHtml {
     return html`<p class="row">no placement recorded</p>`;
   }
   const entry = value.entry;
-  const decision = entry.chosen ? "chosen" : entry.excluded ? "excluded" : "eligible, not chosen";
+  const decision = entry.chosen
+    ? "chosen"
+    : entry.excluded
+      ? "excluded"
+      : entry.workItemId === null
+        ? "eligible"
+        : "eligible, not chosen";
+  const source =
+    entry.workItemId === null
+      ? html`host assessment`
+      : html`<a href="${buildHref(model, { task: entry.workItemId })}">${entry.workItemId}</a>`;
   return html`<p class="row">
-      ${panelTime(entry.at, model)} ·
-      <a href="${buildHref(model, { task: entry.workItemId })}">${entry.workItemId}</a> ·
+      ${panelTime(entry.at, model)} · ${source} ·
       ${decision}${value.fresh ? "" : " (older than the placement age; the probe decides)"}
     </p>
     <p class="row">${entry.reason}</p>`;
@@ -1406,8 +1434,8 @@ export function renderLive(model: LiveModel): string {
       <div class="groups">${realGroup} ${simGroups}</div>
       ${legend}
       <p class="cite">
-        source: real recorded probes, dispatcher registry, work store and loop placement events;
-        simulated fleet trace (sim-trace-v1)
+        source: real recorded probes, dispatcher registry, work store and loop placement and
+        host-assessment events; simulated fleet trace (sim-trace-v1)
       </p>
     </section>
     <div class="rail">${rail}</div>

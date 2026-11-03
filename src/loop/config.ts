@@ -129,6 +129,7 @@ export interface LoopConfig {
   readonly budgetBackoffMs: number;
   readonly maxStartRejections: number;
   readonly hostCooldown: LoopHostCooldownConfig;
+  readonly hostAssessmentRefreshSec: number;
   readonly retireRetryMs: number;
   readonly maxBriefBytes: number;
   readonly stall: LoopStallConfig;
@@ -685,6 +686,7 @@ const TOP_LEVEL_KEYS = [
   "budgetBackoffMs",
   "maxStartRejections",
   "hostCooldown",
+  "hostAssessmentRefreshSec",
   "retireRetryMs",
   "maxBriefBytes",
   "stall",
@@ -798,6 +800,14 @@ export async function loadLoopConfig(path: string, mode: LoopMode): Promise<Loop
     budgetBackoffMs: requiredInteger(record, path, "", "budgetBackoffMs", 1000, 86400000),
     maxStartRejections: requiredInteger(record, path, "", "maxStartRejections", 1, 20),
     hostCooldown: parseHostCooldown(record["hostCooldown"], path),
+    hostAssessmentRefreshSec: requiredInteger(
+      record,
+      path,
+      "",
+      "hostAssessmentRefreshSec",
+      1,
+      86400,
+    ),
     retireRetryMs: requiredInteger(record, path, "", "retireRetryMs", 1000, 86400000),
     maxBriefBytes,
     stall: parseStall(record["stall"], path),

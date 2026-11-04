@@ -114,4 +114,4 @@ Production ledger (2026-10-30 to 2026-11-03):
 
 The factory ran on four machines shown by display alias. Every machine runs the host probe and the loop records a placement decision with a reason for each machine at least every two minutes.
 
-Work sessions ran on `desktop` (29 items, 7.95 hours) and `laptop-b` (24 items, 5.37 hours), and briefly on `laptop-mac` (2 items). `laptop-a` was never chosen: it reported user activity most of the week, and in the demo it is unplugged and shown as blocked with the reason "not on AC power".
+Work sessions ran on `desktop` (29 items, 7.95 hours) and `laptop-b` (24 items, 5.37 hours), and briefly on `laptop-mac` (2 items). `laptop-a` was eligible most of the week but never chosen: placement scores free CPU, memory and GPU, and `laptop-b` had more free memory. In the demo it is unplugged and shown as blocked with the reason "not on AC power".
